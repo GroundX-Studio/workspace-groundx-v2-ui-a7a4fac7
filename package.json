@@ -1,0 +1,26 @@
+{
+  "name": "groundx-web-ui-scaffold",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "app",
+    "middleware"
+  ],
+  "scripts": {
+    "setup:env": "node scripts/setup-local-env.mjs",
+    "dev": "concurrently -n middleware,app -c blue,green \"npm --workspace middleware run dev\" \"npm --workspace app run dev\"",
+    "build": "npm --workspace app run build && npm --workspace middleware run build",
+    "test": "npm --workspace app test && npm --workspace middleware test",
+    "test:e2e": "npm --workspace app run test:e2e",
+    "test:setup-env": "node scripts/test-setup-local-env.mjs",
+    "smoke:dev": "node scripts/smoke-dev.mjs",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "preview": "npm --workspace app run preview"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

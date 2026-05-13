@@ -1,0 +1,41 @@
+/*
+ * Inter — the current GroundX Studio Harness typeface across slides, dashboard, and web UI.
+ *
+ * Imported from Google Fonts so every build gets the same weights + optical
+ * settings. Import this file once from your app entry (e.g. src/index.css
+ * or src/main.tsx) and every <Typography> and <body> element will inherit
+ * it via the theme. Feature flags below match the slide template: ss01
+ * (single-story 'a'), cv11 (straight 'R'), cv01 (lowercase 'l' with tail).
+ *
+ * The font-family stack and OpenType feature string are the single-source-of-
+ * truth values from eyelevel-design-standards/tokens.json (typography.fontFamily
+ * and typography.fontFeatures). They are mirrored here as CSS custom properties
+ * so any CSS rule in this project can reference var(--gx-font) / var(--gx-font-
+ * features) consistently with the slide stylesheet.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap");
+
+:root {
+  /*
+   * --gx-font mirrors tokens.json typography.fontFamily.
+   * --gx-font-features mirrors tokens.json typography.fontFeatures.
+   * These are intentionally identical to the values the FONT_FAMILY and
+   * FONT_FEATURE_SETTINGS TS constants export — one is the CSS surface,
+   * the other is the JS surface of the same token.
+   */
+  --gx-font:                 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --gx-font-features:        "ss01", "cv11", "cv01";
+
+  /* Alias kept for backward compat with any older component that used the
+     hyphenated name before --gx-font-features was standardised. */
+  --gx-font-feature-settings: var(--gx-font-features);
+}
+
+body {
+  font-family: var(--gx-font);
+  font-feature-settings: var(--gx-font-features);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}

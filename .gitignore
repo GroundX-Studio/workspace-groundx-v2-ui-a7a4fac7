@@ -141,5 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+test-results/
+playwright-report/
 
 .DS_Store

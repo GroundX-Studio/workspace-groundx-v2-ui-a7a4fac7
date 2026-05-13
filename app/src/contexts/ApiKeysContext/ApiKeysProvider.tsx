@@ -1,0 +1,134 @@
+import { FC, ReactNode, useCallback, useState } from "react";
+
+import { api } from "@/api";
+import { GroundXRequestOptions, PartnerRequestOptions } from "@/api/common";
+import { GroundXApiKey } from "@/api/entities/sdkTypes";
+import { useIsLoading } from "@/contexts/LoadingContext";
+import { useMessageContext } from "@/contexts/MessageBarContext";
+import { createSdkResult } from "@/contexts/sdkContextTypes";
+
+import { ApiKeysContext } from "./ApiKeysContext";
+
+export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  const { setIsLoading } = useIsLoading();
+  const { setErrorMessage, setSuccessMessage } = useMessageContext();
+  const [groundxApiKeys, setGroundXApiKeys] = useState<GroundXApiKey[]>([]);
+  const [partnerApiKeys, setPartnerApiKeys] = useState<GroundXApiKey[]>([]);
+
+  const run = useCallback(
+    async <T,>(work: () => Promise<T>, successMessage?: string) => {
+      const result = createSdkResult<T>();
+      setIsLoading(true);
+      try {
+        result.response = await work();
+        result.isSuccess = true;
+        if (successMessage) setSuccessMessage(successMessage);
+      } catch (error) {
+        result.error = error;
+        setErrorMessage("API key operation failed.");
+      } finally {
+        setIsLoading(false);
+      }
+      return result;
+    },
+    [setErrorMessage, setIsLoading, setSuccessMessage]
+  );
+
+  const listGroundXApiKeys = useCallback(
+    (options?: GroundXRequestOptions) =>
+      run(async () => {
+        const response = await api.groundxApiKeys.listGroundXApiKeys(options);
+        setGroundXApiKeys(response.apiKeys);
+        return response.apiKeys;
+      }),
+    [run]
+  );
+
+  const createGroundXApiKey = useCallback(
+    (name: string, options?: GroundXRequestOptions) =>
+      run(async () => {
+        const response = await api.groundxApiKeys.createGroundXApiKey(name, options);
+        setGroundXApiKeys(response.apiKeys);
+        return response.apiKeys;
+      }, "API key created."),
+    [run]
+  );
+
+  const renameGroundXApiKey = useCallback(
+    (apiKey: string, name: string, options?: GroundXRequestOptions) =>
+      run(async () => {
+        const response = await api.groundxApiKeys.renameGroundXApiKey(apiKey, name, options);
+        setGroundXApiKeys(response.apiKeys);
+        return response.apiKeys;
+      }, "API key renamed."),
+    [run]
+  );
+
+  const deleteGroundXApiKey = useCallback(
+    (apiKey: string, options?: GroundXRequestOptions) =>
+      run(async () => {
+        await api.groundxApiKeys.deleteGroundXApiKey(apiKey, options);
+        setGroundXApiKeys((keys) => keys.filter((key) => key.apiKey !== apiKey));
+      }, "API key deleted."),
+    [run]
+  );
+
+  const listPartnerApiKeys = useCallback(
+    (options?: PartnerRequestOptions) =>
+      run(async () => {
+        const response = await api.partnerApiKeys.listPartnerApiKeys(options);
+        setPartnerApiKeys(response.apiKeys);
+        return response.apiKeys;
+      }),
+    [run]
+  );
+
+  const createPartnerApiKey = useCallback(
+    (name: string, options?: PartnerRequestOptions) =>
+      run(async () => {
+        const response = await api.partnerApiKeys.createPartnerApiKey(name, options);
+        setPartnerApiKeys(response.apiKeys);
+        return response.apiKeys;
+      }, "API key created."),
+    [run]
+  );
+
+  const renamePartnerApiKey = useCallback(
+    (apiKey: string, name: string, options?: PartnerRequestOptions) =>
+      run(async () => {
+        const response = await api.partnerApiKeys.renamePartnerApiKey(apiKey, name, options);
+        setPartnerApiKeys(response.apiKeys);
+        return response.apiKeys;
+      }, "API key renamed."),
+    [run]
+  );
+
+  const deletePartnerApiKey = useCallback(
+    (apiKey: string, options?: PartnerRequestOptions) =>
+      run(async () => {
+        await api.partnerApiKeys.deletePartnerApiKey(apiKey, options);
+        setPartnerApiKeys((keys) => keys.filter((key) => key.apiKey !== apiKey));
+      }, "API key deleted."),
+    [run]
+  );
+
+  return (
+    <ApiKeysContext.Provider
+      value={{
+        groundxApiKeys,
+        partnerApiKeys,
+        listGroundXApiKeys,
+        createGroundXApiKey,
+        renameGroundXApiKey,
+        deleteGroundXApiKey,
+        listPartnerApiKeys,
+        createPartnerApiKey,
+        renamePartnerApiKey,
+        deletePartnerApiKey,
+      }}
+    >
+      {children}
+    </ApiKeysContext.Provider>
+  );
+};
+
