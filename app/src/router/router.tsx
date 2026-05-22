@@ -10,6 +10,7 @@ import { Home } from "@/views/Home/Home";
 import { Login } from "@/views/Auth/Login";
 import { Register } from "@/views/Auth/Register";
 import { ResetPassword } from "@/views/Auth/ResetPassword";
+import { OnboardingShell } from "@/views/Onboarding/OnboardingShell";
 import { ROUTER_PATHS } from "@/router/routerPaths";
 
 export const router = createBrowserRouter([
@@ -34,4 +35,5 @@ export const router = createBrowserRouter([
   { path: ROUTER_PATHS.AUTH_RESET_PASSWORD, element: <ResetPassword /> },
   { path: ROUTER_PATHS.HEALTH, element: <Health /> },
   { path: ROUTER_PATHS.BANNED, element: <Banned /> },
+  { path: ROUTER_PATHS.ONBOARDING, element: <OnboardingShell /> },
 ]);

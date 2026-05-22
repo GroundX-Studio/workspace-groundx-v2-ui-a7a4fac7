@@ -44,15 +44,48 @@ Override if you think Workspace should be a Partner `project` (with the UI "Proj
 
 ---
 
-## Phase 1 — App shell + nav + layout
+## Phase 1 — App shell + nav + layout ✓
 
-*(populated as we get there)*
+Done. Commit `phase1-...`. Test count: 323/323 app (was 287), 117/117 middleware.
 
----
+**Delivered:**
+- `useFocusMode` (split / focus-chat / focus-canvas) with Alt+1/2/3 hotkeys
+- `useResizableSplit` with W5 snap zones (200, 280, 640/720, 720)
+- `AppShell` 3-column CSS grid + Framer Motion AnimatePresence + ResizeHandle a11y separator
+- `StepStrip` (W2) with pill state machine + Analyze substeps in dashed bracket
 
-## Phase 2 — Onboarding F1–F7
+**Decisions log**
 
-*(populated as we get there)*
+**D1.1 — Drag-snap auto-triggers focus mode.** When the user drags the chat width past a snap threshold, the AppShell auto-transitions into the corresponding focus mode (chat-focus or focus-canvas), and dragging back into the live band returns to split. The hook skips the first render so `initialFocus` isn't clobbered. Per spec W5 ("snapping is itself a request").
+
+**D1.2 — Reduced-motion compliance via Framer Motion's prefers-reduced-motion.** No per-component logic; rely on the user agent.
+
+**D1.3 — Existing Dashboard.tsx left alone.** The scaffold's logged-in Dashboard shell remains the route for steady-mode + auth screens. Phase 2 will add a new `OnboardingShell` view that mounts AppShell instead, gated by route + AppMode.
+
+## Phase 2 — Onboarding F1–F7 ✓
+
+Done. Test count: 333/333 app (was 323), 117/117 middleware. Build + verify:preview + 15/15 Playwright e2e all clean.
+
+**Delivered:**
+- Placeholder fixtures for Utility / Loan / Solar (`app/src/fixtures/*.ts`). Every literal value tagged `// FIXTURE_PLACEHOLDER`. Fixture shape contract locked by `app/src/fixtures/types.ts`.
+- F1 IngestView — three sample cards + 3 BYO tiles; clicking a sample picks scenario + dispatches `showSample` canvas intent + advances to F2; BYO opens the gate.
+- F2 UnderstandView — placeholder PDF surface with scan animation (skipped under reduced-motion), streaming thinking notes (setTimeout-chained, terminates at end of list), "Show me the extract" reveal after ~4.5s.
+- F3/F4 ExtractView — field rows by category, citation chips, click-to-peek preview pane. Solar (no schema) shows the skip-extract message.
+- F5 InteractView — fixture chat replay + free-form input that posts a placeholder "live answers after sign-in" assistant turn.
+- F6 GateView — email + book-engineer-call options (no SSO when `SSO_ENABLED=false` per decision #25).
+- F7 IntegrateView — three-language code snippet (curl / Python / TS) + agent integrations list + next-steps card.
+- Shared `<CiteChip>` — dispatches `highlightCitation` canvas intent.
+- OnboardingShell — composes F1–F7 behind AppShell. Route `/onboarding` added.
+
+**Decisions log**
+
+**D2.1 — Heavy view tests deferred to Phase 6.** UnderstandView / ExtractView / OnboardingShell userEvent.click tests caused jsdom to pin at 100% CPU. Root cause is framer-motion + jsdom. Mitigation: framer-motion aliased to a test-only mock in `vitest.config.ts`. IngestView tests pass; rest of view tests come back in Phase 6 with proper Playwright coverage.
+
+**D2.2 — Placeholder fixtures, locked shape.** Every fixture value tagged `// FIXTURE_PLACEHOLDER` for grep. Solar 142 docs + Loan 12 docs are synthetic procedurally-generated. Citation IDs reference fixture doc IDs only.
+
+**D2.3 — F6 GateView commit is a placeholder.** Email submit immediately marks the gate "committed". Real magic-link send-and-verify is Phase 7. Calendly placeholder; production needs `CALENDLY_URL` env.
+
+**D2.4 — Pin-to-report deferred to Phase 5.** When added, decision #12 holds: literal text only on first pin, manual variable bindings later.
 
 ---
 
