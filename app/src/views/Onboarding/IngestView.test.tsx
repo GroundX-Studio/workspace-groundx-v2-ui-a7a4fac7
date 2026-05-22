@@ -33,11 +33,19 @@ describe("IngestView (F1)", () => {
     expect(screen.getAllByText("Report").length).toBeGreaterThan(0);
   });
 
-  it("renders BYO tiles", () => {
+  it("renders BYO tiles with the wireframe's three doors", () => {
     render(wrap(<IngestView />));
     expect(screen.getByTestId("byo-pdf")).toBeInTheDocument();
     expect(screen.getByTestId("byo-url")).toBeInTheDocument();
     expect(screen.getByTestId("byo-folder")).toBeInTheDocument();
+    // Three door titles from spec-nav-v2.jsx Canvas_Ingest.
+    expect(screen.getByText("Upload files")).toBeInTheDocument();
+    expect(screen.getByText("Connect a source")).toBeInTheDocument();
+    expect(screen.getByText("Email it in")).toBeInTheDocument();
+    // Behavior pill — confirms Sign up triggers F1→F2 + inline gate.
+    expect(screen.getByText(/Sign up triggers F1.{1,3}F2/)).toBeInTheDocument();
+    // Privacy footer.
+    expect(screen.getByText(/GroundX never trains on uploaded content/)).toBeInTheDocument();
   });
 
   it("clicking a sample sets scenario + advances to F2", async () => {

@@ -25,9 +25,13 @@ const docs = Array.from({ length: 12 }, (_, i) => ({
 export const loanFixture: ScenarioFixture = {
   scenario: "loan",
   hero: {
-    title: "Loan Eligibility",
+    title: "Loan Eligibility Packet",
     subtitle: "12 docs · 24 pages · 5 categories",
     badges: ["E", "I"],
+    shortDesc: "paystubs, W-2, bank statements, employment letter — the bundle an underwriter reviews",
+    demonstrates: "docs → structured JSON for workflows",
+    chapters: { extract: "live", interact: "live", report: "off" },
+    docCount: "12 docs",
   },
   docs,
   thinkingNotes: [

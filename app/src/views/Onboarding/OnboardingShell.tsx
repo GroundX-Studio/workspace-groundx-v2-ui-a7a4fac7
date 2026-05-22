@@ -2,8 +2,9 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useMemo, type FC } from "react";
+import { useCallback, useEffect, useMemo, type FC } from "react";
 
+import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
 import {
   BODY_ON_DARK,
   BORDER,
@@ -69,9 +70,25 @@ function analyzeSubsteps(frame: FFrame): StepDescriptor["substeps"] {
  */
 export const OnboardingShell: FC = () => {
   const { state: appMode } = useAppMode();
-  const { state: session } = useOnboardingSession();
+  const { state: session, advanceFrame, bootstrapSession } = useOnboardingSession();
   const currentStep = FRAME_TO_STEP[session.currentFrame];
   const isF1 = session.currentFrame === "f1";
+
+  useEffect(() => {
+    if (session.sessionId) return;
+    let cancelled = false;
+    issueOnboardingSession()
+      .then((response) => {
+        if (!cancelled) bootstrapSession(response.sessionId);
+      })
+      .catch(() => {
+        // Local preview/e2e can run without middleware. The production path is
+        // still exercised by middleware/API tests, and preview remains usable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bootstrapSession, session.sessionId]);
 
   const completedSteps = useMemo(() => {
     const set = new Set<StepId>();
@@ -94,6 +111,20 @@ export const OnboardingShell: FC = () => {
     ];
   }, [currentStep, completedSteps, appMode.authState, session.currentFrame]);
 
+  const handleStepClick = useCallback(
+    (stepId: StepId) => {
+      if (stepId === "integrate" && appMode.authState !== "signed-in") return;
+      const frameByStep: Record<StepId, FFrame> = {
+        ingest: "f1",
+        understand: "f2",
+        analyze: "f3",
+        integrate: "f7",
+      };
+      advanceFrame(frameByStep[stepId]);
+    },
+    [advanceFrame, appMode.authState],
+  );
+
   const canvasContent = useMemo(() => {
     switch (session.currentFrame) {
       case "f1":
@@ -115,10 +146,27 @@ export const OnboardingShell: FC = () => {
   }, [session.currentFrame]);
 
   if (isF1) {
-    // F1 is a full-bleed picker — no shell chrome.
+    // F1: nav + chat are hidden so the picker gets the full width (spec
+    // Canvas_Ingest). The step strip stays visible at the top of the canvas
+    // so the user can see Ingest active + Analyze/Integrate as upcoming
+    // before they pick a sample.
     return (
-      <Box sx={{ height: "100vh", overflow: "auto" }} data-testid="onboarding-frame-f1">
-        <IngestView />
+      <Box
+        data-testid="onboarding-frame-f1"
+        sx={{
+          height: "100vh",
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+          backgroundColor: WHITE,
+        }}
+      >
+        <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE }}>
+          <StepStrip steps={steps} onStepClick={handleStepClick} />
+        </Box>
+        <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          <IngestView />
+        </Box>
       </Box>
     );
   }
@@ -166,7 +214,7 @@ export const OnboardingShell: FC = () => {
       }}
       aria-label="Chat column"
     >
-      {session.currentFrame === "f6" || session.gate.status === "open" || session.gate.status === "committed" ? (
+      {session.gate.status === "open" || session.gate.status === "committed" ? (
         <GateView />
       ) : (
         <Stack spacing={1}>
@@ -184,7 +232,7 @@ export const OnboardingShell: FC = () => {
   const canvas = (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE }}>
-        <StepStrip steps={steps} />
+        <StepStrip steps={steps} onStepClick={handleStepClick} />
       </Box>
       <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0 }} data-testid={`onboarding-frame-${session.currentFrame}`}>
         {canvasContent}

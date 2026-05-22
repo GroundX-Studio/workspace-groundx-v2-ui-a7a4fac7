@@ -101,9 +101,13 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
         directives: {
           "default-src": ["'self'"],
           "img-src": csp_img_src,
+          // Web fonts are loaded from Google Fonts (Inter) and Fontshare
+          // (Thicccboi). The CSS @imports trigger a stylesheet fetch from
+          // fonts.googleapis.com / api.fontshare.com and the actual font
+          // binaries come from fonts.gstatic.com / cdn.fontshare.com.
           "script-src": csp_script_src,
-          "style-src": ["'self'", "'unsafe-inline'"],
-          "font-src": ["'self'", "data:"],
+          "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://api.fontshare.com"],
+          "font-src": ["'self'", "data:", "https://fonts.gstatic.com", "https://cdn.fontshare.com"],
           "connect-src": csp_connect_src,
           "frame-src": csp_frame_src,
         },
@@ -189,7 +193,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
       }
       const auth = await partnerClient.registerCustomer({ email, password, first, last, company, partnerUserId, phone });
       const apiKey = await partnerClient.createApiKey(auth.username, "app-session");
-      const session = createSessionRecord(auth.username, encryptSecret(apiKey, env.SESSION_SECRET));
+      const session = createSessionRecord(auth.username, encryptSecret(apiKey, env.SESSION_SECRET), req.session?.id);
       await repository.createSession(session);
       await repository.upsertMetadata({ groundxUsername: auth.username });
       setSessionCookie(res, env, session.id);
@@ -211,7 +215,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
       }
       const auth = await partnerClient.loginCustomer({ email, password });
       const apiKey = await partnerClient.createApiKey(auth.username, "app-session");
-      const session = createSessionRecord(auth.username, encryptSecret(apiKey, env.SESSION_SECRET));
+      const session = createSessionRecord(auth.username, encryptSecret(apiKey, env.SESSION_SECRET), req.session?.id);
       await repository.createSession(session);
       await repository.upsertMetadata({ groundxUsername: auth.username });
       setSessionCookie(res, env, session.id);

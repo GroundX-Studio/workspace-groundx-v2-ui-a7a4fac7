@@ -31,9 +31,13 @@ const docs = Array.from({ length: 142 }, (_, i) => {
 export const solarFixture: ScenarioFixture = {
   scenario: "solar",
   hero: {
-    title: "Solar Portfolio",
+    title: "Solar Project Portfolio",
     subtitle: "142 docs · 3 funds · 15 projects",
     badges: ["I", "R"],
+    shortDesc: "agreements, leases, permits, engineering studies — a whole fund's worth of project diligence",
+    demonstrates: "cross-document intelligence at scale",
+    chapters: { extract: "off", interact: "live", report: "live" },
+    docCount: "142 docs",
   },
   docs,
   thinkingNotes: [

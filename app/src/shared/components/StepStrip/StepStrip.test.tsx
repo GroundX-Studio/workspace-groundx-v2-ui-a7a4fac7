@@ -1,14 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StepStrip } from "./StepStrip";
 import type { StepDescriptor } from "./types";
 
-// MUI Chip + ButtonBase use TouchRipple animations whose deferred setState
-// races the test teardown — the global setup throws on any console.error,
-// so we override per-test (the global beforeEach runs first; our beforeEach
-// replaces its spy with a silent no-op for this spec).
+// Some pills schedule deferred layout work that races vitest teardown; silence
+// the global "throw on console.error" spy for this spec only.
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -29,28 +27,52 @@ const baseSteps: StepDescriptor[] = [
   { id: "integrate", label: "4 Integrate", state: "disabled" },
 ];
 
+/**
+ * The wireframe rewrite (spec-nav-v2.jsx) renders the step number as a
+ * standalone circular badge inside the pill, with the label as plain text
+ * next to it. So the DOM contains "1" + "Ingest" as separate text nodes.
+ * Tests match by the label substring.
+ */
 describe("StepStrip", () => {
-  it("renders all four primary pills + substeps when analyze is active", () => {
+  it("renders all four primary slots + substep bracket when analyze is active", () => {
     render(<StepStrip steps={baseSteps} />);
-    expect(screen.getByText("1 Ingest")).toBeInTheDocument();
-    expect(screen.getByText("2 Understand")).toBeInTheDocument();
-    expect(screen.getByText("Analyze")).toBeInTheDocument();
-    expect(screen.getByText("4 Integrate")).toBeInTheDocument();
-    expect(screen.getByText("Extract")).toBeInTheDocument();
-    expect(screen.getByText("Interact")).toBeInTheDocument();
-    expect(screen.getByText("Report")).toBeInTheDocument();
+    const strip = screen.getByRole("group", { name: "Onboarding journey step strip" });
+    expect(within(strip).getByText("Ingest")).toBeInTheDocument();
+    expect(within(strip).getByText("Understand")).toBeInTheDocument();
+    expect(within(strip).getByText("ANALYZE")).toBeInTheDocument();
+    expect(within(strip).getByText("Integrate")).toBeInTheDocument();
+    expect(within(strip).getByText("Extract")).toBeInTheDocument();
+    expect(within(strip).getByText("Interact")).toBeInTheDocument();
+    expect(within(strip).getByText("Report")).toBeInTheDocument();
   });
 
-  it("marks active step with aria-current=step", () => {
+  it("number badge shows ✓ for done-traversed steps", () => {
     render(<StepStrip steps={baseSteps} />);
-    expect(screen.getByText("Analyze").closest(".MuiChip-root")).toHaveAttribute("aria-current", "step");
+    const ingestPill = screen.getByText("Ingest").closest('[role="button"]');
+    expect(ingestPill).not.toBeNull();
+    expect(ingestPill?.textContent).toContain("✓");
   });
 
-  it("disabled pills get aria-disabled and tooltip text", () => {
+  it("disabled pills get aria-disabled + 'Available after sign-in' tooltip", () => {
     render(<StepStrip steps={baseSteps} />);
-    const integrateChip = screen.getByText("4 Integrate").closest(".MuiChip-root");
-    expect(integrateChip).toHaveAttribute("aria-disabled", "true");
-    expect(integrateChip).toHaveAttribute("title", "Available after sign-in");
+    const integratePill = screen.getByText("Integrate").closest('[role="button"]');
+    expect(integratePill).toHaveAttribute("aria-disabled", "true");
+    expect(integratePill).toHaveAttribute("title", "Available after sign-in");
+  });
+
+  it("active step gets aria-current=step", () => {
+    // The Analyze slot is the bracket (role=group) when active; the per-step
+    // aria-current sits on Ingest etc. So pick a non-Analyze step in active
+    // state to exercise this.
+    const steps: StepDescriptor[] = [
+      { id: "ingest", label: "1 Ingest", state: "active" },
+      { id: "understand", label: "2 Understand", state: "reachable-todo" },
+      { id: "analyze", label: "Analyze", state: "reachable-todo", substeps: [] },
+      { id: "integrate", label: "4 Integrate", state: "disabled" },
+    ];
+    render(<StepStrip steps={steps} />);
+    const ingestPill = screen.getByText("Ingest").closest('[role="button"]');
+    expect(ingestPill).toHaveAttribute("aria-current", "step");
   });
 
   it("clicking a reachable pill fires onStepClick", async () => {
@@ -59,11 +81,11 @@ describe("StepStrip", () => {
     const steps: StepDescriptor[] = [
       { id: "ingest", label: "1 Ingest", state: "done-traversed" },
       { id: "understand", label: "2 Understand", state: "reachable-todo" },
-      { id: "analyze", label: "Analyze", state: "disabled" },
+      { id: "analyze", label: "Analyze", state: "disabled", substeps: [] },
       { id: "integrate", label: "4 Integrate", state: "disabled" },
     ];
     render(<StepStrip steps={steps} onStepClick={onStepClick} />);
-    await user.click(screen.getByText("2 Understand"));
+    await user.click(screen.getByText("Understand"));
     expect(onStepClick).toHaveBeenCalledWith("understand");
   });
 
@@ -71,17 +93,11 @@ describe("StepStrip", () => {
     const user = userEvent.setup();
     const onStepClick = vi.fn();
     render(<StepStrip steps={baseSteps} onStepClick={onStepClick} />);
-    await user.click(screen.getByText("4 Integrate"));
+    await user.click(screen.getByText("Integrate"));
     expect(onStepClick).not.toHaveBeenCalled();
   });
 
-  it("done-traversed pill renders the check icon", () => {
-    render(<StepStrip steps={baseSteps} />);
-    const ingestChip = screen.getByText("1 Ingest").closest(".MuiChip-root");
-    expect(ingestChip?.querySelector("svg")).toBeTruthy();
-  });
-
-  it("only renders substep bracket when analyze is active AND substeps are provided", () => {
+  it("analyze bracket renders even when no substeps are provided (it's the slot, not the content)", () => {
     const steps: StepDescriptor[] = [
       { id: "ingest", label: "1 Ingest", state: "active" },
       { id: "understand", label: "2 Understand", state: "reachable-todo" },
@@ -89,6 +105,8 @@ describe("StepStrip", () => {
       { id: "integrate", label: "4 Integrate", state: "disabled" },
     ];
     render(<StepStrip steps={steps} />);
+    expect(screen.getByText("ANALYZE")).toBeInTheDocument();
+    // No substeps means no sub-pills inside the bracket.
     expect(screen.queryByText("Extract")).not.toBeInTheDocument();
   });
 });

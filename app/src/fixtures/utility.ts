@@ -8,6 +8,10 @@ export const utilityFixture: ScenarioFixture = {
     title: "Utility Bill",
     subtitle: "1 doc · 3 pages · 8 meters · 56 charges",
     badges: ["E"],
+    shortDesc: "a single billing statement with 8 meters and 56 charges across 3 pages",
+    demonstrates: "messy layout → clean extraction",
+    chapters: { extract: "live", interact: "live", report: "off" },
+    docCount: "1 doc",
   },
   docs: [
     {

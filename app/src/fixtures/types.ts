@@ -73,7 +73,19 @@ export interface FixtureReport {
 export interface ScenarioFixture {
   scenario: Scenario;
   /** Marketing-facing card copy in F1. */
-  hero: { title: string; subtitle: string; badges: ("E" | "I" | "R")[] };
+  hero: {
+    title: string;
+    subtitle: string;
+    badges: ("E" | "I" | "R")[];
+    /** Compact one-liner under the title on the F1 sample card. */
+    shortDesc: string;
+    /** Coral micro-copy that names the path the sample demonstrates. */
+    demonstrates: string;
+    /** Which capabilities the sample actually exercises (drives badge fill). */
+    chapters: { extract: "live" | "off"; interact: "live" | "off"; report: "live" | "off" };
+    /** Total doc count badge on the F1 card. */
+    docCount: string;
+  };
   docs: FixtureDoc[];
   schema?: FixtureSchema;
   chatScript: FixtureChatTurn[];
