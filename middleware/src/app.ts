@@ -1,11 +1,14 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express, { type Express, type Request, type Response } from "express";
+import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
 import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
 import { encryptSecret } from "./lib/crypto.js";
+import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/metrics.js";
 import { createSessionRecord, clearSessionCookie, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
 import { sendUpstreamResponse } from "./services/http.js";
 import type { AppRepository, GroundXClient, GroundXPartnerClient, LlmClient } from "./types.js";
@@ -65,6 +68,50 @@ export interface AppDependencies {
 export function createApp({ env, repository, partnerClient, groundxClient, llmClient }: AppDependencies): Express {
   const app = express();
   app.set("etag", false);
+  app.disable("x-powered-by");
+
+  // Trust proxy when behind an Ingress/ELB. Helps rate-limit + cookie-secure
+  // pick the right client IP/scheme in EKS deployments.
+  if (env.NODE_ENV === "production") app.set("trust proxy", 1);
+
+  // Security headers. CSP keeps the browser from fetching anything outside our
+  // own origin + the allowlisted analytics domains; tweak via env when GA /
+  // PostHog / Hotjar / Sentry hosts are configured.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          "default-src": ["'self'"],
+          "img-src": ["'self'", "data:", "blob:"],
+          "script-src": ["'self'"],
+          "style-src": ["'self'", "'unsafe-inline'"],
+          "font-src": ["'self'", "data:"],
+          "connect-src": ["'self'"],
+          "frame-src": ["'self'", "https://calendly.com"],
+        },
+      },
+      referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    })
+  );
+
+  // Per-route counters + latency histogram. Cheap to call always; gated behind
+  // `METRICS_ENABLED` only at the /metrics endpoint, not for capture.
+  ensureMetrics();
+  app.use((req, res, next) => {
+    const endTimer = httpRequestDuration.startTimer({ method: req.method });
+    res.on("finish", () => {
+      // Route templates like `/api/v1/...` would explode label cardinality, so
+      // we coalesce to the top-level mount point. Replace later with named
+      // routes once the surface stabilizes in Phase 1.
+      const route = req.originalUrl.split("?")[0]?.split("/").slice(0, 4).join("/") || req.originalUrl;
+      const labels = { method: req.method, route, status: String(res.statusCode) };
+      httpRequestsTotal.inc(labels);
+      endTimer({ route, status: String(res.statusCode) });
+    });
+    next();
+  });
+
   app.use(pinoHttp({ logger }));
   app.use(cors({ origin: env.NODE_ENV === "production" ? env.ALLOWED_ORIGIN ?? false : true, credentials: true }));
   app.use(express.json({ limit: "25mb" }));
@@ -72,7 +119,44 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
   app.use(cookieParser());
   app.use(sessionMiddleware(env, repository));
 
+  // Rate-limit buckets.
+  const authLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: env.RATE_LIMIT_AUTH_PER_MIN,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    skip: () => env.NODE_ENV === "test",
+  });
+  const apiLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: env.RATE_LIMIT_API_PER_MIN,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    skip: () => env.NODE_ENV === "test",
+  });
+  const llmLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: env.RATE_LIMIT_LLM_PER_MIN,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    skip: () => env.NODE_ENV === "test",
+  });
+
   app.get("/api/healthz", (_req, res) => res.json({ status: "ok" }));
+
+  if (env.METRICS_ENABLED) {
+    app.get("/api/metrics", async (_req, res, next) => {
+      try {
+        const registry = ensureMetrics();
+        res.set("Content-Type", registry.contentType);
+        res.send(await registry.metrics());
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
+
+  app.use("/api/auth", authLimiter);
 
   app.post("/api/auth/register", async (req, res, next) => {
     try {
@@ -190,7 +274,26 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
-  app.use("/api/v1", requireSession, async (req: Request, res: Response, next) => {
+  // Anonymous onboarding session. Issues a session cookie scoped to onboarding
+  // only — no Partner customer attached yet. Promotion happens on register or
+  // login (cookie id is preserved; the existing row gets a `groundxUsername`
+  // and an encrypted API key).
+  app.post("/api/onboarding/session", async (req, res, next) => {
+    try {
+      if (req.session) {
+        res.json({ sessionId: req.session.id, anonymous: !req.session.groundxApiKey });
+        return;
+      }
+      const session = createSessionRecord("", null);
+      await repository.createSession(session);
+      setSessionCookie(res, env, session.id);
+      res.json({ sessionId: session.id, anonymous: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.use("/api/v1", apiLimiter, requireSession, async (req: Request, res: Response, next) => {
     try {
       const apiKey = req.session!.groundxApiKey ?? env.GROUNDX_ANON_API_KEY;
       if (!apiKey) {
@@ -209,7 +312,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
-  app.use(["/api/customer", "/api/apikey", "/api/project", "/api/bucket", "/api/group"], requireSession, async (req, res, next) => {
+  app.use(["/api/customer", "/api/apikey", "/api/project", "/api/bucket", "/api/group"], apiLimiter, requireSession, async (req, res, next) => {
     try {
       const path = req.originalUrl.replace(/^\/api/, "");
       const usesCustomerScopedHeader = !path.startsWith("/customer/");
@@ -224,7 +327,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
-  app.use("/api/llm", requireSession, async (req, res, next) => {
+  app.use("/api/llm", llmLimiter, requireSession, async (req, res, next) => {
     try {
       const upstreamPath = req.originalUrl.replace(/^\/api\/llm/, "") || "/";
       const response = await llmClient.forward(upstreamPath, {

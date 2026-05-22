@@ -95,6 +95,22 @@ try {
   const body = await proxied.json();
   if (body.status !== "ok") throw new Error(`frontend proxy returned unexpected body: ${JSON.stringify(body)}`);
 
+  await expectJson(
+    `${frontendUrl}/api/onboarding/session`,
+    { method: "POST", headers: { "content-type": "application/json" } },
+    (json) => {
+      assert(json.anonymous === true, `anonymous onboarding session not flagged: ${JSON.stringify(json)}`);
+      assert(typeof json.sessionId === "string" && json.sessionId.length > 0, `missing sessionId: ${JSON.stringify(json)}`);
+    },
+  );
+
+  const metrics = await fetch(`${middlewareUrl}/api/metrics`);
+  if (!metrics.ok) throw new Error(`/api/metrics not reachable: ${metrics.status}`);
+  const metricsText = await metrics.text();
+  if (!metricsText.includes("http_requests_total")) {
+    throw new Error("metrics output missing http_requests_total counter");
+  }
+
   const login = await expectJson(
     `${frontendUrl}/api/auth/login`,
     {

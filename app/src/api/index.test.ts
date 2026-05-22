@@ -25,6 +25,7 @@ describe("SDK API barrel", () => {
         updateAppMetadata: expect.any(Function),
         resetUserPassword: expect.any(Function),
         confirmUserChangingPassword: expect.any(Function),
+        issueOnboardingSession: expect.any(Function),
       })
     );
   });

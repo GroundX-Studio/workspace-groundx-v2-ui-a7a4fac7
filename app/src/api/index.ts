@@ -20,6 +20,7 @@ import * as partnerBuckets from "@/api/entities/partnerBucketsEntity";
 import * as partnerCustomer from "@/api/entities/partnerCustomerEntity";
 import * as partnerGroups from "@/api/entities/partnerGroupsEntity";
 import * as partnerProjects from "@/api/entities/partnerProjectsEntity";
+import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
 
 export const api = {
   partnerCustomer,
@@ -42,6 +43,7 @@ export const api = {
   updateAppMetadata,
   resetUserPassword,
   confirmUserChangingPassword,
+  issueOnboardingSession,
 };
 
 export type * from "@/api/entities/sdkTypes";

@@ -152,6 +152,33 @@ function send(agent: request.SuperAgentTest, method: Method, path: string, body?
 }
 
 describe("middleware API route contract", () => {
+  it("issues an anonymous onboarding session without auth, scoped to onboarding", async () => {
+    const { app } = setup();
+    const response = await request(app).post("/api/onboarding/session").expect(200);
+    expect(response.body).toMatchObject({ anonymous: true });
+    expect(typeof response.body.sessionId).toBe("string");
+    expect(response.body.sessionId.length).toBeGreaterThan(0);
+    // Cookie is set so subsequent requests resolve as the same anon session.
+    expect(response.headers["set-cookie"]?.[0]).toMatch(/gx_app_session=/);
+  });
+
+  it("idempotent: a second call within the same cookie returns the same session id", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    const first = await agent.post("/api/onboarding/session").expect(200);
+    const second = await agent.post("/api/onboarding/session").expect(200);
+    expect(second.body.sessionId).toBe(first.body.sessionId);
+    expect(second.body.anonymous).toBe(true);
+  });
+
+  it("serves Prometheus metrics when METRICS_ENABLED", async () => {
+    const { app } = setup();
+    const response = await request(app).get("/api/metrics").expect(200);
+    expect(response.headers["content-type"]).toMatch(/text\/plain/);
+    expect(response.text).toContain("http_requests_total");
+  });
+
+
   it.each(publicAuthCases)("handles public auth route: $name", async ({ auth, body, method, partnerCall, path }) => {
     const { app, partnerClient } = setup();
     let req = request(app)[method](path);

@@ -37,6 +37,8 @@ export const resetPasswordUrl = `${customerUrl}/password`;
 export const resetPasswordCodeUrl = `${resetPasswordUrl}/reset`;
 export const resetPasswordConfirmUrl = `${resetPasswordUrl}/confirm`;
 
+export const onboardingSessionUrl = `${middlewareUrl}/onboarding/session`;
+
 export const groundxUrl = (path: string): string => `${middlewareUrl}${path}`;
 export const partnerUrl = (path: string): string => `${middlewareUrl}${path}`;
 export const llmUrl = (path: string): string => `${middlewareUrl}/llm${path}`;

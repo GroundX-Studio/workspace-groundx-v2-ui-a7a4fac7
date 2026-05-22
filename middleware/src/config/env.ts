@@ -40,6 +40,22 @@ const envSchema = z.object({
   LLM_AUTH_HEADER_NAME: z.string().default("Authorization"),
   LLM_AUTH_SCHEME: z.string().default("Bearer"),
   LLM_MODEL_ID: z.string().optional(),
+  // Free-tier metering ceiling for BYO uploads (pages, not docs).
+  BYO_PAGES_LIMIT: z.coerce.number().int().positive().default(100),
+  // Rate limits. Tunable per-deploy via env so on-prem can dial down.
+  RATE_LIMIT_AUTH_PER_MIN: z.coerce.number().int().positive().default(20),
+  RATE_LIMIT_API_PER_MIN: z.coerce.number().int().positive().default(120),
+  RATE_LIMIT_LLM_PER_MIN: z.coerce.number().int().positive().default(60),
+  // Metrics + telemetry — off when unset; never required in dev.
+  METRICS_ENABLED: z.preprocess(parseBoolean, z.boolean()).default(true),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  OTEL_SERVICE_NAME: z.string().default("groundx-v2-ui-middleware"),
+  POSTHOG_API_KEY: z.string().optional(),
+  POSTHOG_HOST: z.string().url().optional(),
+  SENTRY_DSN: z.string().url().optional(),
+  // Feature flags decided at deploy time. Defaults keep us safe.
+  SSO_ENABLED: z.preprocess(parseBoolean, z.boolean()).default(false),
+  DISABLE_AGENT_TURN_LOG: z.preprocess(parseBoolean, z.boolean()).default(false),
 }).superRefine((env, ctx) => {
   const requiresMysql = env.NODE_ENV === "production" || env.APP_REPOSITORY_MODE === "mysql";
   for (const key of ["MYSQL_HOST", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD"] as const) {

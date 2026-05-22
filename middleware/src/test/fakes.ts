@@ -31,6 +31,14 @@ export const testEnv: AppEnv = {
   LLM_AUTH_SCHEME: "Bearer",
   LLM_MODEL_ID: "model",
   MOCK_MODE: false,
+  BYO_PAGES_LIMIT: 100,
+  RATE_LIMIT_AUTH_PER_MIN: 20,
+  RATE_LIMIT_API_PER_MIN: 120,
+  RATE_LIMIT_LLM_PER_MIN: 60,
+  METRICS_ENABLED: true,
+  OTEL_SERVICE_NAME: "groundx-v2-ui-middleware",
+  SSO_ENABLED: false,
+  DISABLE_AGENT_TURN_LOG: false,
 };
 
 export class FakePartnerClient implements GroundXPartnerClient {
