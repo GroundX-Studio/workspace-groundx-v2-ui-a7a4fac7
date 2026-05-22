@@ -1,7 +1,45 @@
 # Overnight autonomous run journal
 
 **Run start:** 2026-05-22, after baseline gate green.
-**Scope authorized:** Phase 0 → Phase 3 (Phase 4 stretch).
+**Run end:** 2026-05-22, after Phase 4 stretch committed.
+**Scope authorized:** Phase 0 → Phase 3 (Phase 4 stretch). All five phases committed clean.
+
+## TL;DR for the morning
+
+| Phase | Commit | Net delivery |
+|---|---|---|
+| **0 Foundations** | `a5ce66a` | 5 new contexts, observability + security middleware, onboarding session endpoint, PII scrubber, contract tests |
+| **1 App shell + layout** | `8b2baaa` | AppShell 3-column grid, ResizeHandle a11y separator, useFocusMode (⌥-1/2/3), useResizableSplit (W5 snap zones), StepStrip |
+| **2 F1–F7 + fixtures** | `1e07a48` | IngestView / UnderstandView / ExtractView / InteractView / GateView / IntegrateView, OnboardingShell route, placeholder fixtures (Utility/Loan/Solar), shared CiteChip |
+| **3 Utility acceptance** | `24d9255` | Playwright golden journey F1–F7 for Utility (9 desktop tests) + two real bugs caught and fixed |
+| **4 Loan (stretch)** | `e026c59` | Loan coverage + ExtractView render-mode toggle (Table ↔ JSON) for the workflow-handoff demo, 8 desktop tests including cross-doc citation chips |
+
+**Test counts** (vs baseline 258 / 104):
+- App unit: **333 passing** (75 new)
+- Middleware unit: **117 passing** (13 new — onboarding session, PII scrubber, metrics endpoint)
+- Playwright e2e: **32 passing / 34 properly skipped** (Utility 9 + Loan 8 desktop + scaffold smoke 15 × 3 viewports; deep flow on tablet+mobile deferred to Phase 6)
+
+**Where to look first:**
+- `git log --oneline workspace/groundx-v2-ui` — five new commits
+- This file (below) — what each phase did + decisions I made
+- `MEMORY.md` — unchanged overnight (no new feedback memories; only project facts in the per-phase decisions logs here)
+
+**What's NOT done:**
+- **Phase 5 (Solar + Report Builder)** — stopped here on purpose. S3/S3a are the parts I most want your judgment on (report builder, pin-to-report, 142-doc tree, cross-doc rollup canvas). Resuming Phase 5 is the next session.
+- Phase 6 (Responsive + a11y + telemetry hardening) — tablet+mobile of the deep flow, axe a11y sweep, Lighthouse budget, mobile sheet patterns
+- Phase 7 (Live integration + release hardening) — real Partner customer provisioning, real OpenAI calls, Calendly, Helm, SSO, magic-link sender, fixture content swap
+
+**Fixture-swap checkpoint** (between Phase 6 and 7) is on schedule. Product owes the 11 content artifacts; my placeholder schema/category/field/citation shapes are stable so the swap should be content-only.
+
+**Git push status:**
+- Git session expired around 07:15 UTC. Five commits are local on `workspace/groundx-v2-ui`. After you refresh the session (via the harness `git_session` MCP tool or a fresh `harness-publish` call) and `git push`, they'll land on the managed repo.
+- `/tmp/gxn-gitsession.json` (the password file) is still 0600 in /tmp. Safe to `shred -u` it.
+
+**Security housekeeping not done overnight:**
+- Your OpenAI key and Partner API key are still in `middleware/.env.local` (gitignored). Rotating them at your convenience won't break anything; just re-run `npm run setup:env`.
+
+---
+
 **Boundary rules:** see end of this file.
 
 This file is the trail you read in the morning. Every phase appends a section. Every "hit a fork in the road" choice gets a `→ DECISION` line so you can override it.
