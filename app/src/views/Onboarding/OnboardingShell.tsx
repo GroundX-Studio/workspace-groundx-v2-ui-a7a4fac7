@@ -39,11 +39,20 @@ const FRAME_TO_STEP: Record<FFrame, StepId> = {
   f7: "integrate",
 };
 
-function pillState(stepId: StepId, currentStep: StepId, completed: Set<StepId>, authSignedIn: boolean): StepPillState {
+function pillState(
+  stepId: StepId,
+  currentStep: StepId,
+  completed: Set<StepId>,
+  authSignedIn: boolean,
+  scenarioPicked: boolean,
+): StepPillState {
   if (stepId === currentStep) return "active";
   if (completed.has(stepId)) return "done-traversed";
   // Integrate is reachable only after sign-in (post-gate).
   if (stepId === "integrate" && !authSignedIn) return "disabled";
+  // Understand, Analyze can't be jumped to until a sample is picked on F1 —
+  // they need a scenario to render anything meaningful.
+  if ((stepId === "understand" || stepId === "analyze") && !scenarioPicked) return "disabled";
   return "reachable-todo";
 }
 
@@ -99,22 +108,26 @@ export const OnboardingShell: FC = () => {
 
   const steps: StepDescriptor[] = useMemo(() => {
     const signedIn = appMode.authState === "signed-in";
+    const scenarioPicked = session.scenario != null;
     return [
-      { id: "ingest", label: "1 Ingest", state: pillState("ingest", currentStep, completedSteps, signedIn) },
-      { id: "understand", label: "2 Understand", state: pillState("understand", currentStep, completedSteps, signedIn) },
+      { id: "ingest", label: "1 Ingest", state: pillState("ingest", currentStep, completedSteps, signedIn, scenarioPicked) },
+      { id: "understand", label: "2 Understand", state: pillState("understand", currentStep, completedSteps, signedIn, scenarioPicked) },
       {
         id: "analyze",
         label: "Analyze",
-        state: pillState("analyze", currentStep, completedSteps, signedIn),
+        state: pillState("analyze", currentStep, completedSteps, signedIn, scenarioPicked),
         substeps: analyzeSubsteps(session.currentFrame),
       },
-      { id: "integrate", label: "4 Integrate", state: pillState("integrate", currentStep, completedSteps, signedIn) },
+      { id: "integrate", label: "4 Integrate", state: pillState("integrate", currentStep, completedSteps, signedIn, scenarioPicked) },
     ];
-  }, [currentStep, completedSteps, appMode.authState, session.currentFrame]);
+  }, [currentStep, completedSteps, appMode.authState, session.currentFrame, session.scenario]);
 
   const handleStepClick = useCallback(
     (stepId: StepId) => {
       if (stepId === "integrate" && appMode.authState !== "signed-in") return;
+      // Understand + Analyze need a scenario; on F1 the user must click a
+      // sample card (or BYO) first.
+      if ((stepId === "understand" || stepId === "analyze") && session.scenario == null) return;
       const frameByStep: Record<StepId, FFrame> = {
         ingest: "f1",
         understand: "f2",
@@ -123,7 +136,7 @@ export const OnboardingShell: FC = () => {
       };
       advanceFrame(frameByStep[stepId]);
     },
-    [advanceFrame, appMode.authState],
+    [advanceFrame, appMode.authState, session.scenario],
   );
 
   const canvasContent = useMemo(() => {

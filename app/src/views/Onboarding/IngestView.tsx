@@ -354,15 +354,41 @@ export const IngestView: FC = () => {
         </Typography>
       </Stack>
 
-      {/* BYO header — the "Sign up triggers F1→F2 + loads the gate inline"
-          margin note from the wireframe is design-medium metadata, not UI
-          copy, so it does not render in production. */}
-      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 4, mb: 1, color: alpha(NAVY, 0.5) }}>
+      {/* BYO header — clickable; opens the same gate as the three Sign Up
+          buttons inside the tiles. Styled flat (no button chrome) so it
+          still reads as a section label, but it's an interactive landmark
+          for users who scan the page label-first. */}
+      <Stack
+        direction="row"
+        alignItems="center"
+        spacing={0.5}
+        role="button"
+        tabIndex={0}
+        onClick={handleByoClick}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            handleByoClick();
+          }
+        }}
+        sx={{
+          mt: 4,
+          mb: 1,
+          color: alpha(NAVY, 0.5),
+          cursor: "pointer",
+          width: "fit-content",
+          borderRadius: BORDER_RADIUS_SM,
+          px: 0.5,
+          mx: -0.5,
+          "&:hover": { color: NAVY, backgroundColor: alpha(NAVY, 0.04) },
+          "&:focus-visible": { outline: `2px solid ${GREEN}`, outlineOffset: 2 },
+        }}
+      >
         <LockOutlinedIcon sx={{ fontSize: 14 }} />
         <Typography
           variant="overline"
           sx={{
-            color: alpha(NAVY, 0.5),
+            color: "inherit",
             fontWeight: FONT_WEIGHT_LABEL,
             letterSpacing: LETTER_SPACING_LABEL,
             fontSize: FONT_SIZE_LABEL,
