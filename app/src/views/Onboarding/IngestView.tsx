@@ -10,32 +10,38 @@ import { useCallback, type FC } from "react";
 import {
   BORDER,
   BORDER_RADIUS,
-  BORDER_RADIUS_PILL,
   BORDER_RADIUS_SM,
   CORAL,
-  CYAN,
   FONT_FAMILY_MARKETING,
   FONT_SIZE_LABEL,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
+  GATE_MAX_WIDTH,
   GREEN,
   LETTER_SPACING_LABEL,
   NAVY,
-  TINT,
+  ONBOARDING_HERO_FONT_SIZE,
+  ONBOARDING_SMALL_TEXT_FONT_SIZE,
+  PICKER_MAX_WIDTH,
+  PICKER_MAX_WIDTH_ULTRAWIDE,
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import { ByoTile } from "@/shared/components/ByoTile";
+import { CapabilityBadge } from "@/shared/components/CapabilityBadge";
 import {
   CONNECTOR_KINDS,
   CONNECTOR_LABELS,
   ConnectorGlyph,
 } from "@/shared/components/ConnectorGlyph";
-import { DocThumb } from "@/shared/components/DocThumb";
+import { SampleScenarioCard } from "@/shared/components/SampleScenarioCard";
 import type { Scenario } from "@/types/onboarding";
 import type { ScenarioConfig } from "@/types/scenarios";
+
+import { GateView } from "./GateView";
 
 /**
  * Closed-union safe-list. Downstream views (F2-F5) still type on the
@@ -46,24 +52,21 @@ const KNOWN_SCENARIOS = new Set<Scenario>(["utility", "loan", "solar"]);
 const asKnownScenario = (id: string): Scenario | null =>
   KNOWN_SCENARIOS.has(id as Scenario) ? (id as Scenario) : null;
 
-import { GateView } from "./GateView";
-
-const ROUGH_FILTER = "url(#wf-rough-lite)";
+const CAPABILITIES: ReadonlyArray<{ letter: "E" | "I" | "R"; name: string; key: "extract" | "interact" | "report" }> = [
+  { letter: "E", name: "Extract", key: "extract" },
+  { letter: "I", name: "Interact", key: "interact" },
+  { letter: "R", name: "Report", key: "report" },
+];
 
 /**
  * F1 IngestView — composed against `spec-nav-v2.jsx Canvas_Ingest`.
  *
  * Layout (top → bottom):
  *   1. Hero: marketing-tier headline + brand-voice sub-line
- *   2. "TRY A SAMPLE · NO SIGN-UP" — 3 sample cards (Utility = ★ start here)
+ *   2. "TRY A SAMPLE · NO SIGN-UP" — sample cards (Utility = ★ start here)
  *   3. Capability legend (E / I / R · filled vs hollow)
  *   4. "🔒 BRING YOUR OWN — SIGN UP FREE TO UNLOCK" — 3 BYO tiles
- *      (Upload files · Connect a source · Email it in) with diagonal stripe
- *      overlay so they read as one disabled section
  *   5. Privacy footer
- *
- * The step strip lives on the OnboardingShell side; this view fills the canvas
- * column. F1 hides nav + chat (handled by OnboardingShell).
  */
 export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
@@ -72,17 +75,11 @@ export const IngestView: FC = () => {
   const { state: registry } = useScenarioRegistry();
   const gateOpenOrCommitted = session.gate.status === "open" || session.gate.status === "committed";
   const theme = useTheme();
-  // Below md (900): tablet + mobile. Drives the bottom-sheet gate so the
-  // picker stays usable in a sliver-width window. Mobile-only finer
-  // adjustments use the sx breakpoint object (xs/sm) inline.
   const compact = useMediaQuery(theme.breakpoints.down("md"));
 
   const handlePickScenario = useCallback(
     (id: string) => {
       const scenario = asKnownScenario(id);
-      // Unknown scenario IDs (seeded into the bucket but not yet recognized
-      // by downstream views) are clickable but no-op until those views can
-      // consume the registry directly.
       if (!scenario) return;
       pickScenario(scenario);
       setScenario(scenario);
@@ -96,22 +93,12 @@ export const IngestView: FC = () => {
     openGate("byo");
   }, [openGate]);
 
-  const capabilities = [
-    { letter: "E" as const, name: "Extract", key: "extract" as const },
-    { letter: "I" as const, name: "Interact", key: "interact" as const },
-    { letter: "R" as const, name: "Report", key: "report" as const },
-  ];
-
   return (
     <Box
       component="main"
       aria-label="Pick a starting point"
       sx={{
-        // Desktop default = 1200 (matches MUI lg). Ultrawide (≥1600) bumps
-        // to 1320 so the picker doesn't feel orphaned in the centre of a
-        // 27" monitor — but stops short of "stretch to viewport", which
-        // would make the BYO tiles read as too wide / too sparse.
-        maxWidth: { xs: "100%", md: 1200, xl: 1320 },
+        maxWidth: { xs: "100%", md: PICKER_MAX_WIDTH, xl: PICKER_MAX_WIDTH_ULTRAWIDE },
         mx: "auto",
         py: { xs: 3, md: 5 },
         px: { xs: 2, md: 4 },
@@ -123,7 +110,7 @@ export const IngestView: FC = () => {
           component="h1"
           sx={{
             fontFamily: FONT_FAMILY_MARKETING,
-            fontSize: 34,
+            fontSize: ONBOARDING_HERO_FONT_SIZE,
             fontWeight: FONT_WEIGHT_HEADLINE,
             lineHeight: 1.05,
             color: NAVY,
@@ -152,8 +139,7 @@ export const IngestView: FC = () => {
       >
         TRY A SAMPLE · NO SIGN-UP
       </Typography>
-      {/* Cards: 1 column on xs/sm (mobile + tablet — easier to scan, ≥44px
-          tap target), 3 columns on md+ (desktop). */}
+      {/* Cards: 1 column below md, 3 columns above. */}
       <Box
         role="list"
         aria-label="Sample scenarios"
@@ -170,148 +156,15 @@ export const IngestView: FC = () => {
             Couldn't load samples: {registry.error}
           </Typography>
         ) : null}
-        {registry.scenarios.map((scenario: ScenarioConfig, index) => {
-          const hero = scenario.manifest.hero;
-          const isStartHere = index === 0;
-          return (
-            <Box
-              key={scenario.id}
-              role="listitem"
-              tabIndex={0}
-              data-testid={`sample-${scenario.id}`}
-              aria-label={`Open sample: ${hero.title}`}
-              onClick={() => handlePickScenario(scenario.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  handlePickScenario(scenario.id);
-                }
-              }}
-              sx={{
-                position: "relative",
-                display: "flex",
-                flexDirection: "column",
-                minHeight: 140,
-                p: 1.75,
-                borderRadius: BORDER_RADIUS,
-                border: isStartHere ? `2px solid ${NAVY}` : `1.5px solid ${alpha(NAVY, 0.55)}`,
-                backgroundColor: WHITE,
-                filter: ROUGH_FILTER,
-                cursor: "pointer",
-                transition: "transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
-                "&:hover": { borderColor: NAVY, transform: "translateY(-1px)" },
-                "&:focus-visible": { outline: `2px solid ${GREEN}`, outlineOffset: 2 },
-              }}
-            >
-              {isStartHere ? (
-                <Box
-                  aria-hidden
-                  sx={{
-                    position: "absolute",
-                    top: -12,
-                    right: 14,
-                    px: 1.25,
-                    py: 0.25,
-                    borderRadius: BORDER_RADIUS_PILL,
-                    backgroundColor: GREEN,
-                    border: `1.5px solid ${NAVY}`,
-                    fontFamily: FONT_FAMILY_MARKETING,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: NAVY,
-                    letterSpacing: "0.02em",
-                  }}
-                >
-                  ★ start here
-                </Box>
-              ) : null}
-              <Stack direction="row" spacing={2.5} sx={{ flex: 1, alignItems: "flex-start" }}>
-                <Box sx={{ position: "relative", flexShrink: 0, mr: 0.5 }}>
-                  <DocThumb w={36} h={46} />
-                  <Box
-                    aria-hidden
-                    sx={{
-                      position: "absolute",
-                      bottom: -6,
-                      right: -10,
-                      px: 0.75,
-                      py: 0.1,
-                      borderRadius: BORDER_RADIUS_PILL,
-                      backgroundColor: CYAN,
-                      border: `1.5px solid ${NAVY}`,
-                      fontFamily: FONT_FAMILY_MARKETING,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: NAVY,
-                      whiteSpace: "nowrap",
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {hero.docCount}
-                  </Box>
-                </Box>
-                <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
-                  <Typography
-                    sx={{
-                      fontFamily: FONT_FAMILY_MARKETING,
-                      fontSize: 18,
-                      fontWeight: FONT_WEIGHT_HEADLINE,
-                      lineHeight: 1.05,
-                      color: NAVY,
-                    }}
-                  >
-                    {hero.title}
-                  </Typography>
-                  <Typography sx={{ color: alpha(NAVY, 0.65), fontSize: 12, lineHeight: 1.35 }}>
-                    {hero.shortDesc}
-                  </Typography>
-                </Stack>
-              </Stack>
-              <Stack direction="row" alignItems="flex-end" spacing={1} sx={{ mt: 1 }}>
-                <Typography
-                  sx={{
-                    flex: 1,
-                    color: CORAL,
-                    fontWeight: 700,
-                    fontSize: 11.5,
-                    lineHeight: 1.3,
-                    letterSpacing: "0.01em",
-                  }}
-                >
-                  {hero.demonstrates}
-                </Typography>
-                <Stack direction="row" spacing={0.5}>
-                  {capabilities.map((cap) => {
-                    const live = hero.chapters[cap.key] === "live";
-                    return (
-                      <Box
-                        key={cap.key}
-                        title={`${cap.name}${live ? " · live in this sample" : " · not in this sample"}`}
-                        aria-hidden
-                        sx={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: BORDER_RADIUS_SM,
-                          backgroundColor: live ? GREEN : WHITE,
-                          border: `1.5px solid ${live ? NAVY : alpha(NAVY, 0.25)}`,
-                          color: live ? NAVY : alpha(NAVY, 0.4),
-                          fontSize: 11,
-                          fontWeight: 700,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontFamily: FONT_FAMILY_MARKETING,
-                        }}
-                      >
-                        {cap.letter}
-                      </Box>
-                    );
-                  })}
-                </Stack>
-              </Stack>
-            </Box>
-          );
-        })}
+        {registry.scenarios.map((scenario: ScenarioConfig, index) => (
+          <SampleScenarioCard
+            key={scenario.id}
+            id={scenario.id}
+            hero={scenario.manifest.hero}
+            startHere={index === 0}
+            onClick={() => handlePickScenario(scenario.id)}
+          />
+        ))}
       </Box>
 
       {/* Capability legend */}
@@ -320,32 +173,14 @@ export const IngestView: FC = () => {
         alignItems="center"
         flexWrap="wrap"
         spacing={1.25}
-        sx={{ mt: 1.25, color: alpha(NAVY, 0.6), fontSize: 11.5 }}
+        sx={{ mt: 1.25, color: alpha(NAVY, 0.6), fontSize: ONBOARDING_SMALL_TEXT_FONT_SIZE }}
       >
         <Typography sx={{ fontWeight: 700, color: alpha(NAVY, 0.75), fontSize: "inherit" }}>
           capabilities demonstrated:
         </Typography>
-        {capabilities.map((cap) => (
+        {CAPABILITIES.map((cap) => (
           <Stack key={cap.key} direction="row" alignItems="center" spacing={0.5}>
-            <Box
-              aria-hidden
-              sx={{
-                width: 16,
-                height: 16,
-                borderRadius: BORDER_RADIUS_SM,
-                backgroundColor: GREEN,
-                border: `1.2px solid ${NAVY}`,
-                fontSize: 9,
-                fontWeight: 700,
-                color: NAVY,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontFamily: FONT_FAMILY_MARKETING,
-              }}
-            >
-              {cap.letter}
-            </Box>
+            <CapabilityBadge letter={cap.letter} live name={cap.name} size="sm" />
             <Typography sx={{ fontSize: "inherit" }}>{cap.name}</Typography>
           </Stack>
         ))}
@@ -355,9 +190,7 @@ export const IngestView: FC = () => {
       </Stack>
 
       {/* BYO header — clickable; opens the same gate as the three Sign Up
-          buttons inside the tiles. Styled flat (no button chrome) so it
-          still reads as a section label, but it's an interactive landmark
-          for users who scan the page label-first. */}
+          buttons inside the tiles. */}
       <Stack
         direction="row"
         alignItems="center"
@@ -506,7 +339,7 @@ export const IngestView: FC = () => {
                 backgroundColor: alpha(WHITE, 0.7),
                 border: `1px dashed ${alpha(NAVY, 0.3)}`,
                 fontFamily: '"JetBrains Mono", monospace',
-                fontSize: 10.5,
+                fontSize: ONBOARDING_SMALL_TEXT_FONT_SIZE,
                 fontWeight: 700,
                 color: alpha(NAVY, 0.6),
                 borderRadius: BORDER_RADIUS_SM,
@@ -521,32 +354,20 @@ export const IngestView: FC = () => {
       {/* Privacy footer */}
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 2, color: alpha(NAVY, 0.6) }}>
         <LockOutlinedIcon sx={{ fontSize: 14 }} />
-        <Typography sx={{ fontSize: 11.5 }}>
+        <Typography sx={{ fontSize: ONBOARDING_SMALL_TEXT_FONT_SIZE }}>
           Your docs are yours. GroundX never trains on uploaded content. Air-gapped on-prem available for regulated
           buyers.
         </Typography>
       </Stack>
 
       {/* F6 gate — inline next to the picker on desktop (md+), or a bottom
-          sheet Drawer on tablet/mobile so the picker stays visible behind
-          and the form claims comfortable space on a narrow viewport. Per
-          spec the gate is never modal in the dimmed-overlay sense; the
-          Drawer here uses a translucent backdrop only so the user retains
-          the "browse samples" affordance by tapping outside the sheet. */}
+          sheet Drawer on tablet/mobile so the picker stays visible behind. */}
       {gateOpenOrCommitted && !compact ? (
-        <Box sx={{ mt: 4, maxWidth: 460, mx: "auto" }}>
+        <Box sx={{ mt: 4, maxWidth: GATE_MAX_WIDTH, mx: "auto" }}>
           <GateView />
         </Box>
       ) : null}
 
-      {/* GateView already provides its own close X + "Keep exploring
-          samples" link, so we render it bare inside the Drawer — no extra
-          IconButton, no extra Card chrome. The Drawer Paper supplies the
-          bottom-sheet surface; the GateView Card sits inside it.
-          Content-sized rather than fullscreen: the user's instinct on a
-          bottom sheet is "this didn't take over my screen, I can still see
-          my samples behind it," which matches the spec's "never modal"
-          framing. Tap outside or the sheet's close X to dismiss. */}
       <Drawer
         anchor="bottom"
         open={gateOpenOrCommitted && compact}
@@ -570,157 +391,3 @@ export const IngestView: FC = () => {
     </Box>
   );
 };
-
-/** Small document icon with a count badge, matches the spec card hero. */
-function DocIcon({ count }: { count: string }) {
-  return (
-    <Box sx={{ position: "relative", flexShrink: 0 }}>
-      <Box
-        aria-hidden
-        sx={{
-          width: 38,
-          height: 48,
-          borderRadius: BORDER_RADIUS_SM,
-          backgroundColor: WHITE,
-          border: `1.5px solid ${alpha(NAVY, 0.35)}`,
-          position: "relative",
-          "&::before": {
-            content: '""',
-            position: "absolute",
-            top: 5,
-            left: 6,
-            right: 18,
-            height: 1.5,
-            backgroundColor: alpha(NAVY, 0.2),
-          },
-          "&::after": {
-            content: '""',
-            position: "absolute",
-            top: 11,
-            left: 6,
-            right: 12,
-            height: 1.5,
-            backgroundColor: alpha(NAVY, 0.18),
-            boxShadow: `0 5px 0 ${alpha(NAVY, 0.16)}, 0 10px 0 ${alpha(NAVY, 0.14)}, 0 15px 0 ${alpha(NAVY, 0.12)}`,
-          },
-        }}
-      />
-      <Box
-        aria-hidden
-        sx={{
-          position: "absolute",
-          bottom: -6,
-          right: -8,
-          minWidth: 20,
-          height: 18,
-          px: 0.75,
-          borderRadius: BORDER_RADIUS_PILL,
-          backgroundColor: CYAN,
-          border: `1.5px solid ${NAVY}`,
-          fontFamily: FONT_FAMILY_MARKETING,
-          fontSize: 10,
-          fontWeight: 700,
-          color: NAVY,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {count}
-      </Box>
-    </Box>
-  );
-}
-
-/** Locked BYO tile — accepts a child for the inline affordance (icon, chips, email box). */
-function ByoTile({
-  testId,
-  title,
-  sub,
-  cta,
-  ctaIcon,
-  onClick,
-  accent,
-  children,
-}: {
-  testId: string;
-  title: string;
-  sub: string;
-  cta: string;
-  ctaIcon: string;
-  onClick: () => void;
-  accent?: "dashed";
-  children: React.ReactNode;
-}) {
-  return (
-    <Box
-      role="listitem"
-      tabIndex={0}
-      data-testid={testId}
-      aria-label={`${title} (sign-in required)`}
-      onClick={onClick}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onClick();
-        }
-      }}
-      sx={{
-        height: 134,
-        p: 1.5,
-        boxSizing: "border-box",
-        borderRadius: BORDER_RADIUS,
-        border: accent === "dashed" ? `2px dashed ${alpha(NAVY, 0.25)}` : `1.5px solid ${alpha(NAVY, 0.25)}`,
-        backgroundColor: alpha(TINT, 0.6),
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        cursor: "pointer",
-        filter: "grayscale(0.35)",
-        "&:hover": { filter: "grayscale(0.15)" },
-        "&:focus-visible": { outline: `2px solid ${GREEN}`, outlineOffset: 2 },
-      }}
-    >
-      <Box sx={{ display: "flex", gap: 1.25 }}>
-        <Box sx={{ flexShrink: 0 }}>{children && accent === "dashed" ? children : null}</Box>
-        <Stack spacing={0.25} sx={{ flex: 1, minWidth: 0 }}>
-          <Typography
-            sx={{
-              fontFamily: FONT_FAMILY_MARKETING,
-              fontSize: 17,
-              fontWeight: FONT_WEIGHT_HEADLINE,
-              lineHeight: 1.1,
-              color: alpha(NAVY, 0.7),
-            }}
-          >
-            {title}
-          </Typography>
-          <Typography sx={{ fontSize: 11.5, color: alpha(NAVY, 0.55) }}>{sub}</Typography>
-          {!(children && accent === "dashed") ? <Box sx={{ mt: 0.75 }}>{children}</Box> : null}
-        </Stack>
-      </Box>
-      <Box
-        sx={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 0.75,
-          alignSelf: "stretch",
-          justifyContent: "center",
-          px: 1.25,
-          py: 0.5,
-          borderRadius: BORDER_RADIUS_PILL,
-          border: `1.5px solid ${GREEN}`,
-          color: NAVY,
-          backgroundColor: WHITE,
-          fontSize: 11,
-          fontWeight: 600,
-        }}
-      >
-        <Box component="span" sx={{ color: GREEN, fontWeight: 700 }}>
-          {ctaIcon}
-        </Box>
-        {cta}
-      </Box>
-    </Box>
-  );
-}

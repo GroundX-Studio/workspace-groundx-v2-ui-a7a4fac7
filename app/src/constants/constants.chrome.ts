@@ -62,3 +62,37 @@ export const PROGRESS_TRACK_ON_DARK = "rgba(255, 255, 255, 0.15)";
 
 export const PREMIUM_GRADIENT_FROM = "#fe6b8b";
 export const PREMIUM_GRADIENT_TO = "#ff8e53";
+
+// ──────────────────────────────────────────────────────────────────────────
+// Onboarding F-series tokens (project-specific; not in tokens.json because
+// the F-series flow is unique to this product UI)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** F1 hero headline — Thicccboi, 34px. */
+export const ONBOARDING_HERO_FONT_SIZE = "2.125rem";
+
+/** Tile titles in BYO row (Upload files / Connect a source / Email it in). */
+export const ONBOARDING_TILE_TITLE_FONT_SIZE = "1.0625rem";
+
+/** F-series small body copy — coral demonstrates line, privacy footer, capability legend, BYO sub. */
+export const ONBOARDING_SMALL_TEXT_FONT_SIZE = "0.71875rem";
+
+/** Sample / BYO card chrome dimensions. */
+export const SAMPLE_CARD_MIN_HEIGHT = 140;
+export const BYO_TILE_HEIGHT = 134;
+
+/** Step strip number badge size. */
+export const STEP_BADGE_SIZE = 20;
+
+/** Capability badge (E / I / R) — default size used inside sample cards. */
+export const CAPABILITY_BADGE_SIZE = 20;
+
+/** Capability badge — smaller variant used in the legend row. */
+export const CAPABILITY_BADGE_SIZE_SM = 16;
+
+/** Picker container — desktop and ultrawide max widths. */
+export const PICKER_MAX_WIDTH = 1200;
+export const PICKER_MAX_WIDTH_ULTRAWIDE = 1320;
+
+/** F1 sample/BYO max width on bottom-sheet gate drawer body. */
+export const GATE_MAX_WIDTH = 460;

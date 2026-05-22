@@ -7,6 +7,7 @@ import {
   CYAN,
   GREEN,
   NAVY,
+  STEP_BADGE_SIZE,
   TINT,
   WHITE,
 } from "@/constants";
@@ -74,8 +75,8 @@ const badgeSx = (state: StepPillState, n: number | "check") => {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    width: 20,
-    height: 20,
+    width: STEP_BADGE_SIZE,
+    height: STEP_BADGE_SIZE,
     borderRadius: BORDER_RADIUS_PILL,
     fontSize: 11,
     fontWeight: 700,

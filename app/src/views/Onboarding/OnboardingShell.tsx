@@ -12,6 +12,8 @@ import {
   MUTED_ON_DARK,
   MUTED_ON_LIGHT,
   NAVY,
+  PICKER_MAX_WIDTH,
+  PICKER_MAX_WIDTH_ULTRAWIDE,
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
@@ -188,7 +190,7 @@ export const OnboardingShell: FC = () => {
               first pill and the hero headline both anchor to the same left
               edge on every viewport. Ultrawide (xl) bumps to 1320 — see
               IngestView for the rationale. */}
-          <Box sx={{ maxWidth: { xs: "100%", md: 1200, xl: 1320 }, mx: "auto", px: { xs: 2, md: 4 } }}>
+          <Box sx={{ maxWidth: { xs: "100%", md: PICKER_MAX_WIDTH, xl: PICKER_MAX_WIDTH_ULTRAWIDE }, mx: "auto", px: { xs: 2, md: 4 } }}>
             <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
           </Box>
         </Box>
