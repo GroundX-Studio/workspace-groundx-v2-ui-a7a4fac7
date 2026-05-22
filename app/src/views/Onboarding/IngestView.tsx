@@ -116,21 +116,9 @@ export const IngestView: FC = () => {
         >
           Connect your data to GroundX.
         </Typography>
-        {/* On mobile (xs only) we shrink the sub-line to one short clause —
-            "one job per screen". Tablet + desktop get the full brand-voice
-            sentence. */}
-        <Typography
-          variant="body1"
-          sx={{ color: alpha(NAVY, 0.72), display: { xs: "none", sm: "block" } }}
-        >
+        <Typography variant="body1" sx={{ color: alpha(NAVY, 0.72) }}>
           GroundX works on the docs that break general-purpose AI — contracts, claims, policies, forms, technical
           diagrams. Try a sample, or bring your own.
-        </Typography>
-        <Typography
-          variant="body2"
-          sx={{ color: alpha(NAVY, 0.72), display: { xs: "block", sm: "none" } }}
-        >
-          Try a sample, or bring your own.
         </Typography>
       </Stack>
 
@@ -266,9 +254,6 @@ export const IngestView: FC = () => {
                   </Stack>
                 </Stack>
                 <Stack direction="row" alignItems="flex-end" spacing={1} sx={{ mt: 1 }}>
-                  {/* "demonstrates" coral line — hides on mobile (xs) so the
-                      tile keeps a calm two-line shape and the capability
-                      badges still anchor the right edge. */}
                   <Typography
                     sx={{
                       flex: 1,
@@ -277,7 +262,6 @@ export const IngestView: FC = () => {
                       fontSize: 11.5,
                       lineHeight: 1.3,
                       letterSpacing: "0.01em",
-                      display: { xs: "none", sm: "block" },
                     }}
                   >
                     {fixture.hero.demonstrates}
@@ -317,19 +301,13 @@ export const IngestView: FC = () => {
         )}
       </Box>
 
-      {/* Capability legend — desktop-only. On tablet/mobile the per-tile
-          badges (active E/I/R chips) already carry the meaning; the legend
-          would only steal scroll real-estate. */}
+      {/* Capability legend */}
       <Stack
         direction="row"
         alignItems="center"
+        flexWrap="wrap"
         spacing={1.25}
-        sx={{
-          mt: 1.25,
-          color: alpha(NAVY, 0.6),
-          fontSize: 11.5,
-          display: { xs: "none", md: "flex" },
-        }}
+        sx={{ mt: 1.25, color: alpha(NAVY, 0.6), fontSize: 11.5 }}
       >
         <Typography sx={{ fontWeight: 700, color: alpha(NAVY, 0.75), fontSize: "inherit" }}>
           capabilities demonstrated:
@@ -447,13 +425,7 @@ export const IngestView: FC = () => {
             ctaIcon="⚡"
             onClick={handleByoClick}
           >
-            {/* Full 8-logo grid on sm+; a compact "8 sources" chip on xs
-                so the tile stays one-line scannable. */}
-            <Stack
-              direction="row"
-              flexWrap="wrap"
-              sx={{ gap: 0.5, opacity: 0.7, display: { xs: "none", sm: "flex" } }}
-            >
+            <Stack direction="row" flexWrap="wrap" sx={{ gap: 0.5, opacity: 0.7 }}>
               {CONNECTOR_KINDS.map((kind) => (
                 <Box
                   key={kind}
@@ -474,24 +446,6 @@ export const IngestView: FC = () => {
                 </Box>
               ))}
             </Stack>
-            <Box
-              aria-label="8 sources"
-              sx={{
-                display: { xs: "inline-flex", sm: "none" },
-                alignItems: "center",
-                gap: 0.5,
-                px: 1,
-                py: 0.25,
-                borderRadius: BORDER_RADIUS_PILL,
-                border: `1px solid ${alpha(NAVY, 0.2)}`,
-                backgroundColor: WHITE,
-                fontSize: 11,
-                fontWeight: 600,
-                color: alpha(NAVY, 0.6),
-              }}
-            >
-              8 sources
-            </Box>
           </ByoTile>
 
           <ByoTile
@@ -502,13 +456,10 @@ export const IngestView: FC = () => {
             ctaIcon="✉"
             onClick={handleByoClick}
           >
-            {/* Mono address box hides on xs — it's redundant with the title
-                + sub, doesn't fit a 320-wide tile, and the full address is
-                revealed post-signup anyway. */}
             <Box
               aria-hidden
               sx={{
-                display: { xs: "none", sm: "inline-flex" },
+                display: "inline-flex",
                 alignItems: "center",
                 gap: 0.5,
                 px: 1,
@@ -528,16 +479,12 @@ export const IngestView: FC = () => {
         </Box>
       </Box>
 
-      {/* Privacy footer — desktop shows the full brand-voice line, mobile
-          shows the short "we don't train on your docs" assurance only. */}
+      {/* Privacy footer */}
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 2, color: alpha(NAVY, 0.6) }}>
         <LockOutlinedIcon sx={{ fontSize: 14 }} />
-        <Typography sx={{ fontSize: 11.5, display: { xs: "none", sm: "block" } }}>
+        <Typography sx={{ fontSize: 11.5 }}>
           Your docs are yours. GroundX never trains on uploaded content. Air-gapped on-prem available for regulated
           buyers.
-        </Typography>
-        <Typography sx={{ fontSize: 11.5, display: { xs: "block", sm: "none" } }}>
-          Your docs are yours. We never train on them.
         </Typography>
       </Stack>
 
