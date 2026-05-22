@@ -5,8 +5,16 @@ import type { FC } from "react";
 import {
   BORDER_RADIUS_PILL,
   CYAN,
+  FONT_SIZE_CAPTION,
+  FONT_SIZE_LABEL,
+  FONT_WEIGHT_HEADLINE,
+  FONT_WEIGHT_LABEL,
+  FONT_WEIGHT_MEDIUM,
   GREEN,
   NAVY,
+  ONBOARDING_BADGE_FONT_SIZE,
+  ONBOARDING_MICRO_FONT_SIZE,
+  STEP_ANALYZE_BRACKET_RADIUS,
   STEP_BADGE_SIZE,
   TINT,
   WHITE,
@@ -40,21 +48,21 @@ const stepChipSx = (state: StepPillState) => {
         backgroundColor: GREEN,
         borderColor: NAVY,
         color: NAVY,
-        fontWeight: 700,
+        fontWeight: FONT_WEIGHT_HEADLINE,
       };
     case "done-traversed":
       return {
         backgroundColor: TINT,
         borderColor: NAVY,
         color: NAVY,
-        fontWeight: 600,
+        fontWeight: FONT_WEIGHT_LABEL,
       };
     case "disabled":
       return {
         backgroundColor: WHITE,
         borderColor: alpha(NAVY, 0.25),
         color: alpha(NAVY, 0.5),
-        fontWeight: 500,
+        fontWeight: FONT_WEIGHT_MEDIUM,
         cursor: "not-allowed",
       };
     case "reachable-todo":
@@ -63,7 +71,7 @@ const stepChipSx = (state: StepPillState) => {
         backgroundColor: WHITE,
         borderColor: alpha(NAVY, 0.5),
         color: NAVY,
-        fontWeight: 500,
+        fontWeight: FONT_WEIGHT_MEDIUM,
         "&:hover": { backgroundColor: alpha(NAVY, 0.04) },
       };
   }
@@ -78,8 +86,8 @@ const badgeSx = (state: StepPillState, n: number | "check") => {
     width: STEP_BADGE_SIZE,
     height: STEP_BADGE_SIZE,
     borderRadius: BORDER_RADIUS_PILL,
-    fontSize: 11,
-    fontWeight: 700,
+    fontSize: ONBOARDING_BADGE_FONT_SIZE,
+    fontWeight: FONT_WEIGHT_HEADLINE,
     backgroundColor: filled ? NAVY : "transparent",
     color: filled ? WHITE : alpha(NAVY, 0.4),
     border: filled ? "none" : `1px solid ${alpha(NAVY, 0.4)}`,
@@ -118,7 +126,7 @@ const Pill: FC<{
         padding: "6px 14px",
         borderRadius: BORDER_RADIUS_PILL,
         border: "1.5px solid",
-        fontSize: 13,
+        fontSize: FONT_SIZE_CAPTION,
         lineHeight: 1,
         outline: "none",
         userSelect: "none",
@@ -147,8 +155,8 @@ const SubPill: FC<{ id: string; label: string; state: StepPillState }> = ({ labe
         border: `1.5px ${active ? "solid" : "dashed"} ${active ? NAVY : alpha(NAVY, 0.25)}`,
         backgroundColor: active ? GREEN : alpha(WHITE, 0.7),
         color: active ? NAVY : alpha(NAVY, 0.45),
-        fontSize: 12,
-        fontWeight: active ? 700 : 500,
+        fontSize: FONT_SIZE_LABEL,
+        fontWeight: active ? FONT_WEIGHT_HEADLINE : FONT_WEIGHT_MEDIUM,
         opacity: disabled ? 0.75 : 1,
         cursor: disabled ? "not-allowed" : "default",
       }}
@@ -183,18 +191,18 @@ const CompactStrip: FC<{ steps: StepDescriptor[] }> = ({ steps }) => {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          fontSize: 12,
+          fontSize: FONT_SIZE_LABEL,
           color: NAVY,
-          fontWeight: 600,
+          fontWeight: FONT_WEIGHT_LABEL,
         }}
       >
         <Box component="span">
           Step {found?.n ?? 1} of {total}{" "}
-          <Box component="span" sx={{ color: alpha(NAVY, 0.55), fontWeight: 500, ml: 0.5 }}>
+          <Box component="span" sx={{ color: alpha(NAVY, 0.55), fontWeight: FONT_WEIGHT_MEDIUM, ml: 0.5 }}>
             · {found?.current.label.replace(/^\d+\s*/, "") ?? steps[0].label.replace(/^\d+\s*/, "")}
           </Box>
         </Box>
-        <Box component="span" sx={{ fontSize: 11, color: alpha(NAVY, 0.55), fontWeight: 500 }}>
+        <Box component="span" sx={{ fontSize: ONBOARDING_BADGE_FONT_SIZE, color: alpha(NAVY, 0.55), fontWeight: FONT_WEIGHT_MEDIUM }}>
           {completed}/{total} done
         </Box>
       </Box>
@@ -255,7 +263,7 @@ export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = fa
                   position: "relative",
                   padding: "14px 14px 6px",
                   border: `1.5px dashed ${alpha(NAVY, 0.4)}`,
-                  borderRadius: 14,
+                  borderRadius: STEP_ANALYZE_BRACKET_RADIUS,
                   backgroundColor: alpha(CYAN, 0.18),
                   display: "inline-flex",
                   gap: 0.5,
@@ -270,8 +278,8 @@ export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = fa
                     left: 12,
                     px: 1,
                     backgroundColor: WHITE,
-                    fontSize: 10,
-                    fontWeight: 700,
+                    fontSize: ONBOARDING_MICRO_FONT_SIZE,
+                    fontWeight: FONT_WEIGHT_HEADLINE,
                     letterSpacing: "0.08em",
                     textTransform: "uppercase",
                     color: NAVY,

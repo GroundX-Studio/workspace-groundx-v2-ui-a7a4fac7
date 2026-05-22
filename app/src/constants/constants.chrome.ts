@@ -96,3 +96,29 @@ export const PICKER_MAX_WIDTH_ULTRAWIDE = 1320;
 
 /** F1 sample/BYO max width on bottom-sheet gate drawer body. */
 export const GATE_MAX_WIDTH = 460;
+
+/** Bottom-sheet gate drawer — max height as a viewport ratio. */
+export const GATE_DRAWER_MAX_HEIGHT = "90vh";
+
+/**
+ * Step strip ANALYZE bracket — radius is between BORDER_RADIUS (6px) and
+ * BORDER_RADIUS_2X (12px); the spec wants something rounder than the
+ * step pills it contains but not as soft as a card.
+ */
+export const STEP_ANALYZE_BRACKET_RADIUS = 14;
+
+/** F-series micro chrome — for tiny inline labels (Analyze label, doc-count badge). */
+export const ONBOARDING_MICRO_FONT_SIZE = 10;
+
+/** F-series badge text — for the step-strip number badge + compact-strip done count. */
+export const ONBOARDING_BADGE_FONT_SIZE = 11;
+
+/** Inline icon size — LockOutlinedIcon and similar chrome icons paired with text. */
+export const ICON_SIZE_INLINE = 14;
+
+/**
+ * MUI's brand tokens cover 400 / 600 / 700 / 800 weights. 500 is a useful
+ * "medium" between body and label; the step strip's reachable-todo + disabled
+ * states use it for a slightly softer feel than full label weight.
+ */
+export const FONT_WEIGHT_MEDIUM = 500;

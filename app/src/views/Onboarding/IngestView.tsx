@@ -13,11 +13,14 @@ import {
   BORDER_RADIUS_SM,
   CORAL,
   FONT_FAMILY_MARKETING,
+  FONT_SIZE_H5,
   FONT_SIZE_LABEL,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
+  GATE_DRAWER_MAX_HEIGHT,
   GATE_MAX_WIDTH,
   GREEN,
+  ICON_SIZE_INLINE,
   LETTER_SPACING_LABEL,
   NAVY,
   ONBOARDING_HERO_FONT_SIZE,
@@ -175,7 +178,7 @@ export const IngestView: FC = () => {
         spacing={1.25}
         sx={{ mt: 1.25, color: alpha(NAVY, 0.6), fontSize: ONBOARDING_SMALL_TEXT_FONT_SIZE }}
       >
-        <Typography sx={{ fontWeight: 700, color: alpha(NAVY, 0.75), fontSize: "inherit" }}>
+        <Typography sx={{ fontWeight: FONT_WEIGHT_HEADLINE, color: alpha(NAVY, 0.75), fontSize: "inherit" }}>
           capabilities demonstrated:
         </Typography>
         {CAPABILITIES.map((cap) => (
@@ -217,7 +220,7 @@ export const IngestView: FC = () => {
           "&:focus-visible": { outline: `2px solid ${GREEN}`, outlineOffset: 2 },
         }}
       >
-        <LockOutlinedIcon sx={{ fontSize: 14 }} />
+        <LockOutlinedIcon sx={{ fontSize: ICON_SIZE_INLINE }} />
         <Typography
           variant="overline"
           sx={{
@@ -279,8 +282,8 @@ export const IngestView: FC = () => {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 18,
-                fontWeight: 700,
+                fontSize: FONT_SIZE_H5,
+                fontWeight: FONT_WEIGHT_HEADLINE,
                 color: alpha(NAVY, 0.45),
                 fontFamily: FONT_FAMILY_MARKETING,
               }}
@@ -340,7 +343,7 @@ export const IngestView: FC = () => {
                 border: `1px dashed ${alpha(NAVY, 0.3)}`,
                 fontFamily: '"JetBrains Mono", monospace',
                 fontSize: ONBOARDING_SMALL_TEXT_FONT_SIZE,
-                fontWeight: 700,
+                fontWeight: FONT_WEIGHT_HEADLINE,
                 color: alpha(NAVY, 0.6),
                 borderRadius: BORDER_RADIUS_SM,
               }}
@@ -353,7 +356,7 @@ export const IngestView: FC = () => {
 
       {/* Privacy footer */}
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 2, color: alpha(NAVY, 0.6) }}>
-        <LockOutlinedIcon sx={{ fontSize: 14 }} />
+        <LockOutlinedIcon sx={{ fontSize: ICON_SIZE_INLINE }} />
         <Typography sx={{ fontSize: ONBOARDING_SMALL_TEXT_FONT_SIZE }}>
           Your docs are yours. GroundX never trains on uploaded content. Air-gapped on-prem available for regulated
           buyers.
@@ -376,7 +379,7 @@ export const IngestView: FC = () => {
           sx: {
             borderTopLeftRadius: BORDER_RADIUS,
             borderTopRightRadius: BORDER_RADIUS,
-            maxHeight: "90vh",
+            maxHeight: GATE_DRAWER_MAX_HEIGHT,
             backgroundColor: WHITE,
             p: { xs: 1.5, sm: 2 },
           },

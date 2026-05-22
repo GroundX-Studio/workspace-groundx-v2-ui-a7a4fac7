@@ -23,6 +23,7 @@ import {
   BYO_TILE_HEIGHT,
   FONT_FAMILY_MARKETING,
   FONT_WEIGHT_HEADLINE,
+  FONT_WEIGHT_LABEL,
   GREEN,
   NAVY,
   ONBOARDING_SMALL_TEXT_FONT_SIZE,
@@ -106,10 +107,10 @@ export const ByoTile: FC<ByoTileProps> = ({ testId, title, sub, cta, ctaIcon, on
           color: NAVY,
           backgroundColor: WHITE,
           fontSize: ONBOARDING_SMALL_TEXT_FONT_SIZE,
-          fontWeight: 600,
+          fontWeight: FONT_WEIGHT_LABEL,
         }}
       >
-        <Box component="span" sx={{ color: GREEN, fontWeight: 700 }}>
+        <Box component="span" sx={{ color: GREEN, fontWeight: FONT_WEIGHT_HEADLINE }}>
           {ctaIcon}
         </Box>
         {cta}
