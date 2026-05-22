@@ -88,6 +88,40 @@ describe("OnboardingShell", () => {
     expect(screen.getByText("Ask anything about the sample. Citations appear next to every answer.")).toBeInTheDocument();
   });
 
+  it("disables the Understand pill on F1 when no scenario has been picked", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
+    // The Understand pill should be visually present but marked disabled
+    // — clicking it from F1 with no scenario would land on a blank canvas.
+    const understandPill = screen.getByText("Understand").closest('[role="button"]');
+    expect(understandPill).toHaveAttribute("aria-disabled", "true");
+    expect(understandPill).toHaveAttribute("tabIndex", "-1");
+  });
+
+  it("does not advance when the disabled Understand pill is clicked", async () => {
+    const user = userEvent.setup();
+    let snapshot = { sessionId: null as string | null, frame: "" };
+
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SessionProbe onSnapshot={(next) => (snapshot = next)} />
+      </>,
+      { initialFrame: "f1", initialScenario: null },
+    );
+
+    await user.click(screen.getByText("Understand"));
+    // Frame must NOT change. Wait briefly to catch any async state flip.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(snapshot.frame).toBe("f1");
+  });
+
+  it("makes the Understand pill reachable once a scenario is picked", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    const understandPill = screen.getByText("Understand").closest('[role="button"]');
+    // Active on F2; aria-disabled should be absent.
+    expect(understandPill).not.toHaveAttribute("aria-disabled");
+  });
+
   it("only makes Integrate reachable from the step strip after sign-in", async () => {
     const user = userEvent.setup();
     let snapshot = { sessionId: null as string | null, frame: "" };

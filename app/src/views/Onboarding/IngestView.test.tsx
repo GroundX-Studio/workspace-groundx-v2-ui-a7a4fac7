@@ -151,4 +151,49 @@ describe("IngestView (F1)", () => {
     await user.click(screen.getByTestId("byo-pdf"));
     expect(gateStatus).toBe("open");
   });
+
+  it("clicking the BYO section header opens the gate (same as the Sign Up buttons)", async () => {
+    const user = userEvent.setup();
+    let gateStatus = "";
+    const Spy = () => {
+      const session = useOnboardingSession();
+      gateStatus = session.state.gate.status;
+      return null;
+    };
+    render(
+      wrap(
+        <>
+          <IngestView />
+          <Spy />
+        </>
+      )
+    );
+    // The header is the role=button wrapping "BRING YOUR OWN ..." copy.
+    const header = screen.getByText(/BRING YOUR OWN/).closest('[role="button"]');
+    expect(header).toBeTruthy();
+    await user.click(header!);
+    expect(gateStatus).toBe("open");
+  });
+
+  it("opens the gate from the BYO header via Enter key", async () => {
+    const user = userEvent.setup();
+    let gateStatus = "";
+    const Spy = () => {
+      const session = useOnboardingSession();
+      gateStatus = session.state.gate.status;
+      return null;
+    };
+    render(
+      wrap(
+        <>
+          <IngestView />
+          <Spy />
+        </>
+      )
+    );
+    const header = screen.getByText(/BRING YOUR OWN/).closest('[role="button"]') as HTMLElement;
+    header.focus();
+    await user.keyboard("{Enter}");
+    expect(gateStatus).toBe("open");
+  });
 });
