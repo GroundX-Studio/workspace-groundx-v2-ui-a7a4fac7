@@ -107,7 +107,7 @@ export const IngestView: FC = () => {
           component="h1"
           sx={{
             fontFamily: FONT_FAMILY_MARKETING,
-            fontSize: { xs: 24, sm: 28, md: 34 },
+            fontSize: 34,
             fontWeight: FONT_WEIGHT_HEADLINE,
             lineHeight: 1.05,
             color: NAVY,
@@ -211,8 +211,8 @@ export const IngestView: FC = () => {
                     ★ start here
                   </Box>
                 ) : null}
-                <Stack direction="row" spacing={1.5} sx={{ flex: 1, alignItems: "flex-start" }}>
-                  <Box sx={{ position: "relative", flexShrink: 0 }}>
+                <Stack direction="row" spacing={2.5} sx={{ flex: 1, alignItems: "flex-start" }}>
+                  <Box sx={{ position: "relative", flexShrink: 0, mr: 0.5 }}>
                     <DocThumb w={36} h={46} />
                     <Box
                       aria-hidden
