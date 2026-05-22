@@ -89,9 +89,22 @@ Done. Test count: 333/333 app (was 323), 117/117 middleware. Build + verify:prev
 
 ---
 
-## Phase 3 — Utility acceptance pass
+## Phase 3 — Utility acceptance pass ✓
 
-*(populated as we get there)*
+Done. Playwright Utility golden journey at desktop: 9/9 onboarding-utility tests + 15 scaffold-smoke × 3 viewports = 24 passed, 18 properly skipped (utility tablet+mobile).
+
+**Delivered:**
+- `app/e2e/onboarding-utility.spec.ts` — 9 desktop tests covering F1 picker badges, F1→F2, F2 thinking-notes reveal, F3 schema rows + cite chips, F4 citation peek open-on-row-click, F5 fixture chat replay, F6 gate-open-then-dismiss (LC5), F6 commit → magic-link confirmation, F1 BYO opens gate
+- Tablet/mobile coverage of the deep flow deferred to Phase 6 via `test.skip` on non-desktop projects
+- Bug fix: F5 "Save" now `openGate("save")` AND `advanceFrame("f6")` — previously only advanced the frame so the gate stayed idle
+- Bug fix: GateView TextField had `data-testid` on the wrapper instead of the input; moved to `inputProps`
+- Polish: GateView email submit is now a real `<button type="submit">` (was a Box requestSubmit dance)
+
+**Decisions log**
+
+**D3.1 — Desktop-only for deep flow tests in v1.** OnboardingShell tablet/mobile responsive forks per spec R3/R4 (tab nav + bottom-anchored chat sheet) haven't been implemented. Running deep-flow tests on smaller viewports would catch layout drift but not feature breakage. Gap closes in Phase 6.
+
+**D3.2 — No `--project=` filter persisted.** Default `test:e2e` runs all viewports. Skip annotations live in spec files.
 
 ---
 

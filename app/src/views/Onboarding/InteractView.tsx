@@ -22,7 +22,7 @@ import { CiteChip } from "@/shared/components/CiteChip";
  */
 export const InteractView: FC = () => {
   const { state: appMode } = useAppMode();
-  const { state: session, advanceFrame } = useOnboardingSession();
+  const { state: session, advanceFrame, openGate } = useOnboardingSession();
   const scenario = appMode.scenario ?? session.scenario ?? "utility";
   const fixture = scenarioFixtures[scenario];
   const [turns, setTurns] = useState<FixtureChatTurn[]>(fixture.chatScript);
@@ -127,9 +127,15 @@ export const InteractView: FC = () => {
           role="button"
           tabIndex={0}
           data-testid="advance-to-f6"
-          onClick={() => advanceFrame("f6")}
+          onClick={() => {
+            advanceFrame("f6");
+            openGate("save");
+          }}
           onKeyDown={(event) => {
-            if (event.key === "Enter") advanceFrame("f6");
+            if (event.key === "Enter") {
+              advanceFrame("f6");
+              openGate("save");
+            }
           }}
           sx={{
             ml: 1,

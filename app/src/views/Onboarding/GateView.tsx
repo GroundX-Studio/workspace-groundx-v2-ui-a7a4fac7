@@ -100,19 +100,15 @@ export const GateView: FC = () => {
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              data-testid="gate-email-input"
+              inputProps={{ "data-testid": "gate-email-input" }}
               InputProps={{
                 startAdornment: <EmailOutlinedIcon sx={{ mr: 1, color: NAVY }} fontSize="small" />,
               }}
             />
             <Box
-              role="button"
-              tabIndex={0}
+              component="button"
+              type="submit"
               data-testid="gate-email-submit"
-              onClick={() => {
-                const form = (document.activeElement as HTMLElement)?.closest("form") as HTMLFormElement | null;
-                if (form) form.requestSubmit();
-              }}
               sx={{
                 p: 1,
                 borderRadius: 100,
@@ -121,13 +117,14 @@ export const GateView: FC = () => {
                 textAlign: "center",
                 fontWeight: 600,
                 cursor: "pointer",
+                border: "none",
+                fontFamily: "inherit",
+                fontSize: 14,
+                width: "100%",
               }}
             >
               Send magic link
             </Box>
-            <button type="submit" style={{ display: "none" }} aria-hidden tabIndex={-1}>
-              submit
-            </button>
           </Stack>
         </Box>
 
