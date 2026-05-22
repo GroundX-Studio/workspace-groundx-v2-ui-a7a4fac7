@@ -9,7 +9,7 @@ import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
 import { encryptSecret } from "./lib/crypto.js";
 import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/metrics.js";
-import { createSessionRecord, clearSessionCookie, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
+import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
 import { sendUpstreamResponse } from "./services/http.js";
 import type { AppRepository, GroundXClient, GroundXPartnerClient, LlmClient } from "./types.js";
 
@@ -75,20 +75,37 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
   if (env.NODE_ENV === "production") app.set("trust proxy", 1);
 
   // Security headers. CSP keeps the browser from fetching anything outside our
-  // own origin + the allowlisted analytics domains; tweak via env when GA /
-  // PostHog / Hotjar / Sentry hosts are configured.
+  // own origin + the allowlisted analytics domains; deploy-tunable via env so
+  // the browser can reach configured PostHog / Sentry / analytics hosts.
+  const csp_connect_src: string[] = ["'self'"];
+  const csp_script_src: string[] = ["'self'"];
+  const csp_frame_src: string[] = ["'self'", "https://calendly.com", "https://*.calendly.com"];
+  const csp_img_src: string[] = ["'self'", "data:", "blob:"];
+  if (env.POSTHOG_HOST) csp_connect_src.push(env.POSTHOG_HOST);
+  if (env.SENTRY_DSN) {
+    // Sentry SDK posts to https://<key>@<host>/<projectId>; the ingest host
+    // is the DSN's URL origin.
+    try {
+      const parsed = new URL(env.SENTRY_DSN);
+      csp_connect_src.push(`${parsed.protocol}//${parsed.host}`);
+    } catch {
+      /* invalid Sentry DSN — skip, Zod would have already rejected it */
+    }
+  }
+  if (env.OTEL_EXPORTER_OTLP_ENDPOINT) csp_connect_src.push(env.OTEL_EXPORTER_OTLP_ENDPOINT);
+
   app.use(
     helmet({
       contentSecurityPolicy: {
         useDefaults: true,
         directives: {
           "default-src": ["'self'"],
-          "img-src": ["'self'", "data:", "blob:"],
-          "script-src": ["'self'"],
+          "img-src": csp_img_src,
+          "script-src": csp_script_src,
           "style-src": ["'self'", "'unsafe-inline'"],
           "font-src": ["'self'", "data:"],
-          "connect-src": ["'self'"],
-          "frame-src": ["'self'", "https://calendly.com"],
+          "connect-src": csp_connect_src,
+          "frame-src": csp_frame_src,
         },
       },
       referrerPolicy: { policy: "strict-origin-when-cross-origin" },
@@ -210,7 +227,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     res.json({ success: true });
   });
 
-  app.get("/api/auth/me", requireSession, async (req, res, next) => {
+  app.get("/api/auth/me", requireAuthenticatedUser, async (req, res, next) => {
     try {
       const [customer, metadata] = await Promise.all([
         partnerClient.getCustomer(req.session!.groundxUsername),
@@ -222,7 +239,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
-  app.patch("/api/me/metadata", requireSession, async (req, res, next) => {
+  app.patch("/api/me/metadata", requireAuthenticatedUser, async (req, res, next) => {
     try {
       const patch = parseMetadataPatch(req.body);
       if ("error" in patch) {
@@ -232,10 +249,13 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
 
       const groundxUsername = req.session!.groundxUsername;
       const existingMetadata = await repository.getMetadata(groundxUsername);
+      // Spread the patch (not a fixed shape) so future fields land
+      // automatically — a regression that adds a metadata field and forgets
+      // to update this block would otherwise silently drop user data.
       const appMetadata = {
         ...existingMetadata,
         groundxUsername,
-        onboardingState: patch.onboardingState,
+        ...patch,
       };
       await repository.upsertMetadata(appMetadata);
       res.json({ appMetadata });
@@ -312,7 +332,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
-  app.use(["/api/customer", "/api/apikey", "/api/project", "/api/bucket", "/api/group"], apiLimiter, requireSession, async (req, res, next) => {
+  app.use(["/api/customer", "/api/apikey", "/api/project", "/api/bucket", "/api/group"], apiLimiter, requireAuthenticatedUser, async (req, res, next) => {
     try {
       const path = req.originalUrl.replace(/^\/api/, "");
       const usesCustomerScopedHeader = !path.startsWith("/customer/");
@@ -340,10 +360,23 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
-  app.use((error: any, _req: Request, res: Response, _next: express.NextFunction) => {
+  app.use((error: any, req: Request, res: Response, _next: express.NextFunction) => {
     const status = Number(error?.status) || 500;
+    // 5xx responses never leak the original error message — that often
+    // contains DNS / DB / upstream-internal details. Client gets a stable
+    // shape; full details land in the server log only.
+    if (status >= 500) {
+      logger.error(
+        { err: error, url: req?.originalUrl, method: req?.method, upstreamStatus: error?.upstreamStatus },
+        "Unhandled middleware error"
+      );
+      const payload: { error: string; upstreamStatus?: number } = { error: "Internal middleware error" };
+      if (Number.isFinite(error?.upstreamStatus)) payload.upstreamStatus = Number(error.upstreamStatus);
+      res.status(status).json(payload);
+      return;
+    }
     const payload: { error: string; upstreamStatus?: number } = {
-      error: error?.message ?? "Unexpected middleware error",
+      error: error?.message ?? "Bad request",
     };
     if (Number.isFinite(error?.upstreamStatus)) payload.upstreamStatus = Number(error.upstreamStatus);
     res.status(status).json(payload);

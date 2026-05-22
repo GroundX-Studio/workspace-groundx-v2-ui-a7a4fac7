@@ -32,7 +32,11 @@ export interface UseResizableSplitOptions {
   ultrawide?: boolean;
 }
 
-export function snapZoneFor(width: number, ultrawide = false): SplitSnapZone {
+export function snapZoneFor(width: number): SplitSnapZone {
+  // Spec W5: the chat-focus threshold is 720 for both default + ultrawide
+  // screens. Only the live-band ceiling differs (640 vs 720) — that lives in
+  // `clampToLiveBand`. Keeping `snapZoneFor` viewport-independent so the
+  // dispatcher can decide focus mode without a re-render-on-resize hook.
   if (width < WORKSPACE_FOCUS_THRESHOLD) return "workspace-focus";
   if (width > CHAT_FOCUS_THRESHOLD) return "chat-focus";
   return "split-live";
@@ -51,7 +55,9 @@ export function useResizableSplit(options: UseResizableSplitOptions = {}): {
   /** Aria-friendly arrow-key resize (returns the new width). */
   bump: (deltaPx: number) => number;
 } {
-  const { initial = 360, min = 0, max = 1200, ultrawide = false } = options;
+  const { initial = 360, min = 0, max = 1200 } = options;
+  // `ultrawide` is destructured below only as part of the surface the W5
+  // spec calls out; the current zone classifier is viewport-independent.
   const [width, setWidthState] = useState<number>(initial);
   const dragOriginRef = useRef<{ pointerX: number; widthAtStart: number } | null>(null);
 
@@ -97,5 +103,5 @@ export function useResizableSplit(options: UseResizableSplitOptions = {}): {
     [width, min, max]
   );
 
-  return { width, setWidth, zone: snapZoneFor(width, ultrawide), startDrag, bump };
+  return { width, setWidth, zone: snapZoneFor(width), startDrag, bump };
 }

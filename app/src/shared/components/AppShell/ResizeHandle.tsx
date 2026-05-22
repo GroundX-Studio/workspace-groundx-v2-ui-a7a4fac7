@@ -2,7 +2,7 @@ import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import { useCallback, type KeyboardEvent, type PointerEvent } from "react";
 
-import { BORDER, NAVY } from "@/constants";
+import { BORDER, BORDER_RADIUS_SM, NAVY } from "@/constants";
 
 export interface ResizeHandleProps {
   /** Current width in px of the pane being resized. Used as aria-valuenow. */
@@ -84,7 +84,7 @@ export function ResizeHandle({ value, min = 0, max = 1200, onPointerDown, onBump
           transform: "translate(-50%, -50%)",
           width: 2,
           height: 32,
-          borderRadius: 1,
+          borderRadius: BORDER_RADIUS_SM,
           backgroundColor: NAVY,
           opacity: 0.2,
         },

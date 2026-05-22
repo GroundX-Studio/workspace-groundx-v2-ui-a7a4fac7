@@ -38,9 +38,11 @@ test.describe("F1–F7 · Loan Eligibility scenario · golden journey @desktop-o
     await page.getByTestId("sample-loan").click();
     await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
     await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible();
-    await expect(page.getByRole("region", { name: "Income" })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Debt" })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Anomalies" })).toBeVisible();
+    // Category cards expose their name via aria-label; using the label query
+    // sidesteps the ARIA role question (a flat Card is not a "region").
+    await expect(page.getByLabel("Income", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Debt", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Anomalies", { exact: true })).toBeVisible();
   });
 
   test("gross_monthly_income field carries 4 cross-doc citation chips", async ({ page }) => {

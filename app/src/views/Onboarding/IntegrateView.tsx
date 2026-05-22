@@ -6,7 +6,17 @@ import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { useState, type FC, type SyntheticEvent } from "react";
 
-import { BODY_TEXT, BORDER, FONT_WEIGHT_LABEL, GREEN, NAVY, WHITE } from "@/constants";
+import {
+  BODY_TEXT,
+  BORDER,
+  BORDER_RADIUS,
+  BORDER_RADIUS_PILL,
+  EYEBROW_ON_LIGHT,
+  FONT_WEIGHT_LABEL,
+  GREEN,
+  NAVY,
+  WHITE,
+} from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 
@@ -52,7 +62,7 @@ export const IntegrateView: FC = () => {
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, height: "100%", overflow: "auto" }} aria-label="Integrate">
       <Stack spacing={0.5} sx={{ mb: 3 }}>
-        <Typography variant="overline" sx={{ color: GREEN, fontWeight: FONT_WEIGHT_LABEL }}>
+        <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
           INTEGRATE
         </Typography>
         <Typography variant="h4">Ship the same answer into your stack.</Typography>
@@ -104,7 +114,7 @@ export const IntegrateView: FC = () => {
                     alignItems: "center",
                     p: 1.25,
                     border: `1px solid ${BORDER}`,
-                    borderRadius: 1.5,
+                    borderRadius: BORDER_RADIUS,
                   }}
                 >
                   <Stack spacing={0}>
@@ -121,7 +131,7 @@ export const IntegrateView: FC = () => {
                     sx={{
                       px: 1.5,
                       py: 0.5,
-                      borderRadius: 100,
+                      borderRadius: BORDER_RADIUS_PILL,
                       backgroundColor: GREEN,
                       color: NAVY,
                       fontWeight: 600,

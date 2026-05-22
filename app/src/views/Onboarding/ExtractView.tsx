@@ -4,9 +4,23 @@ import Stack from "@mui/material/Stack";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 import { useState, type FC, type SyntheticEvent } from "react";
 
-import { BODY_TEXT, BORDER, FONT_WEIGHT_LABEL, GREEN, NAVY, WHITE } from "@/constants";
+import {
+  BODY_TEXT,
+  BORDER,
+  BORDER_RADIUS,
+  BORDER_RADIUS_2X,
+  BORDER_RADIUS_CARD,
+  BORDER_RADIUS_PILL,
+  BORDER_RADIUS_SM,
+  EYEBROW_ON_LIGHT,
+  FONT_WEIGHT_LABEL,
+  GREEN,
+  NAVY,
+  WHITE,
+} from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { scenarioFixtures } from "@/fixtures";
@@ -25,9 +39,16 @@ import { CiteChip } from "@/shared/components/CiteChip";
  * state set — see the right-side preview card.
  */
 export const ExtractView: FC = () => {
+  // All hooks must run before any conditional return. Otherwise the render
+  // order diverges when the active scenario flips to one without a schema
+  // (e.g. Solar), violating React's rules of hooks and crashing.
   const { state: appMode } = useAppMode();
   const { state: session, advanceFrame } = useOnboardingSession();
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [renderMode, setRenderMode] = useState<"table" | "json">("table");
+  const handleRenderMode = (_event: SyntheticEvent, value: "table" | "json") => {
+    if (value) setRenderMode(value);
+  };
 
   const scenario = appMode.scenario ?? session.scenario ?? "utility";
   const fixture = scenarioFixtures[scenario];
@@ -44,10 +65,6 @@ export const ExtractView: FC = () => {
 
   const allFields = fixture.schema.categories.flatMap((c) => c.fields);
   const selectedField = selectedFieldId ? allFields.find((f) => f.id === selectedFieldId) ?? null : null;
-  const [renderMode, setRenderMode] = useState<"table" | "json">("table");
-  const handleRenderMode = (_event: SyntheticEvent, value: "table" | "json") => {
-    if (value) setRenderMode(value);
-  };
 
   // Loan scenario surfaces the workflow handoff demo via JSON render mode.
   const supportsJsonRender = scenario === "loan";
@@ -95,7 +112,7 @@ export const ExtractView: FC = () => {
         sx={{ gridColumn: "1 / -1" }}
       >
         <Stack spacing={0.5}>
-          <Typography variant="overline" sx={{ color: GREEN, fontWeight: FONT_WEIGHT_LABEL }}>
+          <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
             ANALYZE · EXTRACT
           </Typography>
           <Typography variant="h4">{fixture.schema.name}</Typography>
@@ -124,7 +141,7 @@ export const ExtractView: FC = () => {
               fontSize: 12,
               backgroundColor: WHITE,
               border: `1px solid ${BORDER}`,
-              borderRadius: 2,
+              borderRadius: BORDER_RADIUS_2X,
               p: 2,
               m: 0,
               whiteSpace: "pre-wrap",
@@ -136,7 +153,7 @@ export const ExtractView: FC = () => {
           </Box>
         ) : null}
         {!supportsJsonRender || renderMode === "table" ? fixture.schema.categories.map((category) => (
-          <Card key={category.id} sx={{ mb: 2, p: 2 }} role="region" aria-label={category.name}>
+          <Card key={category.id} sx={{ mb: 2, p: 2 }} aria-label={category.name}>
             <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
               {category.name}
             </Typography>
@@ -144,18 +161,31 @@ export const ExtractView: FC = () => {
               {category.fields.map((field) => (
                 <Box
                   key={field.id}
-                  role="row"
+                  // No `role="button"` here on purpose: the row contains
+                  // inner clickable citation chips, and `role="button"` would
+                  // nest interactive controls (axe `nested-interactive`).
+                  // The row is still keyboard-reachable via tabIndex + Enter
+                  // handler; screen readers announce it as a generic clickable
+                  // region with an aria-label describing the field.
+                  tabIndex={0}
+                  aria-label={`Inspect field: ${field.name}`}
                   data-testid={`field-row-${field.id}`}
                   onClick={() => setSelectedFieldId(field.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedFieldId(field.id);
+                    }
+                  }}
                   sx={{
                     display: "grid",
                     gridTemplateColumns: "1fr auto",
                     gap: 1,
                     p: 1.25,
-                    borderRadius: 1.5,
+                    borderRadius: BORDER_RADIUS,
                     cursor: "pointer",
-                    backgroundColor: selectedFieldId === field.id ? "rgba(161, 236, 131, 0.12)" : "transparent",
-                    "&:hover": { backgroundColor: "rgba(161, 236, 131, 0.08)" },
+                    backgroundColor: selectedFieldId === field.id ? alpha(GREEN, 0.12) : "transparent",
+                    "&:hover": { backgroundColor: alpha(GREEN, 0.08) },
                   }}
                 >
                   <Stack spacing={0.25}>
@@ -195,12 +225,12 @@ export const ExtractView: FC = () => {
               display: "inline-block",
               px: 2,
               py: 1,
-              borderRadius: 100,
+              borderRadius: BORDER_RADIUS_PILL,
               border: `1px solid ${NAVY}`,
               color: NAVY,
               cursor: "pointer",
               fontWeight: 600,
-              "&:hover": { backgroundColor: "rgba(41, 51, 92, 0.04)" },
+              "&:hover": { backgroundColor: alpha(NAVY, 0.04) },
             }}
           >
             Try asking a question →
@@ -212,7 +242,7 @@ export const ExtractView: FC = () => {
         data-testid="extract-preview"
         sx={{
           border: `1px solid ${BORDER}`,
-          borderRadius: 2.5,
+          borderRadius: BORDER_RADIUS_CARD,
           p: 2,
           backgroundColor: WHITE,
           overflow: "auto",
@@ -236,7 +266,7 @@ export const ExtractView: FC = () => {
               </Typography>
               <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: "wrap" }}>
                 {selectedField.citations.map((c, idx) => (
-                  <Box key={idx} sx={{ p: 1, borderRadius: 1, border: `1px solid ${BORDER}` }}>
+                  <Box key={idx} sx={{ p: 1, borderRadius: BORDER_RADIUS_SM, border: `1px solid ${BORDER}` }}>
                     <Typography variant="caption" sx={{ color: NAVY }}>
                       {c.documentId} · page {c.page}
                     </Typography>

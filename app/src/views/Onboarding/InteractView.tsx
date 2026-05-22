@@ -4,9 +4,21 @@ import IconButton from "@mui/material/IconButton";
 import InputBase from "@mui/material/InputBase";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 import { useCallback, useState, type FC, type FormEvent } from "react";
 
-import { BODY_TEXT, BORDER, CYAN, FONT_WEIGHT_LABEL, GREEN, NAVY, WHITE } from "@/constants";
+import {
+  BODY_TEXT,
+  BORDER,
+  BORDER_RADIUS_2X,
+  BORDER_RADIUS_PILL,
+  CYAN,
+  EYEBROW_ON_LIGHT,
+  FONT_WEIGHT_LABEL,
+  GREEN,
+  NAVY,
+  WHITE,
+} from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { scenarioFixtures, type FixtureChatTurn } from "@/fixtures";
@@ -59,7 +71,7 @@ export const InteractView: FC = () => {
       aria-label="Interact"
     >
       <Stack spacing={0.5}>
-        <Typography variant="overline" sx={{ color: GREEN, fontWeight: FONT_WEIGHT_LABEL }}>
+        <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
           ANALYZE · INTERACT
         </Typography>
         <Typography variant="h5">Ask anything about the sample</Typography>
@@ -79,7 +91,7 @@ export const InteractView: FC = () => {
                 maxWidth: "80%",
                 px: 1.5,
                 py: 1,
-                borderRadius: 2,
+                borderRadius: BORDER_RADIUS_2X,
                 backgroundColor: turn.role === "user" ? NAVY : WHITE,
                 color: turn.role === "user" ? WHITE : NAVY,
                 border: turn.role === "assistant" ? `1px solid ${BORDER}` : "none",
@@ -107,7 +119,7 @@ export const InteractView: FC = () => {
           gap: 1,
           backgroundColor: WHITE,
           border: `1px solid ${BORDER}`,
-          borderRadius: 100,
+          borderRadius: BORDER_RADIUS_PILL,
           px: 2,
           py: 1,
         }}
@@ -141,13 +153,13 @@ export const InteractView: FC = () => {
             ml: 1,
             px: 1.5,
             py: 0.75,
-            borderRadius: 100,
+            borderRadius: BORDER_RADIUS_PILL,
             color: NAVY,
             border: `1px solid ${NAVY}`,
             cursor: "pointer",
             fontSize: 13,
             fontWeight: 600,
-            "&:hover": { backgroundColor: "rgba(41, 51, 92, 0.04)" },
+            "&:hover": { backgroundColor: alpha(NAVY, 0.04) },
           }}
         >
           💾 Save

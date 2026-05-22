@@ -81,3 +81,25 @@ export function requireSession(req: Request, res: Response, next: NextFunction):
   }
   next();
 }
+
+/**
+ * Tighter guard for routes that need a *signed-in* GroundX customer (Partner
+ * resource endpoints, auth/me, /api/v1 with the user's API key). Two failure
+ * modes get distinct 401 shapes so the app can branch on them:
+ *   - No session cookie at all → `Authentication required` (matches the
+ *     `requireSession` shape; the user needs to log in from scratch).
+ *   - Cookie present but anonymous → `Sign-in required` + `ANONYMOUS_SESSION`
+ *     code (the user already has an onboarding session; the app should open
+ *     the F6 gate inline, not redirect to the login page).
+ */
+export function requireAuthenticatedUser(req: Request, res: Response, next: NextFunction): void {
+  if (!req.session) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  if (!req.session.groundxUsername) {
+    res.status(401).json({ error: "Sign-in required", code: "ANONYMOUS_SESSION" });
+    return;
+  }
+  next();
+}

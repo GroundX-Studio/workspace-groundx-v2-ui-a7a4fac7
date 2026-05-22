@@ -5,7 +5,18 @@ import Typography from "@mui/material/Typography";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useState, type FC } from "react";
 
-import { BODY_TEXT, BORDER, CYAN, FONT_WEIGHT_LABEL, GREEN, NAVY, WHITE } from "@/constants";
+import {
+  BODY_TEXT,
+  BORDER,
+  BORDER_RADIUS_2X,
+  BORDER_RADIUS_PILL,
+  CYAN,
+  EYEBROW_ON_LIGHT,
+  FONT_WEIGHT_LABEL,
+  GREEN,
+  NAVY,
+  WHITE,
+} from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { scenarioFixtures } from "@/fixtures";
@@ -63,7 +74,7 @@ export const UnderstandView: FC = () => {
       aria-label="Understand"
     >
       <Stack spacing={0.5}>
-        <Typography variant="overline" sx={{ color: GREEN, fontWeight: FONT_WEIGHT_LABEL }}>
+        <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
           UNDERSTAND
         </Typography>
         <Typography variant="h4">{fixture.docs[0]?.title ?? "Sample"}</Typography>
@@ -86,13 +97,14 @@ export const UnderstandView: FC = () => {
         aria-label="Document preview"
       >
         {/* Placeholder page surface — a clean off-white sheet. Phase 7 plugs
-            pdfjs-dist here to render the real first page. */}
+            pdfjs-dist here to render the real first page. Per brand rule
+            "no shadows / no non-sanctioned gradients" the placeholder is a
+            flat WHITE fill with no overlay. */}
         <Box
           sx={{
             position: "absolute",
             inset: 0,
             backgroundColor: WHITE,
-            backgroundImage: "linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0) 100%)",
           }}
         />
         {/* Parsed-region wash above the scan line */}
@@ -110,7 +122,11 @@ export const UnderstandView: FC = () => {
             opacity: 0.18,
           }}
         />
-        {/* The scan line itself */}
+        {/* The scan line itself. Two tokens of green flank a cyan core; the
+            line is intentionally narrow (2px) to read as a process indicator,
+            not a sanctioned brand surface. No box-shadow per the brand
+            "flat / no shadows" rule — the line gets visual prominence from
+            color contrast against the WHITE page beneath. */}
         {!reduceMotion ? (
           <motion.div
             aria-hidden
@@ -123,7 +139,6 @@ export const UnderstandView: FC = () => {
               right: 0,
               height: 2,
               background: `linear-gradient(90deg, ${GREEN}, ${CYAN}, ${GREEN})`,
-              boxShadow: `0 0 12px ${GREEN}`,
               zIndex: 2,
             }}
           />
@@ -138,7 +153,7 @@ export const UnderstandView: FC = () => {
           spacing={0.5}
           sx={{
             border: `1px solid ${BORDER}`,
-            borderRadius: 2,
+            borderRadius: BORDER_RADIUS_2X,
             p: 1.5,
             backgroundColor: WHITE,
             maxHeight: 120,
@@ -179,7 +194,7 @@ export const UnderstandView: FC = () => {
                 px: 2,
                 py: 1,
                 mt: 1,
-                borderRadius: 100,
+                borderRadius: BORDER_RADIUS_PILL,
                 backgroundColor: GREEN,
                 color: NAVY,
                 fontWeight: 600,

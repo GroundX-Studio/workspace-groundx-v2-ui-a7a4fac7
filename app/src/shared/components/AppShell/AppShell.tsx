@@ -44,7 +44,7 @@ const MOTION = { type: "tween", duration: 0.2, ease: "easeOut" } as const;
  */
 export function AppShell({ nav, chat, canvas, hideNav = false, initialChatWidth = 360, initialFocus = "split" }: AppShellProps) {
   const { mode, setMode } = useFocusMode({ initial: initialFocus });
-  const { width, zone, startDrag, bump, setWidth } = useResizableSplit({ initial: initialChatWidth, min: 0, max: 1200 });
+  const { width, zone, startDrag, bump } = useResizableSplit({ initial: initialChatWidth, min: 0, max: 1200 });
 
   // Mirror the drag-snap zone into the focus mode (per spec W5: dragging to
   // either extreme is itself a request to enter the corresponding focus mode).
@@ -131,8 +131,6 @@ export function AppShell({ nav, chat, canvas, hideNav = false, initialChatWidth 
           ) : null}
         </AnimatePresence>
       </Box>
-      {/* Hidden hook into setWidth so parents can imperatively restore. */}
-      <span data-testid="appshell-width" data-width={width} hidden onClick={() => setWidth(360)} />
     </LayoutGroup>
   );
 }

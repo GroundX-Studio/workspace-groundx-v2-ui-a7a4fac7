@@ -9,12 +9,14 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, type FC } from "react";
 
-import { BORDER, BODY_TEXT, CYAN, FONT_WEIGHT_LABEL, GREEN, NAVY } from "@/constants";
+import { BORDER, BODY_TEXT, CYAN, EYEBROW_ON_LIGHT, FONT_WEIGHT_LABEL, NAVY } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { scenarioFixtures } from "@/fixtures";
 import type { Scenario } from "@/types/onboarding";
+
+import { GateView } from "./GateView";
 
 const CAPABILITY_LABEL: Record<"E" | "I" | "R", string> = {
   E: "Extract",
@@ -38,8 +40,9 @@ const CAPABILITY_LABEL: Record<"E" | "I" | "R", string> = {
  */
 export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
-  const { pickScenario, advanceFrame, openGate } = useOnboardingSession();
+  const { state: session, pickScenario, advanceFrame, openGate } = useOnboardingSession();
   const { dispatch } = useCanvasOrchestrator();
+  const gateOpenOrCommitted = session.gate.status === "open" || session.gate.status === "committed";
 
   const handlePickScenario = useCallback(
     (scenario: Scenario) => {
@@ -68,7 +71,7 @@ export const IngestView: FC = () => {
       }}
     >
       <Stack spacing={1.5} sx={{ mb: 5 }}>
-        <Typography variant="overline" sx={{ color: GREEN, fontWeight: FONT_WEIGHT_LABEL }}>
+        <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
           INGEST
         </Typography>
         <Typography variant="h2">Pick a sample to see GroundX in action.</Typography>
@@ -158,6 +161,16 @@ export const IngestView: FC = () => {
           Pre-sign-in we cap BYO at 100 pages of content. Sign in any time to lift the cap.
         </Typography>
       </Stack>
+
+      {/* F6 gate renders inline on F1 when triggered by BYO (and on
+          re-trigger from a future threshold). Per spec the gate is never
+          modal — it lives next to the picker so the user can still browse
+          samples without losing the offer. */}
+      {gateOpenOrCommitted ? (
+        <Box sx={{ mt: 5, maxWidth: 460, mx: "auto" }}>
+          <GateView collapseOnCommit />
+        </Box>
+      ) : null}
 
       <Box sx={{ visibility: "hidden", borderTop: `1px solid ${BORDER}`, mt: 6 }} aria-hidden />
     </Box>

@@ -11,7 +11,7 @@ function setup() {
   const groundxClient = new FakeGroundXClient();
   const llmClient = new FakeLlmClient();
   const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient });
-  return { app, partnerClient, groundxClient, llmClient };
+  return { app, partnerClient, groundxClient, llmClient, repository };
 }
 
 type Method = "get" | "post" | "put" | "patch" | "delete";
@@ -162,13 +162,45 @@ describe("middleware API route contract", () => {
     expect(response.headers["set-cookie"]?.[0]).toMatch(/gx_app_session=/);
   });
 
-  it("idempotent: a second call within the same cookie returns the same session id", async () => {
-    const { app } = setup();
+  it("idempotent: a second call within the same cookie returns the same session id (no duplicate row)", async () => {
+    const { app, repository } = setup();
     const agent = request.agent(app);
     const first = await agent.post("/api/onboarding/session").expect(200);
     const second = await agent.post("/api/onboarding/session").expect(200);
     expect(second.body.sessionId).toBe(first.body.sessionId);
     expect(second.body.anonymous).toBe(true);
+    // The repository must hold exactly one session row — a regression that
+    // creates a second row while returning the first id would still pass
+    // the equality assertion above without this size check.
+    expect(repository.sessions.size).toBe(1);
+  });
+
+  it("Partner resource proxy returns ANONYMOUS_SESSION when session is unauthenticated", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    // The anon session cookie is now set; without a register/login the
+    // Partner resource endpoints (apikey, bucket, group, project, customer)
+    // must reject with the stable ANONYMOUS_SESSION code so the app can
+    // route the user into the F6 gate.
+    const response = await agent.get("/api/apikey").expect(401);
+    expect(response.body).toMatchObject({ error: "Sign-in required", code: "ANONYMOUS_SESSION" });
+  });
+
+  it("authenticated /api/auth/me returns ANONYMOUS_SESSION when anon", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    const response = await agent.get("/api/auth/me").expect(401);
+    expect(response.body.code).toBe("ANONYMOUS_SESSION");
+  });
+
+  it("PATCH /api/me/metadata returns ANONYMOUS_SESSION when anon", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    const response = await agent.patch("/api/me/metadata").send({ onboardingState: "x" }).expect(401);
+    expect(response.body.code).toBe("ANONYMOUS_SESSION");
   });
 
   it("serves Prometheus metrics when METRICS_ENABLED", async () => {
@@ -176,6 +208,15 @@ describe("middleware API route contract", () => {
     const response = await request(app).get("/api/metrics").expect(200);
     expect(response.headers["content-type"]).toMatch(/text\/plain/);
     expect(response.text).toContain("http_requests_total");
+  });
+
+  it("sets security headers from helmet (CSP, Referrer-Policy, no x-powered-by)", async () => {
+    const { app } = setup();
+    const response = await request(app).get("/api/healthz").expect(200);
+    expect(response.headers["content-security-policy"]).toMatch(/default-src 'self'/);
+    expect(response.headers["content-security-policy"]).toMatch(/frame-src .*calendly\.com/);
+    expect(response.headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+    expect(response.headers["x-powered-by"]).toBeUndefined();
   });
 
 

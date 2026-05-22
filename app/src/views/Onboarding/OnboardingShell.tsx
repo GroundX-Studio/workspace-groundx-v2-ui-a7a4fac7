@@ -1,9 +1,17 @@
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 import { useMemo, type FC } from "react";
 
-import { BORDER, NAVY, WHITE } from "@/constants";
+import {
+  BODY_ON_DARK,
+  BORDER,
+  MUTED_ON_DARK,
+  MUTED_ON_LIGHT,
+  NAVY,
+  WHITE,
+} from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { AppShell } from "@/shared/components/AppShell";
@@ -120,25 +128,25 @@ export const OnboardingShell: FC = () => {
       sx={{
         height: "100%",
         backgroundColor: NAVY,
-        color: "rgba(255,255,255,0.82)",
+        color: BODY_ON_DARK,
         p: 1.5,
       }}
       aria-label="Onboarding navigation"
     >
-      <Typography variant="overline" sx={{ color: "rgba(255,255,255,0.65)", letterSpacing: "0.08em" }}>
+      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
         WORKSPACES
       </Typography>
-      <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.5)", mt: 0.5 }}>
+      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.5), mt: 0.5 }}>
         Available after sign-in
       </Typography>
       <Box sx={{ flex: 1 }} />
-      <Typography variant="overline" sx={{ color: "rgba(255,255,255,0.65)", letterSpacing: "0.08em" }}>
+      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
         ACCOUNT
       </Typography>
-      <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.85)", mt: 0.5 }}>
+      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
         Book a call
       </Typography>
-      <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.85)", mt: 0.5 }}>
+      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
         Docs
       </Typography>
     </Stack>
@@ -165,7 +173,7 @@ export const OnboardingShell: FC = () => {
           <Typography variant="overline" sx={{ color: NAVY, letterSpacing: "0.08em" }}>
             CHAT
           </Typography>
-          <Typography variant="body2" sx={{ color: "rgba(64,73,107,0.7)" }}>
+          <Typography variant="body2" sx={{ color: MUTED_ON_LIGHT }}>
             Ask anything about the sample. Citations appear next to every answer.
           </Typography>
         </Stack>

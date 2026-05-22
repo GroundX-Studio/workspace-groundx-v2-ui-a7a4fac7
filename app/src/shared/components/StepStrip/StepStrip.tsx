@@ -4,7 +4,7 @@ import Chip from "@mui/material/Chip";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { FC } from "react";
 
-import { BORDER, CYAN, DARK_GREY, GREEN, NAVY } from "@/constants";
+import { BORDER, BORDER_RADIUS_PILL, CYAN, DARK_GREY, GREEN, NAVY } from "@/constants";
 
 import type { StepDescriptor, StepPillState, StepStripProps } from "./types";
 
@@ -59,7 +59,7 @@ const Pill: FC<{
       title={disabled ? "Available after sign-in" : undefined}
       sx={{
         height: 32,
-        borderRadius: 100,
+        borderRadius: BORDER_RADIUS_PILL,
         px: 0.5,
         ...stateChipSx(step.state, theme),
       }}
@@ -68,7 +68,6 @@ const Pill: FC<{
 };
 
 export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick }) => {
-  const analyze = steps.find((s) => s.id === "analyze");
   return (
     <Box
       role="group"
@@ -95,7 +94,7 @@ export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick }) => {
                 gap: 0.5,
                 px: 1,
                 py: 0.5,
-                borderRadius: 100,
+                borderRadius: BORDER_RADIUS_PILL,
                 border: `1px dashed ${CYAN}`,
               }}
             >
@@ -121,8 +120,6 @@ export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick }) => {
           ) : null}
         </Box>
       ))}
-      {/* analyze fallback to suppress unused warning */}
-      {analyze ? null : null}
     </Box>
   );
 };
