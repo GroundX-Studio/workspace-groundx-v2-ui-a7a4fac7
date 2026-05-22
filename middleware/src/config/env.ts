@@ -34,6 +34,10 @@ const envSchema = z.object({
   GROUNDX_BASE_URL: z.string().url().default("https://api.groundx.ai/api/v1"),
   GROUNDX_PARTNER_API_KEY: z.string().optional(),
   GROUNDX_ANON_API_KEY: z.string().optional(),
+  // Bucket holding the onboarding sample documents. The partner API key is
+  // used directly against GroundX for this bucket — no per-customer key,
+  // since samples are partner-owned content read by every visitor.
+  GROUNDX_SAMPLES_BUCKET_ID: z.coerce.number().int().positive().optional(),
   LLM_SERVICE: z.string().optional(),
   LLM_BASE_URL: z.string().url().optional(),
   LLM_API_KEY: z.string().optional(),

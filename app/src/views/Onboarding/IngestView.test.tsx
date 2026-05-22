@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppModeProvider, useAppMode } from "@/contexts/AppModeContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { OnboardingSessionProvider, useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
+import type { ScenarioConfig } from "@/types/scenarios";
 
 import { IngestView } from "./IngestView";
 
@@ -14,11 +16,73 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
+const fixtureScenarios: ScenarioConfig[] = [
+  {
+    id: "utility",
+    order: 1,
+    manifest: {
+      id: "utility",
+      hero: {
+        title: "Utility Bill",
+        shortDesc: "a single billing statement with 8 meters and 56 charges across 3 pages",
+        demonstrates: "messy layout → clean extraction",
+        badges: ["E"],
+        chapters: { extract: "live", interact: "live", report: "off" },
+        docCount: "1 doc",
+      },
+      thinkingScript: [],
+      extractionSchema: { id: "u", name: "Utility", categories: [] },
+      chatSeeds: [],
+    },
+    documents: [],
+  },
+  {
+    id: "loan",
+    order: 2,
+    manifest: {
+      id: "loan",
+      hero: {
+        title: "Loan Eligibility Packet",
+        shortDesc: "paystubs, W-2, bank statements, employment letter — the bundle an underwriter reviews",
+        demonstrates: "docs → structured JSON for workflows",
+        badges: ["E", "I"],
+        chapters: { extract: "live", interact: "live", report: "off" },
+        docCount: "12 docs",
+      },
+      thinkingScript: [],
+      extractionSchema: { id: "l", name: "Loan", categories: [] },
+      chatSeeds: [],
+    },
+    documents: [],
+  },
+  {
+    id: "solar",
+    order: 3,
+    manifest: {
+      id: "solar",
+      hero: {
+        title: "Solar Project Portfolio",
+        shortDesc: "agreements, leases, permits, engineering studies — a whole fund's worth of project diligence",
+        demonstrates: "cross-document intelligence at scale",
+        badges: ["I", "R"],
+        chapters: { extract: "off", interact: "live", report: "live" },
+        docCount: "142 docs",
+      },
+      thinkingScript: [],
+      extractionSchema: { id: "s", name: "Solar", categories: [] },
+      chatSeeds: [],
+    },
+    documents: [],
+  },
+];
+
 const wrap = (node: React.ReactNode) => (
   <AppModeProvider>
-    <OnboardingSessionProvider>
-      <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
-    </OnboardingSessionProvider>
+    <ScenarioRegistryProvider initialScenarios={fixtureScenarios}>
+      <OnboardingSessionProvider>
+        <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
+      </OnboardingSessionProvider>
+    </ScenarioRegistryProvider>
   </AppModeProvider>
 );
 

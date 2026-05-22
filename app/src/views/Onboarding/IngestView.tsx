@@ -27,7 +27,7 @@ import {
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
-import { scenarioFixtures } from "@/fixtures";
+import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import {
   CONNECTOR_KINDS,
   CONNECTOR_LABELS,
@@ -35,6 +35,16 @@ import {
 } from "@/shared/components/ConnectorGlyph";
 import { DocThumb } from "@/shared/components/DocThumb";
 import type { Scenario } from "@/types/onboarding";
+import type { ScenarioConfig } from "@/types/scenarios";
+
+/**
+ * Closed-union safe-list. Downstream views (F2-F5) still type on the
+ * `Scenario` literal union; once they migrate to consume the registry too,
+ * this gate can go away.
+ */
+const KNOWN_SCENARIOS = new Set<Scenario>(["utility", "loan", "solar"]);
+const asKnownScenario = (id: string): Scenario | null =>
+  KNOWN_SCENARIOS.has(id as Scenario) ? (id as Scenario) : null;
 
 import { GateView } from "./GateView";
 
@@ -59,15 +69,21 @@ export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
   const { state: session, pickScenario, advanceFrame, openGate, dismissGate } = useOnboardingSession();
   const { dispatch } = useCanvasOrchestrator();
+  const { state: registry } = useScenarioRegistry();
   const gateOpenOrCommitted = session.gate.status === "open" || session.gate.status === "committed";
   const theme = useTheme();
-  // Below md (1100): tablet + mobile. Drives the bottom-sheet gate so the
+  // Below md (900): tablet + mobile. Drives the bottom-sheet gate so the
   // picker stays usable in a sliver-width window. Mobile-only finer
   // adjustments use the sx breakpoint object (xs/sm) inline.
   const compact = useMediaQuery(theme.breakpoints.down("md"));
 
   const handlePickScenario = useCallback(
-    (scenario: Scenario) => {
+    (id: string) => {
+      const scenario = asKnownScenario(id);
+      // Unknown scenario IDs (seeded into the bucket but not yet recognized
+      // by downstream views) are clickable but no-op until those views can
+      // consume the registry directly.
+      if (!scenario) return;
       pickScenario(scenario);
       setScenario(scenario);
       dispatch({ kind: "showSample", scenario }, "user");
@@ -147,158 +163,155 @@ export const IngestView: FC = () => {
           gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" },
         }}
       >
-        {(Object.entries(scenarioFixtures) as Array<[Scenario, typeof scenarioFixtures[Scenario]]>).map(
-          ([scenario, fixture], index) => {
-            const isStartHere = index === 0;
-            return (
-              <Box
-                key={scenario}
-                role="listitem"
-                tabIndex={0}
-                data-testid={`sample-${scenario}`}
-                aria-label={`Open sample: ${fixture.hero.title}`}
-                onClick={() => handlePickScenario(scenario)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    handlePickScenario(scenario);
-                  }
-                }}
-                sx={{
-                  position: "relative",
-                  display: "flex",
-                  flexDirection: "column",
-                  minHeight: 140,
-                  p: 1.75,
-                  borderRadius: BORDER_RADIUS,
-                  border: isStartHere ? `2px solid ${NAVY}` : `1.5px solid ${alpha(NAVY, 0.55)}`,
-                  backgroundColor: WHITE,
-                  // Wireframe `.wf-rough-lite` filter — gives the card a
-                  // slightly-irregular hand-sketched edge while staying flat
-                  // and brand-token-driven everywhere else.
-                  filter: ROUGH_FILTER,
-                  cursor: "pointer",
-                  transition: "transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
-                  "&:hover": {
-                    borderColor: NAVY,
-                    transform: "translateY(-1px)",
-                  },
-                  "&:focus-visible": {
-                    outline: `2px solid ${GREEN}`,
-                    outlineOffset: 2,
-                  },
-                }}
-              >
-                {isStartHere ? (
+        {registry.status === "loading" ? (
+          <Typography sx={{ color: alpha(NAVY, 0.55), fontStyle: "italic", py: 2 }}>Loading samples…</Typography>
+        ) : registry.status === "error" ? (
+          <Typography sx={{ color: CORAL, py: 2 }} role="alert">
+            Couldn't load samples: {registry.error}
+          </Typography>
+        ) : null}
+        {registry.scenarios.map((scenario: ScenarioConfig, index) => {
+          const hero = scenario.manifest.hero;
+          const isStartHere = index === 0;
+          return (
+            <Box
+              key={scenario.id}
+              role="listitem"
+              tabIndex={0}
+              data-testid={`sample-${scenario.id}`}
+              aria-label={`Open sample: ${hero.title}`}
+              onClick={() => handlePickScenario(scenario.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  handlePickScenario(scenario.id);
+                }
+              }}
+              sx={{
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 140,
+                p: 1.75,
+                borderRadius: BORDER_RADIUS,
+                border: isStartHere ? `2px solid ${NAVY}` : `1.5px solid ${alpha(NAVY, 0.55)}`,
+                backgroundColor: WHITE,
+                filter: ROUGH_FILTER,
+                cursor: "pointer",
+                transition: "transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
+                "&:hover": { borderColor: NAVY, transform: "translateY(-1px)" },
+                "&:focus-visible": { outline: `2px solid ${GREEN}`, outlineOffset: 2 },
+              }}
+            >
+              {isStartHere ? (
+                <Box
+                  aria-hidden
+                  sx={{
+                    position: "absolute",
+                    top: -12,
+                    right: 14,
+                    px: 1.25,
+                    py: 0.25,
+                    borderRadius: BORDER_RADIUS_PILL,
+                    backgroundColor: GREEN,
+                    border: `1.5px solid ${NAVY}`,
+                    fontFamily: FONT_FAMILY_MARKETING,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: NAVY,
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  ★ start here
+                </Box>
+              ) : null}
+              <Stack direction="row" spacing={2.5} sx={{ flex: 1, alignItems: "flex-start" }}>
+                <Box sx={{ position: "relative", flexShrink: 0, mr: 0.5 }}>
+                  <DocThumb w={36} h={46} />
                   <Box
                     aria-hidden
                     sx={{
                       position: "absolute",
-                      top: -12,
-                      right: 14,
-                      px: 1.25,
-                      py: 0.25,
+                      bottom: -6,
+                      right: -10,
+                      px: 0.75,
+                      py: 0.1,
                       borderRadius: BORDER_RADIUS_PILL,
-                      backgroundColor: GREEN,
+                      backgroundColor: CYAN,
                       border: `1.5px solid ${NAVY}`,
                       fontFamily: FONT_FAMILY_MARKETING,
-                      fontSize: 11,
+                      fontSize: 10,
                       fontWeight: 700,
                       color: NAVY,
-                      letterSpacing: "0.02em",
+                      whiteSpace: "nowrap",
+                      lineHeight: 1.4,
                     }}
                   >
-                    ★ start here
+                    {hero.docCount}
                   </Box>
-                ) : null}
-                <Stack direction="row" spacing={2.5} sx={{ flex: 1, alignItems: "flex-start" }}>
-                  <Box sx={{ position: "relative", flexShrink: 0, mr: 0.5 }}>
-                    <DocThumb w={36} h={46} />
-                    <Box
-                      aria-hidden
-                      sx={{
-                        position: "absolute",
-                        bottom: -6,
-                        right: -10,
-                        px: 0.75,
-                        py: 0.1,
-                        borderRadius: BORDER_RADIUS_PILL,
-                        backgroundColor: CYAN,
-                        border: `1.5px solid ${NAVY}`,
-                        fontFamily: FONT_FAMILY_MARKETING,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: NAVY,
-                        whiteSpace: "nowrap",
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      {fixture.hero.docCount}
-                    </Box>
-                  </Box>
-                  <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography
-                      sx={{
-                        fontFamily: FONT_FAMILY_MARKETING,
-                        fontSize: 18,
-                        fontWeight: FONT_WEIGHT_HEADLINE,
-                        lineHeight: 1.05,
-                        color: NAVY,
-                      }}
-                    >
-                      {fixture.hero.title}
-                    </Typography>
-                    <Typography sx={{ color: alpha(NAVY, 0.65), fontSize: 12, lineHeight: 1.35 }}>
-                      {fixture.hero.shortDesc}
-                    </Typography>
-                  </Stack>
-                </Stack>
-                <Stack direction="row" alignItems="flex-end" spacing={1} sx={{ mt: 1 }}>
+                </Box>
+                <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
                   <Typography
                     sx={{
-                      flex: 1,
-                      color: CORAL,
-                      fontWeight: 700,
-                      fontSize: 11.5,
-                      lineHeight: 1.3,
-                      letterSpacing: "0.01em",
+                      fontFamily: FONT_FAMILY_MARKETING,
+                      fontSize: 18,
+                      fontWeight: FONT_WEIGHT_HEADLINE,
+                      lineHeight: 1.05,
+                      color: NAVY,
                     }}
                   >
-                    {fixture.hero.demonstrates}
+                    {hero.title}
                   </Typography>
-                  <Stack direction="row" spacing={0.5}>
-                    {capabilities.map((cap) => {
-                      const live = fixture.hero.chapters[cap.key] === "live";
-                      return (
-                        <Box
-                          key={cap.key}
-                          title={`${cap.name}${live ? " · live in this sample" : " · not in this sample"}`}
-                          aria-hidden
-                          sx={{
-                            width: 20,
-                            height: 20,
-                            borderRadius: BORDER_RADIUS_SM,
-                            backgroundColor: live ? GREEN : WHITE,
-                            border: `1.5px solid ${live ? NAVY : alpha(NAVY, 0.25)}`,
-                            color: live ? NAVY : alpha(NAVY, 0.4),
-                            fontSize: 11,
-                            fontWeight: 700,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontFamily: FONT_FAMILY_MARKETING,
-                          }}
-                        >
-                          {cap.letter}
-                        </Box>
-                      );
-                    })}
-                  </Stack>
+                  <Typography sx={{ color: alpha(NAVY, 0.65), fontSize: 12, lineHeight: 1.35 }}>
+                    {hero.shortDesc}
+                  </Typography>
                 </Stack>
-              </Box>
-            );
-          }
-        )}
+              </Stack>
+              <Stack direction="row" alignItems="flex-end" spacing={1} sx={{ mt: 1 }}>
+                <Typography
+                  sx={{
+                    flex: 1,
+                    color: CORAL,
+                    fontWeight: 700,
+                    fontSize: 11.5,
+                    lineHeight: 1.3,
+                    letterSpacing: "0.01em",
+                  }}
+                >
+                  {hero.demonstrates}
+                </Typography>
+                <Stack direction="row" spacing={0.5}>
+                  {capabilities.map((cap) => {
+                    const live = hero.chapters[cap.key] === "live";
+                    return (
+                      <Box
+                        key={cap.key}
+                        title={`${cap.name}${live ? " · live in this sample" : " · not in this sample"}`}
+                        aria-hidden
+                        sx={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: BORDER_RADIUS_SM,
+                          backgroundColor: live ? GREEN : WHITE,
+                          border: `1.5px solid ${live ? NAVY : alpha(NAVY, 0.25)}`,
+                          color: live ? NAVY : alpha(NAVY, 0.4),
+                          fontSize: 11,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontFamily: FONT_FAMILY_MARKETING,
+                        }}
+                      >
+                        {cap.letter}
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              </Stack>
+            </Box>
+          );
+        })}
       </Box>
 
       {/* Capability legend */}

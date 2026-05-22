@@ -3,15 +3,16 @@ import { describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
 import { MemoryAppRepository } from "./db/memoryRepository.js";
-import { FakeGroundXClient, FakeLlmClient, FakePartnerClient, testEnv } from "./test/fakes.js";
+import { FakeGroundXClient, FakeLlmClient, FakePartnerClient, FakeScenarioRegistry, testEnv } from "./test/fakes.js";
 
 function setup() {
   const repository = new MemoryAppRepository();
   const partnerClient = new FakePartnerClient();
   const groundxClient = new FakeGroundXClient();
   const llmClient = new FakeLlmClient();
-  const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient });
-  return { app, partnerClient, groundxClient, llmClient, repository };
+  const scenarioRegistry = new FakeScenarioRegistry();
+  const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+  return { app, partnerClient, groundxClient, llmClient, repository, scenarioRegistry };
 }
 
 type Method = "get" | "post" | "put" | "patch" | "delete";

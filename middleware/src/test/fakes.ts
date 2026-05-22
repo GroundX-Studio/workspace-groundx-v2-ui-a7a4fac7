@@ -1,4 +1,6 @@
 import type { AppEnv } from "../config/env.js";
+import { ScenarioRegistry } from "../scenarios/registry.js";
+import type { ScenarioConfig } from "../scenarios/types.js";
 import type {
   AuthResponse,
   ConfirmPasswordInput,
@@ -95,5 +97,25 @@ export class FakeLlmClient implements LlmClient {
   async forward(path: string, init: RequestInit): Promise<Response> {
     this.calls.push({ path, init });
     return Response.json({ answer: "ok" });
+  }
+}
+
+/**
+ * In-memory ScenarioRegistry stand-in for tests. Bypasses the network layer
+ * entirely; tests preload the list they want returned.
+ */
+export class FakeScenarioRegistry extends ScenarioRegistry {
+  private data: ScenarioConfig[] = [];
+
+  constructor() {
+    super(testEnv);
+  }
+
+  setScenarios(scenarios: ScenarioConfig[]): void {
+    this.data = scenarios;
+  }
+
+  async list(): Promise<ScenarioConfig[]> {
+    return this.data;
   }
 }

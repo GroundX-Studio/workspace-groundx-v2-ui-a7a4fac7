@@ -1,0 +1,59 @@
+{
+  "id": "utility",
+  "order": 1,
+  "manifest": {
+    "id": "utility",
+    "hero": {
+      "title": "Utility Bill",
+      "shortDesc": "a single billing statement with 8 meters and 56 charges across 3 pages",
+      "demonstrates": "messy layout → clean extraction",
+      "badges": ["E"],
+      "chapters": { "extract": "live", "interact": "live", "report": "off" },
+      "docCount": "1 doc"
+    },
+    "thinkingScript": [
+      "parsing layout · page 1",
+      "found header · account 1023456",
+      "extracting meter table · 8 rows",
+      "extracting charge ledger · 56 rows",
+      "matching legend to charge codes",
+      "confidence check · 96% mean"
+    ],
+    "extractionSchema": {
+      "id": "utility-schema-v1",
+      "name": "Utility Bill",
+      "categories": [
+        {
+          "id": "statement",
+          "type": "statement",
+          "name": "Statement",
+          "fields": [
+            { "id": "account_number", "name": "Account number", "type": "STRING", "description": "The account number printed in the statement header." },
+            { "id": "billing_period_start", "name": "Billing period start", "type": "DATE", "description": "Start of the billing period printed in the statement." },
+            { "id": "billing_period_end", "name": "Billing period end", "type": "DATE", "description": "End of the billing period printed in the statement." },
+            { "id": "amount_due", "name": "Amount due", "type": "NUMBER", "description": "Total amount due across all meters and charges, USD." },
+            { "id": "due_date", "name": "Due date", "type": "DATE", "description": "The due date printed on the statement." }
+          ]
+        },
+        {
+          "id": "meters",
+          "type": "meters",
+          "name": "Meters",
+          "fields": [
+            { "id": "meter_kwh", "name": "kWh consumed", "type": "NUMBER", "description": "kWh consumed by the meter during the billing period." }
+          ]
+        }
+      ]
+    },
+    "chatSeeds": [
+      { "id": "u1", "prompt": "What's our largest charge category this month?", "rationale": "Tests RAG over the charge ledger." }
+    ]
+  },
+  "documents": [
+    {
+      "fileName": "utility-bill-april-2026.pdf",
+      "filePath": "/Users/benjaminfletcher/Desktop/extract-demo/1F05BAE470BADDAAA0099252C14E61FD.pdf",
+      "order": 1
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import { OnboardingSessionProvider } from "@/contexts/OnboardingSessionContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { AgentToolBusProvider } from "@/contexts/AgentToolBusContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
+import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
 import { WireframeFilters } from "@/shared/components/WireframeFilters";
 import { GxThemeProvider } from "@/ThemeProvider";
 import { router } from "@/router/router";
@@ -23,17 +24,19 @@ export default function App() {
         <MessageBarProvider>
           <AuthProvider>
             <AppModeProvider>
-              <OnboardingSessionProvider>
-                <AgentToolBusProvider>
-                  <CanvasOrchestratorProvider>
-                    <OnboardingSkillProvider>
-                      <HelmetProvider>
-                        <RouterProvider router={router} />
-                      </HelmetProvider>
-                    </OnboardingSkillProvider>
-                  </CanvasOrchestratorProvider>
-                </AgentToolBusProvider>
-              </OnboardingSessionProvider>
+              <ScenarioRegistryProvider>
+                <OnboardingSessionProvider>
+                  <AgentToolBusProvider>
+                    <CanvasOrchestratorProvider>
+                      <OnboardingSkillProvider>
+                        <HelmetProvider>
+                          <RouterProvider router={router} />
+                        </HelmetProvider>
+                      </OnboardingSkillProvider>
+                    </CanvasOrchestratorProvider>
+                  </AgentToolBusProvider>
+                </OnboardingSessionProvider>
+              </ScenarioRegistryProvider>
             </AppModeProvider>
           </AuthProvider>
         </MessageBarProvider>

@@ -6,7 +6,7 @@ import { loadEnv } from "./config/env.js";
 import { MemoryAppRepository } from "./db/memoryRepository.js";
 import { decryptSecret } from "./lib/crypto.js";
 import { SESSION_COOKIE } from "./middleware/session.js";
-import { FakeGroundXClient, FakeLlmClient, FakePartnerClient, testEnv } from "./test/fakes.js";
+import { FakeGroundXClient, FakeLlmClient, FakePartnerClient, FakeScenarioRegistry, testEnv } from "./test/fakes.js";
 import type { GroundXClient, GroundXPartnerClient, LlmClient } from "./types.js";
 
 function setup() {
@@ -14,8 +14,9 @@ function setup() {
   const partnerClient = new FakePartnerClient();
   const groundxClient = new FakeGroundXClient();
   const llmClient = new FakeLlmClient();
-  const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient });
-  return { app, repository, partnerClient, groundxClient, llmClient };
+  const scenarioRegistry = new FakeScenarioRegistry();
+  const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+  return { app, repository, partnerClient, groundxClient, llmClient, scenarioRegistry };
 }
 
 describe("middleware scaffold", () => {
@@ -69,6 +70,30 @@ describe("middleware scaffold", () => {
     const [session] = [...repository.sessions.values()];
     expect(session.groundxUsername).toBe("gx-user");
     expect(decryptSecret(session.groundxApiKeyEnc!, testEnv.SESSION_SECRET)).toBe("groundx-api-key");
+  });
+
+  it.each([
+    ["login", "/api/auth/login", { email: "pat@example.com", password: "secret" }],
+    ["register", "/api/auth/register", { email: "pat@example.com", password: "secret", customer: { first: "Pat" } }],
+  ] as const)("promotes an anonymous onboarding session in place on %s", async (_name, path, body) => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+
+    const anonymous = await agent.post("/api/onboarding/session").expect(200);
+    const anonymousSessionId = anonymous.body.sessionId;
+    expect(repository.sessions.size).toBe(1);
+    expect(repository.sessions.get(anonymousSessionId)?.groundxUsername).toBe("");
+
+    await agent.post(path).send(body).expect(200);
+
+    expect(repository.sessions.size).toBe(1);
+    const promoted = repository.sessions.get(anonymousSessionId);
+    expect(promoted).toBeDefined();
+    expect(promoted?.groundxUsername).toBe("gx-user");
+    expect(decryptSecret(promoted!.groundxApiKeyEnc!, testEnv.SESSION_SECRET)).toBe("groundx-api-key");
+    await agent.get("/api/auth/me").expect(200).expect((res) => {
+      expect(res.body).toMatchObject({ authenticated: true, username: "gx-user" });
+    });
   });
 
   it("accepts Basic auth credentials when auth request bodies are absent or malformed", async () => {
@@ -279,6 +304,7 @@ describe("middleware scaffold", () => {
       partnerClient: new ErrorPartnerClient(),
       groundxClient: new ErrorGroundXClient(),
       llmClient: new ErrorLlmClient(),
+      scenarioRegistry: new FakeScenarioRegistry(),
     });
     const agent = request.agent(app);
     await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
@@ -303,6 +329,7 @@ describe("middleware scaffold", () => {
       partnerClient: new LoginErrorPartnerClient(),
       groundxClient: new FakeGroundXClient(),
       llmClient: new FakeLlmClient(),
+      scenarioRegistry: new FakeScenarioRegistry(),
     });
 
     await request(app).post("/api/auth/login").send({ email: "pat@example.com", password: "bad" }).expect(401, {

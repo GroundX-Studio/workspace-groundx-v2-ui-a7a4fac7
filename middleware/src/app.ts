@@ -10,6 +10,7 @@ import { logger } from "./lib/logger.js";
 import { encryptSecret } from "./lib/crypto.js";
 import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/metrics.js";
 import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
+import { ScenarioRegistry } from "./scenarios/registry.js";
 import { sendUpstreamResponse } from "./services/http.js";
 import type { AppRepository, GroundXClient, GroundXPartnerClient, LlmClient } from "./types.js";
 
@@ -63,9 +64,10 @@ export interface AppDependencies {
   partnerClient: GroundXPartnerClient;
   groundxClient: GroundXClient;
   llmClient: LlmClient;
+  scenarioRegistry: ScenarioRegistry;
 }
 
-export function createApp({ env, repository, partnerClient, groundxClient, llmClient }: AppDependencies): Express {
+export function createApp({ env, repository, partnerClient, groundxClient, llmClient, scenarioRegistry }: AppDependencies): Express {
   const app = express();
   app.set("etag", false);
   app.disable("x-powered-by");
@@ -312,6 +314,18 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
       await repository.createSession(session);
       setSessionCookie(res, env, session.id);
       res.json({ sessionId: session.id, anonymous: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Public onboarding catalog. Reads the samples bucket and returns the
+  // ScenarioConfig list parsed from each manifest doc's filter. No session
+  // required — the samples are partner-owned, public content.
+  app.get("/api/scenarios", apiLimiter, async (_req, res, next) => {
+    try {
+      const scenarios = await scenarioRegistry.list();
+      res.json({ scenarios });
     } catch (error) {
       next(error);
     }

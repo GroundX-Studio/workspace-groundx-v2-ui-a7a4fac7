@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { loadEnv } from "./config/env.js";
 import { MemoryAppRepository } from "./db/memoryRepository.js";
 import { MySqlAppRepository } from "./db/mysqlRepository.js";
+import { ScenarioRegistry } from "./scenarios/registry.js";
 import { DevGroundXClient, DevGroundXPartnerClient, DevLlmClient } from "./services/devClients.js";
 import { FetchGroundXClient } from "./services/groundxClient.js";
 import { FetchGroundXPartnerClient } from "./services/groundxPartnerClient.js";
@@ -26,6 +27,7 @@ const app = createApp({
   partnerClient: useDevClients ? new DevGroundXPartnerClient() : new FetchGroundXPartnerClient(env),
   groundxClient: useDevClients ? new DevGroundXClient() : new FetchGroundXClient(env),
   llmClient: useDevClients ? new DevLlmClient() : new FetchLlmClient(env),
+  scenarioRegistry: new ScenarioRegistry(env),
 });
 
 const server = app.listen(env.PORT, () => {
