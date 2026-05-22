@@ -363,56 +363,23 @@ export const IngestView: FC = () => {
         </Typography>
       </Stack>
 
-      {/* BYO — header row stacks on mobile so the label keeps its full
-          width and the annotation note flows underneath instead of getting
-          crammed against the right edge or wrapping awkwardly. */}
-      <Stack
-        direction={{ xs: "column", sm: "row" }}
-        alignItems={{ xs: "flex-start", sm: "center" }}
-        spacing={{ xs: 0.75, sm: 1.25 }}
-        sx={{ mt: 4, mb: 1 }}
-      >
-        <Stack direction="row" alignItems="center" spacing={0.5} sx={{ color: alpha(NAVY, 0.5) }}>
-          <LockOutlinedIcon sx={{ fontSize: 14 }} />
-          <Typography
-            variant="overline"
-            sx={{
-              color: alpha(NAVY, 0.5),
-              fontWeight: FONT_WEIGHT_LABEL,
-              letterSpacing: LETTER_SPACING_LABEL,
-              fontSize: FONT_SIZE_LABEL,
-              lineHeight: 1,
-            }}
-          >
-            BRING YOUR OWN — SIGN UP FREE TO UNLOCK
-          </Typography>
-        </Stack>
-        {/* Annotation — not interactive. Reads as a margin note explaining
-            the BYO sign-up behavior. Wireframe used a green pill (`wf-anno`)
-            but in production that visual idiom reads as a CTA, so we tone it
-            down: subtle tinted background, italic, no border, no hover.
-            Hidden below sm — on a phone the message reads as engineering
-            jargon and clutters the picker. */}
-        <Box
-          aria-hidden
+      {/* BYO header — the "Sign up triggers F1→F2 + loads the gate inline"
+          margin note from the wireframe is design-medium metadata, not UI
+          copy, so it does not render in production. */}
+      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 4, mb: 1, color: alpha(NAVY, 0.5) }}>
+        <LockOutlinedIcon sx={{ fontSize: 14 }} />
+        <Typography
+          variant="overline"
           sx={{
-            display: { xs: "none", sm: "inline-flex" },
-            alignItems: "center",
-            gap: 0.5,
-            px: 1,
-            py: 0.25,
-            borderRadius: BORDER_RADIUS_SM,
-            backgroundColor: alpha(NAVY, 0.05),
-            fontStyle: "italic",
-            fontSize: 11,
-            color: alpha(NAVY, 0.65),
-            cursor: "default",
-            userSelect: "none",
+            color: alpha(NAVY, 0.5),
+            fontWeight: FONT_WEIGHT_LABEL,
+            letterSpacing: LETTER_SPACING_LABEL,
+            fontSize: FONT_SIZE_LABEL,
+            lineHeight: 1,
           }}
         >
-          <Box component="span" aria-hidden sx={{ color: alpha(NAVY, 0.45), fontStyle: "normal" }}>↳</Box>
-          Sign up triggers F1→F2 + loads the gate inline
-        </Box>
+          BRING YOUR OWN — SIGN UP FREE TO UNLOCK
+        </Typography>
       </Stack>
 
       <Box sx={{ position: "relative" }}>

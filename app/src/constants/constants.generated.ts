@@ -189,13 +189,17 @@ export const MAIN_CONTENT_TOP_MARGIN = 7;
 export const MESSAGE_BAR_DURATION = 20000;
 
 // ────────────────────────────────────────────────────────────────────────
-// Breakpoints (px thresholds) — md=1100 is the brand-wide desktop threshold
+// Breakpoints (px thresholds). md=900 (MUI default) is the
+// iPad-portrait-to-landscape divide and the threshold above which the
+// onboarding step strip fits on one row. Below 900: compact strip + 1-up
+// cards (phones + iPad portrait). At/above 900: full strip + 3-up cards
+// (iPad landscape, laptops, desktops).
 // ────────────────────────────────────────────────────────────────────────
 
 export const BREAKPOINT_XS = 0;
 export const BREAKPOINT_SM = 600;
-/** Customized from MUI default 900. */
-export const BREAKPOINT_MD = 1100;
+/** MUI default. iPad-portrait-to-landscape divide; full step strip fits above this. */
+export const BREAKPOINT_MD = 900;
 export const BREAKPOINT_LG = 1200;
 export const BREAKPOINT_XL = 1536;
 

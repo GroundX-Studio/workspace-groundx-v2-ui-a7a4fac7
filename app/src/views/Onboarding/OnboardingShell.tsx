@@ -147,8 +147,9 @@ export const OnboardingShell: FC = () => {
   }, [session.currentFrame]);
 
   // Theme-driven breakpoint detection. Compact step strip activates below
-  // md (1100) which catches both spec-tablet (768-1023) and the awkward
-  // window-resize sliver below that. Desktop keeps the full pill strip.
+  // md (900 = MUI default; iPad-portrait-to-landscape divide). Phones +
+  // iPad-portrait get the thin progress bar; iPad-landscape and up get the
+  // full pill strip — which is also where it fits on one row.
   const theme = useTheme();
   const stripCompact = useMediaQuery(theme.breakpoints.down("md"));
 
