@@ -1,7 +1,8 @@
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { alpha } from "@mui/material/styles";
+import { alpha, useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { useCallback, useEffect, useMemo, type FC } from "react";
 
 import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
@@ -145,6 +146,12 @@ export const OnboardingShell: FC = () => {
     }
   }, [session.currentFrame]);
 
+  // Theme-driven breakpoint detection. Compact step strip activates below
+  // md (1100) which catches both spec-tablet (768-1023) and the awkward
+  // window-resize sliver below that. Desktop keeps the full pill strip.
+  const theme = useTheme();
+  const stripCompact = useMediaQuery(theme.breakpoints.down("md"));
+
   if (isF1) {
     // F1: nav + chat are hidden so the picker gets the full width (spec
     // Canvas_Ingest). The step strip stays visible at the top of the canvas
@@ -163,8 +170,12 @@ export const OnboardingShell: FC = () => {
         }}
       >
         <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE }}>
-          <Box sx={{ maxWidth: 1200, mx: "auto", px: { xs: 2, md: 4 } }}>
-            <StepStrip steps={steps} onStepClick={handleStepClick} />
+          {/* Strip container width must match IngestView's container so the
+              first pill and the hero headline both anchor to the same left
+              edge on every viewport. Ultrawide (xl) bumps to 1320 — see
+              IngestView for the rationale. */}
+          <Box sx={{ maxWidth: { xs: "100%", md: 1200, xl: 1320 }, mx: "auto", px: { xs: 2, md: 4 } }}>
+            <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
           </Box>
         </Box>
         <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
@@ -234,8 +245,8 @@ export const OnboardingShell: FC = () => {
 
   const canvas = (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE }}>
-        <StepStrip steps={steps} onStepClick={handleStepClick} />
+      <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE, px: 3 }}>
+        <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
       </Box>
       <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0 }} data-testid={`onboarding-frame-${session.currentFrame}`}>
         {canvasContent}

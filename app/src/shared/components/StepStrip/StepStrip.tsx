@@ -157,7 +157,71 @@ const SubPill: FC<{ id: string; label: string; state: StepPillState }> = ({ labe
   );
 };
 
-export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick }) => {
+/** Find the current step + its 1-based index for the compact progress bar. */
+function findCurrent(steps: StepDescriptor[]): { current: StepDescriptor; n: number } | null {
+  for (let i = 0; i < steps.length; i += 1) {
+    if (steps[i].state === "active") return { current: steps[i], n: i + 1 };
+  }
+  return null;
+}
+
+const CompactStrip: FC<{ steps: StepDescriptor[] }> = ({ steps }) => {
+  const found = findCurrent(steps);
+  // Progress as a percentage; we count done + active vs total.
+  const completed = steps.filter((s) => s.state === "done-traversed").length;
+  const total = steps.length;
+  const fillPct = ((completed + (found ? 0.5 : 0)) / total) * 100;
+  return (
+    <Box
+      role="group"
+      aria-label="Onboarding journey step strip"
+      sx={{ display: "flex", flexDirection: "column", gap: 0.5, py: 1.5 }}
+    >
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          fontSize: 12,
+          color: NAVY,
+          fontWeight: 600,
+        }}
+      >
+        <Box component="span">
+          Step {found?.n ?? 1} of {total}{" "}
+          <Box component="span" sx={{ color: alpha(NAVY, 0.55), fontWeight: 500, ml: 0.5 }}>
+            · {found?.current.label.replace(/^\d+\s*/, "") ?? steps[0].label.replace(/^\d+\s*/, "")}
+          </Box>
+        </Box>
+        <Box component="span" sx={{ fontSize: 11, color: alpha(NAVY, 0.55), fontWeight: 500 }}>
+          {completed}/{total} done
+        </Box>
+      </Box>
+      <Box
+        aria-hidden
+        sx={{
+          height: 4,
+          width: "100%",
+          borderRadius: BORDER_RADIUS_PILL,
+          backgroundColor: alpha(NAVY, 0.1),
+          overflow: "hidden",
+        }}
+      >
+        <Box
+          sx={{
+            height: "100%",
+            width: `${fillPct}%`,
+            backgroundColor: GREEN,
+            transition: "width 200ms ease",
+          }}
+        />
+      </Box>
+    </Box>
+  );
+};
+
+export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = false }) => {
+  if (compact) return <CompactStrip steps={steps} />;
   return (
     <Box
       role="group"

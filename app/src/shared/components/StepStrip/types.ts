@@ -32,4 +32,12 @@ export interface StepStripProps {
   steps: StepDescriptor[];
   /** Fires when a clickable pill is activated. Disabled pills do not call. */
   onStepClick?: (id: StepId) => void;
+  /**
+   * Compact mode for tablet + mobile. Renders a thin progress bar with the
+   * current step label inline (e.g. "Step 1 / 4 · Ingest") instead of the
+   * full pill + Analyze bracket. The strip stays visible — collapsing the
+   * step strip behind a tap costs at-a-glance progress, which is the only
+   * thing the strip is for.
+   */
+  compact?: boolean;
 }

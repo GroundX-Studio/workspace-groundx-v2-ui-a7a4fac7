@@ -1,8 +1,10 @@
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import Box from "@mui/material/Box";
+import Drawer from "@mui/material/Drawer";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { alpha } from "@mui/material/styles";
+import { alpha, useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { useCallback, type FC } from "react";
 
 import {
@@ -55,9 +57,14 @@ const ROUGH_FILTER = "url(#wf-rough-lite)";
  */
 export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
-  const { state: session, pickScenario, advanceFrame, openGate } = useOnboardingSession();
+  const { state: session, pickScenario, advanceFrame, openGate, dismissGate } = useOnboardingSession();
   const { dispatch } = useCanvasOrchestrator();
   const gateOpenOrCommitted = session.gate.status === "open" || session.gate.status === "committed";
+  const theme = useTheme();
+  // Below md (1100): tablet + mobile. Drives the bottom-sheet gate so the
+  // picker stays usable in a sliver-width window. Mobile-only finer
+  // adjustments use the sx breakpoint object (xs/sm) inline.
+  const compact = useMediaQuery(theme.breakpoints.down("md"));
 
   const handlePickScenario = useCallback(
     (scenario: Scenario) => {
@@ -83,15 +90,24 @@ export const IngestView: FC = () => {
     <Box
       component="main"
       aria-label="Pick a starting point"
-      sx={{ maxWidth: 1200, mx: "auto", py: { xs: 3, md: 5 }, px: { xs: 2, md: 4 } }}
+      sx={{
+        // Desktop default = 1200 (matches MUI lg). Ultrawide (≥1600) bumps
+        // to 1320 so the picker doesn't feel orphaned in the centre of a
+        // 27" monitor — but stops short of "stretch to viewport", which
+        // would make the BYO tiles read as too wide / too sparse.
+        maxWidth: { xs: "100%", md: 1200, xl: 1320 },
+        mx: "auto",
+        py: { xs: 3, md: 5 },
+        px: { xs: 2, md: 4 },
+      }}
     >
       {/* Hero */}
-      <Stack spacing={0.75} sx={{ mb: 4 }}>
+      <Stack spacing={0.75} sx={{ mb: { xs: 3, md: 4 } }}>
         <Typography
           component="h1"
           sx={{
             fontFamily: FONT_FAMILY_MARKETING,
-            fontSize: { xs: 28, md: 34 },
+            fontSize: { xs: 24, sm: 28, md: 34 },
             fontWeight: FONT_WEIGHT_HEADLINE,
             lineHeight: 1.05,
             color: NAVY,
@@ -100,9 +116,21 @@ export const IngestView: FC = () => {
         >
           Connect your data to GroundX.
         </Typography>
-        <Typography variant="body1" sx={{ color: alpha(NAVY, 0.72) }}>
+        {/* On mobile (xs only) we shrink the sub-line to one short clause —
+            "one job per screen". Tablet + desktop get the full brand-voice
+            sentence. */}
+        <Typography
+          variant="body1"
+          sx={{ color: alpha(NAVY, 0.72), display: { xs: "none", sm: "block" } }}
+        >
           GroundX works on the docs that break general-purpose AI — contracts, claims, policies, forms, technical
           diagrams. Try a sample, or bring your own.
+        </Typography>
+        <Typography
+          variant="body2"
+          sx={{ color: alpha(NAVY, 0.72), display: { xs: "block", sm: "none" } }}
+        >
+          Try a sample, or bring your own.
         </Typography>
       </Stack>
 
@@ -120,12 +148,14 @@ export const IngestView: FC = () => {
       >
         TRY A SAMPLE · NO SIGN-UP
       </Typography>
+      {/* Cards: 1 column on xs/sm (mobile + tablet — easier to scan, ≥44px
+          tap target), 3 columns on md+ (desktop). */}
       <Box
         role="list"
         aria-label="Sample scenarios"
         sx={{
           display: "grid",
-          gap: 1.5,
+          gap: { xs: 1, md: 1.5 },
           gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" },
         }}
       >
@@ -236,6 +266,9 @@ export const IngestView: FC = () => {
                   </Stack>
                 </Stack>
                 <Stack direction="row" alignItems="flex-end" spacing={1} sx={{ mt: 1 }}>
+                  {/* "demonstrates" coral line — hides on mobile (xs) so the
+                      tile keeps a calm two-line shape and the capability
+                      badges still anchor the right edge. */}
                   <Typography
                     sx={{
                       flex: 1,
@@ -244,6 +277,7 @@ export const IngestView: FC = () => {
                       fontSize: 11.5,
                       lineHeight: 1.3,
                       letterSpacing: "0.01em",
+                      display: { xs: "none", sm: "block" },
                     }}
                   >
                     {fixture.hero.demonstrates}
@@ -283,8 +317,20 @@ export const IngestView: FC = () => {
         )}
       </Box>
 
-      {/* Capability legend */}
-      <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mt: 1.25, color: alpha(NAVY, 0.6), fontSize: 11.5 }}>
+      {/* Capability legend — desktop-only. On tablet/mobile the per-tile
+          badges (active E/I/R chips) already carry the meaning; the legend
+          would only steal scroll real-estate. */}
+      <Stack
+        direction="row"
+        alignItems="center"
+        spacing={1.25}
+        sx={{
+          mt: 1.25,
+          color: alpha(NAVY, 0.6),
+          fontSize: 11.5,
+          display: { xs: "none", md: "flex" },
+        }}
+      >
         <Typography sx={{ fontWeight: 700, color: alpha(NAVY, 0.75), fontSize: "inherit" }}>
           capabilities demonstrated:
         </Typography>
@@ -317,8 +363,15 @@ export const IngestView: FC = () => {
         </Typography>
       </Stack>
 
-      {/* BYO */}
-      <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mt: 4, mb: 1 }}>
+      {/* BYO — header row stacks on mobile so the label keeps its full
+          width and the annotation note flows underneath instead of getting
+          crammed against the right edge or wrapping awkwardly. */}
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        spacing={{ xs: 0.75, sm: 1.25 }}
+        sx={{ mt: 4, mb: 1 }}
+      >
         <Stack direction="row" alignItems="center" spacing={0.5} sx={{ color: alpha(NAVY, 0.5) }}>
           <LockOutlinedIcon sx={{ fontSize: 14 }} />
           <Typography
@@ -337,11 +390,13 @@ export const IngestView: FC = () => {
         {/* Annotation — not interactive. Reads as a margin note explaining
             the BYO sign-up behavior. Wireframe used a green pill (`wf-anno`)
             but in production that visual idiom reads as a CTA, so we tone it
-            down: subtle tinted background, italic, no border, no hover. */}
+            down: subtle tinted background, italic, no border, no hover.
+            Hidden below sm — on a phone the message reads as engineering
+            jargon and clutters the picker. */}
         <Box
           aria-hidden
           sx={{
-            display: "inline-flex",
+            display: { xs: "none", sm: "inline-flex" },
             alignItems: "center",
             gap: 0.5,
             px: 1,
@@ -425,7 +480,13 @@ export const IngestView: FC = () => {
             ctaIcon="⚡"
             onClick={handleByoClick}
           >
-            <Stack direction="row" flexWrap="wrap" sx={{ gap: 0.5, opacity: 0.7 }}>
+            {/* Full 8-logo grid on sm+; a compact "8 sources" chip on xs
+                so the tile stays one-line scannable. */}
+            <Stack
+              direction="row"
+              flexWrap="wrap"
+              sx={{ gap: 0.5, opacity: 0.7, display: { xs: "none", sm: "flex" } }}
+            >
               {CONNECTOR_KINDS.map((kind) => (
                 <Box
                   key={kind}
@@ -446,6 +507,24 @@ export const IngestView: FC = () => {
                 </Box>
               ))}
             </Stack>
+            <Box
+              aria-label="8 sources"
+              sx={{
+                display: { xs: "inline-flex", sm: "none" },
+                alignItems: "center",
+                gap: 0.5,
+                px: 1,
+                py: 0.25,
+                borderRadius: BORDER_RADIUS_PILL,
+                border: `1px solid ${alpha(NAVY, 0.2)}`,
+                backgroundColor: WHITE,
+                fontSize: 11,
+                fontWeight: 600,
+                color: alpha(NAVY, 0.6),
+              }}
+            >
+              8 sources
+            </Box>
           </ByoTile>
 
           <ByoTile
@@ -456,10 +535,13 @@ export const IngestView: FC = () => {
             ctaIcon="✉"
             onClick={handleByoClick}
           >
+            {/* Mono address box hides on xs — it's redundant with the title
+                + sub, doesn't fit a 320-wide tile, and the full address is
+                revealed post-signup anyway. */}
             <Box
               aria-hidden
               sx={{
-                display: "inline-flex",
+                display: { xs: "none", sm: "inline-flex" },
                 alignItems: "center",
                 gap: 0.5,
                 px: 1,
@@ -479,24 +561,57 @@ export const IngestView: FC = () => {
         </Box>
       </Box>
 
-      {/* Privacy footer */}
+      {/* Privacy footer — desktop shows the full brand-voice line, mobile
+          shows the short "we don't train on your docs" assurance only. */}
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 2, color: alpha(NAVY, 0.6) }}>
         <LockOutlinedIcon sx={{ fontSize: 14 }} />
-        <Typography sx={{ fontSize: 11.5 }}>
+        <Typography sx={{ fontSize: 11.5, display: { xs: "none", sm: "block" } }}>
           Your docs are yours. GroundX never trains on uploaded content. Air-gapped on-prem available for regulated
           buyers.
         </Typography>
+        <Typography sx={{ fontSize: 11.5, display: { xs: "block", sm: "none" } }}>
+          Your docs are yours. We never train on them.
+        </Typography>
       </Stack>
 
-      {/* F6 gate renders inline on F1 when triggered by BYO (and on
-          re-trigger from a future threshold). Per spec the gate is never
-          modal — it lives next to the picker so the user can still browse
-          samples without losing the offer. */}
-      {gateOpenOrCommitted ? (
+      {/* F6 gate — inline next to the picker on desktop (md+), or a bottom
+          sheet Drawer on tablet/mobile so the picker stays visible behind
+          and the form claims comfortable space on a narrow viewport. Per
+          spec the gate is never modal in the dimmed-overlay sense; the
+          Drawer here uses a translucent backdrop only so the user retains
+          the "browse samples" affordance by tapping outside the sheet. */}
+      {gateOpenOrCommitted && !compact ? (
         <Box sx={{ mt: 4, maxWidth: 460, mx: "auto" }}>
           <GateView />
         </Box>
       ) : null}
+
+      {/* GateView already provides its own close X + "Keep exploring
+          samples" link, so we render it bare inside the Drawer — no extra
+          IconButton, no extra Card chrome. The Drawer Paper supplies the
+          bottom-sheet surface; the GateView Card sits inside it.
+          Content-sized rather than fullscreen: the user's instinct on a
+          bottom sheet is "this didn't take over my screen, I can still see
+          my samples behind it," which matches the spec's "never modal"
+          framing. Tap outside or the sheet's close X to dismiss. */}
+      <Drawer
+        anchor="bottom"
+        open={gateOpenOrCommitted && compact}
+        onClose={dismissGate}
+        PaperProps={{
+          sx: {
+            borderTopLeftRadius: BORDER_RADIUS,
+            borderTopRightRadius: BORDER_RADIUS,
+            maxHeight: "90vh",
+            backgroundColor: WHITE,
+            p: { xs: 1.5, sm: 2 },
+          },
+        }}
+      >
+        <Box sx={{ width: "100%", display: "flex", justifyContent: "center" }}>
+          <GateView />
+        </Box>
+      </Drawer>
 
       <Box sx={{ visibility: "hidden", borderTop: `1px solid ${BORDER}`, mt: 4 }} aria-hidden />
     </Box>
