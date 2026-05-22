@@ -47,6 +47,47 @@
     },
     "chatSeeds": [
       { "id": "u1", "prompt": "What's our largest charge category this month?", "rationale": "Tests RAG over the charge ledger." }
+    ],
+    "sampleExtractionValues": [
+      {
+        "fieldId": "account_number",
+        "value": "1023456",
+        "citations": [{ "documentId": "utility-bill-april-2026.pdf", "page": 1, "bbox": { "x": 0.06, "y": 0.07, "w": 0.18, "h": 0.03 } }]
+      },
+      {
+        "fieldId": "billing_period_start",
+        "value": "2026-03-15",
+        "citations": [{ "documentId": "utility-bill-april-2026.pdf", "page": 1, "bbox": { "x": 0.06, "y": 0.12, "w": 0.16, "h": 0.025 } }]
+      },
+      {
+        "fieldId": "billing_period_end",
+        "value": "2026-04-14",
+        "citations": [{ "documentId": "utility-bill-april-2026.pdf", "page": 1, "bbox": { "x": 0.22, "y": 0.12, "w": 0.16, "h": 0.025 } }]
+      },
+      {
+        "fieldId": "amount_due",
+        "value": 18742.16,
+        "citations": [{ "documentId": "utility-bill-april-2026.pdf", "page": 1, "bbox": { "x": 0.70, "y": 0.14, "w": 0.16, "h": 0.04 } }]
+      },
+      {
+        "fieldId": "due_date",
+        "value": "2026-05-08",
+        "citations": [{ "documentId": "utility-bill-april-2026.pdf", "page": 1, "bbox": { "x": 0.70, "y": 0.19, "w": 0.16, "h": 0.025 } }]
+      },
+      {
+        "fieldId": "meter_kwh",
+        "value": 4128,
+        "citations": [{ "documentId": "utility-bill-april-2026.pdf", "page": 2, "bbox": { "x": 0.08, "y": 0.32, "w": 0.10, "h": 0.025 } }]
+      }
+    ],
+    "sampleChatScript": [
+      { "id": "u1", "role": "user", "content": "What's our largest charge category this month?" },
+      {
+        "id": "a1",
+        "role": "assistant",
+        "content": "Demand charges came in highest at $9,418, up 12% from March. Generation followed at $6,205, then Transmission at $2,118.",
+        "citations": [{ "documentId": "utility-bill-april-2026.pdf", "page": 3, "snippet": "Demand Charges — $9,418" }]
+      }
     ]
   },
   "documents": [

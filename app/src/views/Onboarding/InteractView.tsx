@@ -5,7 +5,7 @@ import InputBase from "@mui/material/InputBase";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useCallback, useState, type FC, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FC, type FormEvent } from "react";
 
 import {
   BODY_TEXT,
@@ -21,7 +21,8 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
-import { scenarioFixtures, type FixtureChatTurn } from "@/fixtures";
+import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import type { SampleChatTurn } from "@/types/scenarios";
 import { CiteChip } from "@/shared/components/CiteChip";
 
 /**
@@ -35,18 +36,27 @@ import { CiteChip } from "@/shared/components/CiteChip";
 export const InteractView: FC = () => {
   const { state: appMode } = useAppMode();
   const { state: session, advanceFrame, openGate } = useOnboardingSession();
-  const scenario = appMode.scenario ?? session.scenario ?? "utility";
-  const fixture = scenarioFixtures[scenario];
-  const [turns, setTurns] = useState<FixtureChatTurn[]>(fixture.chatScript);
+  const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
+  const { byId } = useScenarioRegistry();
+  const scenario = byId(scenarioId);
+  const initialTurns: SampleChatTurn[] = scenario?.manifest.sampleChatScript ?? [];
+  const [turns, setTurns] = useState<SampleChatTurn[]>(initialTurns);
   const [draft, setDraft] = useState("");
+
+  // Re-seed when the active scenario changes (e.g. user backs out to F1
+  // and picks a different sample). Without this, the initial useState
+  // captures the first scenario's chat forever.
+  useEffect(() => {
+    setTurns(scenario?.manifest.sampleChatScript ?? []);
+  }, [scenario]);
 
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const trimmed = draft.trim();
       if (!trimmed) return;
-      const userTurn: FixtureChatTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
-      const assistantTurn: FixtureChatTurn = {
+      const userTurn: SampleChatTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
+      const assistantTurn: SampleChatTurn = {
         id: `a-${Date.now()}`,
         role: "assistant",
         content:
@@ -144,7 +154,8 @@ export const InteractView: FC = () => {
             openGate("save");
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter") {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
               advanceFrame("f6");
               openGate("save");
             }

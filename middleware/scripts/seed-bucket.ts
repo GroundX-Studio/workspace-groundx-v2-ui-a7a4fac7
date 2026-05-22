@@ -113,6 +113,41 @@ async function uploadLocalFile(filePath: string, fileName: string): Promise<stri
   return presign.Header["Gx-Hosted-Url"][0];
 }
 
+async function refreshManifestIfChanged(spec: ScenarioSpec, existing: ExistingDoc[]): Promise<void> {
+  // The first-ordered doc carries the manifest. If the spec's manifest has
+  // drifted from what's stored, push an update via document_update so the
+  // bucket stays the source of truth.
+  const manifestCarrier = existing.find(
+    (d) => (d.filter as Partial<SampleDocFilter> | undefined)?.manifest != null
+  );
+  if (!manifestCarrier) return;
+  const stored = JSON.stringify((manifestCarrier.filter as Partial<SampleDocFilter>).manifest);
+  const desired = JSON.stringify(spec.manifest);
+  if (stored === desired) {
+    console.log(`  ✓ manifest already up-to-date`);
+    return;
+  }
+  console.log(`  → manifest drift detected — pushing update for ${manifestCarrier.documentId}`);
+  await gx<{ ingest: { processId: string; status: string } }>(
+    "/ingest/documents",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        documents: [
+          {
+            documentId: manifestCarrier.documentId,
+            filter: {
+              ...(manifestCarrier.filter as Record<string, unknown>),
+              manifest: spec.manifest,
+            },
+          },
+        ],
+      }),
+    }
+  );
+  console.log(`  ← manifest update queued`);
+}
+
 async function seedScenario(spec: ScenarioSpec): Promise<void> {
   console.log(`\n=== ${spec.id} (order ${spec.order}, ${spec.documents.length} docs) ===`);
 
@@ -120,10 +155,12 @@ async function seedScenario(spec: ScenarioSpec): Promise<void> {
   const existingByName = new Map(existing.map((d) => [d.fileName, d]));
   console.log(`  ${existing.length} existing docs in bucket for this scenario`);
 
+  await refreshManifestIfChanged(spec, existing);
+
   // Determine which docs need ingest. We dedupe by fileName.
   const docsToIngest = spec.documents.filter((doc) => !existingByName.has(doc.fileName));
   if (docsToIngest.length === 0) {
-    console.log(`  ✓ all docs already present — nothing to do`);
+    console.log(`  ✓ all docs already present — nothing to ingest`);
     return;
   }
 

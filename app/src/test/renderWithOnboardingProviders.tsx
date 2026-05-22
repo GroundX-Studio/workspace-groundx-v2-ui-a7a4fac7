@@ -9,6 +9,7 @@ import { OnboardingSessionProvider } from "@/contexts/OnboardingSessionContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
 import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
 import { GxThemeProvider } from "@/ThemeProvider";
+import { allTestScenarios } from "@/test/scenarioFixtures";
 import type { AuthState, FFrame, Scenario } from "@/types/onboarding";
 import type { ScenarioConfig } from "@/types/scenarios";
 
@@ -21,7 +22,7 @@ interface RenderOnboardingOptions {
 
 export const renderWithOnboardingProviders = (
   ui: ReactElement,
-  { initialAuthState = "anonymous", initialFrame = "f1", initialScenario = null, initialScenarios = [] }: RenderOnboardingOptions = {},
+  { initialAuthState = "anonymous", initialFrame = "f1", initialScenario = null, initialScenarios = allTestScenarios }: RenderOnboardingOptions = {},
 ) =>
   render(
     <GxThemeProvider>

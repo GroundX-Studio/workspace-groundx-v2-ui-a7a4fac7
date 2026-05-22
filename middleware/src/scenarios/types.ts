@@ -46,12 +46,44 @@ export interface ChatSeed {
   rationale: string;
 }
 
+export interface ScenarioCitation {
+  /**
+   * Either a real GroundX document ID, or a stable placeholder string used
+   * only for display. The frontend renders this verbatim; nothing in the
+   * citation rendering path validates the ID against the registry's docs.
+   */
+  documentId: string;
+  /** 1-indexed page. */
+  page: number;
+  bbox?: { x: number; y: number; w: number; h: number };
+  snippet?: string;
+  confidence?: number;
+}
+
+export interface ExtractedFieldValue {
+  fieldId: string;
+  value: string | number | boolean | null;
+  citations: ScenarioCitation[];
+}
+
+export interface SampleChatTurn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  citations?: ScenarioCitation[];
+}
+
 export interface ScenarioManifest {
   id: string;
   hero: ScenarioHero;
   thinkingScript: string[];
-  extractionSchema: ExtractionSchemaDef;
+  /** Absent → scenario skips the Extract frame. */
+  extractionSchema?: ExtractionSchemaDef;
   chatSeeds: ChatSeed[];
+  /** Pre-canned extraction results for the demo flow. */
+  sampleExtractionValues?: ExtractedFieldValue[];
+  /** Pre-canned chat transcript for the demo flow. */
+  sampleChatScript?: SampleChatTurn[];
 }
 
 /** What gets stored in every sample doc's filter. */

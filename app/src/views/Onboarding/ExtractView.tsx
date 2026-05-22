@@ -5,7 +5,7 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useState, type FC, type SyntheticEvent } from "react";
+import { useMemo, useState, type FC, type SyntheticEvent } from "react";
 
 import {
   BODY_TEXT,
@@ -23,8 +23,8 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
-import { scenarioFixtures } from "@/fixtures";
-import type { Citation } from "@/types/onboarding";
+import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import type { ExtractedFieldValue } from "@/types/scenarios";
 import { CiteChip } from "@/shared/components/CiteChip";
 
 /**
@@ -50,10 +50,23 @@ export const ExtractView: FC = () => {
     if (value) setRenderMode(value);
   };
 
-  const scenario = appMode.scenario ?? session.scenario ?? "utility";
-  const fixture = scenarioFixtures[scenario];
+  const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
+  const { byId } = useScenarioRegistry();
+  const scenario = byId(scenarioId);
+  const schema = scenario?.manifest.extractionSchema;
 
-  if (!fixture.schema) {
+  // Schema defs come from the manifest; extracted values (with citations)
+  // come from the manifest's sampleExtractionValues array. Eventually live
+  // extraction will replace the values lookup, schema stays as-is.
+  const valuesByFieldId = useMemo(() => {
+    const map = new Map<string, ExtractedFieldValue>();
+    for (const v of scenario?.manifest.sampleExtractionValues ?? []) {
+      map.set(v.fieldId, v);
+    }
+    return map;
+  }, [scenario]);
+
+  if (!schema) {
     return (
       <Box sx={{ p: 4 }}>
         <Typography variant="body1" sx={{ color: BODY_TEXT }}>
@@ -63,28 +76,29 @@ export const ExtractView: FC = () => {
     );
   }
 
-  const allFields = fixture.schema.categories.flatMap((c) => c.fields);
+  const allFields = schema.categories.flatMap((c) => c.fields);
   const selectedField = selectedFieldId ? allFields.find((f) => f.id === selectedFieldId) ?? null : null;
+  const selectedValue = selectedField ? valuesByFieldId.get(selectedField.id) : undefined;
 
   // Loan scenario surfaces the workflow handoff demo via JSON render mode.
-  const supportsJsonRender = scenario === "loan";
+  const supportsJsonRender = scenarioId === "loan";
 
-  // Building a deterministic JSON representation from the fixture so the
-  // render-mode toggle has something real to show. Real Phase 7 wire-up pulls
-  // this from the extraction-workbench widget's `results` channel.
   const jsonOutput = JSON.stringify(
     {
-      schemaId: fixture.schema.id,
-      name: fixture.schema.name,
-      categories: fixture.schema.categories.map((category) => ({
+      schemaId: schema.id,
+      name: schema.name,
+      categories: schema.categories.map((category) => ({
         id: category.id,
         type: category.type,
-        fields: category.fields.map((field) => ({
-          id: field.id,
-          type: field.type,
-          value: field.value,
-          citations: field.citations.map((c) => ({ documentId: c.documentId, page: c.page })),
-        })),
+        fields: category.fields.map((field) => {
+          const value = valuesByFieldId.get(field.id);
+          return {
+            id: field.id,
+            type: field.type,
+            value: value?.value ?? null,
+            citations: value?.citations.map((c) => ({ documentId: c.documentId, page: c.page })) ?? [],
+          };
+        }),
       })),
     },
     null,
@@ -115,7 +129,7 @@ export const ExtractView: FC = () => {
           <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
             ANALYZE · EXTRACT
           </Typography>
-          <Typography variant="h4">{fixture.schema.name}</Typography>
+          <Typography variant="h4">{schema.name}</Typography>
         </Stack>
         {supportsJsonRender ? (
           <Tabs
@@ -152,60 +166,59 @@ export const ExtractView: FC = () => {
             {jsonOutput}
           </Box>
         ) : null}
-        {!supportsJsonRender || renderMode === "table" ? fixture.schema.categories.map((category) => (
+        {!supportsJsonRender || renderMode === "table" ? schema.categories.map((category) => (
           <Card key={category.id} sx={{ mb: 2, p: 2 }} aria-label={category.name}>
             <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
               {category.name}
             </Typography>
             <Stack spacing={1} sx={{ mt: 1.5 }}>
-              {category.fields.map((field) => (
-                <Box
-                  key={field.id}
-                  // No `role="button"` here on purpose: the row contains
-                  // inner clickable citation chips, and `role="button"` would
-                  // nest interactive controls (axe `nested-interactive`).
-                  // The row is still keyboard-reachable via tabIndex + Enter
-                  // handler; screen readers announce it as a generic clickable
-                  // region with an aria-label describing the field.
-                  tabIndex={0}
-                  aria-label={`Inspect field: ${field.name}`}
-                  data-testid={`field-row-${field.id}`}
-                  onClick={() => setSelectedFieldId(field.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedFieldId(field.id);
-                    }
-                  }}
-                  sx={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr auto",
-                    gap: 1,
-                    p: 1.25,
-                    borderRadius: BORDER_RADIUS,
-                    cursor: "pointer",
-                    backgroundColor: selectedFieldId === field.id ? alpha(GREEN, 0.12) : "transparent",
-                    "&:hover": { backgroundColor: alpha(GREEN, 0.08) },
-                  }}
-                >
-                  <Stack spacing={0.25}>
-                    <Typography variant="body2" sx={{ color: NAVY, fontWeight: 600 }}>
-                      {field.name}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-                      {field.description}
-                    </Typography>
-                  </Stack>
-                  <Stack direction="row" spacing={0.5} alignItems="center">
-                    <Typography variant="body2" sx={{ fontFamily: "monospace", color: NAVY }}>
-                      {field.value === null ? "—" : String(field.value)}
-                    </Typography>
-                    {field.citations.map((c: Citation, idx) => (
-                      <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} />
-                    ))}
-                  </Stack>
-                </Box>
-              ))}
+              {category.fields.map((field) => {
+                const extracted = valuesByFieldId.get(field.id);
+                const value = extracted?.value;
+                const citations = extracted?.citations ?? [];
+                return (
+                  <Box
+                    key={field.id}
+                    tabIndex={0}
+                    aria-label={`Inspect field: ${field.name}`}
+                    data-testid={`field-row-${field.id}`}
+                    onClick={() => setSelectedFieldId(field.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedFieldId(field.id);
+                      }
+                    }}
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 1,
+                      p: 1.25,
+                      borderRadius: BORDER_RADIUS,
+                      cursor: "pointer",
+                      backgroundColor: selectedFieldId === field.id ? alpha(GREEN, 0.12) : "transparent",
+                      "&:hover": { backgroundColor: alpha(GREEN, 0.08) },
+                    }}
+                  >
+                    <Stack spacing={0.25}>
+                      <Typography variant="body2" sx={{ color: NAVY, fontWeight: 600 }}>
+                        {field.name}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: BODY_TEXT }}>
+                        {field.description}
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Typography variant="body2" sx={{ fontFamily: "monospace", color: NAVY }}>
+                        {value === undefined || value === null ? "—" : String(value)}
+                      </Typography>
+                      {citations.map((c, idx) => (
+                        <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} />
+                      ))}
+                    </Stack>
+                  </Box>
+                );
+              })}
             </Stack>
           </Card>
         )) : null}
@@ -265,7 +278,7 @@ export const ExtractView: FC = () => {
                 Source pages
               </Typography>
               <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: "wrap" }}>
-                {selectedField.citations.map((c, idx) => (
+                {(selectedValue?.citations ?? []).map((c, idx) => (
                   <Box key={idx} sx={{ p: 1, borderRadius: BORDER_RADIUS_SM, border: `1px solid ${BORDER}` }}>
                     <Typography variant="caption" sx={{ color: NAVY }}>
                       {c.documentId} · page {c.page}
@@ -277,7 +290,7 @@ export const ExtractView: FC = () => {
                     ) : null}
                   </Box>
                 ))}
-                {selectedField.citations.length === 0 ? (
+                {(selectedValue?.citations ?? []).length === 0 ? (
                   <Typography variant="caption" sx={{ color: BODY_TEXT }}>
                     No citations on this field.
                   </Typography>

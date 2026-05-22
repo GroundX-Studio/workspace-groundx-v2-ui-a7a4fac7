@@ -39,12 +39,38 @@ export interface ChatSeed {
   rationale: string;
 }
 
+export interface ScenarioCitation {
+  documentId: string;
+  page: number;
+  bbox?: { x: number; y: number; w: number; h: number };
+  snippet?: string;
+  confidence?: number;
+}
+
+export interface ExtractedFieldValue {
+  fieldId: string;
+  value: string | number | boolean | null;
+  citations: ScenarioCitation[];
+}
+
+export interface SampleChatTurn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  citations?: ScenarioCitation[];
+}
+
 export interface ScenarioManifest {
   id: string;
   hero: ScenarioHero;
   thinkingScript: string[];
-  extractionSchema: ExtractionSchemaDef;
+  /** Absent → scenario skips the Extract frame (e.g. Solar is Interact+Report only). */
+  extractionSchema?: ExtractionSchemaDef;
   chatSeeds: ChatSeed[];
+  /** Pre-canned extraction results for the demo flow. */
+  sampleExtractionValues?: ExtractedFieldValue[];
+  /** Pre-canned chat transcript for the demo flow. */
+  sampleChatScript?: SampleChatTurn[];
 }
 
 export interface ScenarioDocument {

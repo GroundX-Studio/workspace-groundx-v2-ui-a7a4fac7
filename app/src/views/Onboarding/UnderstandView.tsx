@@ -19,7 +19,7 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
-import { scenarioFixtures } from "@/fixtures";
+import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 
 const THINKING_NOTE_INTERVAL_MS = 1100;
 const REVEAL_DELAY_MS = 4500;
@@ -44,17 +44,20 @@ export const UnderstandView: FC = () => {
   const [noteIndex, setNoteIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
 
-  const scenario = appMode.scenario ?? session.scenario ?? "utility";
-  const fixture = scenarioFixtures[scenario];
+  const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
+  const { byId } = useScenarioRegistry();
+  const scenario = byId(scenarioId);
+  const thinkingScript = scenario?.manifest.thinkingScript ?? [];
+  const docTitle = scenario?.documents[0]?.fileName ?? "Sample";
 
   useEffect(() => {
-    if (!fixture.thinkingNotes.length) return;
-    if (noteIndex >= fixture.thinkingNotes.length - 1) return;
+    if (!thinkingScript.length) return;
+    if (noteIndex >= thinkingScript.length - 1) return;
     const id = window.setTimeout(() => {
-      setNoteIndex((current) => Math.min(current + 1, fixture.thinkingNotes.length - 1));
+      setNoteIndex((current) => Math.min(current + 1, thinkingScript.length - 1));
     }, THINKING_NOTE_INTERVAL_MS);
     return () => window.clearTimeout(id);
-  }, [fixture.thinkingNotes.length, noteIndex]);
+  }, [thinkingScript.length, noteIndex]);
 
   useEffect(() => {
     const id = window.setTimeout(() => setRevealed(true), REVEAL_DELAY_MS);
@@ -77,7 +80,7 @@ export const UnderstandView: FC = () => {
         <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
           UNDERSTAND
         </Typography>
-        <Typography variant="h4">{fixture.docs[0]?.title ?? "Sample"}</Typography>
+        <Typography variant="h4">{docTitle}</Typography>
         <Typography variant="body2" sx={{ color: BODY_TEXT }}>
           GroundX is parsing the document. You'll see the extract in a moment.
         </Typography>
@@ -161,7 +164,7 @@ export const UnderstandView: FC = () => {
           }}
         >
           <AnimatePresence initial={false}>
-            {fixture.thinkingNotes.slice(0, noteIndex + 1).map((note) => (
+            {thinkingScript.slice(0, noteIndex + 1).map((note) => (
               <motion.div
                 key={note}
                 initial={{ opacity: 0, y: 4 }}
