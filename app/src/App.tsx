@@ -9,12 +9,16 @@ import { OnboardingSessionProvider } from "@/contexts/OnboardingSessionContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { AgentToolBusProvider } from "@/contexts/AgentToolBusContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
+import { WireframeFilters } from "@/shared/components/WireframeFilters";
 import { GxThemeProvider } from "@/ThemeProvider";
 import { router } from "@/router/router";
 
 export default function App() {
   return (
     <GxThemeProvider>
+      {/* Global SVG defs used by the F-series sample cards / BYO tiles to get
+          the slightly-rough wireframe edge — see `WireframeFilters`. */}
+      <WireframeFilters />
       <LoadingProvider>
         <MessageBarProvider>
           <AuthProvider>

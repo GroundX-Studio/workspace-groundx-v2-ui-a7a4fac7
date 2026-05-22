@@ -26,10 +26,17 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { scenarioFixtures } from "@/fixtures";
+import {
+  CONNECTOR_KINDS,
+  CONNECTOR_LABELS,
+  ConnectorGlyph,
+} from "@/shared/components/ConnectorGlyph";
 import { DocThumb } from "@/shared/components/DocThumb";
 import type { Scenario } from "@/types/onboarding";
 
 import { GateView } from "./GateView";
+
+const ROUGH_FILTER = "url(#wf-rough-lite)";
 
 /**
  * F1 IngestView — composed against `spec-nav-v2.jsx Canvas_Ingest`.
@@ -146,8 +153,12 @@ export const IngestView: FC = () => {
                   minHeight: 140,
                   p: 1.75,
                   borderRadius: BORDER_RADIUS,
-                  border: isStartHere ? `2px solid ${NAVY}` : `1.5px solid ${alpha(NAVY, 0.18)}`,
+                  border: isStartHere ? `2px solid ${NAVY}` : `1.5px solid ${alpha(NAVY, 0.55)}`,
                   backgroundColor: WHITE,
+                  // Wireframe `.wf-rough-lite` filter — gives the card a
+                  // slightly-irregular hand-sketched edge while staying flat
+                  // and brand-token-driven everywhere else.
+                  filter: ROUGH_FILTER,
                   cursor: "pointer",
                   transition: "transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
                   "&:hover": {
@@ -409,10 +420,9 @@ export const IngestView: FC = () => {
             onClick={handleByoClick}
           >
             <Stack direction="row" flexWrap="wrap" sx={{ gap: 0.5, opacity: 0.7 }}>
-              {["SharePoint", "OneDrive", "Drive", "Dropbox", "Box", "S3", "Slack", "Notion"].map((name) => (
+              {CONNECTOR_KINDS.map((kind) => (
                 <Box
-                  key={name}
-                  aria-hidden
+                  key={kind}
                   sx={{
                     width: 22,
                     height: 22,
@@ -422,13 +432,11 @@ export const IngestView: FC = () => {
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: 9,
-                    fontWeight: 700,
-                    color: alpha(NAVY, 0.5),
                   }}
-                  title={name}
+                  title={CONNECTOR_LABELS[kind]}
+                  aria-label={CONNECTOR_LABELS[kind]}
                 >
-                  {name.charAt(0)}
+                  <ConnectorGlyph kind={kind} size={16} />
                 </Box>
               ))}
             </Stack>
