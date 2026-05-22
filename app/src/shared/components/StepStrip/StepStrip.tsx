@@ -82,7 +82,7 @@ const badgeSx = (state: StepPillState, n: number | "check") => {
     backgroundColor: filled ? NAVY : "transparent",
     color: filled ? WHITE : alpha(NAVY, 0.4),
     border: filled ? "none" : `1px solid ${alpha(NAVY, 0.4)}`,
-    marginRight: 6,
+    marginRight: 4,
     flexShrink: 0,
   } as const;
 };
