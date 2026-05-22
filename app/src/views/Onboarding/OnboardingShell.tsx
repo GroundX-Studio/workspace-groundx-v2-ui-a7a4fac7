@@ -149,7 +149,8 @@ export const OnboardingShell: FC = () => {
     // F1: nav + chat are hidden so the picker gets the full width (spec
     // Canvas_Ingest). The step strip stays visible at the top of the canvas
     // so the user can see Ingest active + Analyze/Integrate as upcoming
-    // before they pick a sample.
+    // before they pick a sample. The strip aligns with the main content's
+    // max-width (1200) so it doesn't feel orphaned on wide monitors.
     return (
       <Box
         data-testid="onboarding-frame-f1"
@@ -162,7 +163,9 @@ export const OnboardingShell: FC = () => {
         }}
       >
         <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE }}>
-          <StepStrip steps={steps} onStepClick={handleStepClick} />
+          <Box sx={{ maxWidth: 1200, mx: "auto", px: { xs: 2, md: 4 } }}>
+            <StepStrip steps={steps} onStepClick={handleStepClick} />
+          </Box>
         </Box>
         <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
           <IngestView />

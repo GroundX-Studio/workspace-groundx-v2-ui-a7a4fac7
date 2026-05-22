@@ -83,7 +83,7 @@ export const IngestView: FC = () => {
     <Box
       component="main"
       aria-label="Pick a starting point"
-      sx={{ maxWidth: 960, mx: "auto", py: { xs: 3, md: 5 }, px: { xs: 2, md: 4 } }}
+      sx={{ maxWidth: 1200, mx: "auto", py: { xs: 3, md: 5 }, px: { xs: 2, md: 4 } }}
     >
       {/* Hero */}
       <Stack spacing={0.75} sx={{ mb: 4 }}>
@@ -100,7 +100,7 @@ export const IngestView: FC = () => {
         >
           Connect your data to GroundX.
         </Typography>
-        <Typography variant="body1" sx={{ color: alpha(NAVY, 0.72), maxWidth: 640 }}>
+        <Typography variant="body1" sx={{ color: alpha(NAVY, 0.72) }}>
           GroundX works on the docs that break general-purpose AI — contracts, claims, policies, forms, technical
           diagrams. Try a sample, or bring your own.
         </Typography>
@@ -334,23 +334,29 @@ export const IngestView: FC = () => {
             BRING YOUR OWN — SIGN UP FREE TO UNLOCK
           </Typography>
         </Stack>
+        {/* Annotation — not interactive. Reads as a margin note explaining
+            the BYO sign-up behavior. Wireframe used a green pill (`wf-anno`)
+            but in production that visual idiom reads as a CTA, so we tone it
+            down: subtle tinted background, italic, no border, no hover. */}
         <Box
+          aria-hidden
           sx={{
             display: "inline-flex",
             alignItems: "center",
-            gap: 0.75,
-            px: 1.25,
-            py: 0.4,
-            borderRadius: BORDER_RADIUS_PILL,
-            backgroundColor: GREEN,
-            border: `1.5px solid ${NAVY}`,
-            fontFamily: FONT_FAMILY_MARKETING,
-            fontSize: 10.5,
-            fontWeight: 700,
-            color: NAVY,
+            gap: 0.5,
+            px: 1,
+            py: 0.25,
+            borderRadius: BORDER_RADIUS_SM,
+            backgroundColor: alpha(NAVY, 0.05),
+            fontStyle: "italic",
+            fontSize: 11,
+            color: alpha(NAVY, 0.65),
+            cursor: "default",
+            userSelect: "none",
           }}
         >
-          ↳ Sign up triggers F1→F2 + loads the gate inline
+          <Box component="span" aria-hidden sx={{ color: alpha(NAVY, 0.45), fontStyle: "normal" }}>↳</Box>
+          Sign up triggers F1→F2 + loads the gate inline
         </Box>
       </Stack>
 

@@ -167,8 +167,10 @@ export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick }) => {
         alignItems: "center",
         gap: 0,
         py: 2,
-        px: 3,
         flexWrap: "wrap",
+        // No horizontal padding on the strip itself — the parent container
+        // controls page padding so the strip always aligns flush with the
+        // hero copy and sample-card grid below it.
       }}
     >
       {steps.map((step, idx) => {
