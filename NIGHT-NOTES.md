@@ -108,6 +108,22 @@ Done. Playwright Utility golden journey at desktop: 9/9 onboarding-utility tests
 
 ---
 
+## Phase 4 (stretch) — Loan scenario ✓
+
+Done. Loan adds 8 desktop tests on top of Utility's 9 + scaffold smoke 15×3. Full gate: app 333/333, middleware 117/117, build clean, verify:preview pass, **e2e 32 passed / 34 properly skipped**.
+
+**Delivered:**
+- `app/e2e/onboarding-loan.spec.ts` — 8 desktop tests covering Loan badges (Extract + Interact), F1→F2 with first paystub doc, F3 Income/Debt/Anomalies category regions, multi-doc citation chips on `gross_monthly_income` (4 paystub references), citation peek showing all 4 source paystubs, **render-mode Table ↔ JSON toggle (workflow handoff demo)**, F5 DTI replay, negative check that Utility does NOT show the JSON toggle.
+- ExtractView gained a render-mode toggle visible only on scenarios that support JSON output (Loan today). JSON output is built deterministically from the fixture schema so it's a real workflow-handoff artifact.
+
+**Decisions log**
+
+**D4.1 — Render-mode is scenario-driven, not a generic toggle.** Hardcoded `scenario === "loan"` in ExtractView for v1. Will move into the fixture schema (a `renderModes: ["table", "json"]` array) in Phase 5/6.
+
+**D4.2 — Doc-list panel deferred.** Loan spec calls for a 12-doc panel with file-type icons. For v1 the ExtractView shows fields across all docs without listing the docs themselves — citations carry the docId. Phase 5 adds the doc tree component (which Solar's 142-doc hierarchy also needs).
+
+---
+
 ## Boundary rules I'm running by
 
 1. **No live API calls** — `MOCK_MODE=true` and `APP_REPOSITORY_MODE=memory` stay on the whole run.

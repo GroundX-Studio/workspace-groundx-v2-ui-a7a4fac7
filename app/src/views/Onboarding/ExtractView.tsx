@@ -1,8 +1,10 @@
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import Stack from "@mui/material/Stack";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
-import { useState, type FC } from "react";
+import { useState, type FC, type SyntheticEvent } from "react";
 
 import { BODY_TEXT, BORDER, FONT_WEIGHT_LABEL, GREEN, NAVY, WHITE } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
@@ -42,6 +44,35 @@ export const ExtractView: FC = () => {
 
   const allFields = fixture.schema.categories.flatMap((c) => c.fields);
   const selectedField = selectedFieldId ? allFields.find((f) => f.id === selectedFieldId) ?? null : null;
+  const [renderMode, setRenderMode] = useState<"table" | "json">("table");
+  const handleRenderMode = (_event: SyntheticEvent, value: "table" | "json") => {
+    if (value) setRenderMode(value);
+  };
+
+  // Loan scenario surfaces the workflow handoff demo via JSON render mode.
+  const supportsJsonRender = scenario === "loan";
+
+  // Building a deterministic JSON representation from the fixture so the
+  // render-mode toggle has something real to show. Real Phase 7 wire-up pulls
+  // this from the extraction-workbench widget's `results` channel.
+  const jsonOutput = JSON.stringify(
+    {
+      schemaId: fixture.schema.id,
+      name: fixture.schema.name,
+      categories: fixture.schema.categories.map((category) => ({
+        id: category.id,
+        type: category.type,
+        fields: category.fields.map((field) => ({
+          id: field.id,
+          type: field.type,
+          value: field.value,
+          citations: field.citations.map((c) => ({ documentId: c.documentId, page: c.page })),
+        })),
+      })),
+    },
+    null,
+    2
+  );
 
   return (
     <Box
@@ -56,15 +87,55 @@ export const ExtractView: FC = () => {
       }}
       aria-label="Extract"
     >
-      <Stack spacing={0.5} sx={{ gridColumn: "1 / -1" }}>
-        <Typography variant="overline" sx={{ color: GREEN, fontWeight: FONT_WEIGHT_LABEL }}>
-          ANALYZE · EXTRACT
-        </Typography>
-        <Typography variant="h4">{fixture.schema.name}</Typography>
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        alignItems={{ md: "flex-end" }}
+        justifyContent="space-between"
+        spacing={1}
+        sx={{ gridColumn: "1 / -1" }}
+      >
+        <Stack spacing={0.5}>
+          <Typography variant="overline" sx={{ color: GREEN, fontWeight: FONT_WEIGHT_LABEL }}>
+            ANALYZE · EXTRACT
+          </Typography>
+          <Typography variant="h4">{fixture.schema.name}</Typography>
+        </Stack>
+        {supportsJsonRender ? (
+          <Tabs
+            value={renderMode}
+            onChange={handleRenderMode}
+            aria-label="Render mode"
+            data-testid="render-mode-tabs"
+            sx={{ minHeight: 36 }}
+          >
+            <Tab value="table" label="Table" data-testid="render-mode-table" sx={{ minHeight: 36 }} />
+            <Tab value="json" label="JSON" data-testid="render-mode-json" sx={{ minHeight: 36 }} />
+          </Tabs>
+        ) : null}
       </Stack>
 
       <Box sx={{ overflow: "auto" }}>
-        {fixture.schema.categories.map((category) => (
+        {supportsJsonRender && renderMode === "json" ? (
+          <Box
+            component="pre"
+            data-testid="extract-json"
+            sx={{
+              fontFamily: "monospace",
+              fontSize: 12,
+              backgroundColor: WHITE,
+              border: `1px solid ${BORDER}`,
+              borderRadius: 2,
+              p: 2,
+              m: 0,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              color: NAVY,
+            }}
+          >
+            {jsonOutput}
+          </Box>
+        ) : null}
+        {!supportsJsonRender || renderMode === "table" ? fixture.schema.categories.map((category) => (
           <Card key={category.id} sx={{ mb: 2, p: 2 }} role="region" aria-label={category.name}>
             <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
               {category.name}
@@ -107,7 +178,7 @@ export const ExtractView: FC = () => {
               ))}
             </Stack>
           </Card>
-        ))}
+        )) : null}
         <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
           <Box
             role="button"
