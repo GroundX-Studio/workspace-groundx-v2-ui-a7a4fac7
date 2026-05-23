@@ -8,6 +8,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { useCallback, type FC } from "react";
 
 import {
+  BODY_TEXT,
   BORDER,
   BORDER_RADIUS,
   BORDER_RADIUS_SM,
@@ -27,6 +28,7 @@ import {
   ONBOARDING_SMALL_TEXT_FONT_SIZE,
   PICKER_MAX_WIDTH,
   PICKER_MAX_WIDTH_ULTRAWIDE,
+  TINT,
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
@@ -75,7 +77,7 @@ export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
   const { state: session, pickScenario, advanceFrame, openGate, dismissGate } = useOnboardingSession();
   const { dispatch } = useCanvasOrchestrator();
-  const { state: registry } = useScenarioRegistry();
+  const { state: registry, refresh: refreshRegistry } = useScenarioRegistry();
   const gateOpenOrCommitted = session.gate.status === "open" || session.gate.status === "committed";
   const theme = useTheme();
   const compact = useMediaQuery(theme.breakpoints.down("md"));
@@ -155,9 +157,19 @@ export const IngestView: FC = () => {
         {registry.status === "loading" ? (
           <Typography sx={{ color: alpha(NAVY, 0.55), fontStyle: "italic", py: 2 }}>Loading samples…</Typography>
         ) : registry.status === "error" ? (
-          <Typography sx={{ color: CORAL, py: 2 }} role="alert">
-            Couldn't load samples: {registry.error}
-          </Typography>
+          <RegistryStatusPanel
+            tone="error"
+            heading="Couldn't load samples"
+            body={registry.error ?? "The middleware didn't respond."}
+            onRetry={refreshRegistry}
+          />
+        ) : registry.scenarios.length === 0 ? (
+          <RegistryStatusPanel
+            tone="empty"
+            heading="No samples available right now"
+            body="Once a partner seeds the samples bucket, the tiles will appear here."
+            onRetry={refreshRegistry}
+          />
         ) : null}
         {registry.scenarios.map((scenario: ScenarioConfig, index) => (
           <SampleScenarioCard
@@ -394,3 +406,76 @@ export const IngestView: FC = () => {
     </Box>
   );
 };
+
+/**
+ * Spans the full grid row above the sample tiles. Used for both the empty
+ * state (registry ready, zero scenarios — bucket hasn't been seeded yet)
+ * and the error state (registry fetch failed). Carries the Retry button
+ * so the user can re-trigger the scenarios fetch without reloading the
+ * whole page.
+ */
+function RegistryStatusPanel({
+  tone,
+  heading,
+  body,
+  onRetry,
+}: {
+  tone: "empty" | "error";
+  heading: string;
+  body: string;
+  onRetry: () => void | Promise<void>;
+}) {
+  const accent = tone === "error" ? CORAL : alpha(NAVY, 0.55);
+  return (
+    <Box
+      role={tone === "error" ? "alert" : undefined}
+      sx={{
+        gridColumn: "1 / -1",
+        p: 2.5,
+        borderRadius: BORDER_RADIUS,
+        backgroundColor: tone === "error" ? alpha(CORAL, 0.06) : alpha(TINT, 0.6),
+        border: `1px solid ${tone === "error" ? alpha(CORAL, 0.3) : alpha(NAVY, 0.12)}`,
+      }}
+    >
+      <Typography
+        sx={{
+          color: tone === "error" ? CORAL : NAVY,
+          fontWeight: FONT_WEIGHT_HEADLINE,
+          fontSize: FONT_SIZE_H5,
+          fontFamily: FONT_FAMILY_MARKETING,
+          mb: 0.5,
+        }}
+      >
+        {heading}
+      </Typography>
+      <Typography sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_LABEL, mb: 1.5 }}>
+        {body}
+      </Typography>
+      <Box
+        component="button"
+        type="button"
+        onClick={() => void onRetry()}
+        sx={{
+          appearance: "none",
+          cursor: "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 0.5,
+          px: 1.5,
+          py: 0.5,
+          borderRadius: BORDER_RADIUS_SM,
+          border: `1.5px solid ${accent}`,
+          backgroundColor: WHITE,
+          color: tone === "error" ? CORAL : NAVY,
+          fontFamily: FONT_FAMILY_MARKETING,
+          fontSize: FONT_SIZE_LABEL,
+          fontWeight: FONT_WEIGHT_LABEL,
+          "&:hover": { backgroundColor: alpha(accent, 0.08) },
+          "&:focus-visible": { outline: `2px solid ${GREEN}`, outlineOffset: 2 },
+        }}
+      >
+        ↻ Retry
+      </Box>
+    </Box>
+  );
+}

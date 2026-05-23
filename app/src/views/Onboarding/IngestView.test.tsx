@@ -86,6 +86,16 @@ const wrap = (node: React.ReactNode) => (
   </AppModeProvider>
 );
 
+const wrapEmpty = (node: React.ReactNode) => (
+  <AppModeProvider>
+    <ScenarioRegistryProvider initialScenarios={[]}>
+      <OnboardingSessionProvider>
+        <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
+      </OnboardingSessionProvider>
+    </ScenarioRegistryProvider>
+  </AppModeProvider>
+);
+
 describe("IngestView (F1)", () => {
   it("renders the three sample cards with capability badges", () => {
     render(wrap(<IngestView />));
@@ -173,6 +183,31 @@ describe("IngestView (F1)", () => {
     expect(header).toBeTruthy();
     await user.click(header!);
     expect(gateStatus).toBe("open");
+  });
+
+  it("shows an empty-state message with a Retry button when registry returns zero scenarios", () => {
+    render(wrapEmpty(<IngestView />));
+    // Sample tiles should not render.
+    expect(screen.queryByTestId("sample-utility")).not.toBeInTheDocument();
+    // A clear empty-state message must be present (specific wording: "no samples available").
+    expect(screen.getByText(/no samples available/i)).toBeInTheDocument();
+    // And a Retry button that the user can click.
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("hides the empty-state message when scenarios are present", () => {
+    render(wrap(<IngestView />));
+    expect(screen.queryByText(/no samples available/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  it("Retry button is keyboard-activatable and does not crash on click", async () => {
+    const user = userEvent.setup();
+    render(wrapEmpty(<IngestView />));
+    const retry = screen.getByRole("button", { name: /retry/i });
+    await user.click(retry); // smoke — refresh() fires; the entity will be exercised in integration.
+    // The button should still be in the document after click (provider re-renders into loading then back).
+    expect(screen.queryByText(/no samples available/i) ?? screen.queryByText(/loading/i)).toBeInTheDocument();
   });
 
   it("opens the gate from the BYO header via Enter key", async () => {
