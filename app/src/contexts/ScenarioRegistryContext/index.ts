@@ -1,2 +1,6 @@
-export { ScenarioRegistryProvider, useScenarioRegistry } from "./ScenarioRegistryContext";
+export {
+  ScenarioRegistryProvider,
+  ScenarioRegistryProviderWithDemoHooks,
+  useScenarioRegistry,
+} from "./ScenarioRegistryContext";
 export type { ScenarioRegistryApi, ScenarioRegistryState, ScenarioRegistryStatus } from "./types";
