@@ -3,7 +3,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, type FC } from "react";
 
 import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
@@ -169,41 +169,34 @@ export const OnboardingShell: FC = () => {
   const theme = useTheme();
   const stripCompact = useMediaQuery(theme.breakpoints.down("md"));
 
-  if (isF1) {
-    // F1: nav + chat are hidden so the picker gets the full width (spec
-    // Canvas_Ingest). The step strip stays visible at the top of the canvas
-    // so the user can see Ingest active + Analyze/Integrate as upcoming
-    // before they pick a sample. The strip aligns with the main content's
-    // max-width (1200) so it doesn't feel orphaned on wide monitors.
-    return (
-      <Box
-        data-testid="onboarding-frame-f1"
-        sx={{
-          height: "100vh",
-          overflow: "auto",
-          display: "flex",
-          flexDirection: "column",
-          backgroundColor: WHITE,
-        }}
-      >
-        <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE }}>
-          {/* Strip container width must match IngestView's container so the
-              first pill and the hero headline both anchor to the same left
-              edge on every viewport. Ultrawide (xl) bumps to 1320 — see
-              IngestView for the rationale. */}
-          <Box sx={{ maxWidth: { xs: "100%", md: PICKER_MAX_WIDTH, xl: PICKER_MAX_WIDTH_ULTRAWIDE }, mx: "auto", px: { xs: 2, md: 4 } }}>
-            <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
-          </Box>
-        </Box>
-        <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-          <IngestView />
+  const f1Layout = (
+    <Box
+      data-testid="onboarding-frame-f1"
+      sx={{
+        height: "100%",
+        overflow: "auto",
+        display: "flex",
+        flexDirection: "column",
+        backgroundColor: WHITE,
+      }}
+    >
+      <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE }}>
+        {/* Strip container width must match IngestView's container so the
+            first pill and the hero headline both anchor to the same left
+            edge on every viewport. Ultrawide (xl) bumps to 1320 — see
+            IngestView for the rationale. */}
+        <Box sx={{ maxWidth: { xs: "100%", md: PICKER_MAX_WIDTH, xl: PICKER_MAX_WIDTH_ULTRAWIDE }, mx: "auto", px: { xs: 2, md: 4 } }}>
+          <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
         </Box>
       </Box>
-    );
-  }
+      <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        <IngestView />
+      </Box>
+    </Box>
+  );
 
   const nav = (
-    <SlideInPane delay={0} data-testid="onboarding-shell-nav-pane">
+    <SlideInPane delay={ENTER_NAV_DELAY_S} data-testid="onboarding-shell-nav-pane">
       <Stack
         sx={{
           height: "100%",
@@ -234,7 +227,7 @@ export const OnboardingShell: FC = () => {
   );
 
   const chat = (
-    <SlideInPane delay={0.15} data-testid="onboarding-shell-chat-pane">
+    <SlideInPane delay={ENTER_CHAT_DELAY_S} data-testid="onboarding-shell-chat-pane">
       <Box
         sx={{
           height: "100%",
@@ -258,7 +251,7 @@ export const OnboardingShell: FC = () => {
       <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE, px: 3 }}>
         <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
       </Box>
-      <FadeUpPane delay={0.32} data-testid="onboarding-shell-canvas-pane">
+      <FadeUpPane delay={ENTER_CANVAS_DELAY_S} data-testid="onboarding-shell-canvas-pane">
         <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }} data-testid={`onboarding-frame-${session.currentFrame}`}>
           {canvasContent}
         </Box>
@@ -267,21 +260,88 @@ export const OnboardingShell: FC = () => {
   );
 
   return (
-    <Box sx={{ height: "100vh", overflow: "hidden" }} data-testid="onboarding-shell">
-      <AppShell nav={nav} chat={chat} canvas={canvas} initialChatWidth={360} />
+    <Box
+      sx={{ position: "relative", height: "100vh", overflow: "hidden", backgroundColor: WHITE }}
+      data-testid="onboarding-shell"
+    >
+      <AnimatePresence mode="popLayout" initial={false}>
+        {isF1 ? (
+          <F1ExitFrame key="onboarding-f1-frame">{f1Layout}</F1ExitFrame>
+        ) : (
+          <ShellEntryFrame key="onboarding-shell-frame">
+            <AppShell nav={nav} chat={chat} canvas={canvas} initialChatWidth={360} />
+          </ShellEntryFrame>
+        )}
+      </AnimatePresence>
     </Box>
   );
 };
 
 /**
- * F1 → F2 choreography, beats 1 + 2: nav and chat slide in from the
- * left in sequence. Wraps a single column inside the AppShell so the
- * outer layout (widths, borders) stays AppShell-owned; only the
- * column's contents translate.
+ * F1 → F2 choreography master timing.
+ *
+ * Total duration: ~1180ms. The F1 picker doesn't snap away — it
+ * gently lifts (translateY + scale-down + opacity decay) while the
+ * shell slides in from the left in two staggered beats, then the
+ * canvas content settles in from below with a subtle scale.
+ *
+ * The numbers below are calibrated so each beat is visible without
+ * the sequence feeling slow. Adjust ENTER_* values together if the
+ * overall pace needs tuning.
+ *
+ * Easings:
+ *   easeInQuart  — F1 exit, starts slow then accelerates away
+ *   easeOutExpo  — pane slide-ins, snappy arrival that decelerates
+ *                  smoothly (modern-design-system feel)
+ *   easeOut      — canvas content settle
+ */
+const F1_EXIT_DURATION_S = 0.5;
+const F1_EXIT_EASE = [0.7, 0, 0.84, 0] as const; // easeInQuart
+const ENTER_NAV_DELAY_S = 0.2;
+const ENTER_CHAT_DELAY_S = 0.38;
+const ENTER_CANVAS_DELAY_S = 0.58;
+const ENTER_PANE_DURATION_S = 0.52;
+const ENTER_CANVAS_DURATION_S = 0.6;
+const ENTER_PANE_EASE = [0.16, 1, 0.3, 1] as const; // easeOutExpo
+
+/**
+ * Wraps the F1 picker so the AnimatePresence parent can play its exit
+ * animation when the user advances out of F1. Position absolute over
+ * the shell so the exit + entry overlap visually.
+ */
+const F1ExitFrame: FC<{ children: React.ReactNode }> = ({ children }) => {
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.div
+      style={{ position: "absolute", inset: 0, backgroundColor: WHITE, zIndex: 2 }}
+      initial={false}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -24, scale: 0.97 }}
+      transition={{ duration: reduceMotion ? 0 : F1_EXIT_DURATION_S, ease: F1_EXIT_EASE }}
+    >
+      {children}
+    </motion.div>
+  );
+};
+
+/**
+ * Wraps the F2+ AppShell. Positioned underneath the F1 exit frame so
+ * the nav/chat slide-ins are visible as F1 lifts away. The shell
+ * itself doesn't animate as a whole — the individual panes inside
+ * (SlideInPane × 2, FadeUpPane × 1) handle the staggered entry.
+ */
+const ShellEntryFrame: FC<{ children: React.ReactNode }> = ({ children }) => (
+  <motion.div style={{ position: "absolute", inset: 0, zIndex: 1 }}>{children}</motion.div>
+);
+
+/**
+ * F1 → F2 choreography, beats 1 + 2: nav (delay 0.2s) and chat
+ * (delay 0.38s) slide in from the left. Wraps a single column inside
+ * the AppShell so the outer layout (widths, borders) stays
+ * AppShell-owned; only the column's contents translate.
  *
  * `initial` only fires on mount, so subsequent intra-shell navigations
- * (F2→F3, F3→F5) re-use the mounted pane and skip the animation —
- * which is what we want, the slide-in is exclusive to the F1→F2 entry.
+ * (F2→F3, F3→F5) re-use the mounted pane and skip the animation.
  */
 const SlideInPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?: string }> = ({
   children,
@@ -295,7 +355,11 @@ const SlideInPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?
       style={{ height: "100%", width: "100%" }}
       initial={reduceMotion ? false : { x: "-100%" }}
       animate={{ x: 0 }}
-      transition={{ duration: reduceMotion ? 0 : 0.32, ease: [0.22, 1, 0.36, 1], delay: reduceMotion ? 0 : delay }}
+      transition={{
+        duration: reduceMotion ? 0 : ENTER_PANE_DURATION_S,
+        ease: ENTER_PANE_EASE,
+        delay: reduceMotion ? 0 : delay,
+      }}
     >
       {children}
     </motion.div>
@@ -303,10 +367,10 @@ const SlideInPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?
 };
 
 /**
- * F1 → F2 choreography, beat 3: the canvas content fades up after the
- * nav + chat panes have settled. Internal sub-beats (scan line,
- * streaming thinking notes, reveal of the "Show me the extract" CTA)
- * live inside UnderstandView and run after this fade completes.
+ * F1 → F2 choreography, beat 3: the canvas content settles in from
+ * below with a subtle scale. Internal sub-beats (scan line, streaming
+ * thinking notes, reveal of the "Show me the extract" CTA) live
+ * inside UnderstandView and run after this settle completes.
  */
 const FadeUpPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?: string }> = ({
   children,
@@ -318,9 +382,13 @@ const FadeUpPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?:
     <motion.div
       data-testid={testId}
       style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
-      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: reduceMotion ? 0 : 0.4, ease: "easeOut", delay: reduceMotion ? 0 : delay }}
+      initial={reduceMotion ? false : { opacity: 0, y: 18, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{
+        duration: reduceMotion ? 0 : ENTER_CANVAS_DURATION_S,
+        ease: "easeOut",
+        delay: reduceMotion ? 0 : delay,
+      }}
     >
       {children}
     </motion.div>
