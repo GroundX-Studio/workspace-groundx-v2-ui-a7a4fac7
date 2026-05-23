@@ -203,50 +203,54 @@ export const OnboardingShell: FC = () => {
   }
 
   const nav = (
-    <Stack
-      sx={{
-        height: "100%",
-        backgroundColor: NAVY,
-        color: BODY_ON_DARK,
-        p: 1.5,
-      }}
-      aria-label="Onboarding navigation"
-    >
-      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
-        WORKSPACES
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.5), mt: 0.5 }}>
-        Available after sign-in
-      </Typography>
-      <Box sx={{ flex: 1 }} />
-      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
-        ACCOUNT
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
-        Book a call
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
-        Docs
-      </Typography>
-    </Stack>
+    <SlideInPane delay={0} data-testid="onboarding-shell-nav-pane">
+      <Stack
+        sx={{
+          height: "100%",
+          backgroundColor: NAVY,
+          color: BODY_ON_DARK,
+          p: 1.5,
+        }}
+        aria-label="Onboarding navigation"
+      >
+        <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
+          WORKSPACES
+        </Typography>
+        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.5), mt: 0.5 }}>
+          Available after sign-in
+        </Typography>
+        <Box sx={{ flex: 1 }} />
+        <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
+          ACCOUNT
+        </Typography>
+        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
+          Book a call
+        </Typography>
+        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
+          Docs
+        </Typography>
+      </Stack>
+    </SlideInPane>
   );
 
   const chat = (
-    <Box
-      sx={{
-        height: "100%",
-        backgroundColor: WHITE,
-        borderRight: `1px solid ${BORDER}`,
-        overflow: "auto",
-        p: 2,
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-      }}
-      aria-label="Chat column"
-    >
-      <GateChatPanel />
-    </Box>
+    <SlideInPane delay={0.15} data-testid="onboarding-shell-chat-pane">
+      <Box
+        sx={{
+          height: "100%",
+          backgroundColor: WHITE,
+          borderRight: `1px solid ${BORDER}`,
+          overflow: "auto",
+          p: 2,
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+        aria-label="Chat column"
+      >
+        <GateChatPanel />
+      </Box>
+    </SlideInPane>
   );
 
   const canvas = (
@@ -254,38 +258,69 @@ export const OnboardingShell: FC = () => {
       <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE, px: 3 }}>
         <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
       </Box>
-      <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0 }} data-testid={`onboarding-frame-${session.currentFrame}`}>
-        {canvasContent}
-      </Box>
+      <FadeUpPane delay={0.32} data-testid="onboarding-shell-canvas-pane">
+        <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }} data-testid={`onboarding-frame-${session.currentFrame}`}>
+          {canvasContent}
+        </Box>
+      </FadeUpPane>
     </Box>
   );
 
   return (
     <Box sx={{ height: "100vh", overflow: "hidden" }} data-testid="onboarding-shell">
-      <ShellFadeIn>
-        <AppShell nav={nav} chat={chat} canvas={canvas} initialChatWidth={360} />
-      </ShellFadeIn>
+      <AppShell nav={nav} chat={chat} canvas={canvas} initialChatWidth={360} />
     </Box>
   );
 };
 
 /**
- * Quiet fade-in for the 3-column shell. Fires on mount, which only
- * happens when the user transitions out of F1's full-bleed picker into
- * the F2+ shell. Subsequent intra-shell frame changes (F2→F3, F3→F5,
- * etc.) re-use the same mounted shell and skip the animation.
+ * F1 → F2 choreography, beats 1 + 2: nav and chat slide in from the
+ * left in sequence. Wraps a single column inside the AppShell so the
+ * outer layout (widths, borders) stays AppShell-owned; only the
+ * column's contents translate.
  *
- * Reduced-motion is respected: zero-duration transition collapses to
- * an instant render.
+ * `initial` only fires on mount, so subsequent intra-shell navigations
+ * (F2→F3, F3→F5) re-use the mounted pane and skip the animation —
+ * which is what we want, the slide-in is exclusive to the F1→F2 entry.
  */
-const ShellFadeIn: FC<{ children: React.ReactNode }> = ({ children }) => {
+const SlideInPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?: string }> = ({
+  children,
+  delay,
+  "data-testid": testId,
+}) => {
   const reduceMotion = useReducedMotion();
   return (
     <motion.div
-      style={{ height: "100%" }}
-      initial={reduceMotion ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: reduceMotion ? 0 : 0.28, ease: "easeOut" }}
+      data-testid={testId}
+      style={{ height: "100%", width: "100%" }}
+      initial={reduceMotion ? false : { x: "-100%" }}
+      animate={{ x: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.32, ease: [0.22, 1, 0.36, 1], delay: reduceMotion ? 0 : delay }}
+    >
+      {children}
+    </motion.div>
+  );
+};
+
+/**
+ * F1 → F2 choreography, beat 3: the canvas content fades up after the
+ * nav + chat panes have settled. Internal sub-beats (scan line,
+ * streaming thinking notes, reveal of the "Show me the extract" CTA)
+ * live inside UnderstandView and run after this fade completes.
+ */
+const FadeUpPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?: string }> = ({
+  children,
+  delay,
+  "data-testid": testId,
+}) => {
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.div
+      data-testid={testId}
+      style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.4, ease: "easeOut", delay: reduceMotion ? 0 : delay }}
     >
       {children}
     </motion.div>

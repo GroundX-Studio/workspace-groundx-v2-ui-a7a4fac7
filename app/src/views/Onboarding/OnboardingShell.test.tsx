@@ -115,6 +115,18 @@ describe("OnboardingShell", () => {
     expect(snapshot.frame).toBe("f1");
   });
 
+  it("wraps nav, chat, and canvas in motion panes for the F1->F2 slide-in choreography", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    // All three motion-driven wrappers must be present. The visual
+    // animation timing (180px nav, 320px chat, canvas fade) is a
+    // styling detail covered by visual review; this test guards the
+    // structural wiring so a refactor that strips out the motion
+    // wrappers fails loudly.
+    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-shell-canvas-pane")).toBeInTheDocument();
+  });
+
   it("clicking BYO from F1 advances to F2 and renders the gate in the chat column", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
