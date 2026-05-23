@@ -3,6 +3,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
+import { motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, type FC } from "react";
 
 import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
@@ -24,7 +25,7 @@ import type { StepDescriptor, StepId, StepPillState } from "@/shared/components/
 import type { FFrame } from "@/types/onboarding";
 
 import { ExtractView } from "./ExtractView";
-import { GateView } from "./GateView";
+import { GateChatPanel } from "./GateChatPanel";
 import { IngestView } from "./IngestView";
 import { IntegrateView } from "./IntegrateView";
 import { InteractView } from "./InteractView";
@@ -244,18 +245,7 @@ export const OnboardingShell: FC = () => {
       }}
       aria-label="Chat column"
     >
-      {session.gate.status === "open" || session.gate.status === "committed" ? (
-        <GateView />
-      ) : (
-        <Stack spacing={1}>
-          <Typography variant="overline" sx={{ color: NAVY, letterSpacing: "0.08em" }}>
-            CHAT
-          </Typography>
-          <Typography variant="body2" sx={{ color: MUTED_ON_LIGHT }}>
-            Ask anything about the sample. Citations appear next to every answer.
-          </Typography>
-        </Stack>
-      )}
+      <GateChatPanel />
     </Box>
   );
 
@@ -272,7 +262,32 @@ export const OnboardingShell: FC = () => {
 
   return (
     <Box sx={{ height: "100vh", overflow: "hidden" }} data-testid="onboarding-shell">
-      <AppShell nav={nav} chat={chat} canvas={canvas} initialChatWidth={360} />
+      <ShellFadeIn>
+        <AppShell nav={nav} chat={chat} canvas={canvas} initialChatWidth={360} />
+      </ShellFadeIn>
     </Box>
+  );
+};
+
+/**
+ * Quiet fade-in for the 3-column shell. Fires on mount, which only
+ * happens when the user transitions out of F1's full-bleed picker into
+ * the F2+ shell. Subsequent intra-shell frame changes (F2→F3, F3→F5,
+ * etc.) re-use the same mounted shell and skip the animation.
+ *
+ * Reduced-motion is respected: zero-duration transition collapses to
+ * an instant render.
+ */
+const ShellFadeIn: FC<{ children: React.ReactNode }> = ({ children }) => {
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.div
+      style={{ height: "100%" }}
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: reduceMotion ? 0 : 0.28, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
   );
 };
