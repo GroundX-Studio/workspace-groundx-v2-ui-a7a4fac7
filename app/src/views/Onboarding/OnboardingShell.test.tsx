@@ -115,6 +115,24 @@ describe("OnboardingShell", () => {
     expect(snapshot.frame).toBe("f1");
   });
 
+  it("clicking BYO from F1 advances to F2 and renders the gate in the chat column", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
+
+    // We're on F1's full-bleed picker — no chat column visible yet.
+    expect(screen.queryByLabelText("Chat column")).not.toBeInTheDocument();
+
+    // Click any BYO Sign Up tile (header, Upload, Connect, Email all
+    // route through handleByoClick).
+    await user.click(screen.getByTestId("byo-pdf"));
+
+    // After the click: frame advances to F2 (so the 3-column layout
+    // renders), and the chat column hosts the GateView.
+    expect(await screen.findByTestId("onboarding-frame-f2")).toBeInTheDocument();
+    expect(screen.getByLabelText("Chat column")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+  });
+
   it("makes the Understand pill reachable once a scenario is picked", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
     const understandPill = screen.getByText("Understand").closest('[role="button"]');

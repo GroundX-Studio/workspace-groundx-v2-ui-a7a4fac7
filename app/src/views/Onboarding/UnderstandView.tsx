@@ -44,9 +44,14 @@ export const UnderstandView: FC = () => {
   const [noteIndex, setNoteIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
 
-  const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
+  // A user can land on F2 without a scenario when they click Sign Up
+  // from F1's BYO row — the BYO path advances to F2 + opens the gate
+  // but never picks a sample. In that case we render a BYO-specific
+  // placeholder instead of falling back to the utility scenario.
+  const scenarioId = appMode.scenario ?? session.scenario;
   const { byId } = useScenarioRegistry();
-  const scenario = byId(scenarioId);
+  const scenario = scenarioId ? byId(scenarioId) : undefined;
+  const isByoPlaceholder = scenarioId == null;
   const thinkingScript = scenario?.manifest.thinkingScript ?? [];
   const docTitle = scenario?.documents[0]?.fileName ?? "Sample";
 
@@ -63,6 +68,34 @@ export const UnderstandView: FC = () => {
     const id = window.setTimeout(() => setRevealed(true), REVEAL_DELAY_MS);
     return () => window.clearTimeout(id);
   }, []);
+
+  if (isByoPlaceholder) {
+    return (
+      <Box
+        sx={{
+          p: { xs: 3, md: 5 },
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-start",
+          gap: 1,
+          maxWidth: 560,
+          mx: "auto",
+        }}
+        aria-label="Understand · sign in to upload"
+      >
+        <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
+          UNDERSTAND
+        </Typography>
+        <Typography variant="h4">Sign in to start uploading your own docs.</Typography>
+        <Typography variant="body1" sx={{ color: BODY_TEXT, mt: 1 }}>
+          Once you're signed in, this surface streams the same parse + extract
+          experience over your documents. Use the chat column to send a magic
+          link, log in with SSO, or book a call with an engineer.
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -92,7 +125,8 @@ export const UnderstandView: FC = () => {
           backgroundColor: WHITE,
           overflow: "hidden",
           aspectRatio: "8.5 / 11",
-          maxHeight: "70vh",
+          minHeight: 0,
+          maxHeight: "100%",
           mx: "auto",
           width: "100%",
           maxWidth: 560,

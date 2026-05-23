@@ -142,12 +142,12 @@ describe("IngestView (F1)", () => {
     expect(snapshot.frame).toBe("f2");
   });
 
-  it("clicking BYO opens the gate", async () => {
+  it("clicking BYO opens the gate AND advances the frame to F2", async () => {
     const user = userEvent.setup();
-    let gateStatus = "";
+    let snapshot = { gateStatus: "", frame: "" };
     const Spy = () => {
       const session = useOnboardingSession();
-      gateStatus = session.state.gate.status;
+      snapshot = { gateStatus: session.state.gate.status, frame: session.state.currentFrame };
       return null;
     };
     render(
@@ -159,7 +159,21 @@ describe("IngestView (F1)", () => {
       )
     );
     await user.click(screen.getByTestId("byo-pdf"));
-    expect(gateStatus).toBe("open");
+    // Gate opens (existing behavior)…
+    expect(snapshot.gateStatus).toBe("open");
+    // …AND we advance to F2 so the gate can render in the chat column
+    // (wireframe behavior: "Sign up triggers F1→F2 + loads the gate inline").
+    expect(snapshot.frame).toBe("f2");
+  });
+
+  it("does NOT render the gate inside IngestView after BYO click (OnboardingShell hosts it in chat)", async () => {
+    const user = userEvent.setup();
+    render(wrap(<IngestView />));
+    await user.click(screen.getByTestId("byo-pdf"));
+    // The gate must NOT live in F1's render tree. F2's OnboardingShell
+    // chat column is the host. If IngestView still rendered <GateView />
+    // inline (the old behavior), this test would find a gate-card.
+    expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
   });
 
   it("clicking the BYO section header opens the gate (same as the Sign Up buttons)", async () => {

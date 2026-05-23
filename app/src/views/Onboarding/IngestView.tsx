@@ -1,10 +1,8 @@
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import Box from "@mui/material/Box";
-import Drawer from "@mui/material/Drawer";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { alpha, useTheme } from "@mui/material/styles";
-import useMediaQuery from "@mui/material/useMediaQuery";
+import { alpha } from "@mui/material/styles";
 import { useCallback, type FC } from "react";
 
 import {
@@ -18,8 +16,6 @@ import {
   FONT_SIZE_LABEL,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
-  GATE_DRAWER_MAX_HEIGHT,
-  GATE_MAX_WIDTH,
   GREEN,
   ICON_SIZE_INLINE,
   LETTER_SPACING_LABEL,
@@ -45,8 +41,6 @@ import {
 import { SampleScenarioCard } from "@/shared/components/SampleScenarioCard";
 import type { Scenario } from "@/types/onboarding";
 import type { ScenarioConfig } from "@/types/scenarios";
-
-import { GateView } from "./GateView";
 
 /**
  * Closed-union safe-list. Downstream views (F2-F5) still type on the
@@ -75,12 +69,9 @@ const CAPABILITIES: ReadonlyArray<{ letter: "E" | "I" | "R"; name: string; key: 
  */
 export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
-  const { state: session, pickScenario, advanceFrame, openGate, dismissGate } = useOnboardingSession();
+  const { pickScenario, advanceFrame, openGate } = useOnboardingSession();
   const { dispatch } = useCanvasOrchestrator();
   const { state: registry, refresh: refreshRegistry } = useScenarioRegistry();
-  const gateOpenOrCommitted = session.gate.status === "open" || session.gate.status === "committed";
-  const theme = useTheme();
-  const compact = useMediaQuery(theme.breakpoints.down("md"));
 
   const handlePickScenario = useCallback(
     (id: string) => {
@@ -95,8 +86,14 @@ export const IngestView: FC = () => {
   );
 
   const handleByoClick = useCallback(() => {
+    // Match the spec's wireframe behavior: signup triggers F1→F2 and the
+    // gate loads inline in the chat column. OnboardingShell renders the
+    // chat column on F2-F7 and already hosts <GateView /> when
+    // gate.status === "open", so we just need to (a) open the gate and
+    // (b) advance to F2 so the 3-column shell mounts.
     openGate("byo");
-  }, [openGate]);
+    advanceFrame("f2");
+  }, [openGate, advanceFrame]);
 
   return (
     <Box
@@ -375,32 +372,10 @@ export const IngestView: FC = () => {
         </Typography>
       </Stack>
 
-      {/* F6 gate — inline next to the picker on desktop (md+), or a bottom
-          sheet Drawer on tablet/mobile so the picker stays visible behind. */}
-      {gateOpenOrCommitted && !compact ? (
-        <Box sx={{ mt: 4, maxWidth: GATE_MAX_WIDTH, mx: "auto" }}>
-          <GateView />
-        </Box>
-      ) : null}
-
-      <Drawer
-        anchor="bottom"
-        open={gateOpenOrCommitted && compact}
-        onClose={dismissGate}
-        PaperProps={{
-          sx: {
-            borderTopLeftRadius: BORDER_RADIUS,
-            borderTopRightRadius: BORDER_RADIUS,
-            maxHeight: GATE_DRAWER_MAX_HEIGHT,
-            backgroundColor: WHITE,
-            p: { xs: 1.5, sm: 2 },
-          },
-        }}
-      >
-        <Box sx={{ width: "100%", display: "flex", justifyContent: "center" }}>
-          <GateView />
-        </Box>
-      </Drawer>
+      {/* Note: the gate is NOT rendered here. Clicking Sign Up advances
+          to F2, which mounts the OnboardingShell's chat column; that
+          column hosts <GateView /> whenever gate.status === "open" |
+          "committed". F1 stays a clean full-bleed picker. */}
 
       <Box sx={{ visibility: "hidden", borderTop: `1px solid ${BORDER}`, mt: 4 }} aria-hidden />
     </Box>
