@@ -277,38 +277,35 @@ export const OnboardingShell: FC = () => {
 };
 
 /**
- * F1 → F2 page-swipe choreography.
+ * F1 → F2 transition — orthogonal complementary motions:
  *
- * F1 picker slides out to the right while the F2+ workspace slides in
- * from the left, both moving the same direction at the same pace.
- * Reads as "the new workspace pushed the picker aside" — the canonical
- * mobile/modern page-navigation pattern (Linear, Vercel onboarding,
- * native iOS push transition).
+ *   F1 picker:  slides UP off-screen (y: 0 -> -100%) + slight fade
+ *               (the picker "lifts away" upward)
+ *   F2 shell:   slides in from the LEFT (x: -100% -> 0)
+ *               (the workspace arrives laterally)
  *
- * One synchronized 720ms motion. Adjust SWIPE_DURATION_S to retune.
+ * UP and LEFT are perpendicular directions — the eye reads them as
+ * two distinct layers moving independently. The page-swipe (both
+ * laterally) was visually muddy because the two layers shared a motion
+ * axis; this orthogonal split makes each layer's role unambiguous.
  *
- * Easing: easeOutExpo (cubic-bezier 0.16, 1, 0.3, 1) — leading edge
- * arrives quickly, settles smoothly without bounce. The "modern
- * design system" curve used by Linear, Vercel, Stripe.
+ * Total ~900ms. F1 exits on top (zIndex 2) so its upward slide is
+ * always visible, then the shell underneath finishes settling in.
  */
-const SWIPE_DURATION_S = 0.72;
+const SWIPE_DURATION_S = 0.85;
 const SWIPE_EASE = [0.16, 1, 0.3, 1] as const; // easeOutExpo
 
 const F1ExitFrame: FC<{ children: React.ReactNode }> = ({ children }) => {
   const reduceMotion = useReducedMotion();
   return (
     <motion.div
-      // F1 sits on TOP during its exit (zIndex 2 vs Shell's 1). The shell
-      // is mounted underneath at x:-100% and slides to x:0 simultaneously.
-      // As F1 slides right (x:0 -> 100%), it uncovers the screen left-to-
-      // right; the shell sliding in from the left fills the uncovered
-      // area at the same rate. Without F1 on top, the shell would render
-      // above F1 and the user would only see the shell — F1's slide-off
-      // hidden underneath.
+      // F1 rides on TOP so its upward slide is unambiguous; the shell
+      // sliding in from the left is visible at the bottom edge first,
+      // then revealed fully as F1 clears the top of the screen.
       style={{ position: "absolute", inset: 0, backgroundColor: WHITE, zIndex: 2 }}
       initial={false}
-      animate={{ x: 0 }}
-      exit={reduceMotion ? { opacity: 0 } : { x: "100%" }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={reduceMotion ? { opacity: 0 } : { y: "-100%", opacity: 0.8 }}
       transition={{ duration: reduceMotion ? 0 : SWIPE_DURATION_S, ease: SWIPE_EASE }}
     >
       {children}
