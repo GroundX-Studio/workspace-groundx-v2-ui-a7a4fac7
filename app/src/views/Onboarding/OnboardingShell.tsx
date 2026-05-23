@@ -196,66 +196,67 @@ export const OnboardingShell: FC = () => {
   );
 
   const nav = (
-    <Stack
-      data-testid="onboarding-shell-nav-pane"
-      sx={{
-        height: "100%",
-        backgroundColor: NAVY,
-        color: BODY_ON_DARK,
-        p: 1.5,
-      }}
-      aria-label="Onboarding navigation"
-    >
-      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
-        WORKSPACES
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.5), mt: 0.5 }}>
-        Available after sign-in
-      </Typography>
-      <Box sx={{ flex: 1 }} />
-      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
-        ACCOUNT
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
-        Book a call
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
-        Docs
-      </Typography>
-    </Stack>
+    <PaneSlideIn from="left" data-testid="onboarding-shell-nav-pane" backgroundColor={NAVY}>
+      <Stack
+        sx={{
+          height: "100%",
+          backgroundColor: NAVY,
+          color: BODY_ON_DARK,
+          p: 1.5,
+        }}
+        aria-label="Onboarding navigation"
+      >
+        <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
+          WORKSPACES
+        </Typography>
+        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.5), mt: 0.5 }}>
+          Available after sign-in
+        </Typography>
+        <Box sx={{ flex: 1 }} />
+        <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
+          ACCOUNT
+        </Typography>
+        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
+          Book a call
+        </Typography>
+        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
+          Docs
+        </Typography>
+      </Stack>
+    </PaneSlideIn>
   );
 
   const chat = (
-    <Box
-      data-testid="onboarding-shell-chat-pane"
-      sx={{
-        height: "100%",
-        backgroundColor: WHITE,
-        borderRight: `1px solid ${BORDER}`,
-        overflow: "auto",
-        p: 2,
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-      }}
-      aria-label="Chat column"
-    >
-      <GateChatPanel />
-    </Box>
+    <PaneSlideIn from="left" data-testid="onboarding-shell-chat-pane" backgroundColor={WHITE}>
+      <Box
+        sx={{
+          height: "100%",
+          backgroundColor: WHITE,
+          borderRight: `1px solid ${BORDER}`,
+          overflow: "auto",
+          p: 2,
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+        aria-label="Chat column"
+      >
+        <GateChatPanel />
+      </Box>
+    </PaneSlideIn>
   );
 
   const canvas = (
-    <Box
-      data-testid="onboarding-shell-canvas-pane"
-      sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}
-    >
-      <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE, px: 3 }}>
-        <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
+    <PaneSlideIn from="right" data-testid="onboarding-shell-canvas-pane" backgroundColor={WHITE}>
+      <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: WHITE }}>
+        <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE, px: 3 }}>
+          <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
+        </Box>
+        <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }} data-testid={`onboarding-frame-${session.currentFrame}`}>
+          {canvasContent}
+        </Box>
       </Box>
-      <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }} data-testid={`onboarding-frame-${session.currentFrame}`}>
-        {canvasContent}
-      </Box>
-    </Box>
+    </PaneSlideIn>
   );
 
   return (
@@ -277,48 +278,75 @@ export const OnboardingShell: FC = () => {
 };
 
 /**
- * F1 → F2 transition — orthogonal complementary motions:
+ * F1 → F2 transition — F1 stays still underneath; the three shell
+ * panes slide in over it from their respective edges:
  *
- *   F1 picker:  slides UP off-screen (y: 0 -> -100%) + slight fade
- *               (the picker "lifts away" upward)
- *   F2 shell:   slides in from the LEFT (x: -100% -> 0)
- *               (the workspace arrives laterally)
+ *   Nav  (180px)  ─►  slides in from the LEFT
+ *   Chat (340px)  ─►  slides in from the LEFT
+ *   Canvas (rest) ◄─  slides in from the RIGHT
  *
- * UP and LEFT are perpendicular directions — the eye reads them as
- * two distinct layers moving independently. The page-swipe (both
- * laterally) was visually muddy because the two layers shared a motion
- * axis; this orthogonal split makes each layer's role unambiguous.
+ * F1 doesn't animate at all. It just sits underneath, and gets
+ * progressively covered as the three panes converge to their final
+ * positions. Once the panes are in place, F1 is fully occluded and
+ * unmounts.
  *
- * Total ~900ms. F1 exits on top (zIndex 2) so its upward slide is
- * always visible, then the shell underneath finishes settling in.
+ * AnimatePresence keeps F1 mounted for the SWIPE_DURATION_S beat
+ * via a no-op exit transition so it stays visible behind the
+ * sliding panes during the transition.
  */
-const SWIPE_DURATION_S = 0.85;
+const SWIPE_DURATION_S = 0.7;
 const SWIPE_EASE = [0.16, 1, 0.3, 1] as const; // easeOutExpo
 
-const F1ExitFrame: FC<{ children: React.ReactNode }> = ({ children }) => {
-  const reduceMotion = useReducedMotion();
-  return (
-    <motion.div
-      // F1 rides on TOP so its upward slide is unambiguous; the shell
-      // sliding in from the left is visible at the bottom edge first,
-      // then revealed fully as F1 clears the top of the screen.
-      style={{ position: "absolute", inset: 0, backgroundColor: WHITE, zIndex: 2 }}
-      initial={false}
-      animate={{ y: 0, opacity: 1 }}
-      exit={reduceMotion ? { opacity: 0 } : { y: "-100%", opacity: 0.8 }}
-      transition={{ duration: reduceMotion ? 0 : SWIPE_DURATION_S, ease: SWIPE_EASE }}
-    >
-      {children}
-    </motion.div>
-  );
-};
+const F1ExitFrame: FC<{ children: React.ReactNode }> = ({ children }) => (
+  <motion.div
+    // F1 is underneath (zIndex 0). No transform on exit — it stays
+    // still — but the no-op exit keeps it mounted during the
+    // SWIPE_DURATION_S beat so the user sees it behind the sliding
+    // shell panes.
+    style={{ position: "absolute", inset: 0, backgroundColor: WHITE, zIndex: 0 }}
+    initial={false}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 1 }}
+    transition={{ duration: SWIPE_DURATION_S }}
+  >
+    {children}
+  </motion.div>
+);
 
-const ShellEntryFrame: FC<{ children: React.ReactNode }> = ({ children }) => {
+const ShellEntryFrame: FC<{ children: React.ReactNode }> = ({ children }) => (
+  <motion.div
+    // Shell is on top (zIndex 1). The shell itself doesn't slide —
+    // its individual panes do, each from their own edge. Mounting
+    // the shell with no transform just makes the AppShell layout
+    // available; the PaneSlideIn wrappers inside drive the motion.
+    style={{ position: "absolute", inset: 0, zIndex: 1 }}
+  >
+    {children}
+  </motion.div>
+);
+
+/**
+ * Slides a pane's contents into place from its edge — left for nav
+ * and chat, right for canvas — over F1 sitting underneath. The pane's
+ * background travels with it, so F1 stays visible until the pane
+ * physically reaches its target position.
+ *
+ * Only fires on mount. F2 → F3, F3 → F5 etc. don't re-trigger since
+ * the panes stay mounted across intra-shell navigation.
+ */
+const PaneSlideIn: FC<{
+  children: React.ReactNode;
+  from: "left" | "right";
+  backgroundColor: string;
+  "data-testid"?: string;
+}> = ({ children, from, backgroundColor, "data-testid": testId }) => {
   const reduceMotion = useReducedMotion();
+  const initialX = from === "left" ? "-100%" : "100%";
   return (
     <motion.div
-      style={{ position: "absolute", inset: 0, zIndex: 1 }}
-      initial={reduceMotion ? false : { x: "-100%" }}
+      data-testid={testId}
+      style={{ height: "100%", width: "100%", backgroundColor }}
+      initial={reduceMotion ? false : { x: initialX }}
       animate={{ x: 0 }}
       transition={{ duration: reduceMotion ? 0 : SWIPE_DURATION_S, ease: SWIPE_EASE }}
     >
