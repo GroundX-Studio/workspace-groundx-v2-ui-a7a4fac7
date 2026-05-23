@@ -298,7 +298,14 @@ const F1ExitFrame: FC<{ children: React.ReactNode }> = ({ children }) => {
   const reduceMotion = useReducedMotion();
   return (
     <motion.div
-      style={{ position: "absolute", inset: 0, backgroundColor: WHITE, zIndex: 1 }}
+      // F1 sits on TOP during its exit (zIndex 2 vs Shell's 1). The shell
+      // is mounted underneath at x:-100% and slides to x:0 simultaneously.
+      // As F1 slides right (x:0 -> 100%), it uncovers the screen left-to-
+      // right; the shell sliding in from the left fills the uncovered
+      // area at the same rate. Without F1 on top, the shell would render
+      // above F1 and the user would only see the shell — F1's slide-off
+      // hidden underneath.
+      style={{ position: "absolute", inset: 0, backgroundColor: WHITE, zIndex: 2 }}
       initial={false}
       animate={{ x: 0 }}
       exit={reduceMotion ? { opacity: 0 } : { x: "100%" }}
