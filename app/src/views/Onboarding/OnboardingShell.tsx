@@ -196,66 +196,65 @@ export const OnboardingShell: FC = () => {
   );
 
   const nav = (
-    <SlideInPane delay={ENTER_NAV_DELAY_S} data-testid="onboarding-shell-nav-pane">
-      <Stack
-        sx={{
-          height: "100%",
-          backgroundColor: NAVY,
-          color: BODY_ON_DARK,
-          p: 1.5,
-        }}
-        aria-label="Onboarding navigation"
-      >
-        <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
-          WORKSPACES
-        </Typography>
-        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.5), mt: 0.5 }}>
-          Available after sign-in
-        </Typography>
-        <Box sx={{ flex: 1 }} />
-        <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
-          ACCOUNT
-        </Typography>
-        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
-          Book a call
-        </Typography>
-        <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
-          Docs
-        </Typography>
-      </Stack>
-    </SlideInPane>
+    <Stack
+      data-testid="onboarding-shell-nav-pane"
+      sx={{
+        height: "100%",
+        backgroundColor: NAVY,
+        color: BODY_ON_DARK,
+        p: 1.5,
+      }}
+      aria-label="Onboarding navigation"
+    >
+      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
+        WORKSPACES
+      </Typography>
+      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.5), mt: 0.5 }}>
+        Available after sign-in
+      </Typography>
+      <Box sx={{ flex: 1 }} />
+      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
+        ACCOUNT
+      </Typography>
+      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
+        Book a call
+      </Typography>
+      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
+        Docs
+      </Typography>
+    </Stack>
   );
 
   const chat = (
-    <SlideInPane delay={ENTER_CHAT_DELAY_S} data-testid="onboarding-shell-chat-pane">
-      <Box
-        sx={{
-          height: "100%",
-          backgroundColor: WHITE,
-          borderRight: `1px solid ${BORDER}`,
-          overflow: "auto",
-          p: 2,
-          display: "flex",
-          flexDirection: "column",
-          gap: 2,
-        }}
-        aria-label="Chat column"
-      >
-        <GateChatPanel />
-      </Box>
-    </SlideInPane>
+    <Box
+      data-testid="onboarding-shell-chat-pane"
+      sx={{
+        height: "100%",
+        backgroundColor: WHITE,
+        borderRight: `1px solid ${BORDER}`,
+        overflow: "auto",
+        p: 2,
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+      }}
+      aria-label="Chat column"
+    >
+      <GateChatPanel />
+    </Box>
   );
 
   const canvas = (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <Box
+      data-testid="onboarding-shell-canvas-pane"
+      sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}
+    >
       <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE, px: 3 }}>
         <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
       </Box>
-      <FadeUpPane delay={ENTER_CANVAS_DELAY_S} data-testid="onboarding-shell-canvas-pane">
-        <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }} data-testid={`onboarding-frame-${session.currentFrame}`}>
-          {canvasContent}
-        </Box>
-      </FadeUpPane>
+      <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }} data-testid={`onboarding-frame-${session.currentFrame}`}>
+        {canvasContent}
+      </Box>
     </Box>
   );
 
@@ -278,117 +277,46 @@ export const OnboardingShell: FC = () => {
 };
 
 /**
- * F1 → F2 choreography master timing.
+ * F1 → F2 page-swipe choreography.
  *
- * Total duration: ~1180ms. The F1 picker doesn't snap away — it
- * gently lifts (translateY + scale-down + opacity decay) while the
- * shell slides in from the left in two staggered beats, then the
- * canvas content settles in from below with a subtle scale.
+ * F1 picker slides out to the right while the F2+ workspace slides in
+ * from the left, both moving the same direction at the same pace.
+ * Reads as "the new workspace pushed the picker aside" — the canonical
+ * mobile/modern page-navigation pattern (Linear, Vercel onboarding,
+ * native iOS push transition).
  *
- * The numbers below are calibrated so each beat is visible without
- * the sequence feeling slow. Adjust ENTER_* values together if the
- * overall pace needs tuning.
+ * One synchronized 720ms motion. Adjust SWIPE_DURATION_S to retune.
  *
- * Easings:
- *   easeInQuart  — F1 exit, starts slow then accelerates away
- *   easeOutExpo  — pane slide-ins, snappy arrival that decelerates
- *                  smoothly (modern-design-system feel)
- *   easeOut      — canvas content settle
+ * Easing: easeOutExpo (cubic-bezier 0.16, 1, 0.3, 1) — leading edge
+ * arrives quickly, settles smoothly without bounce. The "modern
+ * design system" curve used by Linear, Vercel, Stripe.
  */
-const F1_EXIT_DURATION_S = 0.5;
-const F1_EXIT_EASE = [0.7, 0, 0.84, 0] as const; // easeInQuart
-const ENTER_NAV_DELAY_S = 0.2;
-const ENTER_CHAT_DELAY_S = 0.38;
-const ENTER_CANVAS_DELAY_S = 0.58;
-const ENTER_PANE_DURATION_S = 0.52;
-const ENTER_CANVAS_DURATION_S = 0.6;
-const ENTER_PANE_EASE = [0.16, 1, 0.3, 1] as const; // easeOutExpo
+const SWIPE_DURATION_S = 0.72;
+const SWIPE_EASE = [0.16, 1, 0.3, 1] as const; // easeOutExpo
 
-/**
- * Wraps the F1 picker so the AnimatePresence parent can play its exit
- * animation when the user advances out of F1. Position absolute over
- * the shell so the exit + entry overlap visually.
- */
 const F1ExitFrame: FC<{ children: React.ReactNode }> = ({ children }) => {
   const reduceMotion = useReducedMotion();
   return (
     <motion.div
-      style={{ position: "absolute", inset: 0, backgroundColor: WHITE, zIndex: 2 }}
+      style={{ position: "absolute", inset: 0, backgroundColor: WHITE, zIndex: 1 }}
       initial={false}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -24, scale: 0.97 }}
-      transition={{ duration: reduceMotion ? 0 : F1_EXIT_DURATION_S, ease: F1_EXIT_EASE }}
+      animate={{ x: 0 }}
+      exit={reduceMotion ? { opacity: 0 } : { x: "100%" }}
+      transition={{ duration: reduceMotion ? 0 : SWIPE_DURATION_S, ease: SWIPE_EASE }}
     >
       {children}
     </motion.div>
   );
 };
 
-/**
- * Wraps the F2+ AppShell. Positioned underneath the F1 exit frame so
- * the nav/chat slide-ins are visible as F1 lifts away. The shell
- * itself doesn't animate as a whole — the individual panes inside
- * (SlideInPane × 2, FadeUpPane × 1) handle the staggered entry.
- */
-const ShellEntryFrame: FC<{ children: React.ReactNode }> = ({ children }) => (
-  <motion.div style={{ position: "absolute", inset: 0, zIndex: 1 }}>{children}</motion.div>
-);
-
-/**
- * F1 → F2 choreography, beats 1 + 2: nav (delay 0.2s) and chat
- * (delay 0.38s) slide in from the left. Wraps a single column inside
- * the AppShell so the outer layout (widths, borders) stays
- * AppShell-owned; only the column's contents translate.
- *
- * `initial` only fires on mount, so subsequent intra-shell navigations
- * (F2→F3, F3→F5) re-use the mounted pane and skip the animation.
- */
-const SlideInPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?: string }> = ({
-  children,
-  delay,
-  "data-testid": testId,
-}) => {
+const ShellEntryFrame: FC<{ children: React.ReactNode }> = ({ children }) => {
   const reduceMotion = useReducedMotion();
   return (
     <motion.div
-      data-testid={testId}
-      style={{ height: "100%", width: "100%" }}
+      style={{ position: "absolute", inset: 0, zIndex: 1 }}
       initial={reduceMotion ? false : { x: "-100%" }}
       animate={{ x: 0 }}
-      transition={{
-        duration: reduceMotion ? 0 : ENTER_PANE_DURATION_S,
-        ease: ENTER_PANE_EASE,
-        delay: reduceMotion ? 0 : delay,
-      }}
-    >
-      {children}
-    </motion.div>
-  );
-};
-
-/**
- * F1 → F2 choreography, beat 3: the canvas content settles in from
- * below with a subtle scale. Internal sub-beats (scan line, streaming
- * thinking notes, reveal of the "Show me the extract" CTA) live
- * inside UnderstandView and run after this settle completes.
- */
-const FadeUpPane: FC<{ children: React.ReactNode; delay: number; "data-testid"?: string }> = ({
-  children,
-  delay,
-  "data-testid": testId,
-}) => {
-  const reduceMotion = useReducedMotion();
-  return (
-    <motion.div
-      data-testid={testId}
-      style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
-      initial={reduceMotion ? false : { opacity: 0, y: 18, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{
-        duration: reduceMotion ? 0 : ENTER_CANVAS_DURATION_S,
-        ease: "easeOut",
-        delay: reduceMotion ? 0 : delay,
-      }}
+      transition={{ duration: reduceMotion ? 0 : SWIPE_DURATION_S, ease: SWIPE_EASE }}
     >
       {children}
     </motion.div>
