@@ -18,6 +18,21 @@ const FrameProbe = ({ onFrame }: { onFrame: (frame: string) => void }) => {
 };
 
 describe("ExtractView (F3/F4)", () => {
+  it("pre-selects the first field in the focus category on mount when ?focus= is set", async () => {
+    // F2 Pick-a-view pills navigate to F3 with ?focus=<categoryId>;
+    // the user lands already inspecting their picked slice instead of
+    // staring at the blank preview placeholder.
+    renderWithOnboardingProviders(<ExtractView />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      initialUrl: "/onboarding/28454/utility?focus=meters",
+    });
+    const preview = screen.getByTestId("extract-preview");
+    // The first Meters field opens in the preview. Use waitFor since
+    // the useEffect that reads ?focus runs after mount.
+    await waitFor(() => expect(within(preview).getByText("Source pages")).toBeInTheDocument());
+  });
+
   it("renders schema categories and citation preview for the Utility sample", async () => {
     const user = userEvent.setup();
 

@@ -27,6 +27,7 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState, type FC } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   BODY_TEXT,
@@ -175,6 +176,7 @@ interface F2ConversationFlowProps {
 
 const F2ConversationFlow: FC<F2ConversationFlowProps> = ({ scenarioName, fileName, thinkingScript }) => {
   const { advanceFrame } = useOnboardingSession();
+  const navigate = useNavigate();
   // Streamed note count — starts at 1 (the first note appears immediately
   // so the user sees motion right away).
   const [noteCount, setNoteCount] = useState<number>(thinkingScript.length > 0 ? 1 : 0);
@@ -296,7 +298,18 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({ scenarioName, fileNam
                     // `advance-to-f3` testid so existing e2e suites that
                     // expect a canvas CTA still find a clickable affordance.
                     legacyTestid={view.key === "statement" ? "advance-to-f3" : undefined}
-                    onClick={() => advanceFrame(view.key === "edit-schema" ? "f3a" : "f3")}
+                    onClick={() => {
+                      // Advance frame state, then append ?focus=<view> so
+                      // ExtractView opens to the picked slice of the
+                      // schema. The current pathname already encodes the
+                      // bucket + scenario; we append only the search.
+                      if (view.key === "edit-schema") {
+                        advanceFrame("f3a");
+                        return;
+                      }
+                      advanceFrame("f3");
+                      navigate({ search: `?focus=${view.key}` }, { replace: false });
+                    }}
                   />
                 ))}
               </Box>

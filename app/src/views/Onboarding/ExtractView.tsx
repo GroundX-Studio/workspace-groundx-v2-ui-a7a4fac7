@@ -5,7 +5,8 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useMemo, useState, type FC, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useState, type FC, type SyntheticEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   BODY_TEXT,
@@ -28,15 +29,25 @@ import type { ExtractedFieldValue } from "@/types/scenarios";
 import { CiteChip } from "@/shared/components/CiteChip";
 
 /**
- * F3 ExtractView — fields panel side-by-side with the doc.
+ * F3 ExtractView — fields panel side-by-side with a citation peek panel.
  *
- * Placeholder rendering — the real Phase 2/7 wire-up mounts the
- * `extraction-workbench` widget here, configured for the 2-pane sample mode
- * documented in the widget README. For now we render the schema directly
- * from the fixture so the user can see citations + values.
+ * Renders the active scenario's extraction schema (categories +
+ * fields) alongside the manifest's sample extracted values + citations.
+ * Field rows are clickable; selecting a row surfaces a "Citation Peek"
+ * panel on the right showing source pages and snippets.
  *
- * F4 (expanded field citation) is the same view with the `selectedFieldId`
- * state set — see the right-side preview card.
+ * Loan scenario carries the workflow-handoff demo via a JSON render
+ * mode toggle ("Table" / "JSON"), backed by the same manifest data.
+ *
+ * The full `extraction-workbench` widget integration (with real
+ * pdfjs-driven PDF rendering + region overlays from citation
+ * coordinates) is the Phase 7 wire-up — until that lands the citation
+ * peek panel above carries the same data in a flat list.
+ *
+ * Optional inbound URL search param `?focus=<categoryId>` pre-selects
+ * the first field in that category — used by the F2 Pick-a-view pills
+ * (`statement` / `meters` / `charges`) so the chat-driven choice lands
+ * the user on the right slice of the schema.
  */
 export const ExtractView: FC = () => {
   // All hooks must run before any conditional return. Otherwise the render
@@ -65,6 +76,20 @@ export const ExtractView: FC = () => {
     }
     return map;
   }, [scenario]);
+
+  // ?focus=<categoryId> from the F2 Pick-a-view pill → select the first
+  // field in that category so the right-side preview opens to the
+  // user's chosen slice. Only runs on initial mount; user clicks on
+  // other fields after that take precedence.
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (!focus || !schema || selectedFieldId !== null) return;
+    const category = schema.categories.find((c) => c.id === focus);
+    const firstField = category?.fields[0];
+    if (firstField) setSelectedFieldId(firstField.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schema]);
 
   if (!schema) {
     return (
