@@ -196,6 +196,105 @@ describe("middleware API route contract", () => {
     expect(response.body.code).toBe("ANONYMOUS_SESSION");
   });
 
+  it("POST /api/chat-sessions/claim requires an authenticated user (ANONYMOUS_SESSION for anon)", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    const response = await agent.post("/api/chat-sessions/claim").send({
+      chatSessions: [],
+      chatMessages: [],
+      conversationSummaries: [],
+      chatSessionEntities: [],
+      viewerEvents: [],
+    }).expect(401);
+    expect(response.body.code).toBe("ANONYMOUS_SESSION");
+  });
+
+  it("POST /api/chat-sessions/claim ingests the localStorage payload under the signed-in user", async () => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+    const nowIso = new Date().toISOString();
+    const response = await agent
+      .post("/api/chat-sessions/claim")
+      .send({
+        chatSessions: [
+          {
+            id: "chat-A",
+            onboardingSessionId: "onb-A",
+            ownerUserId: null,
+            ownerAnonId: "anon-A",
+            title: "Onboarding",
+            isOnboarding: true,
+            activeEntityKey: "sample:utility",
+            currentIntent: null,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            archivedAt: null,
+          },
+        ],
+        chatMessages: [
+          {
+            id: "m1",
+            chatSessionId: "chat-A",
+            turnIndex: 1,
+            role: "user",
+            content: "Utility Bill",
+            createdAt: nowIso,
+          },
+        ],
+        conversationSummaries: [],
+        chatSessionEntities: [
+          {
+            chatSessionId: "chat-A",
+            entityKey: "sample:utility",
+            lastFrame: "f2",
+            completedFramesJson: "[]",
+            scanProgressJson: null,
+            extractedValuesJson: null,
+            createdAt: nowIso,
+            lastVisitedAt: nowIso,
+          },
+        ],
+        viewerEvents: [
+          {
+            id: "e1",
+            chatSessionId: "chat-A",
+            timestamp: Date.now(),
+            entityKey: "sample:utility",
+            action: "opened",
+            source: "user",
+            detailJson: null,
+          },
+        ],
+      })
+      .expect(200);
+    expect(response.body).toMatchObject({
+      claimedSessions: 1,
+      claimedMessages: 1,
+      claimedEntities: 1,
+      claimedViewerEvents: 1,
+    });
+    // The chat session is now owned by the signed-in user.
+    const claimed = await repository.getChatSession("chat-A");
+    expect(claimed?.ownerUserId).toBe("gx-user");
+    expect(claimed?.ownerAnonId).toBeNull();
+    expect(await repository.listChatMessages("chat-A")).toHaveLength(1);
+    expect(await repository.listChatSessionEntities("chat-A")).toHaveLength(1);
+    expect(await repository.listViewerEvents("chat-A")).toHaveLength(1);
+  });
+
+  it("POST /api/chat-sessions/claim returns 400 on a malformed payload", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+    const response = await agent
+      .post("/api/chat-sessions/claim")
+      .send({ chatSessions: [{ id: 123 }] }) // wrong type
+      .expect(400);
+    expect(response.body.error).toBe("invalid_payload");
+  });
+
   it("PATCH /api/me/metadata returns ANONYMOUS_SESSION when anon", async () => {
     const { app } = setup();
     const agent = request.agent(app);

@@ -12,7 +12,18 @@ import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/met
 import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { sendUpstreamResponse } from "./services/http.js";
-import type { AppRepository, GroundXClient, GroundXPartnerClient, LlmClient } from "./types.js";
+import type {
+  AnonymousChatPayload,
+  AppRepository,
+  ChatMessageRecord,
+  ChatSessionEntityRecord,
+  ChatSessionRecord,
+  ConversationSummaryRecord,
+  GroundXClient,
+  GroundXPartnerClient,
+  LlmClient,
+  ViewerEventRecord,
+} from "./types.js";
 
 function basicCredentials(req: Request): { email?: string; password?: string } {
   const header = req.headers.authorization;
@@ -319,6 +330,37 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
+  // Login-claim: ingest the anonymous user's localStorage chat-session
+  // payload into the DB under their new owner_user_id. Triggered by the
+  // frontend right after a successful F6 gate sign-up. The whole payload
+  // is upserted in a single transaction so a partial failure does not
+  // leave the user half-claimed.
+  app.post("/api/chat-sessions/claim", apiLimiter, requireAuthenticatedUser, async (req, res, next) => {
+    try {
+      const session = req.session!;
+      const ownerUserId = session.groundxUsername;
+      if (!ownerUserId) {
+        res.status(401).json({ error: "no_signed_in_user" });
+        return;
+      }
+      const payload = parseAnonymousChatPayload(req.body);
+      if (!payload) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      await repository.claimAnonymousChatPayload(ownerUserId, payload);
+      res.json({
+        claimedSessions: payload.chatSessions.length,
+        claimedMessages: payload.chatMessages.length,
+        claimedSummaries: payload.conversationSummaries.length,
+        claimedEntities: payload.chatSessionEntities.length,
+        claimedViewerEvents: payload.viewerEvents.length,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Public onboarding catalog. Reads the samples bucket and returns the
   // ScenarioConfig list parsed from each manifest doc's filter. No session
   // required — the samples are partner-owned, public content.
@@ -404,4 +446,177 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
   });
 
   return app;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Login-claim payload parsing
+//
+// The client sends a JSON bundle of ChatSession-related records straight from
+// localStorage. We validate the shape conservatively here (the values are
+// just JSON-serialized record types from the shared interface) before
+// handing them to the repository. Anything missing/wrong → null, the
+// endpoint returns 400.
+// ──────────────────────────────────────────────────────────────────────────
+
+function parseAnonymousChatPayload(body: unknown): AnonymousChatPayload | null {
+  if (!isObject(body)) return null;
+  const chatSessions = parseArrayOf(body.chatSessions, parseChatSession);
+  const chatMessages = parseArrayOf(body.chatMessages, parseChatMessage);
+  const conversationSummaries = parseArrayOf(body.conversationSummaries, parseConversationSummary);
+  const chatSessionEntities = parseArrayOf(body.chatSessionEntities, parseChatSessionEntity);
+  const viewerEvents = parseArrayOf(body.viewerEvents, parseViewerEvent);
+  if (
+    chatSessions == null ||
+    chatMessages == null ||
+    conversationSummaries == null ||
+    chatSessionEntities == null ||
+    viewerEvents == null
+  ) {
+    return null;
+  }
+  return { chatSessions, chatMessages, conversationSummaries, chatSessionEntities, viewerEvents };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseArrayOf<T>(input: unknown, parser: (item: unknown) => T | null): T[] | null {
+  if (input == null) return [];
+  if (!Array.isArray(input)) return null;
+  const out: T[] = [];
+  for (const item of input) {
+    const parsed = parser(item);
+    if (parsed == null) return null;
+    out.push(parsed);
+  }
+  return out;
+}
+
+function parseDate(value: unknown): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === "string" || typeof value === "number") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+function parseChatSession(item: unknown): ChatSessionRecord | null {
+  if (!isObject(item)) return null;
+  if (typeof item.id !== "string") return null;
+  if (typeof item.onboardingSessionId !== "string") return null;
+  if (typeof item.title !== "string") return null;
+  const createdAt = parseDate(item.createdAt);
+  const updatedAt = parseDate(item.updatedAt);
+  if (!createdAt || !updatedAt) return null;
+  return {
+    id: item.id,
+    onboardingSessionId: item.onboardingSessionId,
+    ownerUserId: typeof item.ownerUserId === "string" ? item.ownerUserId : null,
+    ownerAnonId: typeof item.ownerAnonId === "string" ? item.ownerAnonId : null,
+    title: item.title,
+    isOnboarding: Boolean(item.isOnboarding),
+    activeEntityKey: typeof item.activeEntityKey === "string" ? item.activeEntityKey : null,
+    currentIntent: isObject(item.currentIntent) ? item.currentIntent : null,
+    createdAt,
+    updatedAt,
+    archivedAt: parseDate(item.archivedAt),
+  };
+}
+
+function parseChatMessage(item: unknown): ChatMessageRecord | null {
+  if (!isObject(item)) return null;
+  if (typeof item.id !== "string") return null;
+  if (typeof item.chatSessionId !== "string") return null;
+  if (typeof item.turnIndex !== "number") return null;
+  if (item.role !== "user" && item.role !== "assistant" && item.role !== "system" && item.role !== "tool") return null;
+  if (typeof item.content !== "string") return null;
+  const createdAt = parseDate(item.createdAt);
+  if (!createdAt) return null;
+  return {
+    id: item.id,
+    chatSessionId: item.chatSessionId,
+    turnIndex: item.turnIndex,
+    role: item.role,
+    content: item.content,
+    citationsJson: typeof item.citationsJson === "string" ? item.citationsJson : null,
+    toolCallsJson: typeof item.toolCallsJson === "string" ? item.toolCallsJson : null,
+    attachmentsJson: typeof item.attachmentsJson === "string" ? item.attachmentsJson : null,
+    compressedIntoSummaryId: typeof item.compressedIntoSummaryId === "string" ? item.compressedIntoSummaryId : null,
+    llmProvider: typeof item.llmProvider === "string" ? item.llmProvider : null,
+    llmModelId: typeof item.llmModelId === "string" ? item.llmModelId : null,
+    latencyMs: typeof item.latencyMs === "number" ? item.latencyMs : null,
+    promptTokens: typeof item.promptTokens === "number" ? item.promptTokens : null,
+    completionTokens: typeof item.completionTokens === "number" ? item.completionTokens : null,
+    errorCode: typeof item.errorCode === "string" ? item.errorCode : null,
+    createdAt,
+  };
+}
+
+function parseConversationSummary(item: unknown): ConversationSummaryRecord | null {
+  if (!isObject(item)) return null;
+  if (typeof item.id !== "string") return null;
+  if (typeof item.chatSessionId !== "string") return null;
+  if (typeof item.fromMessageId !== "string" || typeof item.toMessageId !== "string") return null;
+  if (typeof item.content !== "string" || typeof item.model !== "string") return null;
+  const createdAt = parseDate(item.createdAt);
+  if (!createdAt) return null;
+  return {
+    id: item.id,
+    chatSessionId: item.chatSessionId,
+    fromMessageId: item.fromMessageId,
+    toMessageId: item.toMessageId,
+    generation: typeof item.generation === "number" ? item.generation : 0,
+    absorbedSummaryIdsJson: typeof item.absorbedSummaryIdsJson === "string" ? item.absorbedSummaryIdsJson : "[]",
+    content: item.content,
+    model: item.model,
+    tokensIn: typeof item.tokensIn === "number" ? item.tokensIn : 0,
+    tokensOut: typeof item.tokensOut === "number" ? item.tokensOut : 0,
+    createdAt,
+  };
+}
+
+function parseChatSessionEntity(item: unknown): ChatSessionEntityRecord | null {
+  if (!isObject(item)) return null;
+  if (typeof item.chatSessionId !== "string" || typeof item.entityKey !== "string") return null;
+  const createdAt = parseDate(item.createdAt) ?? new Date();
+  const lastVisitedAt = parseDate(item.lastVisitedAt) ?? createdAt;
+  return {
+    chatSessionId: item.chatSessionId,
+    entityKey: item.entityKey,
+    lastFrame: typeof item.lastFrame === "string" ? item.lastFrame : null,
+    completedFramesJson: typeof item.completedFramesJson === "string" ? item.completedFramesJson : "[]",
+    scanProgressJson: typeof item.scanProgressJson === "string" ? item.scanProgressJson : null,
+    extractedValuesJson: typeof item.extractedValuesJson === "string" ? item.extractedValuesJson : null,
+    createdAt,
+    lastVisitedAt,
+  };
+}
+
+function parseViewerEvent(item: unknown): ViewerEventRecord | null {
+  if (!isObject(item)) return null;
+  if (typeof item.id !== "string" || typeof item.chatSessionId !== "string") return null;
+  if (typeof item.timestamp !== "number") return null;
+  const allowedActions = new Set([
+    "opened",
+    "frame-advanced",
+    "extracted-value-viewed",
+    "citation-clicked",
+    "scan-completed",
+    "intent-dispatched",
+    "left",
+  ]);
+  if (typeof item.action !== "string" || !allowedActions.has(item.action)) return null;
+  if (item.source !== "user" && item.source !== "agent" && item.source !== "tour" && item.source !== "system") return null;
+  return {
+    id: item.id,
+    chatSessionId: item.chatSessionId,
+    timestamp: item.timestamp,
+    entityKey: typeof item.entityKey === "string" ? item.entityKey : null,
+    action: item.action as ViewerEventRecord["action"],
+    source: item.source,
+    detailJson: typeof item.detailJson === "string" ? item.detailJson : null,
+  };
 }

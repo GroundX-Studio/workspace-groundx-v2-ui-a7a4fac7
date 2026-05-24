@@ -21,23 +21,35 @@ describe("MySqlAppRepository", () => {
     mysqlMock.execute.mockResolvedValue([[], []]);
   });
 
-  it("creates only the narrow sessions and app metadata tables", async () => {
+  it("creates the app-owned tables: sessions, app_user_metadata, and the 5 chat tables", async () => {
     const repository = new MySqlAppRepository(testEnv);
 
     await repository.createSchema();
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
-    expect(statements).toHaveLength(2);
-    expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS sessions");
-    expect(statements[1]).toContain("CREATE TABLE IF NOT EXISTS app_user_metadata");
-    const schema = statements.join("\n").toLowerCase();
-    expect(schema).not.toContain("stripe");
-    expect(schema).not.toContain("mailchimp");
-    expect(schema).not.toContain("hubspot");
-    expect(schema).not.toContain("subscription");
-    expect(schema).not.toContain("bucket_name");
-    expect(schema).not.toContain("project_name");
-    expect(schema).not.toContain("document");
+    expect(statements).toHaveLength(7);
+    const joined = statements.join("\n");
+    // Auth + metadata.
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS sessions");
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS app_user_metadata");
+    // Chat-session tables (per project_database.md).
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS chat_sessions");
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS chat_messages");
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS conversation_summaries");
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS chat_session_entities");
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS viewer_events");
+    // App-owned only — no GroundX/Partner duplicates.
+    const lower = joined.toLowerCase();
+    expect(lower).not.toContain("stripe");
+    expect(lower).not.toContain("mailchimp");
+    expect(lower).not.toContain("hubspot");
+    expect(lower).not.toContain("subscription");
+    expect(lower).not.toContain("bucket_name");
+    expect(lower).not.toContain("project_name");
+    // "document" appears in "documents" tables we DON'T create. Allow
+    // "compressed_into_summary_id" but forbid any `documents` table /
+    // column.
+    expect(lower).not.toMatch(/\bcreate table.*documents?\b/);
   });
 
   it("stores session rows with GroundX username and optional encrypted key only", async () => {
