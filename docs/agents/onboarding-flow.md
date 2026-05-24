@@ -33,12 +33,17 @@ change the URL (which is sometimes wrong — prefer navigate).
 - OnboardingShell's `transitionPhase` flips to `"entering"` for
   ~700ms.
 - During entering: F1 stays mounted underneath (`showF1=true`);
-  the SlideOverlay renders `chat-pane` (slides in from left) +
-  `canvas-pane` (slides in from right). Pane contents are EMPTY
+  the SlideOverlay renders THREE panes:
+  - `nav-pane` (slides in from left)
+  - `chat-pane` (slides in from left, same direction + duration)
+  - `canvas-pane` (slides in from right)
+
+  Per wireframe, F1 itself has NO nav — the nav appears for the
+  first time during this transition. Pane contents are EMPTY
   during entering so internal animations (composing dots, scan
   line) don't pre-fire before the pane arrives.
 - After SWIPE_DURATION_MS the phase goes idle, F1 unmounts, the
-  AppShell idle render takes over.
+  AppShell idle render takes over with the real OnboardingNav.
 
 ### F2 → F1 (Ingest pill click)
 
@@ -49,11 +54,12 @@ change the URL (which is sometimes wrong — prefer navigate).
   entity, so we need a frozen copy).
 - URL navigates to `/onboarding`.
 - `transitionPhase` flips to `"leaving"`.
-- During leaving: F1 mounts underneath; SlideOverlay renders
-  chat-pane + canvas-pane sliding OUT. Pane contents are
-  `OnboardingChatColumn` + `UnderstandView` with `overrideScenarioId={leavingScenarioSnapshot}` + `overrideFrame="f2"` so the user sees the F2 chrome slide away.
-- After SWIPE_DURATION_MS the snapshot clears + the idle render
-  shows F1.
+- During leaving: F1 mounts underneath; SlideOverlay renders all
+  three panes sliding OUT (nav + chat to the left, canvas to the
+  right). Chat + canvas pane contents are `OnboardingChatColumn`
+  + `UnderstandView` with `overrideScenarioId={leavingScenarioSnapshot}` + `overrideFrame="f2"` so the user sees the F2 chrome slide away with content intact.
+- After SWIPE_DURATION_MS all three panes unmount + the snapshot
+  clears. The nav is gone (F1 has no nav per spec).
 
 ### F2 → F3 (Pick-a-view pill click)
 

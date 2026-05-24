@@ -7,8 +7,10 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
 import {
   BORDER,
+  ONBOARDING_NAV_WIDTH_FULL,
   PICKER_MAX_WIDTH,
   PICKER_MAX_WIDTH_ULTRAWIDE,
+  WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
@@ -416,88 +418,81 @@ export const OnboardingShell: FC = () => {
   const showF1 = isF1 || transitionPhase === "entering";
   const showIdleShell = !isF1 && transitionPhase === "idle";
 
+  // OnboardingNav is mounted as the AppShell's nav slot for F2+
+  // surfaces ONLY. Per spec-nav-v2.jsx Canvas_Ingest: "F1: nav
+  // HIDDEN entirely — no sidebar so the demo gets the full width."
+  // The nav slides in from the left on F1->F2 and slides out on
+  // F2->F1 (driven by SlideOverlay, not by mount/unmount of this
+  // node).
+  const navIdle = (
+    <OnboardingNav
+      accountState="loggedOut"
+      collapsed={navCollapsed}
+      onToggleCollapsed={() => setNavCollapsed(!navCollapsed)}
+      onItemClick={handleNavItemClick}
+    />
+  );
+
   return (
     <Box
-      sx={{
-        display: "flex",
-        flexDirection: "row",
-        height: "100vh",
-        width: "100%",
-        overflow: "hidden",
-        backgroundColor: WHITE,
-      }}
+      sx={{ position: "relative", height: "100vh", overflow: "hidden", backgroundColor: WHITE }}
       data-testid="onboarding-shell"
     >
-      {/* Shell-level nav. Stable across F1 ↔ F2; never animates during
-          frame transitions. Chevron toggle is owned here via
-          useOnboardingNavCollapsed (localStorage-backed). */}
-      <OnboardingNav
-        accountState="loggedOut"
-        collapsed={navCollapsed}
-        onToggleCollapsed={() => setNavCollapsed(!navCollapsed)}
-        onItemClick={handleNavItemClick}
-      />
-
-      {/* Right-of-nav frame slot. F1 (picker) or F2+ (chat | canvas
-          via AppShell) renders here. The SlideOverlay during F1 ↔ F2
-          transitions covers ONLY this slot, not the nav. */}
-      <Box sx={{ position: "relative", flex: 1, minWidth: 0, height: "100%", overflow: "hidden" }}>
-        {showF1 ? (
-          <Box sx={{ position: "absolute", inset: 0, zIndex: 0 }}>{f1Layout}</Box>
-        ) : null}
-        {showIdleShell ? (
-          <Box sx={{ position: "absolute", inset: 0, zIndex: 1 }}>
-            <AppShell nav={null} chat={chatIdle} canvas={canvasIdle} hideNav initialChatWidth={360} />
-          </Box>
-        ) : null}
-        {inTransition ? (
-          <SlideOverlay
-            phase={transitionPhase}
-            // During the leaving phase (F2 -> F1) the panes carry
-            // their content with them as they slide out so the user
-            // sees what they had — not an empty rectangle. The
-            // session has already flipped to F1 by this point, so we
-            // render frozen-state copies using the scenario snapshot
-            // captured before the navigate fired.
-            //
-            // During entering, panes stay empty so internal
-            // animations (composing dots, scan line) don't pre-fire
-            // before the pane arrives at its final position.
-            chatContent={
-              transitionPhase === "leaving" ? (
-                <Box
-                  sx={{
-                    height: "100%",
-                    overflow: "auto",
-                    p: 2,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 2,
-                  }}
-                  aria-label="Chat column (leaving)"
-                >
-                  <OnboardingChatColumn
-                    overrideScenarioId={leavingScenarioSnapshot}
-                    overrideFrame="f2"
-                  />
+      {showF1 ? (
+        <Box sx={{ position: "absolute", inset: 0, zIndex: 0 }}>{f1Layout}</Box>
+      ) : null}
+      {showIdleShell ? (
+        <Box sx={{ position: "absolute", inset: 0, zIndex: 1 }}>
+          <AppShell nav={navIdle} chat={chatIdle} canvas={canvasIdle} initialChatWidth={360} />
+        </Box>
+      ) : null}
+      {inTransition ? (
+        <SlideOverlay
+          phase={transitionPhase}
+          // During the leaving phase (F2 -> F1) the panes carry
+          // their content with them as they slide out so the user
+          // sees what they had — not an empty rectangle. The
+          // session has already flipped to F1 by this point, so we
+          // render frozen-state copies using the scenario snapshot
+          // captured before the navigate fired.
+          //
+          // During entering, panes stay empty so internal
+          // animations (composing dots, scan line) don't pre-fire
+          // before the pane arrives at its final position.
+          chatContent={
+            transitionPhase === "leaving" ? (
+              <Box
+                sx={{
+                  height: "100%",
+                  overflow: "auto",
+                  p: 2,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                }}
+                aria-label="Chat column (leaving)"
+              >
+                <OnboardingChatColumn
+                  overrideScenarioId={leavingScenarioSnapshot}
+                  overrideFrame="f2"
+                />
+              </Box>
+            ) : null
+          }
+          canvasContent={
+            transitionPhase === "leaving" ? (
+              <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <Box sx={{ borderBottom: `1px solid ${BORDER}`, px: 3 }}>
+                  <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
                 </Box>
-              ) : null
-            }
-            canvasContent={
-              transitionPhase === "leaving" ? (
-                <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                  <Box sx={{ borderBottom: `1px solid ${BORDER}`, px: 3 }}>
-                    <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
-                  </Box>
-                  <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0 }} data-testid="onboarding-frame-f2-leaving">
-                    <UnderstandView overrideScenarioId={leavingScenarioSnapshot} />
-                  </Box>
+                <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0 }} data-testid="onboarding-frame-f2-leaving">
+                  <UnderstandView overrideScenarioId={leavingScenarioSnapshot} />
                 </Box>
-              ) : null
-            }
-          />
-        ) : null}
-      </Box>
+              </Box>
+            ) : null
+          }
+        />
+      ) : null}
     </Box>
   );
 };
@@ -530,18 +525,15 @@ interface SlideOverlayProps {
 
 const SlideOverlay: FC<SlideOverlayProps> = ({ phase, chatContent, canvasContent }) => {
   const dir = phase === "leaving" ? "out" : "in";
-  const chatAnim = dir === "in" ? slideInFromLeft : slideOutToLeft;
-  const canvasAnim = dir === "in" ? slideInFromRight : slideOutToRight;
+  // Nav + chat slide from the LEFT together (one cohesive left block);
+  // canvas slides from the RIGHT.
+  const leftAnim = dir === "in" ? slideInFromLeft : slideOutToLeft;
+  const rightAnim = dir === "in" ? slideInFromRight : slideOutToRight;
   const animStyle = (kf: ReturnType<typeof keyframes>) =>
     `${kf} ${SWIPE_DURATION_S}s ${SWIPE_EASE_CSS} both`;
 
-  // The overlay covers the right-of-nav slot only; the shell-level
-  // OnboardingNav is NOT part of this animation.
-  //
-  // During leaving (F2 -> F1) the panes carry their content with
-  // them as they slide out. During entering (F1 -> F2) the panes
-  // are empty until the slide settles, so internal animations
-  // (composing dots, scan line) don't pre-fire before arrival.
+  // Per the wireframe, F1 has no nav at all — the nav animates IN on
+  // F1->F2 and OUT on F2->F1. Three panes here: nav, chat, canvas.
   return (
     <Box
       sx={{
@@ -554,13 +546,23 @@ const SlideOverlay: FC<SlideOverlayProps> = ({ phase, chatContent, canvasContent
       }}
     >
       <Box
+        data-testid="onboarding-shell-nav-pane"
+        sx={{
+          width: ONBOARDING_NAV_WIDTH_FULL,
+          flexShrink: 0,
+          height: "100%",
+          backgroundColor: WARM_OFFWHITE,
+          animation: animStyle(leftAnim),
+        }}
+      />
+      <Box
         data-testid="onboarding-shell-chat-pane"
         sx={{
           width: 360,
           flexShrink: 0,
           height: "100%",
           backgroundColor: WHITE,
-          animation: animStyle(chatAnim),
+          animation: animStyle(leftAnim),
         }}
       >
         {chatContent}
@@ -571,7 +573,7 @@ const SlideOverlay: FC<SlideOverlayProps> = ({ phase, chatContent, canvasContent
           flex: 1,
           height: "100%",
           backgroundColor: WHITE,
-          animation: animStyle(canvasAnim),
+          animation: animStyle(rightAnim),
         }}
       >
         {canvasContent}
