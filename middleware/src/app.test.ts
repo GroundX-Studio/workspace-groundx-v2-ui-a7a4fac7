@@ -53,6 +53,21 @@ describe("middleware scaffold", () => {
     await request(app).get("/api/healthz").expect(200, { status: "ok" });
   });
 
+  it("skips request logging for kube-probe and Prometheus endpoints", async () => {
+    // Direct unit test on the helper; the pino-http wiring is a
+    // one-liner that delegates to it.
+    const { shouldSkipRequestLog } = await import("./app.js");
+    expect(shouldSkipRequestLog("/api/healthz")).toBe(true);
+    expect(shouldSkipRequestLog("/api/healthz?ts=123")).toBe(true);
+    expect(shouldSkipRequestLog("/api/metrics")).toBe(true);
+    expect(shouldSkipRequestLog("/api/metrics?format=json")).toBe(true);
+    // Everything else still logs.
+    expect(shouldSkipRequestLog("/api/auth/login")).toBe(false);
+    expect(shouldSkipRequestLog("/api/scenarios")).toBe(false);
+    expect(shouldSkipRequestLog("/api/healthz/something")).toBe(false); // not the probe itself
+    expect(shouldSkipRequestLog(undefined)).toBe(false);
+  });
+
   it("registers through GroundX Partner API and stores only session plus app metadata", async () => {
     const { app, repository, partnerClient } = setup();
 

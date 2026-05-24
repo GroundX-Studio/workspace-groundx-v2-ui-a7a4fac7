@@ -146,7 +146,12 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     next();
   });
 
-  app.use(pinoHttp({ logger }));
+  app.use(
+    pinoHttp({
+      logger,
+      autoLogging: { ignore: (req) => shouldSkipRequestLog(req.url) },
+    }),
+  );
   app.use(cors({ origin: env.NODE_ENV === "production" ? env.ALLOWED_ORIGIN ?? false : true, credentials: true }));
   app.use(express.json({ limit: "25mb" }));
   app.use(express.urlencoded({ extended: true }));
@@ -446,6 +451,27 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
   });
 
   return app;
+}
+
+/**
+ * Skip per-request log lines for endpoints that fire on a fixed schedule:
+ *   - `/api/healthz` — Kubernetes liveness + readiness probes (~every 3s).
+ *   - `/api/metrics` — Prometheus scrape interval.
+ * Without this filter both endpoints drown the request log in noise.
+ * Failures still surface because the actual handlers can log explicitly
+ * on error paths; we only suppress the pino-http auto-logged success line.
+ *
+ * Exported for unit-test access; the only caller is the pino-http
+ * `autoLogging.ignore` hook wired into createApp().
+ */
+export function shouldSkipRequestLog(url: string | undefined): boolean {
+  if (!url) return false;
+  return (
+    url === "/api/healthz" ||
+    url.startsWith("/api/healthz?") ||
+    url === "/api/metrics" ||
+    url.startsWith("/api/metrics?")
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────────────
