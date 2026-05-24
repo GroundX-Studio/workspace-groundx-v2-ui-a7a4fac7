@@ -1,18 +1,12 @@
 import Box from "@mui/material/Box";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
-import { alpha, keyframes, useTheme } from "@mui/material/styles";
+import { keyframes, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
 import {
-  BODY_ON_DARK,
   BORDER,
-  MUTED_ON_DARK,
-  MUTED_ON_LIGHT,
-  NAVY,
   PICKER_MAX_WIDTH,
   PICKER_MAX_WIDTH_ULTRAWIDE,
   WHITE,
@@ -21,6 +15,8 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { AppShell } from "@/shared/components/AppShell";
+import { OnboardingNav, useOnboardingNavCollapsed } from "@/shared/components/OnboardingNav";
+import type { OnboardingNavItemKey } from "@/shared/components/OnboardingNav";
 import { StepStrip } from "@/shared/components/StepStrip";
 import type { StepDescriptor, StepId, StepPillState } from "@/shared/components/StepStrip";
 import type { FFrame, Scenario } from "@/types/onboarding";
@@ -72,15 +68,22 @@ function analyzeSubsteps(frame: FFrame): StepDescriptor["substeps"] {
 }
 
 /**
- * OnboardingShell — composes the F1–F7 frames behind the AppShell.
+ * OnboardingShell — composes the F1–F7 frames behind a shared
+ * shell-level left-rail nav.
  *
- *   • F1 (Ingest) hides nav + chat (only canvas is rendered, full-bleed).
- *   • F2–F7 mount the standard 3-column shell: nav · chat · canvas.
- *   • The chat column on F2–F5 shows a placeholder agent surface; F6 swaps
- *     it for the GateView card.
- *   • The canvas hosts the active frame view.
+ *   • OnboardingNav lives at the shell root, mounted on every frame.
+ *     It owns its own collapsed/expanded state (chevron) and never
+ *     animates during F1 ↔ F2 transitions.
+ *   • F1 (Ingest) — the right-of-nav slot is the full-width picker
+ *     (StepStrip on top, IngestView below). No chat column.
+ *   • F2–F7 — the right-of-nav slot is the AppShell chat | canvas
+ *     split. Chat column hosts GateChatPanel; canvas hosts the
+ *     active frame view (UnderstandView / ExtractView / etc.).
+ *   • The F1 ↔ shell transition slides ONLY chat + canvas; the nav
+ *     is stable.
  *
- * Step strip lives at the top of the canvas, NOT in the nav.
+ * Step strip lives at the top of the canvas (or the top of F1's
+ * picker), NOT in the nav.
  */
 export const OnboardingShell: FC = () => {
   const { state: appMode } = useAppMode();
@@ -316,42 +319,21 @@ export const OnboardingShell: FC = () => {
     wasF1Ref.current = isF1;
   }, [isF1]);
 
-  // Idle-phase shell content. Wrapped in plain Box / Stack — no
-  // animation here. The slide animation is owned by `SlideOverlay`
-  // below; the idle shell just renders the panes at their settled
-  // positions. Testids are duplicated between the idle wrappers and
-  // the overlay panes so tests can target the structural slot in
-  // either render mode.
-  const navIdle = (
-    <Stack
-      data-testid="onboarding-shell-nav-pane"
-      sx={{
-        height: "100%",
-        backgroundColor: NAVY,
-        color: BODY_ON_DARK,
-        p: 1.5,
-      }}
-      aria-label="Onboarding navigation"
-    >
-      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
-        WORKSPACES
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.5), mt: 0.5 }}>
-        Available after sign-in
-      </Typography>
-      <Box sx={{ flex: 1 }} />
-      <Typography variant="overline" sx={{ color: MUTED_ON_DARK, letterSpacing: "0.08em" }}>
-        ACCOUNT
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
-        Book a call
-      </Typography>
-      <Typography variant="body2" sx={{ color: alpha(WHITE, 0.85), mt: 0.5 }}>
-        Docs
-      </Typography>
-    </Stack>
+  // Shell-level nav state — chevron toggle persisted across frames.
+  const [navCollapsed, setNavCollapsed] = useOnboardingNavCollapsed();
+  const handleNavItemClick = useCallback(
+    (_key: OnboardingNavItemKey) => {
+      // Logged-out: Workspaces / Projects are disabled (no callback fires).
+      // Docs and Book-a-call are routed/wired in steady mode — for now they
+      // are no-ops in onboarding. Hook left intentionally permissive so future
+      // wiring slots in without a structural change.
+    },
+    [],
   );
 
+  // The chat + canvas split that lives in the right-of-nav slot for
+  // F2+. The chat column hosts GateChatPanel; the canvas hosts the
+  // active frame view with the StepStrip on top.
   const chatIdle = (
     <Box
       data-testid="onboarding-shell-chat-pane"
@@ -393,18 +375,40 @@ export const OnboardingShell: FC = () => {
 
   return (
     <Box
-      sx={{ position: "relative", height: "100vh", overflow: "hidden", backgroundColor: WHITE }}
+      sx={{
+        display: "flex",
+        flexDirection: "row",
+        height: "100vh",
+        width: "100%",
+        overflow: "hidden",
+        backgroundColor: WHITE,
+      }}
       data-testid="onboarding-shell"
     >
-      {showF1 ? (
-        <Box sx={{ position: "absolute", inset: 0, zIndex: 0 }}>{f1Layout}</Box>
-      ) : null}
-      {showIdleShell ? (
-        <Box sx={{ position: "absolute", inset: 0, zIndex: 1 }}>
-          <AppShell nav={navIdle} chat={chatIdle} canvas={canvasIdle} initialChatWidth={360} />
-        </Box>
-      ) : null}
-      {inTransition ? <SlideOverlay phase={transitionPhase} /> : null}
+      {/* Shell-level nav. Stable across F1 ↔ F2; never animates during
+          frame transitions. Chevron toggle is owned here via
+          useOnboardingNavCollapsed (localStorage-backed). */}
+      <OnboardingNav
+        accountState="loggedOut"
+        collapsed={navCollapsed}
+        onToggleCollapsed={() => setNavCollapsed(!navCollapsed)}
+        onItemClick={handleNavItemClick}
+      />
+
+      {/* Right-of-nav frame slot. F1 (picker) or F2+ (chat | canvas
+          via AppShell) renders here. The SlideOverlay during F1 ↔ F2
+          transitions covers ONLY this slot, not the nav. */}
+      <Box sx={{ position: "relative", flex: 1, minWidth: 0, height: "100%", overflow: "hidden" }}>
+        {showF1 ? (
+          <Box sx={{ position: "absolute", inset: 0, zIndex: 0 }}>{f1Layout}</Box>
+        ) : null}
+        {showIdleShell ? (
+          <Box sx={{ position: "absolute", inset: 0, zIndex: 1 }}>
+            <AppShell nav={null} chat={chatIdle} canvas={canvasIdle} hideNav initialChatWidth={360} />
+          </Box>
+        ) : null}
+        {inTransition ? <SlideOverlay phase={transitionPhase} /> : null}
+      </Box>
     </Box>
   );
 };
@@ -429,11 +433,13 @@ export const OnboardingShell: FC = () => {
  */
 const SlideOverlay: FC<{ phase: "entering" | "leaving" }> = ({ phase }) => {
   const dir = phase === "leaving" ? "out" : "in";
-  const sideAnim = dir === "in" ? slideInFromLeft : slideOutToLeft;
+  const chatAnim = dir === "in" ? slideInFromLeft : slideOutToLeft;
   const canvasAnim = dir === "in" ? slideInFromRight : slideOutToRight;
   const animStyle = (kf: ReturnType<typeof keyframes>) =>
     `${kf} ${SWIPE_DURATION_S}s ${SWIPE_EASE_CSS} both`;
 
+  // The overlay covers the right-of-nav slot only; the shell-level
+  // OnboardingNav is NOT part of this animation.
   return (
     <Box
       sx={{
@@ -446,23 +452,13 @@ const SlideOverlay: FC<{ phase: "entering" | "leaving" }> = ({ phase }) => {
       }}
     >
       <Box
-        data-testid="onboarding-shell-nav-pane"
-        sx={{
-          width: 180,
-          flexShrink: 0,
-          height: "100%",
-          backgroundColor: NAVY,
-          animation: animStyle(sideAnim),
-        }}
-      />
-      <Box
         data-testid="onboarding-shell-chat-pane"
         sx={{
           width: 360,
           flexShrink: 0,
           height: "100%",
           backgroundColor: WHITE,
-          animation: animStyle(sideAnim),
+          animation: animStyle(chatAnim),
         }}
       />
       <Box

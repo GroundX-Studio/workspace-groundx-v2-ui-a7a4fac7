@@ -164,16 +164,29 @@ describe("OnboardingShell", () => {
     expect(snapshot.frame).toBe("f1");
   });
 
-  it("wraps nav, chat, and canvas in motion panes for the F1->F2 slide-in choreography", () => {
+  it("renders OnboardingNav at the shell root on F2 + the chat/canvas slot below", () => {
+    // Post-refactor: the nav is hoisted out of the slide overlay and
+    // lives at the shell root, mounted on every frame. The slide
+    // overlay only contains chat + canvas — the nav doesn't animate
+    // because it never moves.
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
-    // All three motion-driven wrappers must be present. The visual
-    // animation timing (180px nav, 320px chat, canvas fade) is a
-    // styling detail covered by visual review; this test guards the
-    // structural wiring so a refactor that strips out the motion
-    // wrappers fails loudly.
-    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-shell-canvas-pane")).toBeInTheDocument();
+    // The old shell-level nav-pane testid is gone; the nav is now the
+    // shared OnboardingNav component.
+    expect(screen.queryByTestId("onboarding-shell-nav-pane")).not.toBeInTheDocument();
+  });
+
+  it("renders OnboardingNav at the shell root on F1 too — same component, same place", () => {
+    // The user requested visual continuity: same nav component on F1
+    // and F2, mounted as a shell-level sibling so it does not unmount
+    // across frame transitions.
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
+    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
+    // F1 still has no chat column — the picker fills the right-of-nav slot.
+    expect(screen.queryByTestId("onboarding-shell-chat-pane")).not.toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
   });
 
   it("applies a CSS keyframe animation to each pane during the F1→F2 slide-in", async () => {
@@ -196,9 +209,8 @@ describe("OnboardingShell", () => {
     // sync useEffect picks up the change asynchronously — wait until
     // the transition's SlideOverlay panes appear.
     await user.click(screen.getByTestId("sample-utility"));
-    await waitFor(() => expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument());
 
-    const nav = screen.getByTestId("onboarding-shell-nav-pane");
     const chat = screen.getByTestId("onboarding-shell-chat-pane");
     const canvas = screen.getByTestId("onboarding-shell-canvas-pane");
     // Emotion compiles the `animation:` sx prop into a class. We grep
@@ -227,12 +239,18 @@ describe("OnboardingShell", () => {
       }
       return null;
     };
-    for (const pane of [nav, chat, canvas]) {
+    for (const pane of [chat, canvas]) {
       const anim = findAnimationRuleFor(pane);
       expect(anim).not.toBeNull();
       // sanity-check the duration is present in the shorthand
       expect(anim).toMatch(/0\.7s/);
     }
+    // The nav itself does NOT animate — it lives at the shell root,
+    // outside the slide overlay. The chevron toggle handles width
+    // changes; F1↔F2 leaves the nav untouched.
+    const navEl = screen.getByTestId("onboarding-nav");
+    const navStyle = window.getComputedStyle(navEl);
+    expect(navStyle.animation === "" || navStyle.animation === "none").toBe(true);
   });
 
   it("clicking BYO from F1 advances to F2 and renders the gate in the chat column", async () => {
@@ -307,18 +325,20 @@ describe("OnboardingShell", () => {
 
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
 
-    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-frame-f1")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("Ingest"));
 
     // Mid-slide-out: F1 is now mounted as the active layer AND the
-    // shell panes are still in the DOM (sliding out over F1). With
-    // URL-driven activation, the navigate happens immediately but
-    // the URL → state useEffect runs on the next tick — wait for the
-    // leaving transition's F1 underlay to appear.
+    // chat + canvas panes are still in the DOM (sliding out over F1).
+    // With URL-driven activation, the navigate happens immediately
+    // but the URL → state useEffect runs on the next tick — wait for
+    // the leaving transition's F1 underlay to appear.
     await waitFor(() => expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument());
-    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
+    // OnboardingNav stays mounted throughout — it does not animate.
+    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
 
     // The pane animation must point at a slide-OUT keyframe, not the
     // slide-IN one — direction-reversed. The Emotion-generated names
@@ -365,11 +385,11 @@ describe("OnboardingShell", () => {
       }
       return null;
     };
-    const navAnim = animationNameOf(screen.getByTestId("onboarding-shell-nav-pane"));
-    expect(navAnim).not.toBeNull();
+    const chatAnim = animationNameOf(screen.getByTestId("onboarding-shell-chat-pane"));
+    expect(chatAnim).not.toBeNull();
     // The `animation` shorthand starts with the animation-name token.
-    const navAnimName = navAnim!.trim().split(/\s+/)[0];
-    const kf = findKeyframesByName(navAnimName);
+    const chatAnimName = chatAnim!.trim().split(/\s+/)[0];
+    const kf = findKeyframesByName(chatAnimName);
     expect(kf).not.toBeNull();
     // For a slide-OUT animation, the final keyframe (100% / "to") must
     // sit at translateX(-100vw) — fully past the LEFT page edge. Using
@@ -382,12 +402,15 @@ describe("OnboardingShell", () => {
     const lastKeyframe = kf!.cssRules[kf!.cssRules.length - 1] as CSSKeyframeRule;
     expect(lastKeyframe.style.transform).toMatch(/translateX\(-100vw\)/);
 
-    // After the slide-out completes, the shell unmounts.
+    // After the slide-out completes, the chat + canvas panes unmount
+    // but the nav stays. F1 is now the active right-of-nav content.
     await waitFor(
-      () => expect(screen.queryByTestId("onboarding-shell-nav-pane")).not.toBeInTheDocument(),
+      () => expect(screen.queryByTestId("onboarding-shell-chat-pane")).not.toBeInTheDocument(),
       { timeout: 1500 },
     );
+    expect(screen.queryByTestId("onboarding-shell-canvas-pane")).not.toBeInTheDocument();
     expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
   });
 
   it("keeps F1 mounted underneath the shell during the slide-in window, then unmounts it", async () => {
@@ -403,14 +426,17 @@ describe("OnboardingShell", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
 
     expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
-    expect(screen.queryByTestId("onboarding-shell-nav-pane")).not.toBeInTheDocument();
+    // Nav IS mounted on F1 too — it lives at the shell root.
+    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-shell-chat-pane")).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("sample-utility"));
 
-    // Mid-slide: BOTH F1 (underneath) and the shell panes (sliding over
-    // it) must be in the DOM.
+    // Mid-slide: BOTH F1 (underneath, in the right-of-nav slot) and
+    // the chat + canvas panes (sliding over it) are in the DOM. The
+    // nav was there before and stays put — no remount.
     expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
-    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-shell-canvas-pane")).toBeInTheDocument();
 
@@ -419,7 +445,28 @@ describe("OnboardingShell", () => {
       () => expect(screen.queryByTestId("onboarding-frame-f1")).not.toBeInTheDocument(),
       { timeout: 1500 },
     );
-    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
+  });
+
+  it("does not remount OnboardingNav across the F1->F2 transition", async () => {
+    // The whole point of hoisting the nav to the shell root is that it
+    // becomes a stable element — F1 and F2 share the SAME DOM node, so
+    // chevron state, focus, and any future ambient nav UX stay
+    // continuous. We tag the node and verify the tag survives the
+    // frame switch.
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
+    const navBefore = screen.getByTestId("onboarding-nav");
+    (navBefore as HTMLElement).dataset.persistenceProbe = "before";
+
+    await user.click(screen.getByTestId("sample-utility"));
+
+    // The same DOM node must still be present, with our probe attribute intact.
+    await waitFor(() => expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument());
+    const navAfter = screen.getByTestId("onboarding-nav");
+    expect(navAfter).toBe(navBefore);
+    expect((navAfter as HTMLElement).dataset.persistenceProbe).toBe("before");
   });
 
   it("activates the sample referenced by the URL params on mount", async () => {
