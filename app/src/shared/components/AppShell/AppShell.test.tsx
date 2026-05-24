@@ -104,4 +104,79 @@ describe("AppShell", () => {
     await user.keyboard("{Shift>}{ArrowLeft}{/Shift}");
     expect(separator).toHaveAttribute("aria-valuenow", "352");
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Compact mode — applies below md (900px) on mobile + tablet portrait.
+  //
+  // Below md, the three-column split breaks: chat is pinned 360px and
+  // canvas crushes to 0 width on a 375px mobile. Compact mode forces
+  // focus-chat as the default, hides the nav into a hamburger-revealed
+  // drawer, and exposes a chat/canvas swap button so the canvas is still
+  // reachable. Pass `compact` explicitly in tests because jsdom's
+  // matchMedia stub always returns false.
+  // ────────────────────────────────────────────────────────────────────────
+  describe("compact mode", () => {
+    it("defaults to focus-chat so the chat pane fills the viewport", () => {
+      renderShell({ compact: true });
+      // canvas is hidden by default in compact mode; chat is visible
+      expect(screen.queryByTestId("appshell-canvas")).not.toBeInTheDocument();
+      expect(screen.getByTestId("chat")).toBeInTheDocument();
+    });
+
+    it("hides the nav from the inline flex row (it lives in the drawer)", () => {
+      renderShell({ compact: true });
+      // No <aside> — the nav slot isn't in the flex row in compact mode
+      expect(screen.queryByLabelText("Primary navigation")).not.toBeInTheDocument();
+      // The nav children are also NOT rendered until the drawer opens
+      expect(screen.queryByTestId("nav")).not.toBeInTheDocument();
+    });
+
+    it("renders a sticky top bar with hamburger + chat/canvas swap buttons", () => {
+      renderShell({ compact: true });
+      expect(screen.getByTestId("appshell-compact-topbar")).toBeInTheDocument();
+      expect(screen.getByTestId("appshell-compact-nav-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("appshell-compact-view-toggle")).toBeInTheDocument();
+    });
+
+    it("does NOT render the compact top bar in desktop mode", () => {
+      renderShell({ compact: false });
+      expect(screen.queryByTestId("appshell-compact-topbar")).not.toBeInTheDocument();
+    });
+
+    it("clicking the hamburger reveals the nav drawer + its contents", async () => {
+      const user = userEvent.setup();
+      renderShell({ compact: true });
+      // Drawer is closed at first; nav children unmounted
+      expect(screen.queryByTestId("nav")).not.toBeInTheDocument();
+      await user.click(screen.getByTestId("appshell-compact-nav-toggle"));
+      // Drawer is open; nav children mounted
+      expect(screen.getByTestId("appshell-compact-nav-drawer")).toBeInTheDocument();
+      expect(screen.getByTestId("nav")).toBeInTheDocument();
+    });
+
+    it("clicking the backdrop closes the nav drawer", async () => {
+      const user = userEvent.setup();
+      renderShell({ compact: true });
+      await user.click(screen.getByTestId("appshell-compact-nav-toggle"));
+      expect(screen.getByTestId("appshell-compact-nav-drawer")).toBeInTheDocument();
+      await user.click(screen.getByTestId("appshell-compact-nav-backdrop"));
+      expect(screen.queryByTestId("appshell-compact-nav-drawer")).not.toBeInTheDocument();
+    });
+
+    it("clicking the view-swap button toggles between focus-chat and focus-canvas", async () => {
+      const user = userEvent.setup();
+      renderShell({ compact: true });
+      // Starts in focus-chat — canvas is hidden
+      expect(screen.queryByTestId("appshell-canvas")).not.toBeInTheDocument();
+      expect(screen.getByTestId("chat")).toBeInTheDocument();
+      // Click swap → focus-canvas
+      await user.click(screen.getByTestId("appshell-compact-view-toggle"));
+      expect(screen.queryByTestId("chat")).not.toBeInTheDocument();
+      expect(screen.getByTestId("appshell-canvas")).toBeInTheDocument();
+      // Click swap again → back to focus-chat
+      await user.click(screen.getByTestId("appshell-compact-view-toggle"));
+      expect(screen.getByTestId("chat")).toBeInTheDocument();
+      expect(screen.queryByTestId("appshell-canvas")).not.toBeInTheDocument();
+    });
+  });
 });
