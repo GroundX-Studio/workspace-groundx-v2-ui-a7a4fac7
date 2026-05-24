@@ -55,6 +55,22 @@ describe("OnboardingNav", () => {
     expect(toggled).toBe(1);
   });
 
+  it("clicking Workspaces while signed in fires onItemClick (hard-reload handler lives in the shell)", () => {
+    let clicked: string | null = null;
+    render(
+      <OnboardingNav
+        accountState="free"
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+        onItemClick={(key) => {
+          clicked = key;
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("onboarding-nav-item-workspaces"));
+    expect(clicked).toBe("workspaces");
+  });
+
   it("logged-out disabled items do not fire onItemClick", () => {
     let clicked: string | null = null;
     render(

@@ -47,11 +47,23 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 
-export const UnderstandView: FC = () => {
+export interface UnderstandViewProps {
+  /**
+   * Override the scenario id read from session/appMode context. Used by
+   * the OnboardingShell during the F2->F1 slide-out so the canvas can
+   * show what was just there, not what session state has flipped to.
+   */
+  overrideScenarioId?: string | null;
+}
+
+export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) => {
   const reduceMotion = useReducedMotion();
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
-  const scenarioId = appMode.scenario ?? session.scenario;
+  const scenarioId =
+    overrideScenarioId !== undefined
+      ? overrideScenarioId
+      : appMode.scenario ?? session.scenario;
   const { byId } = useScenarioRegistry();
   const scenario = scenarioId ? byId(scenarioId) : undefined;
 

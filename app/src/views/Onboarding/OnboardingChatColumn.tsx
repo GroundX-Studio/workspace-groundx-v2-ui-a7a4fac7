@@ -69,7 +69,21 @@ const UTILITY_PICK_VIEWS: PickViewOption[] = [
   { key: "edit-schema", label: "edit schema" },
 ];
 
-export const OnboardingChatColumn: FC = () => {
+export interface OnboardingChatColumnProps {
+  /**
+   * Override the scenario id read from session/appMode context. Used by
+   * the OnboardingShell during the F2->F1 slide-out so the panes can
+   * show the conversation that is sliding away, not the new F1 idle
+   * state that has already taken over the session.
+   */
+  overrideScenarioId?: string | null;
+  /**
+   * Override the current frame. Same use case as overrideScenarioId.
+   */
+  overrideFrame?: "f1" | "f2" | "f3" | "f3a" | "f4" | "f5" | "f6" | "f7";
+}
+
+export const OnboardingChatColumn: FC<OnboardingChatColumnProps> = ({ overrideScenarioId, overrideFrame }) => {
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
   const { byId } = useScenarioRegistry();
@@ -81,10 +95,13 @@ export const OnboardingChatColumn: FC = () => {
     session.gate.status === "committed";
   if (gateActive) return <GateChatPanel />;
 
-  const currentFrame = session.currentFrame;
+  const currentFrame = overrideFrame ?? session.currentFrame;
   const isF1 = currentFrame === "f1";
   const isF2 = currentFrame === "f2";
-  const scenarioId = appMode.scenario ?? session.scenario;
+  const scenarioId =
+    overrideScenarioId !== undefined
+      ? overrideScenarioId
+      : appMode.scenario ?? session.scenario;
   const scenario = scenarioId ? byId(scenarioId) : undefined;
 
   // F2 is the only frame with a streamed thinking-script conversation.

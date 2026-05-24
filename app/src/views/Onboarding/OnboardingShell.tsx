@@ -1,7 +1,7 @@
 import Box from "@mui/material/Box";
 import { keyframes, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
@@ -210,9 +210,14 @@ export const OnboardingShell: FC = () => {
       // sample card (or BYO) first.
       if ((stepId === "understand" || stepId === "analyze") && session.scenario == null) return;
       if (stepId === "ingest") {
-        // Returning to the F1 picker is a URL navigation. The URL
-        // → state useEffect picks up the change and deactivates the
-        // current entity.
+        // Returning to the F1 picker is a URL navigation. Capture the
+        // current scenario into the leaving snapshot BEFORE the
+        // navigate fires — the URL change synchronously flips
+        // session.scenario to null, so the SlideOverlay needs a frozen
+        // value to keep rendering the F2 content during slide-out.
+        if (session.scenario != null && !isF1) {
+          setLeavingScenarioSnapshot(session.scenario);
+        }
         navigate("/onboarding");
         return;
       }
@@ -224,7 +229,7 @@ export const OnboardingShell: FC = () => {
       };
       advanceFrame(frameByStep[stepId]);
     },
-    [advanceFrame, appMode.authState, navigate, session.scenario],
+    [advanceFrame, appMode.authState, isF1, navigate, session.scenario],
   );
 
   const canvasContent = useMemo(() => {
@@ -303,6 +308,11 @@ export const OnboardingShell: FC = () => {
   // framer-motion test stub running its animation cycle.
   const [transitionPhase, setTransitionPhase] = useState<"idle" | "entering" | "leaving">("idle");
   const wasF1Ref = useRef(isF1);
+  // Snapshot of session.scenario captured the moment a F2->F1 leave
+  // begins. Lets the SlideOverlay render the conversation that is
+  // sliding away with frozen state, even though the live session has
+  // already flipped to F1 (the new active frame).
+  const [leavingScenarioSnapshot, setLeavingScenarioSnapshot] = useState<Scenario | null>(null);
   useEffect(() => {
     if (wasF1Ref.current && !isF1) {
       setTransitionPhase("entering");
@@ -312,7 +322,12 @@ export const OnboardingShell: FC = () => {
     }
     if (!wasF1Ref.current && isF1) {
       setTransitionPhase("leaving");
-      const id = window.setTimeout(() => setTransitionPhase("idle"), SWIPE_DURATION_MS);
+      const id = window.setTimeout(() => {
+        setTransitionPhase("idle");
+        // Drop the leaving snapshot once the slide completes so the
+        // frozen scenario doesn't leak into the next interaction.
+        setLeavingScenarioSnapshot(null);
+      }, SWIPE_DURATION_MS);
       wasF1Ref.current = isF1;
       return () => window.clearTimeout(id);
     }
@@ -322,13 +337,41 @@ export const OnboardingShell: FC = () => {
   // Shell-level nav state — chevron toggle persisted across frames.
   const [navCollapsed, setNavCollapsed] = useOnboardingNavCollapsed();
   const handleNavItemClick = useCallback(
-    (_key: OnboardingNavItemKey) => {
-      // Logged-out: Workspaces / Projects are disabled (no callback fires).
-      // Docs and Book-a-call are routed/wired in steady mode — for now they
-      // are no-ops in onboarding. Hook left intentionally permissive so future
-      // wiring slots in without a structural change.
+    (key: OnboardingNavItemKey) => {
+      // Task #52: Workspaces and Projects are the steady-mode app surfaces.
+      // Switching to them is a full mode change (different chrome, different
+      // routes, different state machine). We hard-reload instead of
+      // client-side routing so the onboarding-mode contexts unmount cleanly
+      // and the steady-mode app boots fresh. Logged-out users see these as
+      // disabled in the nav, so this branch only fires post-sign-in.
+      if (key === "workspaces") {
+        window.location.assign("/workspaces");
+        return;
+      }
+      if (key === "projects") {
+        window.location.assign("/projects");
+        return;
+      }
+      // Docs is the public docs site — open in a new tab so the user
+      // doesn't lose the onboarding flow.
+      if (key === "docs") {
+        window.open("https://docs.groundx.ai", "_blank", "noopener,noreferrer");
+        return;
+      }
+      // Book a call CTA → calendly (URL is a placeholder; wire the real
+      // one through deploy_config or appConfig once it exists).
+      if (key === "call") {
+        window.open("https://calendly.com/groundx/30min", "_blank", "noopener,noreferrer");
+        return;
+      }
+      // Settings is in-app for signed-in users — client-side route.
+      if (key === "settings") {
+        navigate("/settings");
+        return;
+      }
+      // support, anything else: no-op for now.
     },
-    [],
+    [navigate],
   );
 
   // The chat + canvas split that lives in the right-of-nav slot for
@@ -407,7 +450,53 @@ export const OnboardingShell: FC = () => {
             <AppShell nav={null} chat={chatIdle} canvas={canvasIdle} hideNav initialChatWidth={360} />
           </Box>
         ) : null}
-        {inTransition ? <SlideOverlay phase={transitionPhase} /> : null}
+        {inTransition ? (
+          <SlideOverlay
+            phase={transitionPhase}
+            // During the leaving phase (F2 -> F1) the panes carry
+            // their content with them as they slide out so the user
+            // sees what they had — not an empty rectangle. The
+            // session has already flipped to F1 by this point, so we
+            // render frozen-state copies using the scenario snapshot
+            // captured before the navigate fired.
+            //
+            // During entering, panes stay empty so internal
+            // animations (composing dots, scan line) don't pre-fire
+            // before the pane arrives at its final position.
+            chatContent={
+              transitionPhase === "leaving" ? (
+                <Box
+                  sx={{
+                    height: "100%",
+                    overflow: "auto",
+                    p: 2,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                  }}
+                  aria-label="Chat column (leaving)"
+                >
+                  <OnboardingChatColumn
+                    overrideScenarioId={leavingScenarioSnapshot}
+                    overrideFrame="f2"
+                  />
+                </Box>
+              ) : null
+            }
+            canvasContent={
+              transitionPhase === "leaving" ? (
+                <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                  <Box sx={{ borderBottom: `1px solid ${BORDER}`, px: 3 }}>
+                    <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
+                  </Box>
+                  <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0 }} data-testid="onboarding-frame-f2-leaving">
+                    <UnderstandView overrideScenarioId={leavingScenarioSnapshot} />
+                  </Box>
+                </Box>
+              ) : null
+            }
+          />
+        ) : null}
       </Box>
     </Box>
   );
@@ -431,7 +520,15 @@ export const OnboardingShell: FC = () => {
  * arriving — visually noisy. Real content mounts once the slide
  * completes and OnboardingShell swaps to the AppShell render path.
  */
-const SlideOverlay: FC<{ phase: "entering" | "leaving" }> = ({ phase }) => {
+interface SlideOverlayProps {
+  phase: "entering" | "leaving";
+  /** Optional content to render INSIDE the chat pane while it animates. */
+  chatContent?: ReactNode;
+  /** Optional content to render INSIDE the canvas pane while it animates. */
+  canvasContent?: ReactNode;
+}
+
+const SlideOverlay: FC<SlideOverlayProps> = ({ phase, chatContent, canvasContent }) => {
   const dir = phase === "leaving" ? "out" : "in";
   const chatAnim = dir === "in" ? slideInFromLeft : slideOutToLeft;
   const canvasAnim = dir === "in" ? slideInFromRight : slideOutToRight;
@@ -440,6 +537,11 @@ const SlideOverlay: FC<{ phase: "entering" | "leaving" }> = ({ phase }) => {
 
   // The overlay covers the right-of-nav slot only; the shell-level
   // OnboardingNav is NOT part of this animation.
+  //
+  // During leaving (F2 -> F1) the panes carry their content with
+  // them as they slide out. During entering (F1 -> F2) the panes
+  // are empty until the slide settles, so internal animations
+  // (composing dots, scan line) don't pre-fire before arrival.
   return (
     <Box
       sx={{
@@ -460,7 +562,9 @@ const SlideOverlay: FC<{ phase: "entering" | "leaving" }> = ({ phase }) => {
           backgroundColor: WHITE,
           animation: animStyle(chatAnim),
         }}
-      />
+      >
+        {chatContent}
+      </Box>
       <Box
         data-testid="onboarding-shell-canvas-pane"
         sx={{
@@ -469,7 +573,9 @@ const SlideOverlay: FC<{ phase: "entering" | "leaving" }> = ({ phase }) => {
           backgroundColor: WHITE,
           animation: animStyle(canvasAnim),
         }}
-      />
+      >
+        {canvasContent}
+      </Box>
     </Box>
   );
 };
