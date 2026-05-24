@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "projectId": "groundx-v2-ui",
+  "projectName": "GroundX V2 Onboarding UI",
+  "projectType": "web-ui",
+  "repository": {
+    "url": "https://github.com/GroundX-Studio/workspace-groundx-v2-ui-a7a4fac7.git",
+    "branch": "workspace/groundx-v2-ui",
+    "baseBranch": "main"
+  },
+  "_note": "Canonical projectId discovery file for the managed-project lifecycle. See ../HARNESS_PROJECT_ID_PERSISTENCE.md for the reasoning. SAFE TO COMMIT — contains no secrets. NEVER add fields whose values originate from .env, secrets, or response fields named `*username`/`*Username` returned by the Partner API (those fields can carry the API key itself; see the postmortem § Security guardrails)."
+}
