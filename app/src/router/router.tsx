@@ -11,6 +11,7 @@ import { Login } from "@/views/Auth/Login";
 import { Register } from "@/views/Auth/Register";
 import { ResetPassword } from "@/views/Auth/ResetPassword";
 import { OnboardingShell } from "@/views/Onboarding/OnboardingShell";
+import { SteadyShell } from "@/views/Steady/SteadyShell";
 import { ROUTER_PATHS } from "@/router/routerPaths";
 
 export const router = createBrowserRouter([
@@ -42,4 +43,8 @@ export const router = createBrowserRouter([
   { path: ROUTER_PATHS.ONBOARDING, element: <OnboardingShell /> },
   { path: `${ROUTER_PATHS.ONBOARDING}/signup`, element: <OnboardingShell /> },
   { path: `${ROUTER_PATHS.ONBOARDING}/:bucketId/:scenarioId`, element: <OnboardingShell /> },
+  // Steady-mode chat-session URL. Authenticated users land here after
+  // the onboarding flow completes; the URL carries the active chat
+  // session so refresh / share keeps you in the same conversation.
+  { path: ROUTER_PATHS.STEADY_SESSION, element: <SteadyShell /> },
 ]);
