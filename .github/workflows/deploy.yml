@@ -14,6 +14,24 @@ on:
         options:
           - dev
           - prod
+      # The three inputs below are harness-plumbing passthroughs. The
+      # `publish` MCP tool dispatches the workflow with them so the
+      # Partner workspace facade can correlate the run back to the
+      # managed project. The workflow body does not read them. Leave
+      # them blank when running manually — the branch comes from
+      # GitHub's built-in "Use workflow from" picker.
+      projectId:
+        description: "(Harness plumbing — leave blank for manual runs)"
+        required: false
+        type: string
+      branch:
+        description: "(Harness plumbing — leave blank for manual runs)"
+        required: false
+        type: string
+      commitSha:
+        description: "(Harness plumbing — leave blank for manual runs)"
+        required: false
+        type: string
 
 permissions:
   contents: read

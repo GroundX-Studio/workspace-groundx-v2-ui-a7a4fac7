@@ -172,11 +172,17 @@ assert(forbiddenInputNames.length === 0, `workflow_dispatch inputs must not acce
 // The manual-run form must stay short. Cluster/Ingress/image-repo overrides
 // belong in org variables and secrets, not on every dispatch. Only the
 // genuinely per-run choices live here.
-// The ref to deploy from is selected via GitHub's built-in "Use workflow
-// from" branch dropdown above the inputs — github.ref / github.ref_name
-// carries it. No need to duplicate that as a typed input.
+// `environment` is the one input a human operator cares about. The
+// other three are harness-plumbing passthroughs: the `publish` MCP tool
+// always passes them, so the workflow has to accept them, but the
+// workflow body ignores them. They show up at the bottom of the manual
+// dispatch form — leave blank when running manually; GitHub uses the
+// "Use workflow from" picker for the ref.
 const allowedDispatchInputs = new Set([
-  "environment", // dev | prod
+  "environment", // dev | prod  (only field humans fill in)
+  "projectId",   // harness passthrough — workspace project id
+  "branch",      // harness passthrough — workspace runner ref
+  "commitSha",   // harness passthrough — workspace runner commit
 ]);
 const actualDispatchInputs = new Set(dispatchInputNames);
 const unexpectedInputs = [...actualDispatchInputs].filter((n) => !allowedDispatchInputs.has(n));
