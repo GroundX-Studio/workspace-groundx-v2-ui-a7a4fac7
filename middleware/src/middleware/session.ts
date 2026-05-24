@@ -35,9 +35,9 @@ export function clearSessionCookie(res: Response): void {
   res.clearCookie(SESSION_COOKIE, { path: "/" });
 }
 
-export function createSessionRecord(groundxUsername: string, groundxApiKeyEnc?: string | null): SessionRecord {
+export function createSessionRecord(groundxUsername: string, groundxApiKeyEnc?: string | null, id?: string): SessionRecord {
   return {
-    id: randomId(),
+    id: id ?? randomId(),
     groundxUsername,
     groundxApiKeyEnc,
     expiresAt: new Date(Date.now() + SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000),

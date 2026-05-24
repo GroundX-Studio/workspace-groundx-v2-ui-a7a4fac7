@@ -4,6 +4,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
 import { useCallback, type FC } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   BODY_TEXT,
@@ -69,7 +70,8 @@ const CAPABILITIES: ReadonlyArray<{ letter: "E" | "I" | "R"; name: string; key: 
  */
 export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
-  const { pickScenario, advanceFrame, openGate } = useOnboardingSession();
+  const { pickScenario, openGate } = useOnboardingSession();
+  const navigate = useNavigate();
   const { dispatch } = useCanvasOrchestrator();
   const { state: registry, refresh: refreshRegistry } = useScenarioRegistry();
 
@@ -77,23 +79,30 @@ export const IngestView: FC = () => {
     (id: string) => {
       const scenario = asKnownScenario(id);
       if (!scenario) return;
+      // Update state directly (preserves resume on existing entities)
+      // AND navigate to the canonical URL so deep links + back/forward
+      // work. OnboardingShell's URL-sync useEffect will also call
+      // pickScenario when it observes the URL change — that call is
+      // idempotent on an already-active entity.
       pickScenario(scenario);
       setScenario(scenario);
       dispatch({ kind: "showSample", scenario }, "user");
-      advanceFrame("f2");
+      if (registry.bucketId != null) {
+        navigate(`/onboarding/${registry.bucketId}/${scenario}`);
+      }
     },
-    [pickScenario, setScenario, advanceFrame, dispatch]
+    [navigate, registry.bucketId, pickScenario, setScenario, dispatch]
   );
 
   const handleByoClick = useCallback(() => {
-    // Match the spec's wireframe behavior: signup triggers F1→F2 and the
-    // gate loads inline in the chat column. OnboardingShell renders the
-    // chat column on F2-F7 and already hosts <GateView /> when
-    // gate.status === "open", so we just need to (a) open the gate and
-    // (b) advance to F2 so the 3-column shell mounts.
+    // Open the session gate directly (so tests + state observers
+    // see it immediately) AND navigate to the signup URL so the
+    // surface is shareable + refresh-safe. Direction A in
+    // OnboardingShell will also call openGate when it sees the URL —
+    // that call is idempotent (no-op when gate is already open).
     openGate("byo");
-    advanceFrame("f2");
-  }, [openGate, advanceFrame]);
+    navigate("/onboarding/signup");
+  }, [openGate, navigate]);
 
   return (
     <Box

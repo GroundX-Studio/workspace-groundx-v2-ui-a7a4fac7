@@ -34,6 +34,12 @@ beforeEach(() => {
   consoleErrorSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
     throw new Error(`Unexpected console.error during test: ${args.map(String).join(" ")}`);
   });
+  // EntityRegistry persists to localStorage. Without this isolation
+  // hook, a previous test's snapshot could rehydrate into the next
+  // test's EntityRegistryProvider and corrupt assertions.
+  if (typeof window !== "undefined") {
+    window.localStorage.clear();
+  }
 });
 
 afterEach(() => {

@@ -22,12 +22,12 @@ describe("readRegistryDemoOverride", () => {
 
   it("returns the empty state for ?registry=empty", () => {
     const result = readRegistryDemoOverride("?registry=empty");
-    expect(result).toEqual({ status: "ready", scenarios: [], error: null });
+    expect(result).toEqual({ status: "ready", scenarios: [], bucketId: null, error: null });
   });
 
   it("returns the loading state for ?registry=loading", () => {
     const result = readRegistryDemoOverride("?registry=loading");
-    expect(result).toEqual({ status: "loading", scenarios: [], error: null });
+    expect(result).toEqual({ status: "loading", scenarios: [], bucketId: null, error: null });
   });
 
   it("returns the error state with a default message for ?registry=error", () => {
@@ -38,7 +38,7 @@ describe("readRegistryDemoOverride", () => {
 
   it("uses a custom error message when ?error=... is provided", () => {
     const result = readRegistryDemoOverride("?registry=error&error=Bucket+unreachable");
-    expect(result).toEqual({ status: "error", scenarios: [], error: "Bucket unreachable" });
+    expect(result).toEqual({ status: "error", scenarios: [], bucketId: null, error: "Bucket unreachable" });
   });
 
   it("handles URL-encoded spaces in custom error messages", () => {

@@ -23,11 +23,17 @@ describe("OnboardingSessionContext", () => {
     expect(result.current.state.sessionId).toBe("sess_abc");
   });
 
-  it("advanceFrame marks the previous frame completed", () => {
+  it("advanceFrame marks the previous frame completed (inside an active sample)", () => {
+    // advanceFrame operates on the active entity. From the F1 picker
+    // with no entity active it's a no-op — the user must
+    // pickScenario (or trigger BYO) first. Picking a sample lands
+    // the user on f2; advancing then marks f2 completed.
     const { result } = renderHook(() => useOnboardingSession(), { wrapper });
-    act(() => result.current.advanceFrame("f2"));
+    act(() => result.current.pickScenario("utility"));
     expect(result.current.state.currentFrame).toBe("f2");
-    expect(result.current.state.completedFrames.has("f1")).toBe(true);
+    act(() => result.current.advanceFrame("f3"));
+    expect(result.current.state.currentFrame).toBe("f3");
+    expect(result.current.state.completedFrames.has("f2")).toBe(true);
   });
 
   it("openGate sets open status with trigger", () => {

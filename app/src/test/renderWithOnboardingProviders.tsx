@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { render } from "@testing-library/react";
 import { HelmetProvider } from "react-helmet-async";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { AgentToolBusProvider } from "@/contexts/AgentToolBusContext";
 import { AppModeProvider } from "@/contexts/AppModeContext";
@@ -18,21 +19,72 @@ interface RenderOnboardingOptions {
   initialAuthState?: AuthState;
   initialScenario?: Scenario | null;
   initialScenarios?: ScenarioConfig[];
+  /**
+   * Initial URL the MemoryRouter mounts at. Defaults to "/onboarding"
+   * so existing tests don't need to think about routes. Pass a deeper
+   * URL like "/onboarding/28454/utility" to exercise URL-driven
+   * surface activation.
+   */
+  initialUrl?: string;
+  /**
+   * Forced bucket id for the ScenarioRegistry. Tests that exercise
+   * URL routing need this to match the URL's bucket segment, since
+   * production gets bucketId from the middleware response. Defaults
+   * to 28454 (the staging/dev samples bucket).
+   */
+  registryBucketId?: number | null;
 }
 
 export const renderWithOnboardingProviders = (
   ui: ReactElement,
-  { initialAuthState = "anonymous", initialFrame = "f1", initialScenario = null, initialScenarios = allTestScenarios }: RenderOnboardingOptions = {},
-) =>
-  render(
+  {
+    initialAuthState = "anonymous",
+    initialFrame = "f1",
+    initialScenario = null,
+    initialScenarios = allTestScenarios,
+    initialUrl,
+    registryBucketId = 28454,
+  }: RenderOnboardingOptions = {},
+) => {
+  // If the caller didn't specify a URL, derive one from
+  // initialScenario so the URL ↔ state sync inside OnboardingShell
+  // doesn't immediately deactivate the seeded entity. This keeps
+  // pre-router tests (which only pass initialFrame/initialScenario)
+  // working unchanged.
+  const resolvedUrl =
+    initialUrl ??
+    (initialScenario ? `/onboarding/${registryBucketId}/${initialScenario}` : "/onboarding");
+  return render(
     <GxThemeProvider>
       <AppModeProvider initialAuthState={initialAuthState} initialScenario={initialScenario}>
-        <ScenarioRegistryProvider initialScenarios={initialScenarios}>
+        <ScenarioRegistryProvider
+          forcedDemoState={{
+            status: "ready",
+            scenarios: initialScenarios,
+            bucketId: registryBucketId,
+            error: null,
+          }}
+        >
           <OnboardingSessionProvider initialFrame={initialFrame} initialScenario={initialScenario}>
             <AgentToolBusProvider>
               <CanvasOrchestratorProvider>
                 <OnboardingSkillProvider>
-                  <HelmetProvider>{ui}</HelmetProvider>
+                  <HelmetProvider>
+                    <MemoryRouter initialEntries={[resolvedUrl]}>
+                      <Routes>
+                        {/* Three onboarding route shapes — the
+                            OnboardingShell reads useParams() and
+                            useLocation() to decide what surface to
+                            mount. */}
+                        <Route path="/onboarding" element={ui} />
+                        <Route path="/onboarding/signup" element={ui} />
+                        <Route path="/onboarding/:bucketId/:scenarioId" element={ui} />
+                        {/* Catch-all so tests that don't care about
+                            routing still get their UI rendered. */}
+                        <Route path="*" element={ui} />
+                      </Routes>
+                    </MemoryRouter>
+                  </HelmetProvider>
                 </OnboardingSkillProvider>
               </CanvasOrchestratorProvider>
             </AgentToolBusProvider>
@@ -41,3 +93,4 @@ export const renderWithOnboardingProviders = (
       </AppModeProvider>
     </GxThemeProvider>,
   );
+};

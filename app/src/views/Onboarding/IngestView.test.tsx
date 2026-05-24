@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppModeProvider, useAppMode } from "@/contexts/AppModeContext";
@@ -77,23 +78,27 @@ const fixtureScenarios: ScenarioConfig[] = [
 ];
 
 const wrap = (node: React.ReactNode) => (
-  <AppModeProvider>
-    <ScenarioRegistryProvider initialScenarios={fixtureScenarios}>
-      <OnboardingSessionProvider>
-        <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
-      </OnboardingSessionProvider>
-    </ScenarioRegistryProvider>
-  </AppModeProvider>
+  <MemoryRouter initialEntries={["/onboarding"]}>
+    <AppModeProvider>
+      <ScenarioRegistryProvider initialScenarios={fixtureScenarios}>
+        <OnboardingSessionProvider>
+          <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
+        </OnboardingSessionProvider>
+      </ScenarioRegistryProvider>
+    </AppModeProvider>
+  </MemoryRouter>
 );
 
 const wrapEmpty = (node: React.ReactNode) => (
-  <AppModeProvider>
-    <ScenarioRegistryProvider initialScenarios={[]}>
-      <OnboardingSessionProvider>
-        <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
-      </OnboardingSessionProvider>
-    </ScenarioRegistryProvider>
-  </AppModeProvider>
+  <MemoryRouter initialEntries={["/onboarding"]}>
+    <AppModeProvider>
+      <ScenarioRegistryProvider initialScenarios={[]}>
+        <OnboardingSessionProvider>
+          <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
+        </OnboardingSessionProvider>
+      </ScenarioRegistryProvider>
+    </AppModeProvider>
+  </MemoryRouter>
 );
 
 describe("IngestView (F1)", () => {

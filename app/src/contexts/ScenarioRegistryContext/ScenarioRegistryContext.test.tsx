@@ -35,6 +35,7 @@ describe("ScenarioRegistryProvider", () => {
     const forced: ScenarioRegistryState = {
       status: "error",
       scenarios: [],
+      bucketId: null,
       error: "Demo: bucket unreachable",
     };
     render(
@@ -54,7 +55,7 @@ describe("ScenarioRegistryProvider", () => {
   });
 
   it("supports forcing the loading state", () => {
-    const forced: ScenarioRegistryState = { status: "loading", scenarios: [], error: null };
+    const forced: ScenarioRegistryState = { status: "loading", scenarios: [], bucketId: null, error: null };
     render(
       <ScenarioRegistryProvider forcedDemoState={forced}>
         <Probe />
@@ -64,7 +65,7 @@ describe("ScenarioRegistryProvider", () => {
   });
 
   it("supports forcing the empty-ready state", () => {
-    const forced: ScenarioRegistryState = { status: "ready", scenarios: [], error: null };
+    const forced: ScenarioRegistryState = { status: "ready", scenarios: [], bucketId: null, error: null };
     render(
       <ScenarioRegistryProvider forcedDemoState={forced}>
         <Probe />

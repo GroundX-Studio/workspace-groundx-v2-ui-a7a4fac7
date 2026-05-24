@@ -12,6 +12,7 @@ interface AppModeProviderProps {
   children: ReactNode;
   initialMode?: AppMode;
   initialAuthState?: AuthState;
+  initialScenario?: Scenario | null;
   byoPagesLimit?: number;
 }
 
@@ -19,12 +20,13 @@ export const AppModeProvider: FC<AppModeProviderProps> = ({
   children,
   initialMode = "onboarding",
   initialAuthState = "anonymous",
+  initialScenario = null,
   byoPagesLimit = DEFAULT_BYO_PAGES_LIMIT,
 }) => {
   const [state, setState] = useState<AppModeState>(() => ({
     mode: initialMode,
     authState: initialAuthState,
-    scenario: null,
+    scenario: initialScenario,
     usage: { byoPages: 0, byoPagesLimit },
   }));
 

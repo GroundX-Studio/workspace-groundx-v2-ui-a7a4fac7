@@ -35,5 +35,11 @@ export const router = createBrowserRouter([
   { path: ROUTER_PATHS.AUTH_RESET_PASSWORD, element: <ResetPassword /> },
   { path: ROUTER_PATHS.HEALTH, element: <Health /> },
   { path: ROUTER_PATHS.BANNED, element: <Banned /> },
+  // Onboarding surfaces — URL is the source of truth for which
+  // surface mounts (picker / signup / specific sample). The
+  // OnboardingShell reads useParams() and useLocation() and dispatches
+  // to the right surface. See OnboardingShell's URL-sync useEffect.
   { path: ROUTER_PATHS.ONBOARDING, element: <OnboardingShell /> },
+  { path: `${ROUTER_PATHS.ONBOARDING}/signup`, element: <OnboardingShell /> },
+  { path: `${ROUTER_PATHS.ONBOARDING}/:bucketId/:scenarioId`, element: <OnboardingShell /> },
 ]);

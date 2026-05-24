@@ -153,7 +153,7 @@ export const IntegrateView: FC = () => {
             <Stack spacing={0.5} sx={{ mt: 1 }}>
               <Typography variant="body2">→ Manage API keys</Typography>
               <Typography variant="body2">→ Read the docs</Typography>
-              <Typography variant="body2">→ Set up Workspaces &amp; Projects</Typography>
+              <Typography variant="body2">→ Connect this sample to your workflow</Typography>
             </Stack>
           </Card>
         </Stack>

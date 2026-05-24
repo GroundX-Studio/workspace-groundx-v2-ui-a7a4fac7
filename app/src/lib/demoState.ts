@@ -49,12 +49,12 @@ export function readRegistryDemoOverride(search?: string): ScenarioRegistryState
   const mode = params.get("registry");
   if (!mode || !ALLOWED_REGISTRY_MODES.has(mode)) return null;
   if (mode === "empty") {
-    return { status: "ready", scenarios: [], error: null };
+    return { status: "ready", scenarios: [], bucketId: null, error: null };
   }
   if (mode === "loading") {
-    return { status: "loading", scenarios: [], error: null };
+    return { status: "loading", scenarios: [], bucketId: null, error: null };
   }
   // mode === "error"
   const errorMessage = params.get("error") ?? "Demo: registry forced into error state.";
-  return { status: "error", scenarios: [], error: errorMessage };
+  return { status: "error", scenarios: [], bucketId: null, error: errorMessage };
 }

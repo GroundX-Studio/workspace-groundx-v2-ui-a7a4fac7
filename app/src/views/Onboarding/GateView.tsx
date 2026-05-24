@@ -37,14 +37,9 @@ const PREAMBLE: Record<GateTrigger, string> = {
  * column. Email is the primary commit path (magic link); engineer call is
  * an alternative commit path; SSO is hidden unless `SSO_ENABLED` is true.
  */
-export interface GateViewProps {
-  /** When true, the committed state collapses on dismiss instead of staying visible. */
-  collapseOnCommit?: boolean;
-}
-
-export const GateView: FC<GateViewProps> = ({ collapseOnCommit = false }) => {
-  const { state, dismissGate, commitGate } = useOnboardingSession();
-  const { state: appMode } = useAppMode();
+export const GateView: FC = () => {
+  const { state, dismissGate, commitGate, advanceFrame } = useOnboardingSession();
+  const { state: appMode, promoteToSignedIn } = useAppMode();
   const [email, setEmail] = useState("");
   const [committedCollapsed, setCommittedCollapsed] = useState(false);
 
@@ -65,6 +60,11 @@ export const GateView: FC<GateViewProps> = ({ collapseOnCommit = false }) => {
     // For Phase 2 we mark the gate committed so the flow can continue.
     commitGate("engineer-call");
   }, [commitGate]);
+
+  const handleContinueToIntegrate = useCallback(() => {
+    promoteToSignedIn();
+    advanceFrame("f7");
+  }, [advanceFrame, promoteToSignedIn]);
 
   // LC5 ESC-key dismiss (project-state-machines-backout). Wired as a global
   // listener while the gate is open; respects existing input focus by only
@@ -94,20 +94,42 @@ export const GateView: FC<GateViewProps> = ({ collapseOnCommit = false }) => {
         <IconButton
           size="small"
           aria-label="Close confirmation"
-          onClick={() => (collapseOnCommit ? setCommittedCollapsed(true) : undefined)}
+          onClick={() => setCommittedCollapsed(true)}
           data-testid="gate-committed-close"
           sx={{ position: "absolute", top: 8, right: 8, color: BODY_TEXT }}
         >
           <CloseIcon fontSize="small" />
         </IconButton>
         <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
-          THANKS — CHECK YOUR EMAIL
+          {method === "engineer-call" ? "THANKS - CALL REQUESTED" : "THANKS - CHECK YOUR EMAIL"}
         </Typography>
         <Typography variant="body1" sx={{ mt: 1 }}>
           {method === "engineer-call"
             ? "You'll get a Calendly confirmation shortly. Until then, keep exploring — your work is preserved."
             : "We sent a magic link. Click it on this device to keep going. Your sample work is preserved."}
         </Typography>
+        <Box
+          component="button"
+          type="button"
+          data-testid="gate-continue-integrate"
+          onClick={handleContinueToIntegrate}
+          sx={{
+            mt: 2,
+            p: 1,
+            borderRadius: BORDER_RADIUS_PILL,
+            backgroundColor: GREEN,
+            color: NAVY,
+            textAlign: "center",
+            fontWeight: 600,
+            cursor: "pointer",
+            border: "none",
+            fontFamily: "inherit",
+            fontSize: 14,
+            width: "100%",
+          }}
+        >
+          Continue to Integrate
+        </Box>
       </Card>
     );
   }
@@ -190,7 +212,10 @@ export const GateView: FC<GateViewProps> = ({ collapseOnCommit = false }) => {
           data-testid="gate-book-call"
           onClick={handleBookCall}
           onKeyDown={(event) => {
-            if (event.key === "Enter") handleBookCall();
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handleBookCall();
+            }
           }}
           sx={{
             display: "flex",

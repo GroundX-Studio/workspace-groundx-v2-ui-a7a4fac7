@@ -325,7 +325,10 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
   app.get("/api/scenarios", apiLimiter, async (_req, res, next) => {
     try {
       const scenarios = await scenarioRegistry.list();
-      res.json({ scenarios });
+      // Include the samples bucket id so the frontend can construct
+      // canonical URLs of the form /onboarding/<bucketId>/<scenarioId>
+      // without having to know the env separately.
+      res.json({ bucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null, scenarios });
     } catch (error) {
       next(error);
     }

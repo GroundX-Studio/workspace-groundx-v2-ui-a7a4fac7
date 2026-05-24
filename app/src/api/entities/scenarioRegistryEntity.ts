@@ -3,6 +3,19 @@ import { scenariosUrl } from "@/api/common";
 import type { ScenarioConfig } from "@/types/scenarios";
 
 export interface ListScenariosResponse {
+  /**
+   * Numeric GroundX bucket the samples live in. Returned by the
+   * middleware so the frontend can build canonical URLs of the form
+   * `/onboarding/<bucketId>/<scenarioId>` without needing its own
+   * env. `null` when the middleware doesn't know (mostly tests or
+   * deployments without the env var set).
+   */
+  bucketId: number | null;
+  scenarios: ScenarioConfig[];
+}
+
+export interface ListScenariosResult {
+  bucketId: number | null;
   scenarios: ScenarioConfig[];
 }
 
@@ -14,7 +27,7 @@ export interface ListScenariosResponse {
  *
  * No auth required — samples are public, partner-owned content.
  */
-export const listScenarios = async (): Promise<ScenarioConfig[]> => {
+export const listScenarios = async (): Promise<ListScenariosResult> => {
   const response = await axios.get<ListScenariosResponse>(scenariosUrl);
-  return response.data.scenarios;
+  return { bucketId: response.data.bucketId ?? null, scenarios: response.data.scenarios };
 };

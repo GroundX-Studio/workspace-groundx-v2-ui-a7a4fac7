@@ -43,8 +43,8 @@ export const ScenarioRegistryProvider: FC<ScenarioRegistryProviderProps> = ({
   // provider starts in `idle` and the useEffect kicks off the real fetch.
   const [state, setState] = useState<ScenarioRegistryState>(() => {
     if (forcedDemoState) return forcedDemoState;
-    if (initialScenarios) return { status: "ready", scenarios: initialScenarios, error: null };
-    return { status: "idle", scenarios: [], error: null };
+    if (initialScenarios) return { status: "ready", scenarios: initialScenarios, bucketId: null, error: null };
+    return { status: "idle", scenarios: [], bucketId: null, error: null };
   });
 
   const refresh = useCallback(async () => {
@@ -57,11 +57,11 @@ export const ScenarioRegistryProvider: FC<ScenarioRegistryProviderProps> = ({
     }
     setState((previous) => ({ ...previous, status: "loading", error: null }));
     try {
-      const scenarios = await listScenarios();
-      setState({ status: "ready", scenarios, error: null });
+      const { bucketId, scenarios } = await listScenarios();
+      setState({ status: "ready", scenarios, bucketId, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load scenarios";
-      setState({ status: "error", scenarios: [], error: message });
+      setState({ status: "error", scenarios: [], bucketId: null, error: message });
     }
   }, [forcedDemoState]);
 

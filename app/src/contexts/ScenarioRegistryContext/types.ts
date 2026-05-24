@@ -5,6 +5,14 @@ export type ScenarioRegistryStatus = "idle" | "loading" | "ready" | "error";
 export interface ScenarioRegistryState {
   status: ScenarioRegistryStatus;
   scenarios: ScenarioConfig[];
+  /**
+   * Numeric GroundX bucket holding the samples. Returned by the
+   * middleware alongside the scenarios; used by URL routing to
+   * construct canonical sample URLs (/onboarding/<bucketId>/<scenarioId>).
+   * `null` when the middleware can't report it (no env var) or
+   * before the registry loads.
+   */
+  bucketId: number | null;
   error: string | null;
 }
 
