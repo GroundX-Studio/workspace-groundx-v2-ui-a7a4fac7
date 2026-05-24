@@ -1,6 +1,6 @@
 import Box from "@mui/material/Box";
 import { alpha } from "@mui/material/styles";
-import type { FC } from "react";
+import { useEffect, useRef, useState, type FC } from "react";
 
 import {
   BORDER_RADIUS_PILL,
@@ -181,11 +181,9 @@ const CompactStrip: FC<{ steps: StepDescriptor[] }> = ({ steps }) => {
   const total = steps.length;
   const fillPct = ((completed + (found ? 0.5 : 0)) / total) * 100;
   return (
-    <Box
-      role="group"
-      aria-label="Onboarding journey step strip"
-      sx={{ display: "flex", flexDirection: "column", gap: 0.5, py: 1.5 }}
-    >
+    // role/aria-label live on the outer StepStrip wrapper; this Box is
+    // just the inner layout container for the compact progress bar.
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, py: 1.5 }}>
       <Box
         sx={{
           display: "flex",
@@ -229,36 +227,49 @@ const CompactStrip: FC<{ steps: StepDescriptor[] }> = ({ steps }) => {
   );
 };
 
-export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = false }) => {
-  if (compact) return <CompactStrip steps={steps} />;
-  return (
-    <Box
-      role="group"
-      aria-label="Onboarding journey step strip"
-      sx={{
-        display: "flex",
-        alignItems: "center",
-        gap: 0,
-        py: 2,
-        // Pinned `nowrap` so the four primary pills + ANALYZE compound
-        // always stay on a single horizontal row. The strip's content
-        // sums to ~711px at the design width, and a fraction-of-a-pixel
-        // narrower used to drop Integrate to a second row mid-render
-        // (caught in Chrome at 1305px on a 1306px design). `overflow-x:
-        // auto` is the graceful degradation — very narrow viewports
-        // get a horizontal scroll rather than a wrap. We hide the
-        // scrollbar UI to avoid an inconsistent 15px gutter on Chrome
-        // at narrow widths; the strip is still scrollable by touch/wheel.
-        flexWrap: "nowrap",
-        overflowX: "auto",
-        scrollbarWidth: "none",
-        "&::-webkit-scrollbar": { display: "none" },
-        // No horizontal padding on the strip itself — the parent container
-        // controls page padding so the strip always aligns flush with the
-        // hero copy and sample-card grid below it.
-      }}
-    >
-      {steps.map((step, idx) => {
+/**
+ * Container-width threshold below which the full pill strip can't fit
+ * its natural ~711px content. Below this, the strip auto-switches to
+ * the compact "Step X of Y" progress bar — independent of the
+ * viewport-based `compact` prop. This handles the case where the
+ * viewport itself is wide (e.g. 1200px) but the strip's container is
+ * narrow because the chat pane is eating most of the row's width.
+ */
+export const STEP_STRIP_CONTAINER_COMPACT_THRESHOLD = 720;
+
+/**
+ * Internal full pill strip — the `[1 Ingest]──[2 Understand]──┌ANALYZE…┐──[4 Integrate]`
+ * layout. Lives behind StepStrip's container-aware compact switch.
+ */
+const FullStrip: FC<{ steps: StepDescriptor[]; onStepClick?: StepStripProps["onStepClick"] }> = ({
+  steps,
+  onStepClick,
+}) => (
+  <Box
+    sx={{
+      display: "flex",
+      alignItems: "center",
+      gap: 0,
+      py: 2,
+      // Pinned `nowrap` so the four primary pills + ANALYZE compound
+      // always stay on a single horizontal row. The strip's content
+      // sums to ~711px at the design width, and a fraction-of-a-pixel
+      // narrower used to drop Integrate to a second row mid-render
+      // (caught in Chrome at 1305px on a 1306px design). `overflow-x:
+      // auto` is the graceful degradation — very narrow viewports
+      // get a horizontal scroll rather than a wrap. We hide the
+      // scrollbar UI to avoid an inconsistent 15px gutter on Chrome
+      // at narrow widths; the strip is still scrollable by touch/wheel.
+      flexWrap: "nowrap",
+      overflowX: "auto",
+      scrollbarWidth: "none",
+      "&::-webkit-scrollbar": { display: "none" },
+      // No horizontal padding on the strip itself — the parent container
+      // controls page padding so the strip always aligns flush with the
+      // hero copy and sample-card grid below it.
+    }}
+  >
+    {steps.map((step, idx) => {
         const isLast = idx === steps.length - 1;
         // Number the step badge based on position in the spec order
         // (Ingest=1, Understand=2, Analyze=no badge / bracket, Integrate=4).
@@ -320,6 +331,54 @@ export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = fa
           </Box>
         );
       })}
+  </Box>
+);
+
+export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = false }) => {
+  // Container-aware fallback to compact mode. We measure the outer
+  // wrapper's own bounding box (which always fills the parent's
+  // available width) and switch to compact when it dips below the
+  // threshold. The full pill strip clips ugly at narrower widths
+  // because the ANALYZE compound + connectors + Integrate pill can't
+  // fit. The wrapper is rendered unconditionally so the observer's
+  // target stays stable across mode switches (otherwise the observer
+  // tears down when the inner content changes and never re-attaches).
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [autoCompact, setAutoCompact] = useState(false);
+  useEffect(() => {
+    if (compact) {
+      setAutoCompact(false);
+      return;
+    }
+    const el = wrapperRef.current;
+    if (!el) return;
+    // SSR / jsdom-less environments: ResizeObserver may be missing.
+    // Without an observer we fall through to the full strip (degraded
+    // but not broken).
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setAutoCompact(entry.contentRect.width < STEP_STRIP_CONTAINER_COMPACT_THRESHOLD);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [compact]);
+
+  const effectiveCompact = compact || autoCompact;
+  return (
+    <Box
+      ref={wrapperRef}
+      role="group"
+      aria-label="Onboarding journey step strip"
+      data-testid="step-strip-wrapper"
+      sx={{ width: "100%" }}
+    >
+      {effectiveCompact ? (
+        <CompactStrip steps={steps} />
+      ) : (
+        <FullStrip steps={steps} onStepClick={onStepClick} />
+      )}
     </Box>
   );
 };

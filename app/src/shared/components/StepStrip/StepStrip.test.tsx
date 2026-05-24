@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StepStrip } from "./StepStrip";
+import { STEP_STRIP_CONTAINER_COMPACT_THRESHOLD, StepStrip } from "./StepStrip";
 import type { StepDescriptor } from "./types";
 
 // Some pills schedule deferred layout work that races vitest teardown; silence
@@ -46,6 +46,29 @@ describe("StepStrip", () => {
     expect(within(strip).getByText("Report")).toBeInTheDocument();
   });
 
+  it("exports a container compact threshold matching the full-strip natural width", () => {
+    // Sanity guard so a future refactor doesn't accidentally drop the
+    // threshold below the strip's natural ~711px content width. If the
+    // threshold is too low, the full pill strip clips Integrate at
+    // narrow canvas widths (bug visible at viewport=1200 where the
+    // canvas pane gives the strip only ~606px). 720 leaves a small
+    // breathing buffer over the 711 content sum.
+    expect(STEP_STRIP_CONTAINER_COMPACT_THRESHOLD).toBeGreaterThanOrEqual(715);
+    expect(STEP_STRIP_CONTAINER_COMPACT_THRESHOLD).toBeLessThan(800);
+  });
+
+  it("falls back to the full strip when ResizeObserver is unavailable", () => {
+    // jsdom has no ResizeObserver. The component must still render the
+    // full strip (degraded but not broken) instead of crashing. We
+    // assert the full strip's "ANALYZE" eyebrow renders, which is
+    // present only in the full layout, not the compact progress bar.
+    render(<StepStrip steps={baseSteps} />);
+    expect(screen.getByText("ANALYZE")).toBeInTheDocument();
+    // The compact "Step X of Y" copy must NOT appear when the strip
+    // is in full mode.
+    expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
+  });
+
   it("never wraps to a second row — flex-wrap pinned to nowrap (bug fix: at 1305px in Chrome the strip dropped Integrate to a second line)", () => {
     // Repro: with `flexWrap: "wrap"`, the strip's content totals
     // ~711px at typical viewports. One pixel narrower and the
@@ -60,13 +83,19 @@ describe("StepStrip", () => {
     // element, similar to the OnboardingNav divider-height regression.
     render(<StepStrip steps={baseSteps} />);
     const strip = screen.getByRole("group", { name: "Onboarding journey step strip" });
-    // Walk the element's className → look up rules in document
+    // Walk the strip + all its descendants → look up rules in document
     // stylesheets → find ANY `flex-wrap` declaration in a rule whose
-    // selector matches one of the strip's classes. We accept rule
-    // matches by raw cssText substring because Emotion sometimes
-    // serializes shorthand properties (e.g. `flex-wrap` under
-    // `flex` shorthand) where `rule.style.flexWrap` reads empty.
-    const classNames = strip.className.split(/\s+/).filter(Boolean);
+    // selector matches any of those classes. We accept rule matches by
+    // raw cssText substring because Emotion sometimes serializes
+    // shorthand properties (e.g. `flex-wrap` under `flex` shorthand)
+    // where `rule.style.flexWrap` reads empty. After the container-aware
+    // refactor the flex-wrap declaration moved from the outer
+    // role=group wrapper to the inner FullStrip body, so we have to
+    // crawl descendants.
+    const descendants = [strip, ...Array.from(strip.querySelectorAll("*"))];
+    const classNames = descendants.flatMap((el) =>
+      (el as HTMLElement).className.split(/\s+/).filter(Boolean),
+    );
     const flexWrapValues: string[] = [];
     for (const sheet of Array.from(document.styleSheets)) {
       let rules: CSSRuleList;
