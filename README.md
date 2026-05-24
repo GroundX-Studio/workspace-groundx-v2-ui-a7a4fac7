@@ -104,13 +104,32 @@ Deployment uses standard Kubernetes resources through Helm:
   for `dev`
 - the workflow creates the namespace idempotently before `helm upgrade --install`
 
-Secrets are not workflow dispatch inputs. For shared organization-level deployment,
-keep true shared credentials as GitHub organization secrets: `KUBE_CONFIG_DATA`,
-`GROUNDX_PARTNER_API_KEY`, and `MYSQL_PASSWORD`. For ECR, prefer GitHub OIDC with
-`AWS_ROLE_TO_ASSUME` as an organization variable; otherwise use
-`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` as organization secrets. Set
-`ECR_AWS_REGION` as an organization variable for ECR auth; ECR Public normally uses
-`us-east-1`.
+Secrets are not workflow dispatch inputs. Shared credentials live as GitHub
+organization secrets: `GROUNDX_PARTNER_API_KEY` and `MYSQL_PASSWORD`. For AWS,
+prefer GitHub OIDC with `AWS_ROLE_TO_ASSUME` as an organization variable;
+otherwise use `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` as organization
+secrets.
+
+EKS targeting is per-environment. Set four variables (org, repo, or
+GitHub-environment scope works for all of them):
+
+| Variable | Used when `environment` is | Example |
+|---|---|---|
+| `EKS_CLUSTER_NAME_DEV` | `dev` | `eyelevel-dev` |
+| `EKS_CLUSTER_REGION_DEV` | `dev` | `us-east-1` |
+| `EKS_CLUSTER_NAME_PROD` | `prod` | `eyelevel-prod` |
+| `EKS_CLUSTER_REGION_PROD` | `prod` | `us-east-1` |
+
+The workflow picks the right pair based on the chosen environment, then
+generates the kubeconfig per job via `aws eks update-kubeconfig` — no static
+`KUBE_CONFIG_DATA` secret. The IAM principal behind `AWS_ROLE_TO_ASSUME` must
+1. have `eks:DescribeCluster` on the target cluster, **and**
+2. be mapped in the cluster's `kube-system/aws-auth` ConfigMap (or in an EKS
+   access entry) so the K8s API authorizes it.
+
+ECR Public auth uses the same AWS credentials; the action internally forces
+`us-east-1` regardless of `EKS_CLUSTER_REGION`, so a non-us-east-1 EKS region
+does not break ECR Public push.
 
 Non-secret deploy settings are better as organization variables. The workflow supports
 the shared variables `FRONTEND_IMAGE_REPOSITORY`, `MIDDLEWARE_IMAGE_REPOSITORY`,

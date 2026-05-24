@@ -47,8 +47,18 @@ jobs:
       IMAGE_PULL_SECRET_NAME_INPUT: ${{ vars.IMAGE_PULL_SECRET_NAME || secrets.IMAGE_PULL_SECRET_NAME || '' }}
       HELM_RELEASE_NAME_INPUT: ${{ vars.HELM_RELEASE_NAME || secrets.HELM_RELEASE_NAME || '' }}
       REGISTRY_INPUT: ${{ vars.CONTAINER_REGISTRY || secrets.CONTAINER_REGISTRY || '' }}
-      ECR_AWS_REGION: ${{ vars.ECR_AWS_REGION || secrets.ECR_AWS_REGION || 'us-east-1' }}
       AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME || secrets.AWS_ROLE_TO_ASSUME || '' }}
+      # Per-environment EKS targeting. Set EKS_CLUSTER_NAME_{DEV,PROD}
+      # and EKS_CLUSTER_REGION_{DEV,PROD} as org or repo variables (or
+      # secrets) so dev and prod can point at different clusters /
+      # regions without touching the workflow.
+      EKS_CLUSTER_NAME_DEV: ${{ vars.EKS_CLUSTER_NAME_DEV || secrets.EKS_CLUSTER_NAME_DEV || '' }}
+      EKS_CLUSTER_NAME_PROD: ${{ vars.EKS_CLUSTER_NAME_PROD || secrets.EKS_CLUSTER_NAME_PROD || '' }}
+      EKS_CLUSTER_REGION_DEV: ${{ vars.EKS_CLUSTER_REGION_DEV || secrets.EKS_CLUSTER_REGION_DEV || '' }}
+      EKS_CLUSTER_REGION_PROD: ${{ vars.EKS_CLUSTER_REGION_PROD || secrets.EKS_CLUSTER_REGION_PROD || '' }}
+      # Resolved per environment for use by steps below.
+      EKS_CLUSTER_NAME: ${{ (github.event_name == 'push' || inputs.environment == 'prod') && (vars.EKS_CLUSTER_NAME_PROD || secrets.EKS_CLUSTER_NAME_PROD) || (vars.EKS_CLUSTER_NAME_DEV || secrets.EKS_CLUSTER_NAME_DEV) }}
+      EKS_CLUSTER_REGION: ${{ (github.event_name == 'push' || inputs.environment == 'prod') && (vars.EKS_CLUSTER_REGION_PROD || secrets.EKS_CLUSTER_REGION_PROD) || (vars.EKS_CLUSTER_REGION_DEV || secrets.EKS_CLUSTER_REGION_DEV) }}
       MIDDLEWARE_SECRET_NAME_INPUT: ${{ vars.MIDDLEWARE_SECRET_NAME || secrets.MIDDLEWARE_SECRET_NAME || '' }}
       MIDDLEWARE_NODE_ENV: ${{ vars.MIDDLEWARE_NODE_ENV || secrets.MIDDLEWARE_NODE_ENV || 'production' }}
       LOG_LEVEL: ${{ vars.LOG_LEVEL || secrets.LOG_LEVEL || '' }}
@@ -157,18 +167,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Configure AWS credentials for public ECR with role
-        if: steps.deploy-vars.outputs.registry == 'public.ecr.aws' && env.AWS_ROLE_TO_ASSUME != ''
+      # AWS credentials configured unconditionally: EKS auth needs them
+      # for `aws eks update-kubeconfig` and the in-cluster exec call,
+      # ECR Public auth needs them too. One role assumption covers both.
+      - name: Configure AWS credentials (OIDC role)
+        if: env.AWS_ROLE_TO_ASSUME != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ env.ECR_AWS_REGION }}
+          aws-region: ${{ env.EKS_CLUSTER_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
 
-      - name: Configure AWS credentials for public ECR with access keys
-        if: steps.deploy-vars.outputs.registry == 'public.ecr.aws' && env.AWS_ROLE_TO_ASSUME == ''
+      - name: Configure AWS credentials (access keys)
+        if: env.AWS_ROLE_TO_ASSUME == ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ env.ECR_AWS_REGION }}
+          aws-region: ${{ env.EKS_CLUSTER_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
@@ -208,16 +221,24 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
-      - name: Configure kubeconfig
+      # Generate the kubeconfig fresh per-job from EKS_CLUSTER_NAME +
+      # AWS_REGION. The resulting kubeconfig uses an exec stanza that
+      # calls `aws eks get-token` with the runner's ambient AWS creds
+      # (just configured above), so the IAM role being assumed must
+      #   1. have eks:DescribeCluster on the target cluster, AND
+      #   2. be mapped in the cluster's kube-system/aws-auth ConfigMap
+      #      (or in an EKS access entry) so the K8s API authorizes it.
+      - name: Configure kubeconfig (aws eks update-kubeconfig)
         run: |
-          if [ -z "${KUBE_CONFIG_DATA:-}" ]; then
-            echo "KUBE_CONFIG_DATA is required as a GitHub environment secret"
+          if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
+            echo "EKS_CLUSTER_NAME must be set as a GitHub environment variable or secret"
             exit 1
           fi
-          echo "$KUBE_CONFIG_DATA" | base64 --decode > "$RUNNER_TEMP/kubeconfig"
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$EKS_CLUSTER_REGION" \
+            --kubeconfig "$RUNNER_TEMP/kubeconfig"
           chmod 600 "$RUNNER_TEMP/kubeconfig"
-        env:
-          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
 
       - name: Create namespace
         run: |

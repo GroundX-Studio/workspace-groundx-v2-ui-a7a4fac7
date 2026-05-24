@@ -108,9 +108,26 @@ assert(workflow.includes("vars.INGRESS_ANNOTATIONS_JSON"), "workflow must allow 
 assert(workflow.includes("MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}"), "workflow must source MYSQL_PASSWORD from GitHub secrets");
 assert(workflow.includes("aws-actions/amazon-ecr-login@v2"), "workflow must support Amazon ECR Public login");
 assert(workflow.includes("registry-type: public"), "workflow must use public ECR registry mode");
-assert(workflow.includes("ECR_AWS_REGION:"), "workflow must use the ECR-specific AWS region setting");
-assert(workflow.includes("aws-region: ${{ env.ECR_AWS_REGION }}"), "ECR auth must use ECR_AWS_REGION");
-assert(!/^\s+AWS_REGION:/m.test(workflow), "workflow must not use ambiguous AWS_REGION for ECR auth");
+// Unified AWS_REGION drives both EKS and ECR; the ECR Public auth flow
+// inside aws-actions/amazon-ecr-login@v2 forces us-east-1 internally,
+// so we no longer need a separate ECR_AWS_REGION env var.
+// EKS targeting is per-environment. The workflow exposes
+// EKS_CLUSTER_REGION_DEV / EKS_CLUSTER_REGION_PROD and
+// EKS_CLUSTER_NAME_DEV / EKS_CLUSTER_NAME_PROD as org/repo/env vars,
+// then resolves each pair into a single EKS_CLUSTER_REGION /
+// EKS_CLUSTER_NAME at job-env time based on the chosen environment.
+assert(/EKS_CLUSTER_REGION_DEV/.test(workflow), "workflow must source dev region from EKS_CLUSTER_REGION_DEV");
+assert(/EKS_CLUSTER_REGION_PROD/.test(workflow), "workflow must source prod region from EKS_CLUSTER_REGION_PROD");
+assert(/EKS_CLUSTER_NAME_DEV/.test(workflow), "workflow must source dev cluster from EKS_CLUSTER_NAME_DEV");
+assert(/EKS_CLUSTER_NAME_PROD/.test(workflow), "workflow must source prod cluster from EKS_CLUSTER_NAME_PROD");
+assert(/^\s+EKS_CLUSTER_REGION:/m.test(workflow), "workflow must compute a resolved EKS_CLUSTER_REGION env var");
+assert(/^\s+EKS_CLUSTER_NAME:/m.test(workflow), "workflow must compute a resolved EKS_CLUSTER_NAME env var");
+assert(!/^\s+AWS_REGION:/m.test(workflow), "workflow must not define a single AWS_REGION — EKS_CLUSTER_REGION is per-env");
+assert(!/ECR_AWS_REGION/.test(workflow), "ECR_AWS_REGION must be gone — EKS_CLUSTER_REGION covers EKS, ECR Public auth forces us-east-1 internally");
+// EKS kubeconfig is generated dynamically per job. We no longer ship a
+// static kubeconfig as KUBE_CONFIG_DATA.
+assert(workflow.includes("aws eks update-kubeconfig"), "workflow must generate the kubeconfig from EKS dynamically");
+assert(!/KUBE_CONFIG_DATA/.test(workflow), "KUBE_CONFIG_DATA must not appear — dynamic kubeconfig replaces the static secret");
 assert(workflow.includes("kubectl -n \"$K8S_NAMESPACE\" get secret \"$MIDDLEWARE_SECRET_NAME\" -o jsonpath='{.data.SESSION_SECRET}'"), "workflow must preserve existing SESSION_SECRET");
 assert(workflow.includes("openssl rand -base64 48"), "workflow must generate SESSION_SECRET on first deploy");
 assert(workflow.includes("${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.image_tag }}"), "frontend build must push the per-env image tag");
