@@ -26,61 +26,8 @@ on:
         options:
           - dev
           - prod
-      publicAccess:
-        description: Frontend public access mode
-        required: false
-        default: inherit
-        type: choice
-        options:
-          - inherit
-          - none
-          - ingress
-      publicHost:
-        description: Public frontend host when publicAccess is ingress
-        required: false
-        type: string
-      publicDomain:
-        description: Public DNS suffix used to derive publicHost
-        required: false
-        type: string
-      namespace:
-        description: Kubernetes namespace override
-        required: false
-        type: string
-      ingressClassName:
-        description: Kubernetes IngressClass override
-        required: false
-        type: string
-      ingressAnnotationsJson:
-        description: JSON object of additional Kubernetes Ingress annotations
-        required: false
-        type: string
-      acmCertificateArn:
-        description: AWS ACM certificate ARN for ALB Ingress
-        required: false
-        type: string
-      albGroupName:
-        description: AWS ALB IngressGroup name
-        required: false
-        type: string
-      frontendImageRepository:
-        description: Frontend image repository override
-        required: false
-        type: string
-      middlewareImageRepository:
-        description: Middleware image repository override
-        required: false
-        type: string
       imageTag:
-        description: Image tag override
-        required: false
-        type: string
-      tlsSecretName:
-        description: Existing Kubernetes TLS secret for frontend Ingress
-        required: false
-        type: string
-      imagePullSecretName:
-        description: Existing Kubernetes image pull secret
+        description: Optional image tag override (for redeploying a specific build)
         required: false
         type: string
 
@@ -102,19 +49,19 @@ jobs:
     env:
       DEPLOY_ENVIRONMENT: ${{ github.event_name == 'push' && 'prod' || inputs.environment || 'dev' }}
       EXPECTED_COMMIT_SHA: ${{ inputs.commitSha || '' }}
-      K8S_NAMESPACE_INPUT: ${{ inputs.namespace || vars.K8S_NAMESPACE || secrets.K8S_NAMESPACE || '' }}
-      PUBLIC_ACCESS_INPUT: ${{ (inputs.publicAccess != 'inherit' && inputs.publicAccess) || vars.PUBLIC_ACCESS || secrets.PUBLIC_ACCESS || '' }}
-      PUBLIC_HOST_INPUT: ${{ inputs.publicHost || vars.PUBLIC_HOST || secrets.PUBLIC_HOST || '' }}
-      PUBLIC_DOMAIN_INPUT: ${{ inputs.publicDomain || vars.PUBLIC_DOMAIN || secrets.PUBLIC_DOMAIN || '' }}
-      INGRESS_CLASS_NAME_INPUT: ${{ inputs.ingressClassName || vars.INGRESS_CLASS_NAME || secrets.INGRESS_CLASS_NAME || '' }}
-      INGRESS_ANNOTATIONS_JSON_INPUT: ${{ inputs.ingressAnnotationsJson || vars.INGRESS_ANNOTATIONS_JSON || '{}' }}
-      ACM_CERTIFICATE_ARN_INPUT: ${{ inputs.acmCertificateArn || vars.ACM_CERTIFICATE_ARN || secrets.ACM_CERTIFICATE_ARN || '' }}
-      ALB_GROUP_NAME_INPUT: ${{ inputs.albGroupName || vars.ALB_GROUP_NAME || secrets.ALB_GROUP_NAME || '' }}
-      FRONTEND_IMAGE_REPOSITORY_INPUT: ${{ inputs.frontendImageRepository || vars.FRONTEND_IMAGE_REPOSITORY || secrets.FRONTEND_IMAGE_REPOSITORY || '' }}
-      MIDDLEWARE_IMAGE_REPOSITORY_INPUT: ${{ inputs.middlewareImageRepository || vars.MIDDLEWARE_IMAGE_REPOSITORY || secrets.MIDDLEWARE_IMAGE_REPOSITORY || '' }}
+      K8S_NAMESPACE_INPUT: ${{ vars.K8S_NAMESPACE || secrets.K8S_NAMESPACE || '' }}
+      PUBLIC_ACCESS_INPUT: ${{ vars.PUBLIC_ACCESS || secrets.PUBLIC_ACCESS || '' }}
+      PUBLIC_HOST_INPUT: ${{ vars.PUBLIC_HOST || secrets.PUBLIC_HOST || '' }}
+      PUBLIC_DOMAIN_INPUT: ${{ vars.PUBLIC_DOMAIN || secrets.PUBLIC_DOMAIN || '' }}
+      INGRESS_CLASS_NAME_INPUT: ${{ vars.INGRESS_CLASS_NAME || secrets.INGRESS_CLASS_NAME || '' }}
+      INGRESS_ANNOTATIONS_JSON_INPUT: ${{ vars.INGRESS_ANNOTATIONS_JSON || '{}' }}
+      ACM_CERTIFICATE_ARN_INPUT: ${{ vars.ACM_CERTIFICATE_ARN || secrets.ACM_CERTIFICATE_ARN || '' }}
+      ALB_GROUP_NAME_INPUT: ${{ vars.ALB_GROUP_NAME || secrets.ALB_GROUP_NAME || '' }}
+      FRONTEND_IMAGE_REPOSITORY_INPUT: ${{ vars.FRONTEND_IMAGE_REPOSITORY || secrets.FRONTEND_IMAGE_REPOSITORY || '' }}
+      MIDDLEWARE_IMAGE_REPOSITORY_INPUT: ${{ vars.MIDDLEWARE_IMAGE_REPOSITORY || secrets.MIDDLEWARE_IMAGE_REPOSITORY || '' }}
       IMAGE_TAG_INPUT: ${{ inputs.imageTag || vars.IMAGE_TAG || secrets.IMAGE_TAG || '' }}
-      TLS_SECRET_NAME_INPUT: ${{ inputs.tlsSecretName || vars.TLS_SECRET_NAME || secrets.TLS_SECRET_NAME || '' }}
-      IMAGE_PULL_SECRET_NAME_INPUT: ${{ inputs.imagePullSecretName || vars.IMAGE_PULL_SECRET_NAME || secrets.IMAGE_PULL_SECRET_NAME || '' }}
+      TLS_SECRET_NAME_INPUT: ${{ vars.TLS_SECRET_NAME || secrets.TLS_SECRET_NAME || '' }}
+      IMAGE_PULL_SECRET_NAME_INPUT: ${{ vars.IMAGE_PULL_SECRET_NAME || secrets.IMAGE_PULL_SECRET_NAME || '' }}
       HELM_RELEASE_NAME_INPUT: ${{ vars.HELM_RELEASE_NAME || secrets.HELM_RELEASE_NAME || '' }}
       REGISTRY_INPUT: ${{ vars.CONTAINER_REGISTRY || secrets.CONTAINER_REGISTRY || '' }}
       ECR_AWS_REGION: ${{ vars.ECR_AWS_REGION || secrets.ECR_AWS_REGION || 'us-east-1' }}

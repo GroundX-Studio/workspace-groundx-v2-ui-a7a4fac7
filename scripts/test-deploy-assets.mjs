@@ -69,7 +69,6 @@ const workflow = read(".github/workflows/deploy.yml");
 assert(workflow.includes("branches:\n      - main"), "deploy workflow must run on merge/push to main");
 assert(workflow.includes("workflow_dispatch:"), "deploy workflow must support manual runs");
 assert(workflow.includes("type: choice") && workflow.includes("- dev") && workflow.includes("- prod"), "manual deploy environment must be dev|prod");
-assert(workflow.includes("default: inherit"), "manual publicAccess must inherit org configuration by default");
 assert(workflow.includes("runs-on: ${{ vars.DEPLOY_RUNNER || 'ubuntu-latest' }}"), "deploy runner must be configurable for private/on-prem clusters");
 assert(workflow.includes('kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -'), "namespace creation must be idempotent");
 assert(workflow.includes("Dockerfile.frontend") && workflow.includes("Dockerfile.middleware"), "workflow must build both Docker images");
@@ -144,6 +143,24 @@ const forbiddenInputNames = dispatchInputNames.filter((name) => {
   return /(password|token|credential|kube|config)/i.test(name);
 });
 assert(forbiddenInputNames.length === 0, `workflow_dispatch inputs must not accept secret values: ${forbiddenInputNames.join(", ")}`);
+
+// The manual-run form must stay short. Cluster/Ingress/image-repo overrides
+// belong in org variables and secrets, not on every dispatch. Only the
+// genuinely per-run choices live here.
+const allowedDispatchInputs = new Set([
+  "projectId",   // workspace runner publish metadata (passthrough)
+  "branch",      // workspace runner publish metadata (passthrough)
+  "commitSha",   // checked-out commit validation
+  "environment", // dev | prod
+  "imageTag",    // optional override for redeploying a specific tag
+]);
+const actualDispatchInputs = new Set(dispatchInputNames);
+const unexpectedInputs = [...actualDispatchInputs].filter((n) => !allowedDispatchInputs.has(n));
+const missingInputs = [...allowedDispatchInputs].filter((n) => !actualDispatchInputs.has(n));
+assert(
+  unexpectedInputs.length === 0 && missingInputs.length === 0,
+  `workflow_dispatch input set drifted — unexpected: [${unexpectedInputs.join(", ")}], missing: [${missingInputs.join(", ")}]`,
+);
 
 if (commandExists("helm")) {
   execFileSync("helm", ["lint", "deploy/helm/groundx-web-ui"], { cwd: root, stdio: "inherit" });
