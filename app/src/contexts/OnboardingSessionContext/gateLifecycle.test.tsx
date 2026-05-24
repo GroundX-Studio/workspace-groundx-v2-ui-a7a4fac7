@@ -103,6 +103,23 @@ describe("LC3 · gate lifecycle state machine", () => {
     }
   });
 
+  it("dismissed → open(same trigger) ALSO re-enters the gate (BYO re-click)", () => {
+    // Bug repro: user clicks Sign Up (open BYO), dismisses (X), then
+    // clicks Sign Up again with the same trigger. The gate must re-open,
+    // not stay stuck in `dismissed`. The earlier same-trigger short-circuit
+    // was too eager — it blocked a legitimate re-trigger from the user's
+    // own re-click.
+    const { result } = renderHook(() => useOnboardingSession(), { wrapper });
+    act(() => result.current.openGate("byo"));
+    act(() => result.current.dismissGate());
+    expect(result.current.state.gate.status).toBe("dismissed");
+    act(() => result.current.openGate("byo"));
+    expect(result.current.state.gate.status).toBe("open");
+    if (result.current.state.gate.status === "open") {
+      expect(result.current.state.gate.trigger).toBe("byo");
+    }
+  });
+
   it("dismissGate from idle is a no-op (no spurious dismissed state)", () => {
     const { result } = renderHook(() => useOnboardingSession(), { wrapper });
     act(() => result.current.dismissGate());

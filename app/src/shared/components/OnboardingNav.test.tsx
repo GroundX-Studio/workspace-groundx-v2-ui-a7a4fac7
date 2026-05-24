@@ -28,6 +28,20 @@ describe("OnboardingNav", () => {
     expect(screen.getByTestId("onboarding-nav-item-docs")).toHaveTextContent(/Docs/);
   });
 
+  it("expanded rows show ONLY the label, not the initial letter (mutually exclusive)", () => {
+    // Bug fix — expanded rows previously showed both "W  Workspaces"
+    // which read as a redundant prefix. Spec: initial when
+    // collapsed, label when expanded; never both.
+    render(<OnboardingNav accountState="loggedOut" collapsed={false} onToggleCollapsed={() => {}} />);
+    const workspaces = screen.getByTestId("onboarding-nav-item-workspaces");
+    // No standalone "W" initial in the expanded row.
+    expect(workspaces.textContent ?? "").not.toMatch(/^W\s+Workspaces/);
+    // Just the label.
+    expect((workspaces.textContent ?? "").trim()).toBe("Workspaces");
+    const docs = screen.getByTestId("onboarding-nav-item-docs");
+    expect((docs.textContent ?? "").trim()).toBe("Docs");
+  });
+
   it("hides text labels in collapsed mode, leaving icon initials", () => {
     render(<OnboardingNav accountState="loggedOut" collapsed={true} onToggleCollapsed={() => {}} />);
     // In collapsed mode the visible label text is replaced by the initial.

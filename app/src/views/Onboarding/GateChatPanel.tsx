@@ -22,7 +22,7 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useState, type FC } from "react";
+import { useCallback, useEffect, useState, type FC } from "react";
 
 import {
   BODY_TEXT,
@@ -31,8 +31,41 @@ import {
   MUTED_ON_LIGHT,
   NAVY,
 } from "@/constants";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { LoadingDots } from "@/shared/components/LoadingDots";
+
+/**
+ * Persisted "the gate has already finished composing for this anon
+ * user" flag. Keyed by ChatStore.ownerKey so a different anon user
+ * (e.g. a fresh incognito session) still sees the typing
+ * animation the first time. The composing beat is part of the
+ * agent-typing-back UX — it shouldn't replay every time the user
+ * navigates back to F1 and re-clicks Sign Up.
+ */
+const COMPOSED_STORAGE_KEY_PREFIX = "groundx-onboarding.gate-composed.";
+
+function useGateComposedPersisted(ownerKey: string): [boolean, () => void] {
+  const storageKey = `${COMPOSED_STORAGE_KEY_PREFIX}${ownerKey}`;
+  const [composed, setComposed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(storageKey) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const markComposed = useCallback(() => {
+    setComposed(true);
+    try {
+      window.localStorage.setItem(storageKey, "true");
+    } catch {
+      // localStorage disabled — in-memory state still works for the
+      // current session; replay across reload is the worst case.
+    }
+  }, [storageKey]);
+  return [composed, markComposed];
+}
 
 import { GateView } from "./GateView";
 
@@ -97,6 +130,7 @@ const TypingIndicator: FC<{ trigger: keyof typeof TYPING_COPY }> = ({ trigger })
 
 export const GateChatPanel: FC = () => {
   const { state: session } = useOnboardingSession();
+  const { state: chatState } = useChatStore();
   const status = session.gate.status;
   const reduceMotion = useReducedMotion();
   // Trigger drives both the delay and the typing copy. For
@@ -109,34 +143,23 @@ export const GateChatPanel: FC = () => {
       ? session.gate.trigger
       : "save";
 
-  // `composed` flips to true after the typing-indicator delay. Skipping
-  // the delay entirely when status starts at "committed" (resumed
-  // session) or when reduced-motion is on (accessibility).
-  const [composed, setComposed] = useState<boolean>(
-    () => status === "committed" || Boolean(reduceMotion),
-  );
+  // Persisted-per-anon-user "the gate finished composing once" flag.
+  // First open: typing → markComposed(). Subsequent opens (after a
+  // dismiss + re-trigger, or after a reload) read it as true and
+  // skip the typing indicator entirely.
+  const [composed, markComposed] = useGateComposedPersisted(chatState.ownerKey);
 
   useEffect(() => {
-    if (status !== "open" && status !== "committed") {
-      // Gate left the active region — reset for the next open. This is
-      // how a dismiss → re-trigger replays the typing animation.
-      setComposed(false);
-      return;
-    }
-    if (status === "committed") {
-      // Already committed — no animation needed.
-      setComposed(true);
-      return;
-    }
+    if (status !== "open" && status !== "committed") return;
     if (composed) return;
-    if (reduceMotion) {
-      setComposed(true);
+    if (status === "committed" || reduceMotion) {
+      markComposed();
       return;
     }
     const delay = COMPOSING_DELAY_MS[trigger];
-    const id = window.setTimeout(() => setComposed(true), delay);
+    const id = window.setTimeout(() => markComposed(), delay);
     return () => window.clearTimeout(id);
-  }, [status, composed, reduceMotion, trigger]);
+  }, [status, composed, reduceMotion, trigger, markComposed]);
 
   if (status !== "open" && status !== "committed") {
     return <IdleChatPlaceholder />;

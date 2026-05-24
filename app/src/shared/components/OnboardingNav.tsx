@@ -301,17 +301,6 @@ function renderExpandedRow(
         "&:hover": item.disabled ? undefined : { backgroundColor: CYAN },
       }}
     >
-      <Box
-        aria-hidden
-        sx={{
-          width: 16,
-          textAlign: "center",
-          fontWeight: FONT_WEIGHT_HEADLINE,
-          color: item.disabled ? "rgba(41,51,92,0.35)" : NAVY,
-        }}
-      >
-        {item.initial}
-      </Box>
       <Box sx={{ flex: 1 }}>{item.label}</Box>
     </Box>
   );

@@ -17,10 +17,14 @@ import { GateChatPanel } from "./GateChatPanel";
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  // The "has the gate finished composing" flag persists in
+  // localStorage per anon user — clear it so each test starts fresh.
+  window.localStorage.clear();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  window.localStorage.clear();
 });
 
 /**
@@ -115,6 +119,60 @@ describe("GateChatPanel", () => {
     // At 1700ms total, the longer BYO delay has elapsed.
     act(() => {
       vi.advanceTimersByTime(1000);
+    });
+    expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
+    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+  });
+
+  it("does NOT replay the typing animation on re-entry after dismiss within the same session", async () => {
+    // Bug fix: user clicks Sign Up (typing → GateView), then clicks
+    // Ingest to go back to F1 (dismisses the gate), then clicks Sign
+    // Up again. Old behavior: typing replays every time. New
+    // behavior: typing fires the FIRST time only; subsequent opens
+    // (within the same anon user / browser) jump straight to the
+    // GateView.
+    vi.useFakeTimers();
+
+    function GateActions() {
+      const { openGate, dismissGate } = useOnboardingSession();
+      return (
+        <>
+          <button data-testid="open-gate-byo" onClick={() => openGate("byo")}>open</button>
+          <button data-testid="dismiss-gate" onClick={() => dismissGate()}>dismiss</button>
+        </>
+      );
+    }
+
+    renderWithOnboardingProviders(
+      <>
+        <GateActions />
+        <GateChatPanel />
+      </>,
+      { initialFrame: "f2", initialScenario: "utility" },
+    );
+
+    // First open — typing indicator, then GateView after the BYO
+    // delay (~1500ms).
+    act(() => {
+      screen.getByTestId("open-gate-byo").click();
+    });
+    expect(screen.getByTestId("gate-typing-indicator")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(1600);
+    });
+    expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
+    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+
+    // Dismiss (simulates clicking Ingest in the StepStrip).
+    act(() => {
+      screen.getByTestId("dismiss-gate").click();
+    });
+    expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
+
+    // Re-open (user clicks Sign Up again). MUST jump straight to
+    // GateView with no typing indicator.
+    act(() => {
+      screen.getByTestId("open-gate-byo").click();
     });
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
     expect(screen.getByTestId("gate-card")).toBeInTheDocument();

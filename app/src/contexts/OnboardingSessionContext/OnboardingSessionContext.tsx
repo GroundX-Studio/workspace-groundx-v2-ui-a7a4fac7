@@ -158,8 +158,14 @@ function useSessionFacade(): OnboardingSessionApi {
       let shouldRecord = false;
       setGate((prev) => {
         if (prev.status === "committed") return prev;
+        // `open(sameTrigger)` while already open is a no-op — the gate is
+        // already showing the right thing, no point re-recording.
         if (prev.status === "open" && prev.trigger === trigger) return prev;
-        if (prev.status === "dismissed" && prev.trigger === trigger) return prev;
+        // `dismissed → open(sameTrigger)` MUST re-enter the gate.
+        // The user clicked Sign Up, dismissed it, then clicked Sign Up
+        // again — that's an explicit re-trigger and the gate should
+        // re-open. (We previously short-circuited this and left the gate
+        // stuck in `dismissed`, which broke the BYO re-click flow.)
         shouldRecord = true;
         return { status: "open", trigger, openedAt: Date.now() };
       });
