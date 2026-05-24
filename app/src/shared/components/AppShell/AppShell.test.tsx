@@ -163,6 +163,58 @@ describe("AppShell", () => {
       expect(screen.queryByTestId("appshell-compact-nav-drawer")).not.toBeInTheDocument();
     });
 
+    it("resets focus mode when the viewport crosses the compact boundary", async () => {
+      // Transition compact -> desktop: if the user had toggled to
+      // focus-canvas at mobile, that state would otherwise persist
+      // at desktop (chat pane hidden, requiring drag-handle recovery).
+      // Same in reverse — desktop -> compact should land on focus-chat.
+      const { rerender } = render(
+        <MotionConfig reducedMotion="always">
+          <AppShell
+            nav={<div data-testid="nav">NAV</div>}
+            chat={<div data-testid="chat">CHAT</div>}
+            canvas={<div data-testid="canvas">CANVAS</div>}
+            compact={true}
+          />
+        </MotionConfig>,
+      );
+      const user = userEvent.setup();
+      // At compact, focus-chat is the default. Flip to focus-canvas.
+      await user.click(screen.getByTestId("appshell-compact-view-toggle"));
+      expect(screen.queryByTestId("chat")).not.toBeInTheDocument();
+      expect(screen.getByTestId("appshell-canvas")).toBeInTheDocument();
+
+      // Now cross to desktop. focus-canvas should NOT persist —
+      // we should land back on the desktop default (split: chat + canvas).
+      rerender(
+        <MotionConfig reducedMotion="always">
+          <AppShell
+            nav={<div data-testid="nav">NAV</div>}
+            chat={<div data-testid="chat">CHAT</div>}
+            canvas={<div data-testid="canvas">CANVAS</div>}
+            compact={false}
+          />
+        </MotionConfig>,
+      );
+      // At desktop default split: BOTH chat and canvas are visible.
+      expect(screen.getByTestId("chat")).toBeInTheDocument();
+      expect(screen.getByTestId("appshell-canvas")).toBeInTheDocument();
+
+      // Cross back to compact. Should re-enter focus-chat (canvas hidden).
+      rerender(
+        <MotionConfig reducedMotion="always">
+          <AppShell
+            nav={<div data-testid="nav">NAV</div>}
+            chat={<div data-testid="chat">CHAT</div>}
+            canvas={<div data-testid="canvas">CANVAS</div>}
+            compact={true}
+          />
+        </MotionConfig>,
+      );
+      expect(screen.getByTestId("chat")).toBeInTheDocument();
+      expect(screen.queryByTestId("appshell-canvas")).not.toBeInTheDocument();
+    });
+
     it("clicking the view-swap button toggles between focus-chat and focus-canvas", async () => {
       const user = userEvent.setup();
       renderShell({ compact: true });

@@ -112,6 +112,24 @@ export function AppShell({
     else if (zone === "split-live" && mode !== "split") setMode("split");
   }, [zone, mode, setMode]);
 
+  // When the viewport crosses the compact <-> desktop boundary, reset
+  // the focus mode so the user doesn't get stuck. Without this, a user
+  // who toggled to focus-canvas at mobile would still see only the
+  // canvas (chat hidden) when they rotate to landscape or resize their
+  // window past md — and the drag-resize handle would be their only
+  // way back. We skip the very first render so the initial mode comes
+  // from `effectiveInitialFocus` (which already accounts for compact).
+  const lastCompactRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (lastCompactRef.current === null) {
+      lastCompactRef.current = compact;
+      return;
+    }
+    if (lastCompactRef.current === compact) return;
+    lastCompactRef.current = compact;
+    setMode(compact ? "focus-chat" : initialFocus);
+  }, [compact, initialFocus, setMode]);
+
   // Compact-mode nav drawer state. Starts closed; the hamburger opens it.
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
 
