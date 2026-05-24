@@ -28,6 +28,54 @@ describe("OnboardingNav", () => {
     expect(screen.getByTestId("onboarding-nav-item-docs")).toHaveTextContent(/Docs/);
   });
 
+  it("section-divider hairlines render as 1px high lines, not full-height gray rectangles", () => {
+    // Bug fix — the JSX `<Box sx={{ height: 1, background: BORDER }} />`
+    // LOOKED like a 1px hairline divider, but in MUI's sx system
+    // `height: 1` means 100% of the parent (it's a fraction shorthand,
+    // not "1px"). Two dividers each grabbed ~150px of column space and
+    // showed up as big gray slabs in the live nav. The fix is the
+    // string form `height: "1px"`.
+    //
+    // jsdom doesn't lay out, and MUI/Emotion serializes sx into
+    // generated CSS rules rather than inline `style="height: …"`. So
+    // we crack open the document's CSS stylesheets and find every rule
+    // whose declarations claim the BORDER color background. Each one
+    // is a divider candidate — its `height` declaration must read
+    // "1px" (the fix) and never "100%" (the unitless-1 bug).
+    const { container } = render(
+      <OnboardingNav accountState="loggedOut" collapsed={false} onToggleCollapsed={() => {}} />,
+    );
+    expect(container.querySelector('[data-testid="onboarding-nav"]')).not.toBeNull();
+
+    type DividerRule = { selector: string; height: string };
+    const dividerRules: DividerRule[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList;
+      try {
+        rules = (sheet as CSSStyleSheet).cssRules;
+      } catch {
+        continue;
+      }
+      for (const rule of Array.from(rules)) {
+        if (!(rule instanceof CSSStyleRule)) continue;
+        const bg = rule.style.background || rule.style.backgroundColor;
+        // BORDER is `rgba(41,51,92,0.1)`. Emotion may emit the literal
+        // string or a normalized form; substring match is sufficient.
+        const looksLikeBorderBg =
+          /41,\s*51,\s*92/.test(bg) || /rgba\(41/.test(bg);
+        if (!looksLikeBorderBg) continue;
+        dividerRules.push({ selector: rule.selectorText, height: rule.style.height });
+      }
+    }
+    // Sanity: we expect to find at least one divider rule. If none,
+    // the test setup changed and this assertion is meaningless.
+    expect(dividerRules.length).toBeGreaterThan(0);
+    const offenders = dividerRules.filter(
+      (r) => r.height !== "1px" && r.height !== "0" && r.height !== "0px",
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("expanded rows show ONLY the label, not the initial letter (mutually exclusive)", () => {
     // Bug fix — expanded rows previously showed both "W  Workspaces"
     // which read as a redundant prefix. Spec: initial when

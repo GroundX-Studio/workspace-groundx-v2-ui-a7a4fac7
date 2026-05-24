@@ -215,18 +215,18 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
           </Box>
         )}
       </Box>
-      <Box sx={{ height: 1, background: BORDER, my: 0.5 }} />
+      <Box sx={{ height: "1px", background: BORDER, my: 0.5, flexShrink: 0 }} />
 
       <Stack spacing={0.25}>{topItems.map(renderRow)}</Stack>
 
       <Box sx={{ flex: 1 }} />
 
-      <Box sx={{ height: 1, background: BORDER, my: 0.5 }} />
+      <Box sx={{ height: "1px", background: BORDER, my: 0.5, flexShrink: 0 }} />
       <Stack spacing={0.5}>{bottomItems.map(renderRow)}</Stack>
 
       {/* Collapse / expand toggle. Chevron direction matches state. */}
       <Box sx={{ pt: 0.5 }}>
-        <Box sx={{ height: 1, background: BORDER }} />
+        <Box sx={{ height: "1px", background: BORDER, flexShrink: 0 }} />
         <Box
           role="button"
           tabIndex={0}
