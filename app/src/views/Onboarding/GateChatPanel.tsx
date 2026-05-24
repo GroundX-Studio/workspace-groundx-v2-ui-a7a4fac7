@@ -36,8 +36,29 @@ import { LoadingDots } from "@/shared/components/LoadingDots";
 
 import { GateView } from "./GateView";
 
-/** Composing-delay duration in ms. Calibrated to feel like a quick bot reply. */
-const COMPOSING_DELAY_MS = 600;
+/**
+ * Composing-delay duration by trigger.
+ *
+ *   - "save" / "export" / "threshold": the gate interrupts an in-progress
+ *     conversation. Short pause (~600ms) keeps the flow snappy.
+ *   - "byo": the gate IS the destination. User just clicked Sign Up from
+ *     F1 with no prior chat context. A short pause feels rushed; the
+ *     longer beat (~1500ms) lets the bot's "thinking" read as a real
+ *     reply, and gives the user time to read the richer typing copy.
+ */
+const COMPOSING_DELAY_MS = {
+  byo: 1500,
+  save: 600,
+  export: 600,
+  threshold: 600,
+} as const;
+
+const TYPING_COPY = {
+  byo: "Preparing a quick sign-up so you can save your work and keep going",
+  save: "GroundX is composing",
+  export: "GroundX is composing",
+  threshold: "GroundX is composing",
+} as const;
 
 /**
  * Idle copy when no gate is active — the chat column's "ready for your
@@ -62,13 +83,13 @@ const IdleChatPlaceholder: FC = () => (
   </Stack>
 );
 
-const TypingIndicator: FC = () => (
+const TypingIndicator: FC<{ trigger: keyof typeof TYPING_COPY }> = ({ trigger }) => (
   <Box
     data-testid="gate-typing-indicator"
-    sx={{ display: "flex", alignItems: "center", gap: 1, py: 1 }}
+    sx={{ display: "flex", alignItems: "center", gap: 1, py: 1, flexWrap: "wrap" }}
   >
     <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-      GroundX is composing
+      {TYPING_COPY[trigger]}
     </Typography>
     <LoadingDots size={5} aria-label="GroundX is composing a response" />
   </Box>
@@ -78,6 +99,15 @@ export const GateChatPanel: FC = () => {
   const { state: session } = useOnboardingSession();
   const status = session.gate.status;
   const reduceMotion = useReducedMotion();
+  // Trigger drives both the delay and the typing copy. For
+  // `committed` / `dismissed` states the gate isn't actively
+  // animating, but we still read the trigger off the state for
+  // consistency. Default `save` when the gate is somehow active
+  // without a trigger — short delay, generic copy.
+  const trigger: keyof typeof TYPING_COPY =
+    session.gate.status === "open" || session.gate.status === "dismissed"
+      ? session.gate.trigger
+      : "save";
 
   // `composed` flips to true after the typing-indicator delay. Skipping
   // the delay entirely when status starts at "committed" (resumed
@@ -103,16 +133,17 @@ export const GateChatPanel: FC = () => {
       setComposed(true);
       return;
     }
-    const id = window.setTimeout(() => setComposed(true), COMPOSING_DELAY_MS);
+    const delay = COMPOSING_DELAY_MS[trigger];
+    const id = window.setTimeout(() => setComposed(true), delay);
     return () => window.clearTimeout(id);
-  }, [status, composed, reduceMotion]);
+  }, [status, composed, reduceMotion, trigger]);
 
   if (status !== "open" && status !== "committed") {
     return <IdleChatPlaceholder />;
   }
 
   if (!composed) {
-    return <TypingIndicator />;
+    return <TypingIndicator trigger={trigger} />;
   }
 
   return (

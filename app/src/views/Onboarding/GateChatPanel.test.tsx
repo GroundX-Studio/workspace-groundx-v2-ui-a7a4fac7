@@ -29,10 +29,10 @@ afterEach(() => {
  * inside GateChatPanel's providers gives us deterministic control over
  * the gate.status transition.
  */
-function GateOpener() {
+function GateOpener({ trigger = "byo" }: { trigger?: "byo" | "save" | "export" | "threshold" }) {
   const { openGate } = useOnboardingSession();
   return (
-    <button data-testid="open-gate" onClick={() => openGate("byo")}>
+    <button data-testid="open-gate" onClick={() => openGate(trigger)}>
       open
     </button>
   );
@@ -46,33 +46,76 @@ describe("GateChatPanel", () => {
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
   });
 
-  it("shows a typing indicator first, then the gate after a composing delay", async () => {
+  it("shows a typing indicator first, then the gate after a composing delay (save trigger — short)", async () => {
     vi.useFakeTimers();
 
     renderWithOnboardingProviders(
       <>
-        <GateOpener />
+        <GateOpener trigger="save" />
         <GateChatPanel />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
 
-    // Trigger the gate (the same call IngestView.handleByoClick makes).
     act(() => {
       screen.getByTestId("open-gate").click();
     });
 
-    // Right after the gate becomes "open": typing indicator visible,
-    // gate card NOT yet.
     expect(screen.getByTestId("gate-typing-indicator")).toBeInTheDocument();
     expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
 
-    // Advance time past the composing delay (~600ms). The typing
-    // indicator should disappear and the gate card should appear.
+    // Standard composing delay is ~600ms for save/export/threshold.
     act(() => {
       vi.advanceTimersByTime(700);
     });
 
+    expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
+    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+  });
+
+  it("uses a longer composing delay AND a more substantial typing message for the BYO/signup trigger", async () => {
+    // BYO is the only path where the gate IS the destination — the
+    // user just clicked Sign Up from F1 and there's no prior context
+    // in the chat. A 600ms beat feels rushed for that case; bump to
+    // ~1500ms so the bot's "thinking" reads as a genuine reply.
+    // The typing copy also gets richer than the default "GroundX is
+    // composing" — long enough to read in the longer window.
+    vi.useFakeTimers();
+
+    renderWithOnboardingProviders(
+      <>
+        <GateOpener trigger="byo" />
+        <GateChatPanel />
+      </>,
+      { initialFrame: "f2", initialScenario: "utility" },
+    );
+
+    act(() => {
+      screen.getByTestId("open-gate").click();
+    });
+
+    // Right after the open: typing visible AND the copy mentions
+    // setting up sign-up (longer than just "composing").
+    const indicator = screen.getByTestId("gate-typing-indicator");
+    expect(indicator).toBeInTheDocument();
+    // The BYO-specific copy should reference the sign-up specifically,
+    // not just "is composing" — it's the start of a multi-turn
+    // sign-up chat moment.
+    expect(indicator.textContent ?? "").toMatch(/sign.?up|preparing|save your work/i);
+    expect(indicator.textContent ?? "").not.toMatch(/^GroundX is composing$/);
+
+    // At 700ms (past the SAVE-trigger threshold), BYO should STILL be
+    // typing — the longer delay is the whole point.
+    act(() => {
+      vi.advanceTimersByTime(700);
+    });
+    expect(screen.getByTestId("gate-typing-indicator")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
+
+    // At 1700ms total, the longer BYO delay has elapsed.
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
     expect(screen.getByTestId("gate-card")).toBeInTheDocument();
   });
