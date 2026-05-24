@@ -61,17 +61,60 @@ sync_status   cwd=scaffold branch=workspace/groundx-v2-ui
 Returns `{ ahead, behind, clean, head, branchMatchesExpected }`.
 Don't push from a dirty / behind tree.
 
-## Where `PARTNER_API_KEY` lives
+## Where `PARTNER_API_KEY` lives — read this carefully
 
-In `scaffold/middleware/.env.local` and `scaffold/.env.local` (both
-gitignored). Both files have `GROUNDX_PARTNER_API_KEY=…`. To pass
-it to an MCP call, read the value out of one of those files via
-`awk` (or read it once into a shell var per session).
+There are **two distinct Partner API keys** on this project. They look
+identical (both 36-char UUIDs, both called "Partner API key" in casual
+conversation) but they authenticate against different things. Mixing
+them up is the #1 way to get a `403 workspace ownership context does
+not match caller` and lose 15 minutes.
 
-**Never paste the literal value into a committed file.** The
-conversation transcript is not a committed file, so tool calls
-that take the value as a parameter are fine — but never as the
-content of a file you'll `git add`.
+| Key | Where it lives | What it's for | When you need it |
+|---|---|---|---|
+| **Runtime** GroundX Partner key | `scaffold/.env.local` (and `scaffold/middleware/.env.local`) as `GROUNDX_PARTNER_API_KEY` | The middleware's calls to `api.groundx.ai` (the GroundX SDK — customers, buckets, documents, search, workflows) | Never as the MCP `PARTNER_API_KEY` argument |
+| **Harness** (workspace-owner) Partner key | NOT on disk. Owned by whoever provisioned the managed project on GroundX Studio. | The `mcp__groundx-studio__*` tools — `commit_push`, `publish`, `git_session`, `deploy_config`, `clone_project`, `setup_env`, `project_create`, `operation_wait` | Every `groundx-studio` MCP call |
+
+### Recovering the harness key after a session compact
+
+The harness key isn't in `.env.local`, `.groundx-studio.json`,
+`~/.claude.json`, or the plugin RPM. It IS in the project's transcript
+JSONL files because every prior `commit_push` recorded the
+`PARTNER_API_KEY` argument:
+
+```bash
+grep -aoE '"PARTNER_API_KEY":"[^"]{30,50}"' \
+  ~/.claude/projects/-Users-benjaminfletcher-git-groundx-v2-ui/*.jsonl \
+  | sort -u
+```
+
+You'll get one or two distinct UUIDs. The one that **does not** equal
+`GROUNDX_PARTNER_API_KEY` from `scaffold/.env.local` is the harness
+key. If only the runtime key prints, or if the harness key has rotated
+and the transcript value 403s, **ask the user for the
+workspace-owner Partner API key**. Don't guess. Don't reuse the runtime
+key "just to see what happens" — the 403 is the only signal you get and
+it doesn't say "wrong key."
+
+### Why the trap is so easy to fall into
+
+- Both keys are 36-char UUIDs. Visually indistinguishable.
+- `.env.local` has only the runtime key, named `GROUNDX_PARTNER_API_KEY`,
+  which sounds authoritative.
+- The MCP's error message says "workspace ownership context does not
+  match caller" — not "wrong Partner key." It reads like a
+  permissions / ACL problem upstream, so retrying or fetching a fresh
+  git-session feels like the right move. It is not.
+- `git push` directly is not a fallback: the scaffold's remote uses
+  git-session credentials only the MCP can mint.
+
+### Before every MCP call, ask yourself
+
+> "Is the `PARTNER_API_KEY` I'm about to pass the workspace-owner one,
+> or the runtime one?"
+
+If you're not sure, run the recovery grep. If still not sure, ask the
+user. Never paste the literal value into a committed file (transcripts
+and tool-call args are fine — git is not).
 
 ## When the MCP path doesn't work
 

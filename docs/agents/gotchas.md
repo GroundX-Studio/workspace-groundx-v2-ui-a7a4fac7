@@ -24,6 +24,29 @@ It carries the Partner API key for the local MCP server. Don't
 `git add .mcp.json` and don't `git add -A` blindly — always
 stage specific files by name.
 
+### Two Partner API keys — pick the right one for the MCP
+
+`GROUNDX_PARTNER_API_KEY` in `scaffold/.env.local` is the **runtime**
+key (for the middleware's calls to `api.groundx.ai`). The
+`mcp__groundx-studio__*` tools (`commit_push`, `publish`,
+`git_session`, etc.) need a **different** workspace-owner Partner key
+— same UUID shape, different account. Using the runtime key on the
+MCP returns `403 workspace ownership context does not match caller`,
+which sounds like an ACL bug but is just the wrong key.
+
+The harness key isn't on disk. After a session compact, recover it
+with:
+
+```bash
+grep -aoE '"PARTNER_API_KEY":"[^"]{30,50}"' \
+  ~/.claude/projects/-Users-benjaminfletcher-git-groundx-v2-ui/*.jsonl \
+  | sort -u
+```
+
+The value that's NOT in `.env.local` is the harness one. Full
+explanation in `docs/agents/mcp-tools.md` → "Where `PARTNER_API_KEY`
+lives".
+
 ### Conversation transcripts ≠ committed files
 
 The TDD-and-never-commit-secrets rule applies to **committed**
