@@ -1,7 +1,17 @@
 import mysql from "mysql2/promise";
 
 import type { AppEnv } from "../config/env.js";
-import type { AppRepository, AppUserMetadata, SessionRecord } from "../types.js";
+import type {
+  AnonymousChatPayload,
+  AppRepository,
+  AppUserMetadata,
+  ChatMessageRecord,
+  ChatSessionEntityRecord,
+  ChatSessionRecord,
+  ConversationSummaryRecord,
+  SessionRecord,
+  ViewerEventRecord,
+} from "../types.js";
 
 export class MySqlAppRepository implements AppRepository {
   private pool: mysql.Pool;
@@ -125,5 +135,66 @@ export class MySqlAppRepository implements AppRepository {
       acceptedTermsAt: row.accepted_terms_at ? new Date(row.accepted_terms_at) : null,
       appRole: row.app_role,
     };
+  }
+
+  // ── Chat-session tables ──────────────────────────────────────────
+  //
+  // SQL implementations are intentionally deferred. The DB-only path
+  // for chat sessions only kicks in once the BFF endpoints (login-claim,
+  // signed-in chat persistence) ship. Until then, all chat content
+  // lives in localStorage on the client (per project_database.md
+  // content-vs-telemetry storage split). The MemoryAppRepository
+  // implements the same contract for tests and MOCK_MODE.
+  //
+  // When wiring real SQL: add CREATE TABLE statements to createSchema()
+  // matching project_database.md, then implement each method against
+  // the pool. Knex migrations to follow.
+
+  private notImplemented(name: string): never {
+    throw new Error(
+      `MySqlAppRepository.${name} is not yet implemented — chat-session DB persistence ships with the login-claim BFF endpoints. Until then anonymous content stays in localStorage and signed-in users do not yet hit this path.`,
+    );
+  }
+
+  async upsertChatSession(_record: ChatSessionRecord): Promise<void> {
+    this.notImplemented("upsertChatSession");
+  }
+  async getChatSession(_id: string): Promise<ChatSessionRecord | null> {
+    return this.notImplemented("getChatSession");
+  }
+  async listChatSessionsForUser(_ownerUserId: string): Promise<ChatSessionRecord[]> {
+    return this.notImplemented("listChatSessionsForUser");
+  }
+
+  async appendChatMessage(_record: ChatMessageRecord): Promise<void> {
+    this.notImplemented("appendChatMessage");
+  }
+  async listChatMessages(_chatSessionId: string): Promise<ChatMessageRecord[]> {
+    return this.notImplemented("listChatMessages");
+  }
+
+  async appendConversationSummary(_record: ConversationSummaryRecord): Promise<void> {
+    this.notImplemented("appendConversationSummary");
+  }
+  async listConversationSummaries(_chatSessionId: string): Promise<ConversationSummaryRecord[]> {
+    return this.notImplemented("listConversationSummaries");
+  }
+
+  async upsertChatSessionEntity(_record: ChatSessionEntityRecord): Promise<void> {
+    this.notImplemented("upsertChatSessionEntity");
+  }
+  async listChatSessionEntities(_chatSessionId: string): Promise<ChatSessionEntityRecord[]> {
+    return this.notImplemented("listChatSessionEntities");
+  }
+
+  async appendViewerEvent(_record: ViewerEventRecord): Promise<void> {
+    this.notImplemented("appendViewerEvent");
+  }
+  async listViewerEvents(_chatSessionId: string, _sinceTimestamp?: number): Promise<ViewerEventRecord[]> {
+    return this.notImplemented("listViewerEvents");
+  }
+
+  async claimAnonymousChatPayload(_ownerUserId: string, _payload: AnonymousChatPayload): Promise<void> {
+    this.notImplemented("claimAnonymousChatPayload");
   }
 }
