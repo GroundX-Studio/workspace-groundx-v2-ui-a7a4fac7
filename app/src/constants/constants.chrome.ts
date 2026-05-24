@@ -31,6 +31,21 @@
 /** Width of the left sidebar drawer when fully expanded. */
 export const drawerWidth = 270;
 
+/**
+ * Onboarding-shell nav (MiniNav) widths. The labeled rail is the default;
+ * the chevron at the bottom of the rail collapses it to the icon rail.
+ * Per spec-primitives.jsx · MiniNav full=180, minimal=48.
+ */
+export const ONBOARDING_NAV_WIDTH_FULL = 180;
+export const ONBOARDING_NAV_WIDTH_COLLAPSED = 48;
+
+/**
+ * Warm off-white nav background. Matches the wireframe MiniNav `#f8f7f2`.
+ * Distinct from TINT (cyan-tinted) — the nav surface is intentionally
+ * separate from the content surface so it reads as chrome.
+ */
+export const WARM_OFFWHITE = "#f8f7f2";
+
 /** Main content-pane background — the fill behind all cards in the authenticated shell. */
 export const MAIN_BACKGROUND = "#eef7f9";
 
