@@ -148,11 +148,8 @@ assert(forbiddenInputNames.length === 0, `workflow_dispatch inputs must not acce
 // belong in org variables and secrets, not on every dispatch. Only the
 // genuinely per-run choices live here.
 const allowedDispatchInputs = new Set([
-  "projectId",   // workspace runner publish metadata (passthrough)
-  "branch",      // workspace runner publish metadata (passthrough)
-  "commitSha",   // checked-out commit validation
   "environment", // dev | prod
-  "imageTag",    // optional override for redeploying a specific tag
+  "branch",      // workspace runner publish metadata (passthrough)
 ]);
 const actualDispatchInputs = new Set(dispatchInputNames);
 const unexpectedInputs = [...actualDispatchInputs].filter((n) => !allowedDispatchInputs.has(n));

@@ -82,18 +82,17 @@ GroundX, Partner, LLM, runner, GitHub, or GitLab keys.
 ## Publish
 
 Managed repos inherit `.github/workflows/deploy.yml`. A push to `main` deploys
-`prod`; manual workflow runs choose `dev` or `prod`. The manual-run form is
-intentionally short — only the genuinely per-run choices are dispatch inputs:
+`prod`; manual workflow runs choose `dev` or `prod`. The manual-run form has
+two fields:
 
 | Input | Required | What it does |
 |---|---|---|
 | `environment` | yes | `dev` or `prod` |
-| `imageTag` | no | Override the image tag (for redeploying a specific build) |
-| `projectId` / `branch` / `commitSha` | no | Passed through by the workspace runner publish; `commitSha` is validated against the checked-out commit |
+| `branch` | no | Passed through by the workspace runner publish |
 
 Everything else — cluster, ingress, image repos, public host/domain, ALB
-certificates, namespace, TLS secrets — comes from GitHub organization / repository
-variables and secrets. See "Configuration" below.
+certificates, namespace, TLS secrets, image tag override — comes from GitHub
+organization / repository variables and secrets. See "Configuration" below.
 
 Deployment uses standard Kubernetes resources through Helm:
 

@@ -6,18 +6,6 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      projectId:
-        description: GroundX workspace project id
-        required: false
-        type: string
-      branch:
-        description: Branch requested by the workspace runner
-        required: false
-        type: string
-      commitSha:
-        description: Commit requested by the workspace runner
-        required: false
-        type: string
       environment:
         description: Deployment environment
         required: true
@@ -26,8 +14,8 @@ on:
         options:
           - dev
           - prod
-      imageTag:
-        description: Optional image tag override (for redeploying a specific build)
+      branch:
+        description: Branch requested by the workspace runner
         required: false
         type: string
 
@@ -48,7 +36,6 @@ jobs:
       name: ${{ github.event_name == 'push' && 'prod' || inputs.environment || 'dev' }}
     env:
       DEPLOY_ENVIRONMENT: ${{ github.event_name == 'push' && 'prod' || inputs.environment || 'dev' }}
-      EXPECTED_COMMIT_SHA: ${{ inputs.commitSha || '' }}
       K8S_NAMESPACE_INPUT: ${{ vars.K8S_NAMESPACE || secrets.K8S_NAMESPACE || '' }}
       PUBLIC_ACCESS_INPUT: ${{ vars.PUBLIC_ACCESS || secrets.PUBLIC_ACCESS || '' }}
       PUBLIC_HOST_INPUT: ${{ vars.PUBLIC_HOST || secrets.PUBLIC_HOST || '' }}
@@ -59,7 +46,7 @@ jobs:
       ALB_GROUP_NAME_INPUT: ${{ vars.ALB_GROUP_NAME || secrets.ALB_GROUP_NAME || '' }}
       FRONTEND_IMAGE_REPOSITORY_INPUT: ${{ vars.FRONTEND_IMAGE_REPOSITORY || secrets.FRONTEND_IMAGE_REPOSITORY || '' }}
       MIDDLEWARE_IMAGE_REPOSITORY_INPUT: ${{ vars.MIDDLEWARE_IMAGE_REPOSITORY || secrets.MIDDLEWARE_IMAGE_REPOSITORY || '' }}
-      IMAGE_TAG_INPUT: ${{ inputs.imageTag || vars.IMAGE_TAG || secrets.IMAGE_TAG || '' }}
+      IMAGE_TAG_INPUT: ${{ vars.IMAGE_TAG || secrets.IMAGE_TAG || '' }}
       TLS_SECRET_NAME_INPUT: ${{ vars.TLS_SECRET_NAME || secrets.TLS_SECRET_NAME || '' }}
       IMAGE_PULL_SECRET_NAME_INPUT: ${{ vars.IMAGE_PULL_SECRET_NAME || secrets.IMAGE_PULL_SECRET_NAME || '' }}
       HELM_RELEASE_NAME_INPUT: ${{ vars.HELM_RELEASE_NAME || secrets.HELM_RELEASE_NAME || '' }}
@@ -96,13 +83,6 @@ jobs:
     steps:
       - name: Check out project
         uses: actions/checkout@v4
-
-      - name: Validate requested commit
-        run: |
-          if [ -n "$EXPECTED_COMMIT_SHA" ] && [ "$EXPECTED_COMMIT_SHA" != "$GITHUB_SHA" ]; then
-            echo "Requested commitSha does not match checked-out commit"
-            exit 1
-          fi
 
       - name: Set deployment variables
         id: deploy-vars
