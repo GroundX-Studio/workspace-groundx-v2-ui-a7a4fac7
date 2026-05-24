@@ -71,6 +71,10 @@ web_modules/
 .env.*
 !.env.example
 
+# Local MCP server config — typically contains the Partner API key
+# for the groundx-studio MCP server. Never commit.
+.mcp.json
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

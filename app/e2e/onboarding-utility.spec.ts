@@ -135,7 +135,6 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
 // AA threshold. This is a brand-token-level decision flagged for the
 // standards owner — we don't want to mask the structural rules (role,
 // landmarks, focus, aria-required-parent) just because of one color pair.
-// See NIGHT-NOTES decision D-AUDIT.1.
 async function expectAxeClean(page: Page, label: string): Promise<void> {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
