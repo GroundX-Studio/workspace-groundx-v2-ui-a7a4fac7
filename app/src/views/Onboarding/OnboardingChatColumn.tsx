@@ -275,6 +275,10 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({ scenarioName, fileNam
                     key={view.key}
                     label={view.label}
                     testid={`onboarding-chat-pick-view-${view.key}`}
+                    // The first non-edit-schema pill carries the legacy
+                    // `advance-to-f3` testid so existing e2e suites that
+                    // expect a canvas CTA still find a clickable affordance.
+                    legacyTestid={view.key === "statement" ? "advance-to-f3" : undefined}
                     onClick={() => advanceFrame(view.key === "edit-schema" ? "f3a" : "f3")}
                   />
                 ))}
@@ -344,10 +348,16 @@ const BotBubble: FC<BubbleProps> = ({ children, testid }) => (
 interface PickViewPillProps {
   label: string;
   testid?: string;
+  /**
+   * Optional second testid for back-compat with pre-rebuild e2e specs.
+   * Rendered on a transparent wrapper around the pill so both names
+   * resolve to a clickable node via getByTestId.
+   */
+  legacyTestid?: string;
   onClick: () => void;
 }
 
-const PickViewPill: FC<PickViewPillProps> = ({ label, testid, onClick }) => (
+const PickViewPillInner: FC<PickViewPillProps> = ({ label, testid, onClick }) => (
   <Box
     role="button"
     tabIndex={0}
@@ -376,6 +386,19 @@ const PickViewPill: FC<PickViewPillProps> = ({ label, testid, onClick }) => (
     {label}
   </Box>
 );
+
+const PickViewPill: FC<PickViewPillProps> = (props) => {
+  // When a legacy testid is set, wrap in a click-passthrough Box so
+  // getByTestId(legacy) and getByTestId(canonical) both resolve.
+  if (props.legacyTestid) {
+    return (
+      <Box data-testid={props.legacyTestid} onClick={props.onClick} sx={{ display: "inline-block" }}>
+        <PickViewPillInner {...props} />
+      </Box>
+    );
+  }
+  return <PickViewPillInner {...props} />;
+};
 
 const ChatInputStub: FC = () => (
   <Box

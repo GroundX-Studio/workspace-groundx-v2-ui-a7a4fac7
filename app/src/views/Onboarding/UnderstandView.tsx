@@ -1,19 +1,45 @@
+/**
+ * F2 UnderstandView — canvas surface during document processing.
+ *
+ * Per spec-chapters.jsx · Flow_Processing the canvas hosts:
+ *
+ *   • LIVE PARSE label row: "LIVE PARSE · <filename>" + animated
+ *     progress bar + "processing…" status.
+ *   • PDF page silhouette with the scan-line animation overlay
+ *     (cyan wash above the line, gradient scan line sweeping top→bottom).
+ *   • Page thumbnails strip showing parse progress per page
+ *     (first page "parsing", subsequent pages "queued").
+ *
+ * The narrative content — the streaming "thinking notes", the
+ * "Done. Ready to analyze." beat, the Pick-a-view affordance — lives
+ * in OnboardingChatColumn. This view is purely the visual proof that
+ * GroundX is doing the work; the chat is where the agent talks.
+ *
+ * BYO branch (no scenario picked) still renders a sign-in placeholder
+ * — this only surfaces if a frame transitions to F2 without an active
+ * entity, defensive against an edge case the gate flow normally guards.
+ */
+
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useState, type FC } from "react";
+import { keyframes } from "@mui/material/styles";
+import { motion, useReducedMotion } from "framer-motion";
+import type { FC } from "react";
 
 import {
   BODY_TEXT,
   BORDER,
-  BORDER_RADIUS_2X,
   BORDER_RADIUS_PILL,
+  BORDER_RADIUS_SM,
   CYAN,
   EYEBROW_ON_LIGHT,
+  FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
   GREEN,
+  LETTER_SPACING_LABEL,
+  MUTED_ON_LIGHT,
   NAVY,
   WHITE,
 } from "@/constants";
@@ -21,55 +47,17 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 
-const THINKING_NOTE_INTERVAL_MS = 1100;
-const REVEAL_DELAY_MS = 4500;
-
-/**
- * F2 UnderstandView — placeholder PDF surface + scan animation + thinking
- * notes streaming. The real Phase 7 wire-up uses pdfjs-dist for actual page
- * rendering and SSE-streamed thinking notes from the agent.
- *
- * Scan animation per spec:
- *   • Thin horizontal scan-line sweeps top→bottom over 4s, looping.
- *   • Above the line: faint cyan wash (parsed region).
- *   • Reduced-motion fallback: replace with a single 80ms crossfade.
- *
- * After ~4.5s of thinking notes, the "Show me the extract" affordance
- * appears, which advances to F3.
- */
 export const UnderstandView: FC = () => {
   const reduceMotion = useReducedMotion();
   const { state: appMode } = useAppMode();
-  const { state: session, advanceFrame } = useOnboardingSession();
-  const [noteIndex, setNoteIndex] = useState(0);
-  const [revealed, setRevealed] = useState(false);
-
-  // A user can land on F2 without a scenario when they click Sign Up
-  // from F1's BYO row — the BYO path advances to F2 + opens the gate
-  // but never picks a sample. In that case we render a BYO-specific
-  // placeholder instead of falling back to the utility scenario.
+  const { state: session } = useOnboardingSession();
   const scenarioId = appMode.scenario ?? session.scenario;
   const { byId } = useScenarioRegistry();
   const scenario = scenarioId ? byId(scenarioId) : undefined;
-  const isByoPlaceholder = scenarioId == null;
-  const thinkingScript = scenario?.manifest.thinkingScript ?? [];
-  const docTitle = scenario?.documents[0]?.fileName ?? "Sample";
 
-  useEffect(() => {
-    if (!thinkingScript.length) return;
-    if (noteIndex >= thinkingScript.length - 1) return;
-    const id = window.setTimeout(() => {
-      setNoteIndex((current) => Math.min(current + 1, thinkingScript.length - 1));
-    }, THINKING_NOTE_INTERVAL_MS);
-    return () => window.clearTimeout(id);
-  }, [thinkingScript.length, noteIndex]);
-
-  useEffect(() => {
-    const id = window.setTimeout(() => setRevealed(true), REVEAL_DELAY_MS);
-    return () => window.clearTimeout(id);
-  }, []);
-
-  if (isByoPlaceholder) {
+  // BYO branch — no scenario picked yet. The chat column carries the
+  // gate / sign-in flow; the canvas just shows orientation copy.
+  if (!scenario) {
     return (
       <Box
         sx={{
@@ -97,153 +85,254 @@ export const UnderstandView: FC = () => {
     );
   }
 
+  const docTitle = scenario.documents[0]?.fileName ?? "Sample";
+  const pageCount = scenario.documents[0]?.pageCount ?? 3;
+  const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
+
   return (
     <Box
+      data-testid="understand-canvas"
       sx={{
-        display: "grid",
-        gridTemplateRows: "auto 1fr auto",
-        gap: 2,
-        p: { xs: 2, md: 4 },
+        display: "flex",
+        flexDirection: "column",
         height: "100%",
         overflow: "hidden",
+        backgroundColor: WHITE,
       }}
       aria-label="Understand"
     >
-      <Stack spacing={0.5}>
-        <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
-          UNDERSTAND
-        </Typography>
-        <Typography variant="h4">{docTitle}</Typography>
-        <Typography variant="body2" sx={{ color: BODY_TEXT }}>
-          GroundX is parsing the document. You'll see the extract in a moment.
-        </Typography>
-      </Stack>
-
-      <Card
+      {/* LIVE PARSE row */}
+      <Box
         sx={{
-          position: "relative",
-          backgroundColor: WHITE,
-          overflow: "hidden",
-          aspectRatio: "8.5 / 11",
-          minHeight: 0,
-          maxHeight: "100%",
-          mx: "auto",
-          width: "100%",
-          maxWidth: 560,
+          display: "flex",
+          alignItems: "center",
+          gap: 1.5,
+          px: { xs: 2, md: 3 },
+          py: 1.25,
+          borderBottom: `1px solid ${BORDER}`,
         }}
-        aria-label="Document preview"
       >
-        {/* Placeholder page surface — a clean off-white sheet. Phase 7 plugs
-            pdfjs-dist here to render the real first page. Per brand rule
-            "no shadows / no non-sanctioned gradients" the placeholder is a
-            flat WHITE fill with no overlay. */}
-        <Box
+        <Typography
+          data-testid="understand-live-parse-label"
+          variant="caption"
           sx={{
-            position: "absolute",
-            inset: 0,
-            backgroundColor: WHITE,
-          }}
-        />
-        {/* Parsed-region wash above the scan line */}
-        <motion.div
-          aria-hidden
-          initial={{ height: "0%" }}
-          animate={reduceMotion ? { height: "100%" } : { height: ["0%", "100%"] }}
-          transition={reduceMotion ? { duration: 0.08 } : { duration: 4, ease: "linear", repeat: Infinity }}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            backgroundColor: CYAN,
-            opacity: 0.18,
-          }}
-        />
-        {/* The scan line itself. Two tokens of green flank a cyan core; the
-            line is intentionally narrow (2px) to read as a process indicator,
-            not a sanctioned brand surface. No box-shadow per the brand
-            "flat / no shadows" rule — the line gets visual prominence from
-            color contrast against the WHITE page beneath. */}
-        {!reduceMotion ? (
-          <motion.div
-            aria-hidden
-            initial={{ top: "0%" }}
-            animate={{ top: ["0%", "100%"] }}
-            transition={{ duration: 4, ease: "linear", repeat: Infinity }}
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              height: 2,
-              background: `linear-gradient(90deg, ${GREEN}, ${CYAN}, ${GREEN})`,
-              zIndex: 2,
-            }}
-          />
-        ) : null}
-      </Card>
-
-      <Stack spacing={1} aria-live="polite">
-        <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
-          THINKING
-        </Typography>
-        <Stack
-          spacing={0.5}
-          sx={{
-            border: `1px solid ${BORDER}`,
-            borderRadius: BORDER_RADIUS_2X,
-            p: 1.5,
-            backgroundColor: WHITE,
-            maxHeight: 120,
-            overflow: "hidden",
+            color: NAVY,
+            letterSpacing: LETTER_SPACING_LABEL,
+            fontWeight: FONT_WEIGHT_HEADLINE,
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
           }}
         >
-          <AnimatePresence initial={false}>
-            {thinkingScript.slice(0, noteIndex + 1).map((note) => (
-              <motion.div
-                key={note}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-              >
-                <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-                  · {note}
-                </Typography>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </Stack>
-        <Box>
-          {revealed ? (
-            <Box
-              role="button"
-              tabIndex={0}
-              data-testid="advance-to-f3"
-              onClick={() => advanceFrame("f3")}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  advanceFrame("f3");
-                }
+          LIVE PARSE · {docTitle}
+        </Typography>
+        <ProgressBar reduceMotion={!!reduceMotion} />
+        <Typography
+          data-testid="understand-processing-status"
+          variant="caption"
+          sx={{ color: NAVY, fontWeight: FONT_WEIGHT_HEADLINE, fontStyle: "italic", whiteSpace: "nowrap" }}
+        >
+          processing…
+        </Typography>
+      </Box>
+
+      {/* PDF silhouette + scan animation */}
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "flex-start",
+          px: { xs: 2, md: 3 },
+          py: 2,
+          overflow: "hidden",
+        }}
+      >
+        <Card
+          data-testid="understand-pdf-card"
+          sx={{
+            position: "relative",
+            backgroundColor: WHITE,
+            overflow: "hidden",
+            aspectRatio: "8.5 / 11",
+            minHeight: 0,
+            maxHeight: "100%",
+            width: "100%",
+            maxWidth: 560,
+            boxShadow: "none",
+            border: `1px solid ${BORDER}`,
+          }}
+          aria-label="Document preview"
+        >
+          {/* Page silhouette content lines — visual filler for the
+              flat-WHITE PDF placeholder until pdfjs-dist plugs in. */}
+          <SilhouetteContent />
+          {/* Parsed-region wash above the scan line */}
+          <motion.div
+            aria-hidden
+            initial={{ height: "0%" }}
+            animate={reduceMotion ? { height: "100%" } : { height: ["0%", "100%"] }}
+            transition={reduceMotion ? { duration: 0.08 } : { duration: 4, ease: "linear", repeat: Infinity }}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              backgroundColor: CYAN,
+              opacity: 0.18,
+            }}
+          />
+          {/* The scan line itself */}
+          {!reduceMotion ? (
+            <motion.div
+              data-testid="understand-scan-line"
+              aria-hidden
+              initial={{ top: "0%" }}
+              animate={{ top: ["0%", "100%"] }}
+              transition={{ duration: 4, ease: "linear", repeat: Infinity }}
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                height: 2,
+                background: `linear-gradient(90deg, ${GREEN}, ${CYAN}, ${GREEN})`,
+                zIndex: 2,
               }}
-              sx={{
-                display: "inline-block",
-                px: 2,
-                py: 1,
-                mt: 1,
-                borderRadius: BORDER_RADIUS_PILL,
-                backgroundColor: GREEN,
-                color: NAVY,
-                fontWeight: 600,
-                cursor: "pointer",
-                "&:hover": { filter: "brightness(0.95)" },
-              }}
-            >
-              Show me the extract →
-            </Box>
-          ) : null}
-        </Box>
-      </Stack>
+            />
+          ) : (
+            <Box data-testid="understand-scan-line" aria-hidden sx={{ display: "none" }} />
+          )}
+        </Card>
+      </Box>
+
+      {/* Page thumbnails strip */}
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "center",
+          gap: 1,
+          px: { xs: 2, md: 3 },
+          py: 1.5,
+          borderTop: `1px solid ${BORDER}`,
+        }}
+        aria-label="Pages"
+      >
+        {pages.map((n, idx) => (
+          <PageThumb key={n} pageNumber={n} state={idx === 0 ? "parsing" : "queued"} />
+        ))}
+      </Box>
     </Box>
   );
 };
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+const slideRight = keyframes`
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(0); }
+`;
+
+const ProgressBar: FC<{ reduceMotion: boolean }> = ({ reduceMotion }) => (
+  <Box
+    data-testid="understand-progress-bar"
+    role="progressbar"
+    aria-label="Document parse progress"
+    aria-valuenow={62}
+    aria-valuemin={0}
+    aria-valuemax={100}
+    sx={{
+      flex: 1,
+      position: "relative",
+      height: 5,
+      borderRadius: BORDER_RADIUS_PILL,
+      backgroundColor: BORDER,
+      overflow: "hidden",
+    }}
+  >
+    <Box
+      sx={{
+        position: "absolute",
+        top: 0,
+        bottom: 0,
+        left: 0,
+        width: "62%",
+        background: `linear-gradient(90deg, ${GREEN}, ${CYAN})`,
+        // A short sweep-in motion at mount so the bar reads as live;
+        // disabled under prefers-reduced-motion.
+        animation: reduceMotion ? "none" : `${slideRight} 1.2s ease-out`,
+      }}
+    />
+  </Box>
+);
+
+const PageThumb: FC<{ pageNumber: number; state: "parsing" | "queued" }> = ({ pageNumber, state }) => (
+  <Box
+    data-testid={`understand-page-thumb-${pageNumber}`}
+    data-state={state}
+    sx={{
+      width: 44,
+      height: 56,
+      backgroundColor: WHITE,
+      border: `1.5px solid ${state === "parsing" ? NAVY : BORDER}`,
+      borderRadius: BORDER_RADIUS_SM,
+      position: "relative",
+      opacity: state === "queued" ? 0.55 : 1,
+      boxShadow: state === "parsing" ? `0 0 0 3px rgba(161, 236, 131, 0.4)` : "none",
+    }}
+    aria-label={`Page ${pageNumber} · ${state}`}
+  >
+    {/* Tiny content lines so the thumb reads as a page */}
+    <Box sx={{ position: "absolute", top: 4, left: 4, right: 4, height: 2, backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+    <Box sx={{ position: "absolute", top: 10, left: 4, right: 4, height: 1.5, backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+    <Box sx={{ position: "absolute", top: 14, left: 4, right: 8, height: 1.5, backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+    <Typography
+      variant="caption"
+      sx={{
+        position: "absolute",
+        bottom: 3,
+        left: 0,
+        right: 0,
+        textAlign: "center",
+        fontSize: 9,
+        fontWeight: FONT_WEIGHT_HEADLINE,
+        color: NAVY,
+      }}
+    >
+      p.{pageNumber}
+    </Typography>
+  </Box>
+);
+
+const SilhouetteContent: FC = () => (
+  <Stack
+    aria-hidden
+    spacing={1}
+    sx={{
+      position: "absolute",
+      inset: 0,
+      p: { xs: 2, md: 3 },
+      opacity: 0.4,
+    }}
+  >
+    <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+      <Box sx={{ height: 14, width: "32%", backgroundColor: MUTED_ON_LIGHT, borderRadius: BORDER_RADIUS_SM }} />
+      <Box sx={{ height: 8, width: "20%", backgroundColor: BORDER, borderRadius: BORDER_RADIUS_SM }} />
+    </Box>
+    <Box sx={{ height: 5, width: "60%", backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+    <Box sx={{ height: 5, width: "70%", backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+    <Box sx={{ height: 5, width: "40%", backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+    <Box sx={{ border: `1px solid ${BORDER}`, p: 0.75, mt: 0.5 }}>
+      {[0, 1, 2, 3, 4, 5, 6, 7].map((row) => (
+        <Box key={row} sx={{ display: "flex", gap: 0.75, mb: 0.5 }}>
+          <Box sx={{ height: 4, flex: 2, backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+          <Box sx={{ height: 4, flex: 1, backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+          <Box sx={{ height: 4, flex: 1, backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+          <Box sx={{ height: 4, flex: 1, backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+        </Box>
+      ))}
+    </Box>
+    <Box sx={{ height: 5, width: "55%", backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+    <Box sx={{ height: 5, width: "75%", backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+    <Box sx={{ height: 5, width: "45%", backgroundColor: BORDER, borderRadius: BORDER_RADIUS_PILL }} />
+  </Stack>
+);

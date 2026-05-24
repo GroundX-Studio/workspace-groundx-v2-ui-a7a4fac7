@@ -98,7 +98,10 @@ describe("OnboardingShell", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
 
     expect(await screen.findByTestId("onboarding-frame-f2")).toBeInTheDocument();
-    expect(screen.getByText("GroundX is parsing the document. You'll see the extract in a moment.")).toBeInTheDocument();
+    // The F2 canvas now reads as a LIVE PARSE label + scan animation;
+    // the prior "GroundX is parsing the document…" copy moved to the
+    // chat-side narrative (OnboardingChatColumn) per the wireframe.
+    expect(screen.getByTestId("understand-live-parse-label")).toBeInTheDocument();
   });
 
   it("wires reachable step-strip pills to frames", async () => {

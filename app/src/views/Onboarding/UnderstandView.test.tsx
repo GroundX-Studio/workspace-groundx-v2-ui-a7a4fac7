@@ -1,72 +1,51 @@
-import { act, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 
-import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
 import { UnderstandView } from "./UnderstandView";
 
-beforeEach(() => {
-  vi.spyOn(console, "error").mockImplementation(() => {});
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-const FrameProbe = ({ onFrame }: { onFrame: (frame: string) => void }) => {
-  const session = useOnboardingSession();
-  onFrame(session.state.currentFrame);
-  return null;
-};
-
-describe("UnderstandView (F2)", () => {
+describe("UnderstandView (F2 canvas)", () => {
   it("renders a BYO sign-in placeholder when no scenario has been picked", () => {
     renderWithOnboardingProviders(<UnderstandView />, { initialFrame: "f2", initialScenario: null });
-    // The canvas should not show the per-scenario thinking script (no
-    // scenario to thread). Instead, a placeholder that explains why and
-    // hints at the sign-in path. The chat column (rendered by the
-    // OnboardingShell, not by UnderstandView itself) hosts the gate.
     expect(screen.getByText(/sign in to start uploading/i)).toBeInTheDocument();
-    // The scenario-specific copy must NOT appear.
-    expect(screen.queryByText(/parsing layout/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("understand-canvas")).not.toBeInTheDocument();
   });
 
-  it("renders the selected scenario document and streams thinking notes", () => {
-    vi.useFakeTimers();
-
+  it("shows the LIVE PARSE label + animated progress bar + processing status", () => {
     renderWithOnboardingProviders(<UnderstandView />, { initialFrame: "f2", initialScenario: "utility" });
-
-    expect(screen.getByText("April 2026 Statement.pdf")).toBeInTheDocument();
-    expect(screen.getByText(/parsing layout/)).toBeInTheDocument();
-
-    act(() => vi.advanceTimersByTime(1100));
-    act(() => vi.advanceTimersByTime(1100));
-
-    expect(screen.getByText(/found header/)).toBeInTheDocument();
-    expect(screen.getByText(/extracting meter table/)).toBeInTheDocument();
+    expect(screen.getByTestId("understand-live-parse-label")).toHaveTextContent(/LIVE PARSE/i);
+    expect(screen.getByTestId("understand-live-parse-label")).toHaveTextContent(/April 2026 Statement\.pdf/i);
+    expect(screen.getByTestId("understand-progress-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("understand-processing-status")).toHaveTextContent(/processing/i);
   });
 
-  it("reveals the extract CTA after the scan beat and advances to F3", async () => {
-    vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    let frame = "";
+  it("renders the PDF silhouette card with the scan-line animation overlay", () => {
+    renderWithOnboardingProviders(<UnderstandView />, { initialFrame: "f2", initialScenario: "utility" });
+    expect(screen.getByTestId("understand-pdf-card")).toBeInTheDocument();
+    // The scan line is identifiable by its testid; the visual gradient
+    // is a styling detail.
+    expect(screen.getByTestId("understand-scan-line")).toBeInTheDocument();
+  });
 
-    renderWithOnboardingProviders(
-      <>
-        <UnderstandView />
-        <FrameProbe onFrame={(next) => (frame = next)} />
-      </>,
-      { initialFrame: "f2", initialScenario: "loan" },
-    );
+  it("renders the page thumbnails strip below the PDF (one per page)", () => {
+    renderWithOnboardingProviders(<UnderstandView />, { initialFrame: "f2", initialScenario: "utility" });
+    // Utility scenario has 3 pages per the manifest. Each thumbnail
+    // carries data-testid="understand-page-thumb-<n>" so a future
+    // pdfjs-driven implementation can match the same shape.
+    expect(screen.getByTestId("understand-page-thumb-1")).toBeInTheDocument();
+    expect(screen.getByTestId("understand-page-thumb-2")).toBeInTheDocument();
+    expect(screen.getByTestId("understand-page-thumb-3")).toBeInTheDocument();
+    // The first thumb is the "parsing" page; subsequent pages are "queued".
+    expect(screen.getByTestId("understand-page-thumb-1")).toHaveAttribute("data-state", "parsing");
+    expect(screen.getByTestId("understand-page-thumb-2")).toHaveAttribute("data-state", "queued");
+  });
 
-    expect(screen.queryByTestId("advance-to-f3")).not.toBeInTheDocument();
-
-    act(() => vi.advanceTimersByTime(4500));
-
-    await user.click(screen.getByTestId("advance-to-f3"));
-
-    expect(frame).toBe("f3");
+  it("no longer renders thinking notes or an advance CTA on the canvas (those moved to chat)", () => {
+    renderWithOnboardingProviders(<UnderstandView />, { initialFrame: "f2", initialScenario: "utility" });
+    // Thinking notes content is now in OnboardingChatColumn; the canvas
+    // must not duplicate it.
+    expect(screen.queryByText(/parsing layout/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Show me the extract/)).not.toBeInTheDocument();
   });
 });
