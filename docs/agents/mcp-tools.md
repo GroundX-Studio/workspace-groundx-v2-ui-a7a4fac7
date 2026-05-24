@@ -61,25 +61,82 @@ sync_status   cwd=scaffold branch=workspace/groundx-v2-ui
 Returns `{ ahead, behind, clean, head, branchMatchesExpected }`.
 Don't push from a dirty / behind tree.
 
-## Where `PARTNER_API_KEY` lives — read this carefully
+## Where `PARTNER_API_KEY` lives
 
-There are **two distinct Partner API keys** on this project. They look
-identical (both 36-char UUIDs, both called "Partner API key" in casual
-conversation) but they authenticate against different things. Mixing
-them up is the #1 way to get a `403 workspace ownership context does
-not match caller` and lose 15 minutes.
+### Mental model
 
-| Key | Where it lives | What it's for | When you need it |
-|---|---|---|---|
-| **Runtime** GroundX Partner key | `scaffold/.env.local` (and `scaffold/middleware/.env.local`) as `GROUNDX_PARTNER_API_KEY` | The middleware's calls to `api.groundx.ai` (the GroundX SDK — customers, buckets, documents, search, workflows) | Never as the MCP `PARTNER_API_KEY` argument |
-| **Harness** (workspace-owner) Partner key | NOT on disk. Owned by whoever provisioned the managed project on GroundX Studio. | The `mcp__groundx-studio__*` tools — `commit_push`, `publish`, `git_session`, `deploy_config`, `clone_project`, `setup_env`, `project_create`, `operation_wait` | Every `groundx-studio` MCP call |
+**One Partner API key per user.** Either explicitly provided (current
+model) or via OAuth in the future. The harness MCP requires the key
+on every call; it has no built-in persistence or discovery, so
+keeping the value somewhere the agent can re-read across cold
+starts / session compacts is on us.
 
-### Recovering the harness key after a session compact
+### Current location on this project (workaround)
 
-The harness key isn't in `.env.local`, `.groundx-studio.json`,
-`~/.claude.json`, or the plugin RPM. It IS in the project's transcript
-JSONL files because every prior `commit_push` recorded the
-`PARTNER_API_KEY` argument:
+```
+scaffold/.env.local              → GROUNDX_PARTNER_API_KEY=…
+scaffold/middleware/.env.local   → GROUNDX_PARTNER_API_KEY=…
+```
+
+Both files are gitignored. Both hold the same value. Read it when you
+need it for an MCP arg:
+
+```bash
+grep -E '^GROUNDX_PARTNER_API_KEY=' \
+  /Users/benjaminfletcher/git/groundx-v2-ui/scaffold/.env.local \
+  | cut -d= -f2-
+```
+
+Framework-agnostic, survives session compacts, works under Codex / CI
+/ custom agents.
+
+### What's wrong with `.env.local` as the canonical home
+
+This is a workaround, not the right long-term shape:
+
+1. **Mixes security domains.** The middleware loads `.env.local` via
+   `dotenv` on every start. A control-plane secret (publish, deploy,
+   destroy rights) sharing an env with request-time secrets means any
+   middleware-side leak — debug log, crash report, telemetry, a
+   dependency that serializes `process.env` — exfiltrates the harness
+   key too.
+2. **Visible to every spawned process.** Test runners, npm scripts,
+   dev containers, dependency packages can all read
+   `process.env.GROUNDX_PARTNER_API_KEY`. Privilege-escalation
+   surface.
+3. **Clobbered by `setup_env`.** That MCP tool regenerates
+   `.env.local` from a template. If it doesn't know to preserve the
+   harness value, the next run drops it.
+4. **Scaffold-specific.** `.env.local` exists because this is the
+   web-ui scaffold. Slides and future scaffolds may not have one.
+   The harness key location should be scaffold-agnostic.
+5. **No rotation story.** Every checkout, every CI secret, every
+   local agent's copy has to be updated independently.
+6. **OAuth-incompatible.** If/when the harness ships an OAuth
+   Connector, the canonical credential lives in the OS keychain.
+
+### The cleaner long-term shape
+
+MCP discovery fallback chain:
+
+```
+1. PARTNER_API_KEY tool arg                          (explicit override)
+2. HARNESS_PARTNER_API_KEY env var                   (CI, Codex)
+3. <cwd>/.harness/credentials.json → partnerApiKey   (per-project, 0600)
+4. ~/.config/groundx-studio/credentials.json         (per-user)
+5. OAuth Connector token from OS keychain            (Claude clients)
+```
+
+`clone_project` + `setup_env` would write `.harness/credentials.json`
+(gitignored) at project creation; the harness MCP would walk the
+chain on every call, so the explicit arg becomes optional. Keeps the
+harness role out of the app runtime env entirely and gives every
+framework a deterministic, scaffold-agnostic location.
+
+### Last-resort recovery (Claude Code only)
+
+If `.env.local` is missing or its value 403s, fall back to the
+transcript:
 
 ```bash
 grep -aoE '"PARTNER_API_KEY":"[^"]{30,50}"' \
@@ -87,34 +144,27 @@ grep -aoE '"PARTNER_API_KEY":"[^"]{30,50}"' \
   | sort -u
 ```
 
-You'll get one or two distinct UUIDs. The one that **does not** equal
-`GROUNDX_PARTNER_API_KEY` from `scaffold/.env.local` is the harness
-key. If only the runtime key prints, or if the harness key has rotated
-and the transcript value 403s, **ask the user for the
-workspace-owner Partner API key**. Don't guess. Don't reuse the runtime
-key "just to see what happens" — the 403 is the only signal you get and
-it doesn't say "wrong key."
+This only works in Claude Code (because of the JSONL transcript
+format). Codex, the OpenAI Agent SDK, Cursor, Windsurf, and CI
+runners can't recover this way — for them the value must be in
+`.env.local`, in env vars, or re-prompted from the user.
 
-### Why the trap is so easy to fall into
+If both `.env.local` and the transcript fail, **ask the user**.
+Don't guess. Don't reuse a value from a different project — Partner
+accounts are per-project.
 
-- Both keys are 36-char UUIDs. Visually indistinguishable.
-- `.env.local` has only the runtime key, named `GROUNDX_PARTNER_API_KEY`,
-  which sounds authoritative.
-- The MCP's error message says "workspace ownership context does not
-  match caller" — not "wrong Partner key." It reads like a
-  permissions / ACL problem upstream, so retrying or fetching a fresh
-  git-session feels like the right move. It is not.
-- `git push` directly is not a fallback: the scaffold's remote uses
-  git-session credentials only the MCP can mint.
+### The misleading 403
 
-### Before every MCP call, ask yourself
+A wrong key (rotated, expired, mis-pasted, leftover from a different
+workspace) returns:
 
-> "Is the `PARTNER_API_KEY` I'm about to pass the workspace-owner one,
-> or the runtime one?"
+```
+403 workspace ownership context does not match caller
+```
 
-If you're not sure, run the recovery grep. If still not sure, ask the
-user. Never paste the literal value into a committed file (transcripts
-and tool-call args are fine — git is not).
+This reads like an ACL/permissions problem. It's not — it's a
+wrong-key signal. If you see this, the first hypothesis should be
+"my key is wrong," not "my access has been revoked."
 
 ## When the MCP path doesn't work
 

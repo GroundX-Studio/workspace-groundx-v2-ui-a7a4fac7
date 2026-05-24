@@ -24,28 +24,32 @@ It carries the Partner API key for the local MCP server. Don't
 `git add .mcp.json` and don't `git add -A` blindly — always
 stage specific files by name.
 
-### Two Partner API keys — pick the right one for the MCP
+### Partner API key — `.env.local` is the persistence (for now)
 
-`GROUNDX_PARTNER_API_KEY` in `scaffold/.env.local` is the **runtime**
-key (for the middleware's calls to `api.groundx.ai`). The
-`mcp__groundx-studio__*` tools (`commit_push`, `publish`,
-`git_session`, etc.) need a **different** workspace-owner Partner key
-— same UUID shape, different account. Using the runtime key on the
-MCP returns `403 workspace ownership context does not match caller`,
-which sounds like an ACL bug but is just the wrong key.
-
-The harness key isn't on disk. After a session compact, recover it
-with:
+Mental model: **one Partner API key per user.** On this project the
+harness MCP's `PARTNER_API_KEY` value lives in `scaffold/.env.local`
+→ `GROUNDX_PARTNER_API_KEY` (mirrored in
+`scaffold/middleware/.env.local`, both gitignored). Read it for an
+MCP arg:
 
 ```bash
-grep -aoE '"PARTNER_API_KEY":"[^"]{30,50}"' \
-  ~/.claude/projects/-Users-benjaminfletcher-git-groundx-v2-ui/*.jsonl \
-  | sort -u
+grep -E '^GROUNDX_PARTNER_API_KEY=' \
+  /Users/benjaminfletcher/git/groundx-v2-ui/scaffold/.env.local \
+  | cut -d= -f2-
 ```
 
-The value that's NOT in `.env.local` is the harness one. Full
-explanation in `docs/agents/mcp-tools.md` → "Where `PARTNER_API_KEY`
-lives".
+**`.env.local` is the wrong long-term home for this value** — it
+mixes the harness control-plane secret with app runtime env, every
+spawned process can read it, and `setup_env` will eventually clobber
+it on the next template regen. The cleaner shape is a dedicated
+mode-0600 dotfile (e.g. `scaffold/.harness/credentials.json`) with an
+MCP discovery fallback chain. See `docs/agents/mcp-tools.md` → "Where
+`PARTNER_API_KEY` lives" for the full critique.
+
+If the key is wrong (rotated, expired, mis-pasted), the MCP returns
+`403 workspace ownership context does not match caller` — that's the
+wrong-key signal, not an ACL bug. First hypothesis on that error
+should be "my key is wrong," not "my access was revoked."
 
 ### Conversation transcripts ≠ committed files
 

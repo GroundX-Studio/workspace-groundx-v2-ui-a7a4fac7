@@ -36,6 +36,16 @@ npm run setup:env
 
 This writes the env files + verifies the keys.
 
+The `PARTNER_API_KEY` value above is the user's **single Partner API
+key** (one identity per user; OAuth path is the future). After
+setup, it lands at `scaffold/.env.local` →
+`GROUNDX_PARTNER_API_KEY` (and the same value in
+`scaffold/middleware/.env.local`). That's also the value you re-read
+on every `mcp__groundx-studio__*` call — `.env.local` is a workaround
+home for it, not the canonical one. See `docs/agents/mcp-tools.md` →
+"Where `PARTNER_API_KEY` lives" for the persistence shape, recovery
+commands, and why this needs to move out of `.env.local` long-term.
+
 ## The inner loop
 
 ```bash

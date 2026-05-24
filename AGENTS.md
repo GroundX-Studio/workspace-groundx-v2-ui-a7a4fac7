@@ -58,15 +58,19 @@ tissue between those and the codebase.
   TDD discipline applied per layer.
 - [**MCP tool surface**](docs/agents/mcp-tools.md) — The
   `groundx-studio` MCP tools used for managed-project lifecycle.
-  When to use `publish` vs `commit_push` vs `deploy_config`. How
-  the Partner API key flows through.
+  When to use `publish` vs `commit_push` vs `deploy_config`. **Where
+  the Partner API key lives, why `.env.local` is the wrong home for
+  it, and how to recover it after a session compact.** One Partner
+  key per user; OAuth path is the future.
 
 ## Cross-cutting
 
 - [**Common gotchas**](docs/agents/gotchas.md) — Mistakes already
   made on this project so you don't repeat them. The Partner API
-  `*username`-is-actually-the-key trap. GitHub vars precedence.
-  Why the Service stays ClusterIP under AWS ALB. MOCK_MODE vs live.
+  `*username`-is-actually-the-key trap. The Partner-key persistence
+  trap (`.env.local` is a workaround, not the canonical home).
+  GitHub vars precedence. Why the Service stays ClusterIP under
+  AWS ALB. MOCK_MODE vs live.
 - [**Open work + deferred tracks**](docs/agents/open-work.md) —
   What's pending. The live LLM router + real GroundX search wiring.
   Compression chain. Multi-session steady-mode UI. Things to know

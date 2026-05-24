@@ -8,5 +8,5 @@
     "branch": "workspace/groundx-v2-ui",
     "baseBranch": "main"
   },
-  "_note": "Canonical projectId discovery file for the managed-project lifecycle. See ../HARNESS_PROJECT_ID_PERSISTENCE.md for the reasoning. SAFE TO COMMIT — contains no secrets. NEVER add fields whose values originate from .env, secrets, or response fields named `*username`/`*Username` returned by the Partner API (those fields can carry the API key itself; see the postmortem § Security guardrails)."
+  "_note": "Canonical projectId discovery file for the managed-project lifecycle. SAFE TO COMMIT — contains no secrets. NEVER add fields whose values originate from .env, secrets, or response fields named `*username`/`*Username` returned by the Partner API: those fields can carry the API key value itself."
 }
