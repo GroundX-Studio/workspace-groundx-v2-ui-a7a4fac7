@@ -22,8 +22,8 @@ import type { StepDescriptor, StepId, StepPillState } from "@/shared/components/
 import type { FFrame, Scenario } from "@/types/onboarding";
 
 import { ExtractView } from "./ExtractView";
-import { GateChatPanel } from "./GateChatPanel";
 import { IngestView } from "./IngestView";
+import { OnboardingChatColumn } from "./OnboardingChatColumn";
 import { IntegrateView } from "./IntegrateView";
 import { InteractView } from "./InteractView";
 import { UnderstandView } from "./UnderstandView";
@@ -348,7 +348,7 @@ export const OnboardingShell: FC = () => {
       }}
       aria-label="Chat column"
     >
-      <GateChatPanel />
+      <OnboardingChatColumn />
     </Box>
   );
 
