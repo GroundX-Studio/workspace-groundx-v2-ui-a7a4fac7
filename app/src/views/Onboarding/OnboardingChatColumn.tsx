@@ -24,9 +24,11 @@
  */
 
 import Box from "@mui/material/Box";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { useEffect, useState, type FC } from "react";
+import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -61,14 +63,8 @@ interface PickViewOption {
   label: string;
 }
 
-// Default Utility-shaped pills. Per the wireframe these are scenario-specific;
-// once each manifest declares its own view set we can move these to ScenarioManifest.
-const UTILITY_PICK_VIEWS: PickViewOption[] = [
-  { key: "statement", label: "statement" },
-  { key: "meters", label: "meters" },
-  { key: "charges", label: "charges" },
-  { key: "edit-schema", label: "edit schema" },
-];
+// Per-scenario pick-a-view pills derive from the scenario's extraction
+// schema in F2ConversationFlow itself — see the useMemo there.
 
 export interface OnboardingChatColumnProps {
   /**
@@ -113,9 +109,11 @@ export const OnboardingChatColumn: FC<OnboardingChatColumnProps> = ({ overrideSc
   if (isF2 && scenario) {
     return (
       <F2ConversationFlow
+        scenarioId={scenarioId!}
         scenarioName={scenario.manifest.hero?.title ?? scenarioId ?? "Sample"}
         fileName={scenario.documents[0]?.fileName ?? "sample.pdf"}
         thinkingScript={scenario.manifest.thinkingScript ?? []}
+        pickViews={derivePickViews(scenario)}
       />
     );
   }
@@ -169,14 +167,48 @@ const ByoChatPlaceholder: FC = () => (
 // ── F2 conversation flow ─────────────────────────────────────────────────
 
 interface F2ConversationFlowProps {
+  scenarioId: string;
   scenarioName: string;
   fileName: string;
   thinkingScript: string[];
+  pickViews: PickViewOption[];
 }
 
-const F2ConversationFlow: FC<F2ConversationFlowProps> = ({ scenarioName, fileName, thinkingScript }) => {
+/**
+ * Derive the Pick-a-view pill set from the scenario's extraction
+ * schema. Each category becomes one pill (label = category.name
+ * lowercased, key = category.id). Plus an "edit schema" pill.
+ * Scenarios without an extraction schema (e.g. Solar — Interact +
+ * Report only) get a single "show me chat" pill that jumps to F5.
+ */
+function derivePickViews(scenario: NonNullable<ReturnType<ReturnType<typeof useScenarioRegistry>["byId"]>>): PickViewOption[] {
+  const schema = scenario.manifest.extractionSchema;
+  if (!schema) return [{ key: "interact", label: "show me chat" }];
+  return [
+    ...schema.categories.map((c) => ({ key: c.id, label: c.name.toLowerCase() })),
+    { key: "edit-schema", label: "edit schema" },
+  ];
+}
+
+const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
+  scenarioId,
+  scenarioName,
+  fileName,
+  thinkingScript,
+  pickViews,
+}) => {
   const { advanceFrame } = useOnboardingSession();
+  const { state: registryState } = useScenarioRegistry();
   const navigate = useNavigate();
+
+  // Sample switcher dropdown anchor + state.
+  const switcherAnchorRef = useRef<HTMLSpanElement | null>(null);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const otherScenarios = useMemo(() => {
+    if (registryState.status !== "ready") return [];
+    return registryState.scenarios.filter((s) => s.id !== scenarioId);
+  }, [registryState, scenarioId]);
+  const bucketId = registryState.status === "ready" ? registryState.bucketId : null;
   // Streamed note count — starts at 1 (the first note appears immediately
   // so the user sees motion right away).
   const [noteCount, setNoteCount] = useState<number>(thinkingScript.length > 0 ? 1 : 0);
@@ -237,9 +269,54 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({ scenarioName, fileNam
         >
           <span>sample:</span>
           <span style={{ fontWeight: FONT_WEIGHT_HEADLINE, color: NAVY }}>{scenarioName}</span>
-          <Box component="span" sx={{ color: MUTED_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL, cursor: "pointer", "&:hover": { color: NAVY } }}>
+          <Box
+            component="span"
+            ref={switcherAnchorRef}
+            role={otherScenarios.length > 0 ? "button" : undefined}
+            tabIndex={otherScenarios.length > 0 ? 0 : -1}
+            aria-haspopup={otherScenarios.length > 0 ? "menu" : undefined}
+            aria-expanded={switcherOpen ? "true" : undefined}
+            data-testid="onboarding-chat-sample-switch-trigger"
+            onClick={() => {
+              if (otherScenarios.length > 0) setSwitcherOpen(true);
+            }}
+            onKeyDown={(event) => {
+              if (otherScenarios.length === 0) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setSwitcherOpen(true);
+              }
+            }}
+            sx={{
+              color: otherScenarios.length === 0 ? MUTED_ON_LIGHT : NAVY,
+              fontWeight: FONT_WEIGHT_LABEL,
+              cursor: otherScenarios.length === 0 ? "default" : "pointer",
+              "&:hover": { color: NAVY },
+            }}
+          >
             switch ▾
           </Box>
+          <Menu
+            anchorEl={switcherAnchorRef.current}
+            open={switcherOpen}
+            onClose={() => setSwitcherOpen(false)}
+            data-testid="onboarding-chat-sample-switch-menu"
+          >
+            {otherScenarios.map((s) => (
+              <MenuItem
+                key={s.id}
+                data-testid={`onboarding-chat-sample-switch-item-${s.id}`}
+                onClick={() => {
+                  setSwitcherOpen(false);
+                  if (bucketId != null) {
+                    navigate(`/onboarding/${bucketId}/${s.id}`);
+                  }
+                }}
+              >
+                {s.manifest.hero?.title ?? s.id}
+              </MenuItem>
+            ))}
+          </Menu>
         </Box>
       </Box>
 
@@ -289,24 +366,28 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({ scenarioName, fileNam
             <Box data-testid="onboarding-chat-pick-a-view" sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
               <BotBubble>Pick a view:</BotBubble>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, pl: 0.5 }}>
-                {UTILITY_PICK_VIEWS.map((view) => (
+                {pickViews.map((view, idx) => (
                   <PickViewPill
                     key={view.key}
                     label={view.label}
                     testid={`onboarding-chat-pick-view-${view.key}`}
-                    // The first non-edit-schema pill carries the legacy
-                    // `advance-to-f3` testid so existing e2e suites that
-                    // expect a canvas CTA still find a clickable affordance.
-                    legacyTestid={view.key === "statement" ? "advance-to-f3" : undefined}
+                    // First non-edit-schema, non-interact pill carries
+                    // the legacy `advance-to-f3` testid so existing e2e
+                    // suites that expect a canvas CTA still find a
+                    // clickable affordance.
+                    legacyTestid={idx === 0 && view.key !== "edit-schema" && view.key !== "interact" ? "advance-to-f3" : undefined}
                     onClick={() => {
-                      // Advance frame state, then append ?focus=<view> so
-                      // ExtractView opens to the picked slice of the
-                      // schema. The current pathname already encodes the
-                      // bucket + scenario; we append only the search.
                       if (view.key === "edit-schema") {
                         advanceFrame("f3a");
                         return;
                       }
+                      if (view.key === "interact") {
+                        advanceFrame("f5");
+                        return;
+                      }
+                      // Schema-derived category pill → land on F3 with
+                      // ?focus=<categoryId>. ExtractView reads that
+                      // param to pre-select the user's picked slice.
                       advanceFrame("f3");
                       navigate({ search: `?focus=${view.key}` }, { replace: false });
                     }}

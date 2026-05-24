@@ -99,6 +99,63 @@ describe("OnboardingChatColumn", () => {
     expect(lastFrame).toBe("f3");
   });
 
+  it("derives Pick-a-view pills from the active scenario's extraction schema (Loan != Utility)", () => {
+    vi.useFakeTimers();
+    renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "loan" });
+    for (let i = 0; i < 12; i += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1100);
+      });
+    }
+    // Loan schema categories are `applicant` and `risk` (per the
+    // fixture). Pills should reflect THOSE keys, not utility's
+    // statement/meters/charges.
+    expect(screen.getByTestId("onboarding-chat-pick-view-applicant")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-chat-pick-view-meters")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-chat-pick-view-statement")).not.toBeInTheDocument();
+    // Edit-schema pill is always last.
+    expect(screen.getByTestId("onboarding-chat-pick-view-edit-schema")).toBeInTheDocument();
+  });
+
+  it("on a schemaless scenario (Solar), surfaces a single 'show me chat' pill that jumps to F5", () => {
+    vi.useFakeTimers();
+    let lastFrame = "";
+    function FrameProbe() {
+      const { state } = useOnboardingSession();
+      lastFrame = state.currentFrame;
+      return null;
+    }
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingChatColumn />
+        <FrameProbe />
+      </>,
+      { initialFrame: "f2", initialScenario: "solar" },
+    );
+    for (let i = 0; i < 4; i += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1100);
+      });
+    }
+    const pill = screen.getByTestId("onboarding-chat-pick-view-interact");
+    act(() => {
+      pill.click();
+    });
+    expect(lastFrame).toBe("f5");
+  });
+
+  it("the sample switcher chip exposes the other scenarios as a menu", () => {
+    renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    const trigger = screen.getByTestId("onboarding-chat-sample-switch-trigger");
+    act(() => {
+      trigger.click();
+    });
+    // Loan and Solar are listed (Utility is excluded — it's the active sample).
+    expect(screen.getByTestId("onboarding-chat-sample-switch-item-loan")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-chat-sample-switch-item-solar")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-chat-sample-switch-item-utility")).not.toBeInTheDocument();
+  });
+
   it("on F6 (gate open), the chat dispatches to GateChatPanel", () => {
     // Defensive: when the gate is active the chat column hands off to
     // GateChatPanel. Same flow that drives the F1 BYO -> signup
