@@ -46,6 +46,54 @@ describe("StepStrip", () => {
     expect(within(strip).getByText("Report")).toBeInTheDocument();
   });
 
+  it("never wraps to a second row — flex-wrap pinned to nowrap (bug fix: at 1305px in Chrome the strip dropped Integrate to a second line)", () => {
+    // Repro: with `flexWrap: "wrap"`, the strip's content totals
+    // ~711px at typical viewports. One pixel narrower and the
+    // Integrate pill silently wrapped to a second row. The fix is to
+    // pin `flex-wrap: nowrap` on the strip's outer container so the
+    // pills stay on a single horizontal row regardless of available
+    // width; an `overflow-x: auto` lets very narrow viewports scroll
+    // instead of stacking.
+    //
+    // jsdom can't lay out, so we read the emitted CSS from the
+    // generated Emotion rules attached to the strip's role=group
+    // element, similar to the OnboardingNav divider-height regression.
+    render(<StepStrip steps={baseSteps} />);
+    const strip = screen.getByRole("group", { name: "Onboarding journey step strip" });
+    // Walk the element's className → look up rules in document
+    // stylesheets → find ANY `flex-wrap` declaration in a rule whose
+    // selector matches one of the strip's classes. We accept rule
+    // matches by raw cssText substring because Emotion sometimes
+    // serializes shorthand properties (e.g. `flex-wrap` under
+    // `flex` shorthand) where `rule.style.flexWrap` reads empty.
+    const classNames = strip.className.split(/\s+/).filter(Boolean);
+    const flexWrapValues: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList;
+      try {
+        rules = (sheet as CSSStyleSheet).cssRules;
+      } catch {
+        continue;
+      }
+      for (const rule of Array.from(rules)) {
+        if (!(rule instanceof CSSStyleRule)) continue;
+        const matchesElement = classNames.some((cls) =>
+          rule.selectorText.includes(`.${cls}`),
+        );
+        if (!matchesElement) continue;
+        const cssText = rule.cssText;
+        const match = cssText.match(/flex-wrap:\s*([a-z-]+)/i);
+        if (match) flexWrapValues.push(match[1]);
+      }
+    }
+    // Sanity: the strip must actually declare a flex-wrap value (this
+    // protects against the test silently passing if the sx prop is
+    // dropped entirely).
+    expect(flexWrapValues.length).toBeGreaterThan(0);
+    expect(flexWrapValues).not.toContain("wrap");
+    expect(flexWrapValues).toContain("nowrap");
+  });
+
   it("number badge shows ✓ for done-traversed steps", () => {
     render(<StepStrip steps={baseSteps} />);
     const ingestPill = screen.getByText("Ingest").closest('[role="button"]');

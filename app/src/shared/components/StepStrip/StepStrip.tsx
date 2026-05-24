@@ -240,7 +240,19 @@ export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = fa
         alignItems: "center",
         gap: 0,
         py: 2,
-        flexWrap: "wrap",
+        // Pinned `nowrap` so the four primary pills + ANALYZE compound
+        // always stay on a single horizontal row. The strip's content
+        // sums to ~711px at the design width, and a fraction-of-a-pixel
+        // narrower used to drop Integrate to a second row mid-render
+        // (caught in Chrome at 1305px on a 1306px design). `overflow-x:
+        // auto` is the graceful degradation — very narrow viewports
+        // get a horizontal scroll rather than a wrap. We hide the
+        // scrollbar UI to avoid an inconsistent 15px gutter on Chrome
+        // at narrow widths; the strip is still scrollable by touch/wheel.
+        flexWrap: "nowrap",
+        overflowX: "auto",
+        scrollbarWidth: "none",
+        "&::-webkit-scrollbar": { display: "none" },
         // No horizontal padding on the strip itself — the parent container
         // controls page padding so the strip always aligns flush with the
         // hero copy and sample-card grid below it.
