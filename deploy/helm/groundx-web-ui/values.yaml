@@ -20,7 +20,7 @@ frontend:
   image:
     repository: ghcr.io/example/groundx-web-ui/frontend
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   service:
     port: 80
     targetPort: 8080
@@ -31,7 +31,7 @@ middleware:
   image:
     repository: ghcr.io/example/groundx-web-ui/middleware
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   existingSecret: groundx-web-ui-middleware
   service:
     port: 3001

@@ -104,16 +104,19 @@ jobs:
           if [ -z "$repo_k8s_name" ]; then
             repo_k8s_name="groundx-web-ui"
           fi
-          short_sha="$(printf '%s' "$GITHUB_SHA" | cut -c1-12)"
-          run_attempt="${GITHUB_RUN_ATTEMPT:-1}"
+          # One image tag per project per environment. The repo name carries
+          # the workspace's unique hash, so it identifies the project; the
+          # -<env> suffix separates dev from prod. Same tag is reused on
+          # every push to that env — pullPolicy: Always in values.yaml is
+          # what makes k8s actually re-pull on each deploy. Rollback by tag
+          # is not possible with this scheme; rollback by digest or by
+          # re-running the workflow at an older commit still works.
           if [ "$DEPLOY_ENVIRONMENT" = "prod" ]; then
-            channel_tag="$repo_tag"
-            default_image_tag="${repo_tag}-${short_sha}-${run_attempt}"
+            image_tag="$repo_tag"
           else
-            channel_tag="${repo_tag}-${DEPLOY_ENVIRONMENT}"
-            default_image_tag="${repo_tag}-${DEPLOY_ENVIRONMENT}-${short_sha}-${run_attempt}"
+            image_tag="${repo_tag}-${DEPLOY_ENVIRONMENT}"
           fi
-          image_tag="$(slugify_tag "${IMAGE_TAG_INPUT:-$default_image_tag}")"
+          image_tag="$(slugify_tag "$image_tag")"
           if [ -z "$image_tag" ]; then
             echo "Computed image tag is empty"
             exit 1
@@ -145,7 +148,6 @@ jobs:
           registry="$(lowercase "${REGISTRY_INPUT:-${frontend_repo%%/*}}")"
           {
             echo "image_tag=$image_tag"
-            echo "channel_tag=$channel_tag"
             echo "namespace=$namespace"
             echo "release_name=$release_name"
             echo "middleware_secret_name=$middleware_secret_name"
@@ -194,9 +196,7 @@ jobs:
           context: .
           file: Dockerfile.frontend
           push: true
-          tags: |
-            ${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
-            ${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.channel_tag }}
+          tags: ${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
 
       - name: Build and push middleware image
         uses: docker/build-push-action@v6
@@ -204,9 +204,7 @@ jobs:
           context: .
           file: Dockerfile.middleware
           push: true
-          tags: |
-            ${{ steps.deploy-vars.outputs.middleware_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
-            ${{ steps.deploy-vars.outputs.middleware_repo }}:${{ steps.deploy-vars.outputs.channel_tag }}
+          tags: ${{ steps.deploy-vars.outputs.middleware_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4

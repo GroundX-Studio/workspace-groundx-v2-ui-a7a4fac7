@@ -75,8 +75,10 @@ assert(workflow.includes("Dockerfile.frontend") && workflow.includes("Dockerfile
 assert(workflow.includes("lowercase()"), "workflow must define an image repository lowercase helper");
 assert(workflow.includes("slugify_tag()"), "workflow must define a Docker tag slug helper");
 assert(workflow.includes("slugify_k8s_name()"), "workflow must define a Kubernetes name slug helper");
-assert(workflow.includes("channel_tag=\"$repo_tag\""), "prod deploys must publish a stable repo-name channel tag");
-assert(workflow.includes('channel_tag="${repo_tag}-${DEPLOY_ENVIRONMENT}"'), "dev deploys must publish a stable repo-name-dev channel tag");
+assert(workflow.includes('image_tag="$repo_tag"'), "prod deploys must tag as <repo-name>");
+assert(workflow.includes('image_tag="${repo_tag}-${DEPLOY_ENVIRONMENT}"'), "non-prod deploys must tag as <repo-name>-<env>");
+assert(!/\bchannel_tag\b/.test(workflow), "old channel_tag/image_tag split must be gone — one tag per env");
+assert(!/short_sha|run_attempt/.test(workflow), "old per-commit immutable tag fragments must be gone");
 assert(workflow.includes('namespace="${K8S_NAMESPACE_INPUT:-${repo_k8s_name}-${DEPLOY_ENVIRONMENT}}"'), "default namespace must be repo/environment scoped");
 assert(workflow.includes('release_name="$(slugify_k8s_name "${HELM_RELEASE_NAME_INPUT:-${repo_k8s_name}-${DEPLOY_ENVIRONMENT}}")"'), "default Helm release name must be repo/environment scoped");
 assert(workflow.includes('middleware_secret_name="$(slugify_k8s_name "${MIDDLEWARE_SECRET_NAME_INPUT:-${release_name}-middleware}")"'), "default middleware secret name must be release scoped");
@@ -111,8 +113,14 @@ assert(workflow.includes("aws-region: ${{ env.ECR_AWS_REGION }}"), "ECR auth mus
 assert(!/^\s+AWS_REGION:/m.test(workflow), "workflow must not use ambiguous AWS_REGION for ECR auth");
 assert(workflow.includes("kubectl -n \"$K8S_NAMESPACE\" get secret \"$MIDDLEWARE_SECRET_NAME\" -o jsonpath='{.data.SESSION_SECRET}'"), "workflow must preserve existing SESSION_SECRET");
 assert(workflow.includes("openssl rand -base64 48"), "workflow must generate SESSION_SECRET on first deploy");
-assert(workflow.includes("${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.channel_tag }}"), "frontend build must push the channel tag");
-assert(workflow.includes("${{ steps.deploy-vars.outputs.middleware_repo }}:${{ steps.deploy-vars.outputs.channel_tag }}"), "middleware build must push the channel tag");
+assert(workflow.includes("${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.image_tag }}"), "frontend build must push the per-env image tag");
+assert(workflow.includes("${{ steps.deploy-vars.outputs.middleware_repo }}:${{ steps.deploy-vars.outputs.image_tag }}"), "middleware build must push the per-env image tag");
+
+// With a stable per-env tag (instead of per-commit immutable), k8s won't
+// know to re-pull unless pullPolicy is Always. Pin it in values.yaml.
+const valuesYaml = read("deploy/helm/groundx-web-ui/values.yaml");
+assert(/pullPolicy:\s*Always/.test(valuesYaml), "frontend/middleware pullPolicy must be Always so a same-tag re-push gets pulled");
+assert(!/pullPolicy:\s*IfNotPresent/.test(valuesYaml), "no image may use IfNotPresent — stable per-env tag requires Always");
 
 for (const key of [
   "LOG_LEVEL",

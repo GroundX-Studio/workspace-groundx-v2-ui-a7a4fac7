@@ -160,8 +160,10 @@ gets its own repo/environment-scoped Helm release. Setting one org-wide
 `MIDDLEWARE_SECRET_NAME` unset for the same reason; the workflow derives a
 release-scoped Kubernetes Secret name by default.
 
-When multiple scaffold repos publish to shared image repositories, the workflow pushes
-two tags per image. The deployed tag is immutable and includes the repo name, deploy
-environment, commit, and run attempt so Kubernetes rolls forward on every update. It
-also pushes a stable channel tag: repo name for `prod`, and repo name plus `-dev` for
-`dev`.
+Each deploy pushes one image tag per service: `<repo-name>` for `prod`,
+`<repo-name>-dev` for `dev`. The repo name carries the workspace's unique
+hash, so it identifies the project across deploys. The tag is reused on every
+push to that environment — `imagePullPolicy: Always` (set in `values.yaml`) is
+what makes Kubernetes re-pull on each `helm upgrade`. Rollback by tag is not
+possible with this scheme; roll back by image digest, or re-run the workflow
+against an older commit.
