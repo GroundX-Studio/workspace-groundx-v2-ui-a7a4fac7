@@ -155,9 +155,11 @@ assert(forbiddenInputNames.length === 0, `workflow_dispatch inputs must not acce
 // The manual-run form must stay short. Cluster/Ingress/image-repo overrides
 // belong in org variables and secrets, not on every dispatch. Only the
 // genuinely per-run choices live here.
+// The ref to deploy from is selected via GitHub's built-in "Use workflow
+// from" branch dropdown above the inputs — github.ref / github.ref_name
+// carries it. No need to duplicate that as a typed input.
 const allowedDispatchInputs = new Set([
   "environment", // dev | prod
-  "branch",      // workspace runner publish metadata (passthrough)
 ]);
 const actualDispatchInputs = new Set(dispatchInputNames);
 const unexpectedInputs = [...actualDispatchInputs].filter((n) => !allowedDispatchInputs.has(n));

@@ -82,13 +82,10 @@ GroundX, Partner, LLM, runner, GitHub, or GitLab keys.
 ## Publish
 
 Managed repos inherit `.github/workflows/deploy.yml`. A push to `main` deploys
-`prod`; manual workflow runs choose `dev` or `prod`. The manual-run form has
-two fields:
-
-| Input | Required | What it does |
-|---|---|---|
-| `environment` | yes | `dev` or `prod` |
-| `branch` | no | Passed through by the workspace runner publish |
+`prod`; manual workflow runs pick `dev` or `prod`. The manual-run form has
+exactly one field — **Deployment environment** (`dev` or `prod`). The branch
+to deploy is selected via GitHub's built-in "Use workflow from" dropdown above
+the form; no need to type it.
 
 Everything else — cluster, ingress, image repos, public host/domain, ALB
 certificates, namespace, TLS secrets, image tag override — comes from GitHub

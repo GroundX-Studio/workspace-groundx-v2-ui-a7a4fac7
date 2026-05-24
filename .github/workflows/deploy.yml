@@ -14,10 +14,6 @@ on:
         options:
           - dev
           - prod
-      branch:
-        description: Branch requested by the workspace runner
-        required: false
-        type: string
 
 permissions:
   contents: read
