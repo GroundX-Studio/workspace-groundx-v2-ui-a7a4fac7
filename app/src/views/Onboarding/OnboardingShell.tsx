@@ -7,6 +7,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
 import {
   BORDER,
+  ONBOARDING_NAV_WIDTH_COLLAPSED,
   ONBOARDING_NAV_WIDTH_FULL,
   PICKER_MAX_WIDTH,
   PICKER_MAX_WIDTH_ULTRAWIDE,
@@ -443,7 +444,13 @@ export const OnboardingShell: FC = () => {
       ) : null}
       {showIdleShell ? (
         <Box sx={{ position: "absolute", inset: 0, zIndex: 1 }}>
-          <AppShell nav={navIdle} chat={chatIdle} canvas={canvasIdle} initialChatWidth={360} />
+          <AppShell
+            nav={navIdle}
+            chat={chatIdle}
+            canvas={canvasIdle}
+            initialChatWidth={360}
+            navWidth={navCollapsed ? ONBOARDING_NAV_WIDTH_COLLAPSED : ONBOARDING_NAV_WIDTH_FULL}
+          />
         </Box>
       ) : null}
       {inTransition ? (

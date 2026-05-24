@@ -20,9 +20,17 @@ export interface AppShellProps {
   initialChatWidth?: number;
   /** Mount in `focus-canvas` mode (BYO upload heavy work) — defaults to split. */
   initialFocus?: "split" | "focus-chat" | "focus-canvas";
+  /**
+   * Width of the nav column in px. Defaults to 180 (the design width).
+   * Pass 48 when the consumer's nav component is in its collapsed-rail
+   * mode so the `<aside>` doesn't leave a phantom 132px gap between
+   * the nav and the chat pane. The aside still animates between
+   * widths via framer-motion when this prop changes.
+   */
+  navWidth?: number;
 }
 
-const NAV_WIDTH = 180;
+const DEFAULT_NAV_WIDTH = 180;
 const RAIL_HEIGHT = "100vh";
 const MOTION = { type: "tween", duration: 0.2, ease: "easeOut" } as const;
 
@@ -42,7 +50,7 @@ const MOTION = { type: "tween", duration: 0.2, ease: "easeOut" } as const;
  * allowed; the only non-motion thing we set is the `MOTION.duration` which
  * the user agent already overrides.
  */
-export function AppShell({ nav, chat, canvas, hideNav = false, initialChatWidth = 360, initialFocus = "split" }: AppShellProps) {
+export function AppShell({ nav, chat, canvas, hideNav = false, initialChatWidth = 360, initialFocus = "split", navWidth: navWidthProp = DEFAULT_NAV_WIDTH }: AppShellProps) {
   const { mode, setMode } = useFocusMode({ initial: initialFocus });
   const { width, zone, startDrag, bump } = useResizableSplit({ initial: initialChatWidth, min: 0, max: 1200 });
 
@@ -62,7 +70,7 @@ export function AppShell({ nav, chat, canvas, hideNav = false, initialChatWidth 
   const chatVisible = mode !== "focus-canvas";
   const canvasVisible = mode !== "focus-chat";
   const chatWidth = mode === "focus-chat" ? "100%" : mode === "focus-canvas" ? 48 : width;
-  const navWidth = hideNav ? 0 : NAV_WIDTH;
+  const navWidth = hideNav ? 0 : navWidthProp;
 
   return (
     <LayoutGroup>
@@ -85,6 +93,12 @@ export function AppShell({ nav, chat, canvas, hideNav = false, initialChatWidth 
               transition={MOTION}
               style={{ flexShrink: 0, height: "100%", overflow: "hidden" }}
               aria-label="Primary navigation"
+              // Test-only contract: framer-motion under jsdom doesn't
+              // write the animate target into inline `style.width`, so
+              // we surface the chosen width as a data attribute so the
+              // AppShell.test.tsx regression spec can sniff it without
+              // depending on real layout.
+              data-app-shell-nav-width={navWidth}
             >
               {nav}
             </motion.aside>

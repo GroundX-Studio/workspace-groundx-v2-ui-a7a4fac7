@@ -44,6 +44,29 @@ describe("AppShell", () => {
     expect(screen.queryByLabelText("Primary navigation")).not.toBeInTheDocument();
   });
 
+  it("nav column animates to the navWidth prop so collapsed-nav doesn't leave a ghost gap", () => {
+    // Bug fix — when the OnboardingNav internally toggles to its
+    // collapsed (48px) mode, the AppShell's surrounding <aside> stayed
+    // pinned to 180px because the AppShell hardcoded NAV_WIDTH.
+    // The result was a 132px-wide empty band of offwhite between the
+    // nav items and the chat pane. Fix: accept `navWidth` from the
+    // caller and animate the aside to that width.
+    //
+    // framer-motion under jsdom doesn't write the animate target to
+    // inline `style.width`, so we sniff the prop it was given by
+    // grabbing the rendered aside and reading the `data-app-shell-nav-width`
+    // attribute we emit specifically to make this contract testable.
+    renderShell({ navWidth: 48 });
+    const aside = screen.getByLabelText("Primary navigation");
+    expect(aside.getAttribute("data-app-shell-nav-width")).toBe("48");
+  });
+
+  it("falls back to the design default 180px nav width when navWidth is not passed", () => {
+    renderShell();
+    const aside = screen.getByLabelText("Primary navigation");
+    expect(aside.getAttribute("data-app-shell-nav-width")).toBe("180");
+  });
+
   it("hides canvas when mounted in focus-chat mode", () => {
     renderShell({ initialFocus: "focus-chat" });
     expect(screen.queryByTestId("appshell-canvas")).not.toBeInTheDocument();
