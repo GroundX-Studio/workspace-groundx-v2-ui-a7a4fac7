@@ -186,6 +186,26 @@ assert(
   `workflow_dispatch input set drifted — unexpected: [${unexpectedInputs.join(", ")}], missing: [${missingInputs.join(", ")}]`,
 );
 
+// Ops-side helper workflows for log inspection and teardown. They share
+// the same per-env EKS targeting pattern as deploy.yml so an operator
+// can run them from the Actions tab without needing a local kubeconfig.
+for (const name of ["diagnose", "uninstall"]) {
+  const path = `.github/workflows/${name}.yml`;
+  const wf = read(path);
+  assert(wf.includes("workflow_dispatch:"), `${name} must be manually triggerable`);
+  assert(/EKS_CLUSTER_NAME_DEV/.test(wf), `${name} must source dev cluster from EKS_CLUSTER_NAME_DEV`);
+  assert(/EKS_CLUSTER_NAME_PROD/.test(wf), `${name} must source prod cluster from EKS_CLUSTER_NAME_PROD`);
+  assert(wf.includes("aws eks update-kubeconfig"), `${name} must generate kubeconfig dynamically`);
+}
+const diagnoseWf = read(".github/workflows/diagnose.yml");
+assert(diagnoseWf.includes("kubectl logs"), "diagnose must tail pod logs");
+assert(diagnoseWf.includes("kubectl describe"), "diagnose must describe pods");
+assert(/--previous/.test(diagnoseWf), "diagnose must also pull previous-container logs (for crash loops)");
+const uninstallWf = read(".github/workflows/uninstall.yml");
+assert(uninstallWf.includes("helm uninstall"), "uninstall must run helm uninstall");
+assert(/inputs\.confirm/.test(uninstallWf), "uninstall must require explicit confirmation input");
+assert(/deleteNamespace/.test(uninstallWf), "uninstall must offer optional namespace deletion");
+
 if (commandExists("helm")) {
   execFileSync("helm", ["lint", "deploy/helm/groundx-web-ui"], { cwd: root, stdio: "inherit" });
 

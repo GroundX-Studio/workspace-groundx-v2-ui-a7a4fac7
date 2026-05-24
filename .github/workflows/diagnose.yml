@@ -1,0 +1,141 @@
+name: Diagnose
+
+# Manual ops workflow. Pulls `kubectl describe` + `kubectl logs` (including
+# previous-container logs for crash loops) for a pod or label selector in
+# the chosen environment. Output lands in the GitHub Actions run log, so
+# anyone with `gh run view` access — or an MCP-driven agent — can read it
+# without needing a local kubeconfig.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Cluster environment to inspect
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+      podSelector:
+        description: Pod name, OR a label selector (e.g. `app.kubernetes.io/component=middleware`)
+        required: true
+        type: string
+      tailLines:
+        description: Log lines to tail per container
+        required: false
+        default: "200"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  diagnose:
+    name: Diagnose ${{ inputs.environment }}
+    runs-on: ${{ vars.DEPLOY_RUNNER || 'ubuntu-latest' }}
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME || secrets.AWS_ROLE_TO_ASSUME || '' }}
+      EKS_CLUSTER_NAME_DEV: ${{ vars.EKS_CLUSTER_NAME_DEV || secrets.EKS_CLUSTER_NAME_DEV || '' }}
+      EKS_CLUSTER_NAME_PROD: ${{ vars.EKS_CLUSTER_NAME_PROD || secrets.EKS_CLUSTER_NAME_PROD || '' }}
+      EKS_CLUSTER_REGION_DEV: ${{ vars.EKS_CLUSTER_REGION_DEV || secrets.EKS_CLUSTER_REGION_DEV || '' }}
+      EKS_CLUSTER_REGION_PROD: ${{ vars.EKS_CLUSTER_REGION_PROD || secrets.EKS_CLUSTER_REGION_PROD || '' }}
+      EKS_CLUSTER_NAME: ${{ inputs.environment == 'prod' && (vars.EKS_CLUSTER_NAME_PROD || secrets.EKS_CLUSTER_NAME_PROD) || (vars.EKS_CLUSTER_NAME_DEV || secrets.EKS_CLUSTER_NAME_DEV) }}
+      EKS_CLUSTER_REGION: ${{ inputs.environment == 'prod' && (vars.EKS_CLUSTER_REGION_PROD || secrets.EKS_CLUSTER_REGION_PROD) || (vars.EKS_CLUSTER_REGION_DEV || secrets.EKS_CLUSTER_REGION_DEV) }}
+      K8S_NAMESPACE_INPUT: ${{ vars.K8S_NAMESPACE || secrets.K8S_NAMESPACE || '' }}
+    steps:
+      - name: Configure AWS credentials (OIDC role)
+        if: env.AWS_ROLE_TO_ASSUME != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.EKS_CLUSTER_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+
+      - name: Configure AWS credentials (access keys)
+        if: env.AWS_ROLE_TO_ASSUME == ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.EKS_CLUSTER_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig (aws eks update-kubeconfig)
+        run: |
+          if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
+            echo "EKS_CLUSTER_NAME must be set as a GitHub environment variable or secret"
+            exit 1
+          fi
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$EKS_CLUSTER_REGION" \
+            --kubeconfig "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+
+      - name: Resolve namespace
+        id: ns
+        run: |
+          slugify_k8s_name() {
+            printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//' | cut -c1-53 | sed -E 's/-+$//'
+          }
+          repo_k8s_name="$(slugify_k8s_name "${GITHUB_REPOSITORY##*/}")"
+          [ -z "$repo_k8s_name" ] && repo_k8s_name="groundx-web-ui"
+          ns="${K8S_NAMESPACE_INPUT:-${repo_k8s_name}-${{ inputs.environment }}}"
+          echo "namespace=$ns" >> "$GITHUB_OUTPUT"
+          echo "Inspecting namespace: $ns"
+
+      - name: List pods in namespace
+        run: |
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          kubectl get pods -n "${{ steps.ns.outputs.namespace }}" -o wide || true
+
+      - name: Resolve target pods
+        id: pods
+        run: |
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          ns="${{ steps.ns.outputs.namespace }}"
+          selector="${{ inputs.podSelector }}"
+          # Try exact pod name first; if that misses, treat as label selector.
+          if kubectl get pod -n "$ns" "$selector" >/dev/null 2>&1; then
+            pods="$selector"
+          else
+            pods="$(kubectl get pods -n "$ns" -l "$selector" -o jsonpath='{.items[*].metadata.name}')"
+          fi
+          if [ -z "$pods" ]; then
+            echo "No pods matched selector: $selector"
+            exit 1
+          fi
+          echo "pods=$pods" >> "$GITHUB_OUTPUT"
+          echo "Matched pods: $pods"
+
+      - name: Describe pods
+        run: |
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          ns="${{ steps.ns.outputs.namespace }}"
+          for pod in ${{ steps.pods.outputs.pods }}; do
+            echo "::group::describe $pod"
+            kubectl describe pod -n "$ns" "$pod" || true
+            echo "::endgroup::"
+          done
+
+      - name: Tail logs (current + previous container)
+        run: |
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          ns="${{ steps.ns.outputs.namespace }}"
+          tail="${{ inputs.tailLines }}"
+          for pod in ${{ steps.pods.outputs.pods }}; do
+            containers="$(kubectl get pod -n "$ns" "$pod" -o jsonpath='{.spec.containers[*].name}')"
+            for container in $containers; do
+              echo "::group::logs $pod/$container (--tail=$tail)"
+              kubectl logs -n "$ns" "$pod" -c "$container" --tail="$tail" || true
+              echo "::endgroup::"
+              echo "::group::logs $pod/$container (--previous, crash-loop diagnosis)"
+              kubectl logs -n "$ns" "$pod" -c "$container" --tail="$tail" --previous 2>/dev/null || echo "(no previous logs)"
+              echo "::endgroup::"
+            done
+          done

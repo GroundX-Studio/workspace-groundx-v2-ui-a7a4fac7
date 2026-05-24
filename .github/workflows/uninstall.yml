@@ -1,0 +1,124 @@
+name: Uninstall
+
+# Manual teardown of the Helm release for one environment. Requires the
+# operator to type "uninstall" into the confirm field. Optionally also
+# deletes the namespace (which removes the middleware Secret, any PVCs,
+# and anything else under it).
+#
+# For prod, also add required reviewers to the `prod` GitHub Environment
+# (Settings -> Environments -> prod -> Required reviewers) so this
+# workflow waits for a second pair of eyes before it runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to uninstall
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+      confirm:
+        description: Type the word "uninstall" exactly to confirm
+        required: true
+        type: string
+      deleteNamespace:
+        description: Also delete the namespace and all remaining resources in it
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  uninstall:
+    name: Uninstall ${{ inputs.environment }}
+    runs-on: ${{ vars.DEPLOY_RUNNER || 'ubuntu-latest' }}
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME || secrets.AWS_ROLE_TO_ASSUME || '' }}
+      EKS_CLUSTER_NAME_DEV: ${{ vars.EKS_CLUSTER_NAME_DEV || secrets.EKS_CLUSTER_NAME_DEV || '' }}
+      EKS_CLUSTER_NAME_PROD: ${{ vars.EKS_CLUSTER_NAME_PROD || secrets.EKS_CLUSTER_NAME_PROD || '' }}
+      EKS_CLUSTER_REGION_DEV: ${{ vars.EKS_CLUSTER_REGION_DEV || secrets.EKS_CLUSTER_REGION_DEV || '' }}
+      EKS_CLUSTER_REGION_PROD: ${{ vars.EKS_CLUSTER_REGION_PROD || secrets.EKS_CLUSTER_REGION_PROD || '' }}
+      EKS_CLUSTER_NAME: ${{ inputs.environment == 'prod' && (vars.EKS_CLUSTER_NAME_PROD || secrets.EKS_CLUSTER_NAME_PROD) || (vars.EKS_CLUSTER_NAME_DEV || secrets.EKS_CLUSTER_NAME_DEV) }}
+      EKS_CLUSTER_REGION: ${{ inputs.environment == 'prod' && (vars.EKS_CLUSTER_REGION_PROD || secrets.EKS_CLUSTER_REGION_PROD) || (vars.EKS_CLUSTER_REGION_DEV || secrets.EKS_CLUSTER_REGION_DEV) }}
+      K8S_NAMESPACE_INPUT: ${{ vars.K8S_NAMESPACE || secrets.K8S_NAMESPACE || '' }}
+      HELM_RELEASE_NAME_INPUT: ${{ vars.HELM_RELEASE_NAME || secrets.HELM_RELEASE_NAME || '' }}
+    steps:
+      - name: Confirm intent
+        run: |
+          if [ "${{ inputs.confirm }}" != "uninstall" ]; then
+            echo "Confirmation phrase did not match — refusing to uninstall."
+            echo "Re-run the workflow and type the word \"uninstall\" exactly in the confirm field."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC role)
+        if: env.AWS_ROLE_TO_ASSUME != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.EKS_CLUSTER_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+
+      - name: Configure AWS credentials (access keys)
+        if: env.AWS_ROLE_TO_ASSUME == ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.EKS_CLUSTER_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure kubeconfig (aws eks update-kubeconfig)
+        run: |
+          if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
+            echo "EKS_CLUSTER_NAME must be set as a GitHub environment variable or secret"
+            exit 1
+          fi
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$EKS_CLUSTER_REGION" \
+            --kubeconfig "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+
+      - name: Compute release + namespace (same scheme as deploy.yml)
+        id: target
+        run: |
+          slugify_k8s_name() {
+            printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//' | cut -c1-53 | sed -E 's/-+$//'
+          }
+          repo_k8s_name="$(slugify_k8s_name "${GITHUB_REPOSITORY##*/}")"
+          [ -z "$repo_k8s_name" ] && repo_k8s_name="groundx-web-ui"
+          namespace="${K8S_NAMESPACE_INPUT:-${repo_k8s_name}-${{ inputs.environment }}}"
+          release_name="$(slugify_k8s_name "${HELM_RELEASE_NAME_INPUT:-${repo_k8s_name}-${{ inputs.environment }}}")"
+          echo "namespace=$namespace" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+          echo "Target release: $release_name (namespace: $namespace)"
+
+      - name: Helm uninstall
+        run: |
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          ns="${{ steps.target.outputs.namespace }}"
+          rel="${{ steps.target.outputs.release_name }}"
+          if helm status "$rel" -n "$ns" >/dev/null 2>&1; then
+            helm uninstall "$rel" --namespace "$ns" --wait
+          else
+            echo "Helm release $rel not found in $ns — nothing to uninstall."
+          fi
+
+      - name: Delete namespace
+        if: ${{ inputs.deleteNamespace }}
+        run: |
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          kubectl delete namespace "${{ steps.target.outputs.namespace }}" --ignore-not-found --wait=true
