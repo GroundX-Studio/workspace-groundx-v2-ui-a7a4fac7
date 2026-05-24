@@ -47,7 +47,8 @@ tissue between those and the codebase.
   actually works. Workflow inputs, per-env vars/secrets cascade,
   Helm chart, image tagging, ALB Ingress, MCP `publish` /
   `deploy_config` / `commit_push` usage. The one-tag-per-env scheme
-  + `pullPolicy: Always` rationale.
+  + `pullPolicy: Always` rationale. Ops workflows
+  (`diagnose.yml`, `uninstall.yml`, `alb-alarms.yml`).
 - [**Observability + security**](docs/agents/observability.md) —
   pino + OpenTelemetry + Sentry + PostHog + helmet + rate-limit.
   Where each lives, how to add a metric / span / event, PII

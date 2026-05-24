@@ -181,6 +181,35 @@ Inputs: `environment`, `confirm` (must equal literal "uninstall"),
 GitHub Environments' "required reviewers" is the secondary guard
 for `prod`.
 
+### `alb-alarms.yml`
+
+Creates / re-asserts the three CloudWatch alarms our compliance
+posture requires on the public ALB:
+
+| Alarm | CloudWatch metric | Default threshold |
+|---|---|---|
+| `<prefix>-alb-latency` | `AWS/ApplicationELB · TargetResponseTime` (Avg / 5 min × 2) | > 1.0 s |
+| `<prefix>-alb-unhealthy-hosts` | `AWS/ApplicationELB · UnHealthyHostCount` (Max / 1 min × 2) | ≥ 1 |
+| `<prefix>-alb-5xx` | `AWS/ApplicationELB · HTTPCode_Target_5XX_Count` (Sum / 5 min × 1) | > 5 |
+
+Inputs: `environment`, plus optional threshold overrides. The
+workflow looks up the ALB DNS from `kubectl get ingress -o
+jsonpath='{.status.loadBalancer.ingress[0].hostname}'` in the
+environment's namespace, then invokes `scripts/aws/ensure-alb-alarms.sh`.
+
+**Deliberately NOT wired into `deploy.yml`** — a transient AWS API
+blip on the alarms call shouldn't block an app deploy. Run this
+workflow once after the first deploy of an environment, and again
+any time you want to retune thresholds. The script is idempotent
+(`aws cloudwatch put-metric-alarm` is an upsert), so re-runs are
+safe.
+
+Notifications are optional: set `ALARM_SNS_TOPIC_ARN_DEV` /
+`ALARM_SNS_TOPIC_ARN_PROD` as repo / environment vars or secrets
+to publish alarm state changes to an SNS topic. Without a topic the
+alarms still exist and satisfy the compliance control — they just
+don't page anyone.
+
 ## MCP-driven loop
 
 ```text

@@ -1,0 +1,128 @@
+name: ALB Alarms
+
+# Manual ops workflow. Creates / re-asserts the three CloudWatch
+# alarms our compliance posture requires on the public ALB:
+#
+#   1. groundx-onboarding-alb-latency        (TargetResponseTime)
+#   2. groundx-onboarding-alb-unhealthy-hosts (UnHealthyHostCount)
+#   3. groundx-onboarding-alb-5xx            (HTTPCode_Target_5XX_Count)
+#
+# Intentionally NOT wired into deploy.yml so a transient AWS API
+# blip can't block app deploys. Run after the first deploy of a new
+# environment, and any time alarm thresholds need adjustment. The
+# underlying script (scripts/aws/ensure-alb-alarms.sh) is idempotent.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Cluster environment whose ALB to attach alarms to
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+      latencyThresholdSeconds:
+        description: TargetResponseTime threshold (seconds, Average over 5 min)
+        required: false
+        default: "1.0"
+        type: string
+      unhealthyHostThreshold:
+        description: UnHealthyHostCount threshold (Max over 1 min)
+        required: false
+        default: "1"
+        type: string
+      fiveXxThreshold:
+        description: HTTPCode_Target_5XX_Count threshold (Sum over 5 min)
+        required: false
+        default: "5"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  ensure-alarms:
+    name: Ensure ALB alarms (${{ inputs.environment }})
+    runs-on: ${{ vars.DEPLOY_RUNNER || 'ubuntu-latest' }}
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME || secrets.AWS_ROLE_TO_ASSUME || '' }}
+      EKS_CLUSTER_NAME: ${{ inputs.environment == 'prod' && (vars.EKS_CLUSTER_NAME_PROD || secrets.EKS_CLUSTER_NAME_PROD) || (vars.EKS_CLUSTER_NAME_DEV || secrets.EKS_CLUSTER_NAME_DEV) }}
+      EKS_CLUSTER_REGION: ${{ inputs.environment == 'prod' && (vars.EKS_CLUSTER_REGION_PROD || secrets.EKS_CLUSTER_REGION_PROD) || (vars.EKS_CLUSTER_REGION_DEV || secrets.EKS_CLUSTER_REGION_DEV) }}
+      K8S_NAMESPACE_INPUT: ${{ vars.K8S_NAMESPACE || secrets.K8S_NAMESPACE || '' }}
+      SNS_TOPIC_ARN_DEV: ${{ vars.ALARM_SNS_TOPIC_ARN_DEV || secrets.ALARM_SNS_TOPIC_ARN_DEV || '' }}
+      SNS_TOPIC_ARN_PROD: ${{ vars.ALARM_SNS_TOPIC_ARN_PROD || secrets.ALARM_SNS_TOPIC_ARN_PROD || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC role)
+        if: env.AWS_ROLE_TO_ASSUME != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.EKS_CLUSTER_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+
+      - name: Configure AWS credentials (access keys)
+        if: env.AWS_ROLE_TO_ASSUME == ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.EKS_CLUSTER_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
+            echo "EKS_CLUSTER_NAME must be set as a GitHub environment variable or secret"
+            exit 1
+          fi
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$EKS_CLUSTER_REGION" \
+            --kubeconfig "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Resolve namespace + Ingress ALB
+        id: lookup
+        run: |
+          slugify_k8s_name() {
+            printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//' | cut -c1-53 | sed -E 's/-+$//'
+          }
+          repo_k8s_name="$(slugify_k8s_name "${GITHUB_REPOSITORY##*/}")"
+          [ -z "$repo_k8s_name" ] && repo_k8s_name="groundx-web-ui"
+          ns="${K8S_NAMESPACE_INPUT:-${repo_k8s_name}-${{ inputs.environment }}}"
+          echo "namespace=$ns" >> "$GITHUB_OUTPUT"
+          echo "Inspecting namespace: $ns"
+
+          # The AWS LB Controller writes the ALB's DNS name into
+          # the Ingress's loadBalancer.ingress[0].hostname field.
+          alb_dns="$(kubectl get ingress -n "$ns" \
+            -o jsonpath='{range .items[*]}{.status.loadBalancer.ingress[0].hostname}{"\n"}{end}' \
+            | grep -v '^$' | head -1 || true)"
+          if [ -z "$alb_dns" ]; then
+            echo "No Ingress with an ALB DNS hostname found in namespace $ns" >&2
+            echo "Have you deployed to $ns yet, and is publicAccess=ingress?" >&2
+            exit 1
+          fi
+          echo "alb_dns=$alb_dns" >> "$GITHUB_OUTPUT"
+          echo "Resolved ALB DNS: $alb_dns"
+
+      - name: Ensure CloudWatch alarms
+        env:
+          AWS_REGION: ${{ env.EKS_CLUSTER_REGION }}
+          ALB_DNS: ${{ steps.lookup.outputs.alb_dns }}
+          LATENCY_THRESHOLD_S: ${{ inputs.latencyThresholdSeconds }}
+          UNHEALTHY_HOST_THRESHOLD: ${{ inputs.unhealthyHostThreshold }}
+          FIVEXX_THRESHOLD: ${{ inputs.fiveXxThreshold }}
+          SNS_TOPIC_ARN: ${{ inputs.environment == 'prod' && env.SNS_TOPIC_ARN_PROD || env.SNS_TOPIC_ARN_DEV }}
+        run: |
+          bash scripts/aws/ensure-alb-alarms.sh
