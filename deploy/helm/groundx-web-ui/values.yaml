@@ -1,0 +1,43 @@
+environment: dev
+publicAccess: none
+publicHost: ""
+ingressAnnotations: {}
+acmCertificateArn: ""
+albGroupName: ""
+albScheme: internet-facing
+albTargetType: ip
+albListenPorts: '[{"HTTP":80},{"HTTPS":443}]'
+albSslRedirect: "443"
+ingressClassName: ""
+tlsSecretName: ""
+imagePullSecretName: ""
+
+namespace:
+  create: false
+
+frontend:
+  replicas: 1
+  image:
+    repository: ghcr.io/example/groundx-web-ui/frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 80
+    targetPort: 8080
+  resources: {}
+
+middleware:
+  replicas: 1
+  image:
+    repository: ghcr.io/example/groundx-web-ui/middleware
+    tag: latest
+    pullPolicy: IfNotPresent
+  existingSecret: groundx-web-ui-middleware
+  service:
+    port: 3001
+    targetPort: 3001
+  env: {}
+  resources: {}
+
+networkPolicy:
+  enabled: false

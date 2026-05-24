@@ -1,0 +1,26 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "groundx-web-ui.fullname" . }}-middleware
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "groundx-web-ui.labels" . | nindent 4 }}
+    app.kubernetes.io/component: middleware
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "groundx-web-ui.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: middleware
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "groundx-web-ui.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: frontend
+      ports:
+        - protocol: TCP
+          port: http
+{{- end }}

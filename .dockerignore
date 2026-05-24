@@ -1,0 +1,14 @@
+node_modules
+app/node_modules
+middleware/node_modules
+app/dist
+middleware/dist
+.git
+.github
+.env
+.env.*
+**/*.log
+reports
+coverage
+test-results
+playwright-report

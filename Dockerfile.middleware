@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine AS deps
+WORKDIR /workspace
+COPY package*.json ./
+COPY app/package*.json app/
+COPY middleware/package*.json middleware/
+COPY scripts/check-node-version.mjs scripts/check-node-version.mjs
+RUN npm ci
+
+FROM deps AS build
+COPY middleware middleware
+RUN npm --workspace middleware run build
+
+FROM node:22-alpine AS runtime
+ENV NODE_ENV=production
+ENV PORT=3001
+WORKDIR /workspace
+COPY package*.json ./
+COPY app/package*.json app/
+COPY middleware/package*.json middleware/
+COPY scripts/check-node-version.mjs scripts/check-node-version.mjs
+RUN npm ci --omit=dev --workspace middleware && npm cache clean --force
+COPY --from=build /workspace/middleware/dist middleware/dist
+USER node
+EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD wget -qO- http://127.0.0.1:3001/api/healthz || exit 1
+CMD ["npm", "--workspace", "middleware", "run", "start"]

@@ -1,0 +1,58 @@
+{{- if and (eq .Values.publicAccess "ingress") .Values.publicHost }}
+{{- $isAlb := or (eq .Values.ingressClassName "alb") .Values.acmCertificateArn .Values.albGroupName }}
+{{- $annotations := dict }}
+{{- range $key, $value := .Values.ingressAnnotations }}
+{{- $_ := set $annotations $key $value }}
+{{- end }}
+{{- if .Values.acmCertificateArn }}
+{{- $_ := set $annotations "alb.ingress.kubernetes.io/certificate-arn" .Values.acmCertificateArn }}
+{{- end }}
+{{- if .Values.albGroupName }}
+{{- $_ := set $annotations "alb.ingress.kubernetes.io/group.name" .Values.albGroupName }}
+{{- end }}
+{{- if and $isAlb .Values.albScheme }}
+{{- $_ := set $annotations "alb.ingress.kubernetes.io/scheme" .Values.albScheme }}
+{{- end }}
+{{- if and $isAlb .Values.albTargetType }}
+{{- $_ := set $annotations "alb.ingress.kubernetes.io/target-type" .Values.albTargetType }}
+{{- end }}
+{{- if and .Values.acmCertificateArn .Values.albListenPorts }}
+{{- $_ := set $annotations "alb.ingress.kubernetes.io/listen-ports" .Values.albListenPorts }}
+{{- end }}
+{{- if and .Values.acmCertificateArn .Values.albSslRedirect }}
+{{- $_ := set $annotations "alb.ingress.kubernetes.io/ssl-redirect" .Values.albSslRedirect }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "groundx-web-ui.fullname" . }}-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "groundx-web-ui.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+  {{- if gt (len $annotations) 0 }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingressClassName }}
+  ingressClassName: {{ .Values.ingressClassName }}
+  {{- end }}
+  {{- if .Values.tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ .Values.publicHost | quote }}
+      secretName: {{ .Values.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.publicHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "groundx-web-ui.fullname" . }}-frontend
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end }}

@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "groundx-web-ui.fullname" . }}-middleware
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "groundx-web-ui.labels" . | nindent 4 }}
+    app.kubernetes.io/component: middleware
+spec:
+  replicas: {{ .Values.middleware.replicas }}
+  selector:
+    matchLabels:
+      {{- include "groundx-web-ui.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: middleware
+  template:
+    metadata:
+      labels:
+        {{- include "groundx-web-ui.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: middleware
+    spec:
+      {{- if .Values.imagePullSecretName }}
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecretName }}
+      {{- end }}
+      containers:
+        - name: middleware
+          image: "{{ .Values.middleware.image.repository }}:{{ .Values.middleware.image.tag }}"
+          imagePullPolicy: {{ .Values.middleware.image.pullPolicy }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.middleware.existingSecret }}
+          {{- with .Values.middleware.env }}
+          env:
+            {{- range $name, $value := . }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.middleware.service.targetPort }}
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+          resources:
+            {{- toYaml .Values.middleware.resources | nindent 12 }}
