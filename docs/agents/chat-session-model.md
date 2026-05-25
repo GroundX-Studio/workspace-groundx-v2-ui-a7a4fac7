@@ -172,8 +172,9 @@ old history gets compressed further.
   prompt variant + the "active summary" filter
   (`WHERE NOT EXISTS (SELECT 1 FROM conversation_summaries s2 WHERE s2.absorbed_summary_ids_json LIKE …)`).
 
-See P0 item in `docs/agents/open-work.md` — this is the highest-
-priority chat-stack fix.
+See backlog items CF-01 (closed: leaf + meta-compaction shape) and
+CF-17 (in-progress: configurable compression tunables) in
+`docs/agents/backlog.md`.
 
 The whole chain still runs in the request hot path on the
 chatHandler thread today; background-job migration is a separate

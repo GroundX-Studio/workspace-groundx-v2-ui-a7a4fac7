@@ -184,9 +184,9 @@ export class ChatRouteNotImplementedError extends Error {
  *
  * For "multi-workspace" usage (the user is looking across N buckets),
  * the caller is responsible for ensure-creating a group of those
- * buckets and passing `{kind:"group", groupId}`. Today no upstream
- * caller produces multi-workspace scopes, so the ensure-group logic
- * is deferred (see TODO in this file).
+ * buckets and passing `{kind:"group", groupId}`. Multi-workspace
+ * scopes aren't produced by any upstream caller today; the ensure-
+ * group helper is tracked as backlog item CF-15.
  */
 export type RagContentScope =
   | { kind: "bucket"; bucketId: number; projectIds?: string[] }
