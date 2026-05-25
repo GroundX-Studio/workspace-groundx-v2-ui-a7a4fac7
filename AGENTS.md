@@ -72,10 +72,12 @@ tissue between those and the codebase.
   trap (`.env.local` is a workaround, not the canonical home).
   GitHub vars precedence. Why the Service stays ClusterIP under
   AWS ALB. MOCK_MODE vs live.
-- [**Open work + deferred tracks**](docs/agents/open-work.md) —
-  What's pending. The live LLM router + real GroundX search wiring.
-  Compression chain. Multi-session steady-mode UI. Things to know
-  before picking up one of these.
+- [**Backlog (single source of truth)**](docs/agents/backlog.md) —
+  Every pending item across 13 epics (CHAT / AUTH / DATA / UI /
+  TOOLS / OBS / SEC / UR / SCEN / SCALE / TESTING / OPS / POLISH)
+  with stable ids, honest status, and a definition-of-done test.
+  Inline `TODO(<id>)` markers in source resolve here. Read the
+  Rules of Engagement at the top before opening new work.
 
 ## Where the spec is, where the memory is
 
