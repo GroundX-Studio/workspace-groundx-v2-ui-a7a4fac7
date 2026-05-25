@@ -20,7 +20,9 @@
  * returns canned responses so the chat surface can boot today.
  */
 
-import type { GroundXClient, LlmClient } from "../types.js";
+import type { AppRepository, GroundXClient, LlmClient } from "../types.js";
+
+import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
 
 export type ChatMode = "rag" | "structured" | "hybrid";
 
@@ -123,11 +125,30 @@ export interface ChatRouterDeps {
   /**
    * Bucket id to search against — typically the customer's primary
    * bucket, OR the samples bucket id for anonymous onboarding flows.
+   * Legacy single-bucket-only path; new code should pass `contentScope`.
    */
   searchBucketId?: number | null;
+  /**
+   * Explicit content scope. Wins over `searchBucketId` when supplied.
+   * The chatHandler derives this from the active entity / current
+   * intent / project membership; the chatRouter doesn't recompute it.
+   */
+  contentScope?: RagContentScope;
   /** Provider model id for the LLM call, e.g. "gpt-4o" or "claude-3-haiku". */
   llmModelId?: string;
   mockMode: boolean;
+  /**
+   * Repository for structured/hybrid mode handlers (which read
+   * chat session + entity rows). Required for those modes outside
+   * MOCK_MODE; RAG-only deployments can omit.
+   */
+  repository?: AppRepository;
+  /** chatSessionId — needed by structured/hybrid mode for context reads. */
+  chatSessionId?: string;
+  /** Signed-in user, if any. Passed to per-subkind structured readers. */
+  groundxUsername?: string | null;
+  /** BYO free-tier page budget for the "pages_remaining" structured answer. */
+  byoPagesLimit?: number;
 }
 
 /**
@@ -148,6 +169,32 @@ export class ChatRouteNotImplementedError extends Error {
     this.mode = mode;
   }
 }
+
+/**
+ * Discriminated union for which GroundX search call to make.
+ * Mirrors the frontend `ContentScope` type but adds the
+ * project-filter case that frontend doesn't surface yet.
+ *
+ *   bucket    — search a single bucket. Optional projectIds filter:
+ *     []        → no filter (whole bucket)
+ *     [P]       → single-project filter
+ *     [P1, P2]  → multi-project filter ($in)
+ *   group     — search a pre-created group of buckets (no filter).
+ *   documents — search by explicit documentIds via the doc-search API.
+ *
+ * For "multi-workspace" usage (the user is looking across N buckets),
+ * the caller is responsible for ensure-creating a group of those
+ * buckets and passing `{kind:"group", groupId}`. Today no upstream
+ * caller produces multi-workspace scopes, so the ensure-group logic
+ * is deferred (see TODO in this file).
+ */
+export type RagContentScope =
+  | { kind: "bucket"; bucketId: number; projectIds?: string[] }
+  | { kind: "group"; groupId: number }
+  | { kind: "documents"; documentIds: string[] }
+  // Legacy fallback for the case where ContentScope is unknown:
+  // search the doc-wide endpoint. Tracked so it shows up in logs.
+  | { kind: "unknown" };
 
 /**
  * Single snippet returned by the GroundX search result list. The
@@ -178,15 +225,46 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
     return runRagPipeline(request, deps);
   }
 
-  // Structured / hybrid live wiring isn't ready yet — those need MySQL
-  // + Partner readers we haven't built. The earlier code returned a
-  // mock envelope in production, which looked plausible but was fake
-  // data; downstream clients had no way to distinguish a real answer
-  // from a stub. Failing fast with a typed error so the handler can
-  // map to HTTP 501 is the safer behavior. Use MOCK_MODE=true during
-  // development to keep the chat surface usable while the live wiring
-  // catches up.
-  throw new ChatRouteNotImplementedError(mode);
+  // Structured + hybrid: lightweight live wiring via structuredHandler.
+  // The framework dispatches by sub-query kind; each sub-handler either
+  // returns a real answer (for the kinds whose data readers ARE built —
+  // pages_remaining, onboarding_state, current_entity) or a frank
+  // "needs reader" reply (for saved_schemas / my_projects / api_keys
+  // until those tables/Partner reads land). MOCK_MODE bypasses the
+  // whole path; this gives us a real surface in production without
+  // fabricating answers.
+  if (!deps.repository || !deps.chatSessionId) {
+    throw new ChatRouteNotImplementedError(mode);
+  }
+  const structuredDeps = {
+    repository: deps.repository,
+    chatSessionId: deps.chatSessionId,
+    groundxUsername: deps.groundxUsername ?? null,
+    byoPagesLimit: deps.byoPagesLimit ?? 100,
+  };
+  if (mode === "structured") {
+    return runStructuredQuery(request, structuredDeps);
+  }
+  // Hybrid: layer structured context onto a thin RAG search. If the
+  // RAG side isn't configured, hybrid still produces a useful response
+  // (just without grounded snippets).
+  let snippets: GroundXSearchResult[] = [];
+  if (deps.groundxClient && deps.groundxApiKey) {
+    const scope: RagContentScope =
+      deps.contentScope ??
+      (deps.searchBucketId != null
+        ? { kind: "bucket", bucketId: deps.searchBucketId }
+        : { kind: "unknown" });
+    try {
+      snippets = await searchGroundX(request.newUserMessage, scope, deps.groundxClient, deps.groundxApiKey);
+    } catch (err) {
+      // Hybrid is best-effort on the RAG side — log + continue with
+      // empty snippets rather than 502 the whole request.
+      // eslint-disable-next-line no-console
+      console.warn("hybrid mode: RAG search failed, proceeding without snippets", err);
+    }
+  }
+  return runHybridQuery(request, { ...structuredDeps, ragSnippets: snippets });
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -207,9 +285,16 @@ async function runRagPipeline(
     throw new Error("rag mode: llmModelId is required outside MOCK_MODE");
   }
 
+  // Derive the ContentScope. Callers can override via `deps.contentScope`
+  // once the chatHandler wires it from the entity bundle; for now we
+  // fall back to the legacy single-bucket scope from env.
+  const scope: RagContentScope =
+    deps.contentScope ??
+    (deps.searchBucketId != null ? { kind: "bucket", bucketId: deps.searchBucketId } : { kind: "unknown" });
+
   const snippets = await searchGroundX(
     request.newUserMessage,
-    deps.searchBucketId ?? null,
+    scope,
     deps.groundxClient,
     deps.groundxApiKey,
   );
@@ -230,38 +315,76 @@ async function runRagPipeline(
 }
 
 /**
- * TODO(chat-fix-list P0 #2): ContentScope-aware filter routing.
- * Today this picks one of two paths based on whether bucketId is
- * set — that covers "whole workspace" OR "all docs" only. The
- * real ContentScope routing per the user-visible entity is:
- *   - Whole workspace (bucket)  → POST /v1/search/{bucketId} + {query, n}
- *   - Single project            → POST /v1/search/{bucketId} +
- *                                 {query, n, filter: {projectId: P}}
- *   - Multiple projects         → POST /v1/search/{bucketId} +
- *                                 {query, n, filter: {projectId: {$in: [P1, …]}}}
- *   - Multiple workspaces       → ensure-create a group of those bucket
- *                                 ids, then POST /v1/search/{groupId} + {query, n}
- *   - Single document           → POST /v1/search/documents +
- *                                 {query, n, documentIds: [docId]}
- * ContentScope should flow from the chatHandler bundle's currentEntity
- * axis. See docs/agents/open-work.md → "Chat stack — prioritized fix list".
+ * Issue a GroundX search dispatched on `ContentScope`. The five
+ * supported shapes per the docs:
+ *
+ *   bucket / no projectIds  → POST /v1/search/{bucketId} + {query, n}
+ *   bucket / 1 projectId    → POST /v1/search/{bucketId} +
+ *                             {query, n, filter: {projectId: P}}
+ *   bucket / N projectIds   → POST /v1/search/{bucketId} +
+ *                             {query, n, filter: {projectId: {$in: [...]}}}
+ *   group                   → POST /v1/search/{groupId} + {query, n}
+ *   documents               → POST /v1/search/documents +
+ *                             {query, n, documentIds: [...]}
+ *
+ * TODO(chat-fix-list P0 #2 follow-on): multi-bucket usage today
+ * requires the caller to provide an existing groupId. The "ensure-
+ * create group of buckets [B1, B2, …] if none exists" helper lives
+ * outside this function and isn't built yet — when it lands, the
+ * handler can pass `{kind:"group", groupId}` after the ensure call.
  */
-async function searchGroundX(
+export async function searchGroundX(
   query: string,
-  bucketId: number | null,
+  scope: RagContentScope,
   client: GroundXClient,
   apiKey: string,
 ): Promise<GroundXSearchResult[]> {
-  // POST /v1/search/{id} where id = bucket id. The GroundX search
-  // endpoint takes { query, n, nextToken? } and returns { search: { results: [...] } }.
-  const path = bucketId === null
-    ? "/v1/search/documents"
-    : `/v1/search/${bucketId}`;
+  let path: string;
+  // Body must always include {query, n}; some scopes add fields.
+  const body: Record<string, unknown> = { query, n: RAG_SEARCH_LIMIT };
+
+  switch (scope.kind) {
+    case "bucket": {
+      path = `/v1/search/${scope.bucketId}`;
+      const ids = scope.projectIds ?? [];
+      if (ids.length === 1) {
+        body.filter = { projectId: ids[0] };
+      } else if (ids.length > 1) {
+        body.filter = { projectId: { $in: ids } };
+      }
+      break;
+    }
+    case "group": {
+      // Group search has the same shape as bucket search — different
+      // resource id, same endpoint. GroundX resolves the group to its
+      // member buckets server-side.
+      path = `/v1/search/${scope.groupId}`;
+      break;
+    }
+    case "documents": {
+      if (scope.documentIds.length === 0) {
+        throw new Error("rag scope 'documents' requires at least one documentId");
+      }
+      path = "/v1/search/documents";
+      body.documentIds = scope.documentIds;
+      break;
+    }
+    case "unknown": {
+      // Legacy fallback: doc-wide search. This SHOULD only happen when
+      // the chatHandler doesn't know the active entity yet (early
+      // onboarding). Log surfaces this so we can spot it in telemetry.
+      // eslint-disable-next-line no-console
+      console.warn("rag search dispatched with kind=unknown — falling back to /v1/search/documents");
+      path = "/v1/search/documents";
+      break;
+    }
+  }
+
   const response = await client.forward(path, {
     method: "POST",
     apiKey,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ query, n: RAG_SEARCH_LIMIT }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "<unreadable>");

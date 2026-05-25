@@ -3,63 +3,83 @@
 What's pending, in priority order. Each has a brief "why deferred"
 note so you can decide whether to pick it up.
 
-## Chat stack — prioritized fix list (locked 2026-05-25)
+## Chat stack — prioritized fix list (locked 2026-05-25; P0s closed PM 2026-05-25)
 
 Consolidated from the architecture review + a follow-up working
 session that surfaced design defects in the original implementation.
-Each P0 is a real-data correctness issue, not just a polish.
 
-### P0 — would corrupt data / return wrong answers in production
+### Recently closed (PM 2026-05-25)
 
-1. **Compression chain redesign: leaf summaries + meta-compaction**
-   Current `runCompression` always splices the prior summary into
-   the new LLM call (`buildSummaryPrompt` accepts a `priorSummary`
-   arg + uses it). That makes every generation re-summarize
-   already-summarized prose — telephone-game decay. Generation
-   counter increments per-run too, when it should only increment
-   on meta-compaction.
-   The right design (see `docs/agents/chat-session-model.md` →
-   "Compression chain"):
-   - Level 1 (liveTail too long): summarize ONLY the absorbed
-     messages, NO prior-summary splicing. Write a leaf summary
-     with `generation = 0`, `absorbedSummaryIdsJson = "[]"`.
-   - Level 2 (summaries list too long, e.g. > 10): batch-fold
-     the oldest leaf summaries into a super-summary with
-     `generation = max(inputs) + 1` + the absorbed leaf ids.
-   - Bundle for LLM = active summaries (no other summary
-     absorbs them) + liveTail.
+1. **P0 #1: Compression chain redesign** — DONE. `runCompression`
+   no longer splices prior summary text into leaf LLM calls; every
+   leaf summary is written with `generation = 0` and
+   `absorbedSummaryIdsJson = "[]"`. New `runMetaCompaction` folds
+   the oldest active summaries into a super-summary when the
+   active count exceeds `MAX_ACTIVE_SUMMARIES_BEFORE_META = 10`
+   (folds the oldest 5 into 1). New `selectActiveSummaries` filter
+   excludes summaries listed in any other summary's
+   `absorbedSummaryIdsJson` from the bundle. `BundleConversationInput`
+   now carries `activeSummaries: []` (was `latestSummary: …|null`);
+   the bundler's token estimate walks all active summaries. 20
+   tests cover the new compressor + 10 cover the bundler.
 
-2. **GroundX RAG: ContentScope-aware filter routing**
-   `searchGroundX` today picks one of two paths:
-   `/v1/search/{bucketId}` OR `/v1/search/documents`. That covers
-   "whole workspace" OR "all docs" — missing the four other cases
-   that real users will hit. Required mapping:
-   - Whole workspace (bucket) → `POST /v1/search/{bucketId}` +
-     `{query, n}` (current).
-   - Single project → `POST /v1/search/{bucketId}` +
-     `{query, n, filter: {projectId: P}}`.
-   - Multiple projects → `POST /v1/search/{bucketId}` +
-     `{query, n, filter: {projectId: {$in: [P1, P2, ...]}}}`.
-   - Multiple workspaces (buckets) → ensure-create a `group`
-     resource of those bucket ids, then
-     `POST /v1/search/{groupId}` + `{query, n}`.
-   - Single document → `POST /v1/search/documents` +
-     `{query, n, documentIds: [docId]}` — different endpoint.
-   The ContentScope abstraction in `project_groundx_types.md`
-   already covers these cases; needs to flow from the active
-   entity (chatHandler bundle) into `searchGroundX`.
+2. **P0 #2: ContentScope routing in `searchGroundX`** — DONE.
+   `searchGroundX` is now exported and takes a `RagContentScope`
+   discriminated union with 4 live cases + 1 "unknown" fallback
+   that logs:
+     - `bucket` (no projectIds)   → `POST /v1/search/{bucketId}`
+     - `bucket` (1 projectId)     → `+ filter: { projectId: P }`
+     - `bucket` (N projectIds)    → `+ filter: { projectId: { $in: [...] } }`
+     - `group`                     → `POST /v1/search/{groupId}`
+     - `documents`                 → `POST /v1/search/documents + documentIds`
+     - `unknown`                   → legacy /v1/search/documents + console.warn
+   `deriveRagContentScope` lives in `chatHandler.ts` as the single
+   seam where future scope refinements land. Today it returns
+   `{kind: "bucket", bucketId: env.GROUNDX_SAMPLES_BUCKET_ID}` —
+   `EntitySession` doesn't yet carry project/group/doc refs.
+   See **follow-on** below.
 
-3. **Live `structured` chat mode**
-   Today: `routeChat` throws `ChatRouteNotImplementedError` →
-   501 outside MOCK_MODE for any "structured" query. Users
-   asking "saved schemas?" / "pages remaining?" / "my workspace"
-   hit this — common questions. Needs MySQL + Partner-API
-   readers for the per-customer app state.
+3. **P0 #3 + #4: Live `structured` + `hybrid` modes** — DONE
+   (framework + minimum-viable handlers). New
+   `services/structuredHandler.ts` ships `classifyStructuredQuery`
+   (7 sub-kinds) + `runStructuredQuery` (dispatches by sub-kind)
+   + `runHybridQuery` (folds RAG snippets + entity context into a
+   tour-style answer).
+   Sub-handlers wired with REAL data: `pages_remaining`,
+   `onboarding_state`, `current_entity` (these read chat_sessions
+   + chat_session_entities, which exist).
+   Sub-handlers that need readers not yet built (`saved_schemas`,
+   `my_projects`, `api_keys`) return a frank "I can answer once
+   the data readers are wired" reply instead of 501-ing the whole
+   request OR fabricating an answer. Same honesty principle as
+   the silent-mock fix earlier.
+   `routeChat` no longer throws `ChatRouteNotImplementedError`
+   for structured/hybrid when `repository + chatSessionId` are
+   supplied (they always are from chatHandler). The 501 path
+   remains for misconfigured callers.
 
-4. **Live `hybrid` chat mode**
-   Same as above for hybrid: "explain this sample" / "what can
-   I do?" → 501. Tour-style answers blocked. Combines metadata
-   reads (structured side) with grounded snippets (RAG side).
+### P0 follow-ons (smaller scope, real work)
+
+1a. **`runMetaCompaction` chained-generation evolution.** Today the
+    handler triggers meta-compaction on `activeSummaries.length > 10`
+    + folds the oldest 5. Eventually super-summaries themselves
+    pile up; we'd want a 2nd-tier trigger (e.g. > 10 supers fold to
+    1 mega-super, gen=2). Test the actual session-lifetime curve
+    before tuning — the constants are easy to bump.
+
+2a. **`EntitySession` scope refs.** `deriveRagContentScope` in
+    chatHandler returns `{kind:"bucket", bucketId: env.SAMPLES}`
+    today. When EntitySession gains optional `projectIds[]` /
+    `groupId` / `documentIds[]` fields, the helper switches on
+    those automatically — single point of change. Also need:
+    helper that ensures-creates a group of buckets when the user
+    is looking across N workspaces.
+
+3a. **Real `saved_schemas`, `my_projects`, `api_keys` readers.**
+    Today these sub-kinds return a frank "not wired yet" reply.
+    Once the underlying tables / Partner reads exist, swap the
+    body of `answerUnimplementedSubkind` for real queries. The
+    dispatch + classify + envelope shape don't change.
 
 ### P1 — quality / UX
 

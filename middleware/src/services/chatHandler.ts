@@ -36,8 +36,14 @@ import {
   shouldCompress,
   type BundleChatContextInput,
 } from "./contextBundler.js";
-import { ChatRouteNotImplementedError, routeChat, type ChatRouterRequest, type ChatRouterResponse } from "./chatRouter.js";
-import { runCompression } from "./conversationCompressor.js";
+import {
+  ChatRouteNotImplementedError,
+  routeChat,
+  type ChatRouterRequest,
+  type ChatRouterResponse,
+  type RagContentScope,
+} from "./chatRouter.js";
+import { runCompression, runMetaCompaction, selectActiveSummaries } from "./conversationCompressor.js";
 import { UpstreamTimeoutError } from "./http.js";
 
 export interface HandleChatMessageRequest {
@@ -72,6 +78,8 @@ export interface HandleChatMessageDeps {
   compressionModelId?: string;
   /** When true, skip GroundX/LLM and return canned router responses. */
   mockMode: boolean;
+  /** Free-tier BYO page budget surfaced by the "pages_remaining" structured query. */
+  byoPagesLimit?: number;
   /**
    * Estimated LLM context window in tokens. Compression triggers when
    * the bundled context exceeds 70% of this value. Defaults to 16k
@@ -87,6 +95,21 @@ export interface HandleChatMessageDeps {
 const DEFAULT_CONTEXT_WINDOW = 16_000;
 const COMPRESSION_TARGET_TOKENS = 1_000;
 const RECENT_VIEWER_EVENTS = 10;
+/**
+ * Level-2 trigger: when the count of ACTIVE summaries exceeds this,
+ * meta-compaction folds the oldest batch into one super-summary.
+ * Picked so the LLM sees ~10 mini-summaries before any meta fold —
+ * each leaf is a contiguous slice of original prose at full fidelity,
+ * so meta-compaction is genuinely rare in a normal session.
+ */
+const MAX_ACTIVE_SUMMARIES_BEFORE_META = 10;
+/**
+ * Number of OLDEST active summaries to fold in one meta-compaction
+ * pass. Picked so the post-fold list drops back to a comfortable size
+ * (after folding the oldest 5 of 11, the list is 7 — well under the
+ * threshold so we don't fire again immediately).
+ */
+const META_COMPACTION_BATCH_SIZE = 5;
 
 /**
  * Pure handler — takes a typed request + deps, returns a typed
@@ -136,9 +159,11 @@ export async function handleChatMessage(
   //    the user-message append so the live tail includes the user's
   //    new turn (giving compression an accurate view).
   const messagesAfterUser = await deps.repository.listChatMessages(request.chatSessionId);
-  const summaries = await deps.repository.listConversationSummaries(request.chatSessionId);
-  // Summaries return newest-first; the "latest" for bundling is index 0.
-  const latestSummary = summaries[0] ?? null;
+  const allSummaries = await deps.repository.listConversationSummaries(request.chatSessionId);
+  // The LLM bundle uses only ACTIVE summaries — those not absorbed
+  // by any other summary in the list. Older meta-compacted leaves
+  // stay in the table for audit but get filtered out here.
+  const activeSummaries = selectActiveSummaries(allSummaries);
   const liveTail = messagesAfterUser
     .filter((m) => m.compressedIntoSummaryId === null)
     .map((m) => ({ id: m.id, role: m.role, content: m.content }));
@@ -158,14 +183,12 @@ export async function handleChatMessage(
 
   const bundleInput: BundleChatContextInput = {
     conversation: {
-      latestSummary: latestSummary
-        ? {
-            id: latestSummary.id,
-            content: latestSummary.content,
-            tokensIn: latestSummary.tokensIn,
-            tokensOut: latestSummary.tokensOut,
-          }
-        : null,
+      activeSummaries: activeSummaries.map((s) => ({
+        id: s.id,
+        content: s.content,
+        tokensIn: s.tokensIn,
+        tokensOut: s.tokensOut,
+      })),
       liveTail,
     },
     currentEntity: {
@@ -182,19 +205,43 @@ export async function handleChatMessage(
 
   const bundle = bundleChatContext(bundleInput);
 
-  // 3. Compression pre-flight. If the bundle is near the context
-  //    window, run a compression pass before the LLM call so the
-  //    next prompt fits comfortably.
+  // 3. Compression pre-flight. Two independent triggers:
+  //
+  //    Level 1 — liveTail too long for the context window
+  //       → fold the oldest chunk into a NEW leaf summary
+  //         (independent; generation 0; absorbs no prior summary).
+  //
+  //    Level 2 — active-summaries list too long
+  //       → fold the oldest batch of leaves into ONE super-summary
+  //         (meta-compaction; the batched leaves become inactive).
+  //
+  //    They can fire in the same request (large session + many old
+  //    summaries) but each fires at most once per request to bound
+  //    latency. Background-job migration is on the deferred list.
   let compressionRan = false;
+  const compressionDeps = {
+    repo: deps.repository,
+    llmClient: deps.llmClient,
+    modelId: deps.compressionModelId ?? deps.llmModelId,
+    idGen,
+  };
   if (shouldCompress(bundle.estimatedTokens, deps.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW)) {
-    const plan = planCompression(liveTail, latestSummary?.id ?? null, COMPRESSION_TARGET_TOKENS);
+    const plan = planCompression(liveTail, COMPRESSION_TARGET_TOKENS);
     if (plan) {
-      await runCompression(request.chatSessionId, plan, {
-        repo: deps.repository,
-        llmClient: deps.llmClient,
-        modelId: deps.compressionModelId ?? deps.llmModelId,
-        idGen,
-      });
+      await runCompression(request.chatSessionId, plan, compressionDeps);
+      compressionRan = true;
+    }
+  }
+  if (activeSummaries.length > MAX_ACTIVE_SUMMARIES_BEFORE_META) {
+    // Pick the oldest N active summaries to fold (oldest-first order
+    // matches selectActiveSummaries' return order).
+    const batch = activeSummaries.slice(0, META_COMPACTION_BATCH_SIZE);
+    if (batch.length >= 2) {
+      await runMetaCompaction(
+        request.chatSessionId,
+        batch.map((s) => s.id),
+        compressionDeps,
+      );
       compressionRan = true;
     }
   }
@@ -218,11 +265,22 @@ export async function handleChatMessage(
   let reply: ChatRouterResponse;
   let errorCode: string | null = null;
   try {
+    // Derive the RAG content scope from the active entity. Until
+    // EntitySession carries explicit project/group/document refs,
+    // we land here on either a samples-bucket scope (the env-provided
+    // default for anon onboarding) or "unknown". The router logs
+    // unknown-scope dispatches so we can spot the gap in telemetry.
+    const contentScope = deriveRagContentScope(activeEntity, deps.searchBucketId);
     reply = await routeChat(routerRequest, {
       llmClient: deps.llmClient,
       groundxClient: deps.groundxClient,
       groundxApiKey: deps.groundxApiKey ?? undefined,
       searchBucketId: deps.searchBucketId,
+      contentScope,
+      repository: deps.repository,
+      chatSessionId: request.chatSessionId,
+      groundxUsername: session.ownerUserId,
+      byoPagesLimit: deps.byoPagesLimit,
       llmModelId: deps.llmModelId,
       mockMode: deps.mockMode,
     });
@@ -284,6 +342,35 @@ export async function handleChatMessage(
     reply,
     compressionRan,
   };
+}
+
+/**
+ * Derive the RAG ContentScope from the active entity + the env-
+ * provided fallback bucket. This is the single seam where future
+ * scope refinements land:
+ *
+ *   - entity carries a `documentIds` extension      → `{kind:"documents"}`
+ *   - entity carries a `projectIds` + `bucketId`    → `{kind:"bucket", projectIds:[...]}`
+ *   - entity carries a `groupId`                    → `{kind:"group"}`
+ *   - fallback: env samples bucket                  → `{kind:"bucket"}`
+ *   - else                                          → `{kind:"unknown"}`
+ *
+ * EntitySession in `chat_session_entities` doesn't yet have project /
+ * group / doc references. When those fields land, this function picks
+ * them up automatically — the only change needed.
+ *
+ * TODO(chat-fix-list P0 #2 follow-on): wire EntitySession scope refs.
+ */
+function deriveRagContentScope(
+  _activeEntity: { entityKey: string } | null | undefined,
+  fallbackBucketId: number | null | undefined,
+): RagContentScope {
+  // No active entity OR no scope fields on it yet — fall through to
+  // the env bucket.
+  if (fallbackBucketId != null) {
+    return { kind: "bucket", bucketId: fallbackBucketId };
+  }
+  return { kind: "unknown" };
 }
 
 /**

@@ -445,6 +445,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
         searchBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
         llmModelId: env.LLM_MODEL_ID ?? "model",
         mockMode: env.MOCK_MODE,
+        byoPagesLimit: env.BYO_PAGES_LIMIT,
       });
       res.json(result);
     } catch (error) {

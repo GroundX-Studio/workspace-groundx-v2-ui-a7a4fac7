@@ -31,13 +31,23 @@
  */
 
 export interface BundleConversationInput {
-  /** Most recent ConversationSummary if one exists, else null. */
-  latestSummary: {
+  /**
+   * Every ACTIVE ConversationSummary, chronologically (oldest first).
+   * "Active" means no other summary lists this one in its
+   * `absorbedSummaryIdsJson` — `selectActiveSummaries` in the
+   * conversationCompressor does that filtering.
+   *
+   * Each leaf summary covers a contiguous slice of original messages
+   * at full fidelity; meta-compacted super-summaries cover spans of
+   * older leaves. The LLM sees all of them in order plus the
+   * uncompressed live tail.
+   */
+  activeSummaries: ReadonlyArray<{
     id: string;
     content: string;
     tokensIn: number;
     tokensOut: number;
-  } | null;
+  }>;
   /**
    * Live tail messages (compressed_into_summary_id IS NULL).
    * Ordered chronologically (oldest first).
@@ -117,16 +127,23 @@ export function shouldCompress(estimatedTokens: number, contextWindowTokens: num
  * slice; the summary becomes the new "latest summary" with the
  * absorbed message ids recorded.
  */
+/**
+ * A level-1 compression plan: which liveTail messages to fold into
+ * a new leaf summary. NO prior summary is absorbed (that's level 2's
+ * job — see `runMetaCompaction`). `absorbedSummaryIds` is kept on the
+ * type only as a backward-compat shim; level-1 callers always pass [].
+ */
 export interface CompressionPlan {
   fromMessageId: string;
   toMessageId: string;
   messageIds: string[];
+  /** @deprecated Level-1 leaf compaction never absorbs prior summaries.
+   *  Kept for back-compat with callers that haven't migrated yet. */
   absorbedSummaryIds: string[];
 }
 
 export function planCompression(
   liveTail: BundleConversationInput["liveTail"],
-  latestSummaryId: string | null,
   targetCompressedTokens: number,
 ): CompressionPlan | null {
   if (liveTail.length < 2) return null;
@@ -154,7 +171,7 @@ export function planCompression(
     fromMessageId: collected[0],
     toMessageId: collected[collected.length - 1],
     messageIds: collected,
-    absorbedSummaryIds: latestSummaryId ? [latestSummaryId] : [],
+    absorbedSummaryIds: [], // ALWAYS empty for leaf compaction.
   };
 }
 
@@ -171,7 +188,10 @@ function estimateText(text: string): number {
 
 function estimateConversationTokens(c: BundleConversationInput): number {
   let total = 0;
-  if (c.latestSummary) total += estimateText(c.latestSummary.content);
+  // Every ACTIVE summary contributes to the budget — leaf summaries
+  // cover non-overlapping slices, meta summaries supplant the leaves
+  // they absorb (which is why we only count active ones).
+  for (const s of c.activeSummaries) total += estimateText(s.content);
   for (const msg of c.liveTail) total += estimateText(msg.content);
   return total;
 }

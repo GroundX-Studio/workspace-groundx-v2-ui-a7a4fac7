@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryAppRepository } from "../db/memoryRepository.js";
-import type { ChatMessageRecord, LlmClient } from "../types.js";
+import type { ChatMessageRecord, ConversationSummaryRecord, LlmClient } from "../types.js";
 
 import type { CompressionPlan } from "./contextBundler.js";
 import {
+  buildMetaSummaryPrompt,
   buildSummaryPrompt,
   runCompression,
+  runMetaCompaction,
+  selectActiveSummaries,
   summarizeChunk,
+  summarizeSummaries,
 } from "./conversationCompressor.js";
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -38,34 +42,40 @@ function makeMsg(id: string, sessionId: string, turn: number, role: ChatMessageR
   };
 }
 
-describe("buildSummaryPrompt", () => {
-  it("emits a system + user message pair with the role-stamped chunk", () => {
-    const out = buildSummaryPrompt(
-      [
-        { role: "user", content: "what is RAG?" },
-        { role: "assistant", content: "Retrieval-augmented generation." },
-      ],
-      null,
-    );
+describe("buildSummaryPrompt (leaf)", () => {
+  it("emits a system + user message pair with the role-stamped chunk and NO prior-summary splice", () => {
+    const out = buildSummaryPrompt([
+      { role: "user", content: "what is RAG?" },
+      { role: "assistant", content: "Retrieval-augmented generation." },
+    ]);
     expect(out.messages).toHaveLength(2);
     expect(out.messages[0].role).toBe("system");
     expect(out.messages[1].role).toBe("user");
-    // The user content should role-stamp each turn.
     expect(out.messages[1].content).toMatch(/USER: what is RAG\?/);
     expect(out.messages[1].content).toMatch(/ASSISTANT: Retrieval-augmented/);
-  });
-
-  it("includes the prior summary when given so the chain can absorb it", () => {
-    const out = buildSummaryPrompt(
-      [{ role: "user", content: "next question" }],
-      "Previously: the user asked about RAG basics.",
-    );
-    expect(out.messages[1].content).toMatch(/Prior summary/);
-    expect(out.messages[1].content).toMatch(/Previously: the user asked/);
+    // Critical leaf invariant: nothing about a "prior summary" makes
+    // it into the LLM call. That's what keeps leaf summaries
+    // independent and avoids telephone-game decay.
+    expect(out.messages[1].content).not.toMatch(/[Pp]rior summary/);
   });
 });
 
-describe("summarizeChunk", () => {
+describe("buildMetaSummaryPrompt (meta-compaction)", () => {
+  it("emits a system + user message with the summaries oldest-first", () => {
+    const out = buildMetaSummaryPrompt([
+      { content: "S1 covers messages 1-10" },
+      { content: "S2 covers messages 11-20" },
+      { content: "S3 covers messages 21-30" },
+    ]);
+    expect(out.messages).toHaveLength(2);
+    expect(out.messages[0].content).toMatch(/merging older conversation summaries/i);
+    expect(out.messages[1].content).toMatch(/Summary 1[\s\S]*S1 covers/);
+    expect(out.messages[1].content).toMatch(/Summary 2[\s\S]*S2 covers/);
+    expect(out.messages[1].content).toMatch(/Summary 3[\s\S]*S3 covers/);
+  });
+});
+
+describe("summarizeChunk (leaf LLM call)", () => {
   it("returns the LLM-provided content and usage tokens", async () => {
     const llmClient: LlmClient = {
       forward: vi.fn(async () =>
@@ -81,7 +91,6 @@ describe("summarizeChunk", () => {
         { role: "user", content: "what is RAG?" },
         { role: "assistant", content: "Retrieval-augmented generation." },
       ],
-      null,
       { llmClient, modelId: "test-model-id" },
     );
     expect(result.content).toBe("- user wants RAG\n  - assistant explained it");
@@ -93,15 +102,11 @@ describe("summarizeChunk", () => {
   it("falls back to char-based token estimates when the provider omits usage", async () => {
     const llmClient: LlmClient = {
       forward: vi.fn(async () =>
-        jsonResponse({
-          choices: [{ message: { content: "summary text" } }],
-          model: "test-model-id",
-        }),
+        jsonResponse({ choices: [{ message: { content: "summary text" } }], model: "test-model-id" }),
       ),
     };
     const result = await summarizeChunk(
       [{ role: "user", content: "hello" }],
-      null,
       { llmClient, modelId: "test-model-id" },
     );
     expect(result.tokensIn).toBeGreaterThan(0);
@@ -113,11 +118,7 @@ describe("summarizeChunk", () => {
       forward: vi.fn(async () => new Response("server is down", { status: 503 })),
     };
     await expect(
-      summarizeChunk(
-        [{ role: "user", content: "x" }],
-        null,
-        { llmClient, modelId: "test-model-id" },
-      ),
+      summarizeChunk([{ role: "user", content: "x" }], { llmClient, modelId: "test-model-id" }),
     ).rejects.toThrow(/503/);
   });
 
@@ -126,16 +127,106 @@ describe("summarizeChunk", () => {
       forward: vi.fn(async () => jsonResponse({ choices: [{ message: {} }] })),
     };
     await expect(
-      summarizeChunk(
-        [{ role: "user", content: "x" }],
-        null,
-        { llmClient, modelId: "test-model-id" },
-      ),
+      summarizeChunk([{ role: "user", content: "x" }], { llmClient, modelId: "test-model-id" }),
     ).rejects.toThrow(/no content/i);
   });
 });
 
-describe("runCompression — Phase J orchestration", () => {
+describe("summarizeSummaries (meta LLM call)", () => {
+  it("rejects fewer than 2 summaries to merge", async () => {
+    const llmClient: LlmClient = { forward: vi.fn(async () => jsonResponse({})) };
+    await expect(
+      summarizeSummaries([{ content: "only-one" }], { llmClient, modelId: "m" }),
+    ).rejects.toThrow(/at least two/i);
+  });
+
+  it("calls the LLM with the meta prompt and returns its content", async () => {
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () =>
+        jsonResponse({
+          choices: [{ message: { content: "merged super-summary" } }],
+          usage: { prompt_tokens: 200, completion_tokens: 30 },
+          model: "m",
+        }),
+      ),
+    };
+    const result = await summarizeSummaries(
+      [{ content: "S1" }, { content: "S2" }, { content: "S3" }],
+      { llmClient, modelId: "m" },
+    );
+    expect(result.content).toBe("merged super-summary");
+    // The body sent to the LLM should include the meta system prompt
+    // ("merging older conversation summaries").
+    const body = JSON.parse((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.messages[0].content).toMatch(/merging older conversation summaries/i);
+  });
+});
+
+describe("selectActiveSummaries (active-set filter)", () => {
+  function makeSummary(
+    id: string,
+    createdAt: Date,
+    generation = 0,
+    absorbedIds: string[] = [],
+  ): ConversationSummaryRecord {
+    return {
+      id,
+      chatSessionId: "chat-1",
+      fromMessageId: "x",
+      toMessageId: "y",
+      generation,
+      absorbedSummaryIdsJson: JSON.stringify(absorbedIds),
+      content: `${id} content`,
+      model: "m",
+      tokensIn: 0,
+      tokensOut: 0,
+      createdAt,
+    };
+  }
+
+  it("returns all summaries when none absorb any other (all leaves)", () => {
+    const s = [
+      makeSummary("a", new Date(1000)),
+      makeSummary("b", new Date(2000)),
+      makeSummary("c", new Date(3000)),
+    ];
+    const active = selectActiveSummaries(s);
+    expect(active.map((x) => x.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("filters out summaries absorbed by another (and orders chronologically)", () => {
+    const s = [
+      makeSummary("a", new Date(1000)),
+      makeSummary("b", new Date(2000)),
+      makeSummary("c", new Date(3000)),
+      // d is a meta-summary that absorbed a + b. b is excluded.
+      // a is also excluded. c stays. d is active.
+      makeSummary("d", new Date(4000), 1, ["a", "b"]),
+    ];
+    const active = selectActiveSummaries(s);
+    expect(active.map((x) => x.id)).toEqual(["c", "d"]);
+  });
+
+  it("ignores malformed absorbedSummaryIdsJson and keeps the candidate active", () => {
+    const broken: ConversationSummaryRecord = {
+      id: "bad",
+      chatSessionId: "chat-1",
+      fromMessageId: "x",
+      toMessageId: "y",
+      generation: 0,
+      absorbedSummaryIdsJson: "{not json[",
+      content: "bad",
+      model: "m",
+      tokensIn: 0,
+      tokensOut: 0,
+      createdAt: new Date(),
+    };
+    const active = selectActiveSummaries([broken]);
+    expect(active.map((x) => x.id)).toEqual(["bad"]);
+  });
+});
+
+describe("runCompression (level 1 — leaf compaction)", () => {
   let repo: MemoryAppRepository;
   let llmClient: LlmClient;
 
@@ -144,100 +235,96 @@ describe("runCompression — Phase J orchestration", () => {
     llmClient = {
       forward: vi.fn(async () =>
         jsonResponse({
-          choices: [{ message: { content: "summary body" } }],
+          choices: [{ message: { content: "leaf summary body" } }],
           usage: { prompt_tokens: 50, completion_tokens: 20 },
-          model: "test-model-id",
+          model: "m",
         }),
       ),
     };
   });
 
-  it("writes the summary record, marks absorbed messages compressed, and returns the count", async () => {
-    await repo.appendChatMessage(makeMsg("m1", "chat-1", 1, "user", "hello"));
-    await repo.appendChatMessage(makeMsg("m2", "chat-1", 2, "assistant", "hi"));
+  it("writes a leaf summary with generation=0 + absorbedSummaryIds=[] regardless of plan input", async () => {
+    await repo.appendChatMessage(makeMsg("m1", "chat-1", 1, "user", "hi"));
+    await repo.appendChatMessage(makeMsg("m2", "chat-1", 2, "assistant", "yo"));
     await repo.appendChatMessage(makeMsg("m3", "chat-1", 3, "user", "next"));
 
     const plan: CompressionPlan = {
       fromMessageId: "m1",
       toMessageId: "m2",
       messageIds: ["m1", "m2"],
-      absorbedSummaryIds: [],
+      // Even if a caller (old planCompression caller) passes this, leaf
+      // compaction must IGNORE it. That's the bug fix.
+      absorbedSummaryIds: ["should-be-ignored"],
     };
 
     const result = await runCompression("chat-1", plan, {
       llmClient,
-      modelId: "test-model-id",
+      modelId: "m",
       repo,
       idGen: () => "summary-fixed-id",
     });
 
     expect(result.absorbedMessageCount).toBe(2);
     expect(result.summary.id).toBe("summary-fixed-id");
-    expect(result.summary.content).toBe("summary body");
     expect(result.summary.generation).toBe(0);
     expect(result.summary.absorbedSummaryIdsJson).toBe("[]");
 
-    // Summary persisted.
-    const summaries = await repo.listConversationSummaries("chat-1");
-    expect(summaries.map((s) => s.id)).toEqual(["summary-fixed-id"]);
+    // Critical: the LLM call must NOT have included any prior-summary
+    // text. Inspect the request body.
+    const call = (llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.messages[1].content).not.toMatch(/[Pp]rior summary/);
 
-    // Messages flagged compressed (m1, m2) — m3 stays in live tail.
+    // Messages flagged compressed.
     const messages = await repo.listChatMessages("chat-1");
-    const byId = new Map(messages.map((m) => [m.id, m]));
-    expect(byId.get("m1")?.compressedIntoSummaryId).toBe("summary-fixed-id");
-    expect(byId.get("m2")?.compressedIntoSummaryId).toBe("summary-fixed-id");
-    expect(byId.get("m3")?.compressedIntoSummaryId).toBeNull();
+    expect(messages.find((m) => m.id === "m1")?.compressedIntoSummaryId).toBe("summary-fixed-id");
+    expect(messages.find((m) => m.id === "m2")?.compressedIntoSummaryId).toBe("summary-fixed-id");
+    expect(messages.find((m) => m.id === "m3")?.compressedIntoSummaryId).toBeNull();
   });
 
-  it("chains generations: a second compression absorbs the prior summary", async () => {
-    // First pass: m1, m2 compressed into S0 (generation 0).
-    await repo.appendChatMessage(makeMsg("m1", "chat-1", 1, "user", "first"));
-    await repo.appendChatMessage(makeMsg("m2", "chat-1", 2, "assistant", "second"));
-    await repo.appendChatMessage(makeMsg("m3", "chat-1", 3, "user", "third"));
-    await repo.appendChatMessage(makeMsg("m4", "chat-1", 4, "assistant", "fourth"));
+  it("multiple leaf runs produce INDEPENDENT summaries (no telephone-game decay)", async () => {
+    // The user's pushback was: don't re-summarize the prior summary
+    // every run; keep summaries leaf-level so old prose stays at
+    // full fidelity. This test pins that invariant.
+    for (let i = 1; i <= 6; i++) {
+      await repo.appendChatMessage(makeMsg(`m${i}`, "chat-1", i, i % 2 === 0 ? "assistant" : "user", `turn ${i}`));
+    }
 
     let idCounter = 0;
-    const idGen = () => `summary-${idCounter++}`;
+    const idGen = () => `s-${idCounter++}`;
 
     await runCompression(
       "chat-1",
-      {
-        fromMessageId: "m1",
-        toMessageId: "m2",
-        messageIds: ["m1", "m2"],
-        absorbedSummaryIds: [],
-      },
-      { llmClient, modelId: "test-model-id", repo, idGen },
+      { fromMessageId: "m1", toMessageId: "m2", messageIds: ["m1", "m2"], absorbedSummaryIds: [] },
+      { llmClient, modelId: "m", repo, idGen },
     );
-
-    // Second pass: m3, m4 compressed into S1 that ABSORBS S0.
-    const result = await runCompression(
+    await runCompression(
       "chat-1",
-      {
-        fromMessageId: "m3",
-        toMessageId: "m4",
-        messageIds: ["m3", "m4"],
-        absorbedSummaryIds: ["summary-0"],
-      },
-      { llmClient, modelId: "test-model-id", repo, idGen },
+      { fromMessageId: "m3", toMessageId: "m4", messageIds: ["m3", "m4"], absorbedSummaryIds: [] },
+      { llmClient, modelId: "m", repo, idGen },
     );
 
-    expect(result.summary.id).toBe("summary-1");
-    expect(result.summary.generation).toBe(1);
-    expect(JSON.parse(result.summary.absorbedSummaryIdsJson)).toEqual(["summary-0"]);
+    const summaries = await repo.listConversationSummaries("chat-1");
+    // Both are level-0 leaves; neither absorbs the other.
+    expect(summaries.every((s) => s.generation === 0)).toBe(true);
+    expect(summaries.every((s) => s.absorbedSummaryIdsJson === "[]")).toBe(true);
+
+    // Both LLM calls saw ONLY their own message range — no prior
+    // summary was spliced in.
+    const calls = (llmClient.forward as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const body = JSON.parse(call[1].body);
+      expect(body.messages[1].content).not.toMatch(/[Pp]rior summary/);
+    }
   });
 
-  it("rejects a plan with fewer than two message ids (nothing to compress)", async () => {
+  it("rejects a plan with fewer than two message ids", async () => {
     await expect(
       runCompression(
         "chat-1",
-        {
-          fromMessageId: "m1",
-          toMessageId: "m1",
-          messageIds: ["m1"],
-          absorbedSummaryIds: [],
-        },
-        { llmClient, modelId: "test-model-id", repo },
+        { fromMessageId: "m1", toMessageId: "m1", messageIds: ["m1"], absorbedSummaryIds: [] },
+        { llmClient, modelId: "m", repo },
       ),
     ).rejects.toThrow(/at least two/i);
   });
@@ -247,14 +334,108 @@ describe("runCompression — Phase J orchestration", () => {
     await expect(
       runCompression(
         "chat-1",
-        {
-          fromMessageId: "m1",
-          toMessageId: "m999",
-          messageIds: ["m1", "m999"],
-          absorbedSummaryIds: [],
-        },
-        { llmClient, modelId: "test-model-id", repo },
+        { fromMessageId: "m1", toMessageId: "m999", messageIds: ["m1", "m999"], absorbedSummaryIds: [] },
+        { llmClient, modelId: "m", repo },
       ),
     ).rejects.toThrow(/plan referenced 2 messages but repo had 1/);
+  });
+});
+
+describe("runMetaCompaction (level 2 — fold older summaries)", () => {
+  let repo: MemoryAppRepository;
+  let llmClient: LlmClient;
+
+  beforeEach(async () => {
+    repo = new MemoryAppRepository();
+    llmClient = {
+      forward: vi.fn(async () =>
+        jsonResponse({
+          choices: [{ message: { content: "super-summary body" } }],
+          usage: { prompt_tokens: 300, completion_tokens: 40 },
+          model: "m",
+        }),
+      ),
+    };
+
+    // Seed 5 leaf summaries spanning messages 1-10.
+    const baseDate = new Date(1700_000_000_000);
+    for (let i = 0; i < 5; i++) {
+      await repo.appendConversationSummary({
+        id: `leaf-${i}`,
+        chatSessionId: "chat-1",
+        fromMessageId: `m${i * 2 + 1}`,
+        toMessageId: `m${i * 2 + 2}`,
+        generation: 0,
+        absorbedSummaryIdsJson: "[]",
+        content: `Leaf ${i} content`,
+        model: "m",
+        tokensIn: 50,
+        tokensOut: 30,
+        createdAt: new Date(baseDate.getTime() + i * 1000),
+      });
+    }
+  });
+
+  it("rejects fewer than 2 summary ids", async () => {
+    await expect(
+      runMetaCompaction("chat-1", ["leaf-0"], { llmClient, modelId: "m", repo }),
+    ).rejects.toThrow(/at least two/i);
+  });
+
+  it("throws when a referenced summary id is missing from the repo", async () => {
+    await expect(
+      runMetaCompaction("chat-1", ["leaf-0", "nonexistent"], { llmClient, modelId: "m", repo }),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it("writes a super-summary with generation = max(absorbed) + 1 and absorbedSummaryIds = batch", async () => {
+    const result = await runMetaCompaction("chat-1", ["leaf-0", "leaf-1", "leaf-2"], {
+      llmClient,
+      modelId: "m",
+      repo,
+      idGen: () => "super-1",
+    });
+
+    expect(result.absorbedSummaryCount).toBe(3);
+    expect(result.summary.id).toBe("super-1");
+    // The absorbed leaves are all generation 0, so the super lands at 1.
+    expect(result.summary.generation).toBe(1);
+    expect(JSON.parse(result.summary.absorbedSummaryIdsJson)).toEqual(["leaf-0", "leaf-1", "leaf-2"]);
+    // Message-id span = first absorbed's from..last absorbed's to.
+    expect(result.summary.fromMessageId).toBe("m1");
+    expect(result.summary.toMessageId).toBe("m6");
+    // Persisted.
+    const all = await repo.listConversationSummaries("chat-1");
+    expect(all.map((s) => s.id)).toContain("super-1");
+  });
+
+  it("uses the meta prompt (not the leaf prompt) for the LLM call", async () => {
+    await runMetaCompaction("chat-1", ["leaf-0", "leaf-1"], {
+      llmClient,
+      modelId: "m",
+      repo,
+      idGen: () => "super-1",
+    });
+    const body = JSON.parse((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.messages[0].content).toMatch(/merging older conversation summaries/i);
+  });
+
+  it("does NOT touch chat_messages — only the parent summaries table changes", async () => {
+    // Seed a flagged message to prove it stays flagged.
+    await repo.appendChatMessage(makeMsg("m1", "chat-1", 1, "user", "hi"));
+    await repo.markChatMessagesCompressed(["m1"], "leaf-0");
+
+    await runMetaCompaction("chat-1", ["leaf-0", "leaf-1"], {
+      llmClient,
+      modelId: "m",
+      repo,
+      idGen: () => "super-1",
+    });
+
+    const m1 = (await repo.listChatMessages("chat-1")).find((m) => m.id === "m1");
+    // Still pointing at the LEAF that originally absorbed it. Meta-
+    // compaction doesn't re-flag messages — selectActiveSummaries
+    // handles the indirection at read time.
+    expect(m1?.compressedIntoSummaryId).toBe("leaf-0");
   });
 });

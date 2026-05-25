@@ -367,34 +367,32 @@ describe("handleChatMessage — typed error mapping", () => {
     groundxClient = { forward: vi.fn(async () => jsonResponse({})) };
   });
 
-  it("maps ChatRouteNotImplementedError to ChatHandlerError(501)", async () => {
-    // Live mode + a structured-hint message classifies to "structured",
-    // which throws ChatRouteNotImplementedError. The handler must catch
-    // and re-throw with statusCode=501 — NOT 502 (that would imply an
-    // upstream blew up) and NOT 200 with a fake mock body.
-    await expect(
-      handleChatMessage(
-        { chatSessionId: "chat-1", newUserMessage: "what are my saved schemas?" },
-        {
-          repository: repo,
-          llmClient,
-          groundxClient,
-          groundxApiKey: "k",
-          searchBucketId: null,
-          llmModelId: "test-model",
-          mockMode: false,
-        },
-      ),
-    ).rejects.toMatchObject({
-      name: "ChatHandlerError",
-      statusCode: 501,
-    });
-    // Still records an errored assistant placeholder for conversation
-    // log consistency.
+  it("handles a structured query end-to-end with a frank reply (no 501 once handler is wired)", async () => {
+    // P0 #3: structured mode now runs live via the structuredHandler.
+    // The "saved schemas" sub-query is one of the kinds whose data
+    // reader isn't built yet; the framework returns a frank "needs
+    // reader" reply rather than 501-ing the whole request. That's
+    // the intentional behavior — the surface stays useful and the
+    // shortfall is visible to the user instead of hidden behind an
+    // error.
+    const result = await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "what are my saved schemas?" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        searchBucketId: null,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(result.reply.mode).toBe("structured");
+    expect(result.reply.answer).toMatch(/saved schemas/i);
+    // Both messages persisted normally — no 501, no errored placeholder.
     const messages = await repo.listChatMessages("chat-1");
     expect(messages).toHaveLength(2);
-    expect(messages[1].role).toBe("assistant");
-    expect(messages[1].errorCode).toContain("not wired");
+    expect(messages[1].errorCode).toBeNull();
   });
 
   it("maps UpstreamTimeoutError to ChatHandlerError(504)", async () => {

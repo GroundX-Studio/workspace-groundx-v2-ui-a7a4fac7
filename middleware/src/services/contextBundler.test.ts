@@ -11,7 +11,7 @@ import {
 function baseInput(overrides: Partial<BundleChatContextInput> = {}): BundleChatContextInput {
   return {
     conversation: {
-      latestSummary: null,
+      activeSummaries: [],
       liveTail: [],
       ...overrides.conversation,
     },
@@ -32,6 +32,7 @@ describe("bundleChatContext", () => {
     const bundle = bundleChatContext(baseInput());
     expect(bundle.estimatedTokens).toBe(0);
     expect(bundle.conversation.liveTail).toHaveLength(0);
+    expect(bundle.conversation.activeSummaries).toHaveLength(0);
     expect(bundle.viewerTrail).toHaveLength(0);
   });
 
@@ -39,7 +40,9 @@ describe("bundleChatContext", () => {
     const bundle = bundleChatContext(
       baseInput({
         conversation: {
-          latestSummary: { id: "s1", content: "Summary content ~16 chars", tokensIn: 0, tokensOut: 0 },
+          activeSummaries: [
+            { id: "s1", content: "Summary content ~16 chars", tokensIn: 0, tokensOut: 0 },
+          ],
           liveTail: [
             { id: "m1", role: "user", content: "twelve chars" },
             { id: "m2", role: "assistant", content: "another twelve" },
@@ -58,13 +61,38 @@ describe("bundleChatContext", () => {
         newUserMessage: "what is the total amount due?",
       }),
     );
-    // Each axis contributed something; assert the bundle reflects all of them.
-    expect(bundle.conversation.latestSummary?.id).toBe("s1");
+    expect(bundle.conversation.activeSummaries[0].id).toBe("s1");
     expect(bundle.conversation.liveTail).toHaveLength(2);
     expect(bundle.currentEntity.entityKey).toBe("sample:utility");
     expect(bundle.viewerTrail).toHaveLength(2);
     expect(bundle.newUserMessage).toBe("what is the total amount due?");
     expect(bundle.estimatedTokens).toBeGreaterThan(0);
+  });
+
+  it("counts EVERY active summary against the token budget (multi-summary case)", () => {
+    const singleBundle = bundleChatContext(
+      baseInput({
+        conversation: {
+          activeSummaries: [{ id: "s1", content: "x".repeat(400), tokensIn: 0, tokensOut: 0 }],
+          liveTail: [],
+        },
+      }),
+    );
+    const multiBundle = bundleChatContext(
+      baseInput({
+        conversation: {
+          activeSummaries: [
+            { id: "s1", content: "x".repeat(400), tokensIn: 0, tokensOut: 0 },
+            { id: "s2", content: "y".repeat(400), tokensIn: 0, tokensOut: 0 },
+            { id: "s3", content: "z".repeat(400), tokensIn: 0, tokensOut: 0 },
+          ],
+          liveTail: [],
+        },
+      }),
+    );
+    // 3 summaries should weigh ~3x as much as 1 — proves the bundler
+    // accounts for ALL active summaries, not just the latest.
+    expect(multiBundle.estimatedTokens).toBeGreaterThanOrEqual(singleBundle.estimatedTokens * 2.5);
   });
 });
 
@@ -83,38 +111,34 @@ describe("shouldCompress", () => {
   });
 });
 
-describe("planCompression", () => {
+describe("planCompression (level-1 leaf)", () => {
   const tail: BundleConversationInput["liveTail"] = [
     { id: "m1", role: "user", content: "a".repeat(400) }, // ~100 tokens
-    { id: "m2", role: "assistant", content: "b".repeat(400) }, // ~100 tokens
-    { id: "m3", role: "user", content: "c".repeat(400) }, // ~100 tokens
-    { id: "m4", role: "assistant", content: "d".repeat(400) }, // ~100 tokens
+    { id: "m2", role: "assistant", content: "b".repeat(400) },
+    { id: "m3", role: "user", content: "c".repeat(400) },
+    { id: "m4", role: "assistant", content: "d".repeat(400) },
   ];
 
   it("returns null when there's nothing meaningful to compress (single message)", () => {
-    expect(planCompression([tail[0]], null, 1000)).toBeNull();
+    expect(planCompression([tail[0]], 1000)).toBeNull();
   });
 
   it("collects oldest messages until the target token count is reached", () => {
-    const plan = planCompression(tail, null, 250);
+    const plan = planCompression(tail, 250);
     expect(plan).not.toBeNull();
-    // First 3 messages contribute ~300 tokens (>250); the plan covers m1-m3
-    // and leaves m4 in the live tail.
     expect(plan!.messageIds).toEqual(["m1", "m2", "m3"]);
     expect(plan!.fromMessageId).toBe("m1");
     expect(plan!.toMessageId).toBe("m3");
-    expect(plan!.absorbedSummaryIds).toEqual([]);
   });
 
   it("never empties the live tail — at least one message stays as the LLM's prompt anchor", () => {
-    const plan = planCompression(tail, null, 100_000);
+    const plan = planCompression(tail, 100_000);
     expect(plan).not.toBeNull();
-    // Even with a massive target, the plan stops short of the last message.
     expect(plan!.messageIds).not.toContain("m4");
   });
 
-  it("records absorbedSummaryIds when there's already a latest summary", () => {
-    const plan = planCompression(tail, "summary-prev", 250);
-    expect(plan?.absorbedSummaryIds).toEqual(["summary-prev"]);
+  it("ALWAYS leaves absorbedSummaryIds empty — leaf plans never absorb prior summaries", () => {
+    const plan = planCompression(tail, 250);
+    expect(plan!.absorbedSummaryIds).toEqual([]);
   });
 });
