@@ -7,6 +7,7 @@ import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useState, type FC, type FormEvent } from "react";
 
+import { sendChatMessage } from "@/api/chatSessions";
 import {
   BODY_TEXT,
   BORDER,
@@ -20,9 +21,10 @@ import {
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
-import type { SampleChatTurn } from "@/types/scenarios";
+import type { ScenarioCitation, SampleChatTurn } from "@/types/scenarios";
 import { CiteChip } from "@/shared/components/CiteChip";
 
 /**
@@ -39,9 +41,14 @@ export const InteractView: FC = () => {
   const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
   const { byId } = useScenarioRegistry();
   const scenario = byId(scenarioId);
+  const { state: chatState } = useChatStore();
+  const chatSessionId = chatState.activeSessionId;
+  const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
+
   const initialTurns: SampleChatTurn[] = scenario?.manifest.sampleChatScript ?? [];
   const [turns, setTurns] = useState<SampleChatTurn[]>(initialTurns);
   const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
 
   // Re-seed when the active scenario changes (e.g. user backs out to F1
   // and picks a different sample). Without this, the initial useState
@@ -51,21 +58,70 @@ export const InteractView: FC = () => {
   }, [scenario]);
 
   const handleSubmit = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+    async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const trimmed = draft.trim();
-      if (!trimmed) return;
-      const userTurn: SampleChatTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
-      const assistantTurn: SampleChatTurn = {
-        id: `a-${Date.now()}`,
-        role: "assistant",
-        content:
-          "Live answers light up after sign-in. This is a placeholder so you can see the surface — sign in and I'll pull a real, cited answer from your sample.",
-      };
-      setTurns((current) => [...current, userTurn, assistantTurn]);
+      if (!trimmed || sending) return;
+
+      // Optimistic user-turn render so the chat stays responsive even
+      // before the network reply lands.
+      const userId = `u-${Date.now()}`;
+      setTurns((current) => [...current, { id: userId, role: "user", content: trimmed }]);
       setDraft("");
+
+      if (!chatSessionId) {
+        // No active chat session — should never happen inside onboarding
+        // (EntityRegistryProvider auto-seeds one), but fall back to a
+        // polite message rather than throwing.
+        setTurns((current) => [
+          ...current,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: "No active chat session — please refresh and try again.",
+          },
+        ]);
+        return;
+      }
+
+      setSending(true);
+      try {
+        const result = await sendChatMessage({
+          chatSessionId,
+          newUserMessage: trimmed,
+          sessionMeta: {
+            title: activeChatSession?.title ?? "Onboarding",
+            isOnboarding: activeChatSession?.isOnboardingSession ?? true,
+            onboardingSessionId: chatSessionId,
+            activeEntityKey: activeChatSession?.activeEntityKey ?? null,
+          },
+        });
+        const replyCitations: ScenarioCitation[] | undefined = result.reply.citations.length
+          ? result.reply.citations.map((c) => ({ documentId: c.documentId, page: c.page, snippet: c.snippet }))
+          : undefined;
+        setTurns((current) => [
+          ...current,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: result.reply.answer,
+            citations: replyCitations,
+          },
+        ]);
+      } catch {
+        setTurns((current) => [
+          ...current,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: "Couldn't reach the chat service — please try again in a moment.",
+          },
+        ]);
+      } finally {
+        setSending(false);
+      }
     },
-    [draft]
+    [draft, sending, chatSessionId, activeChatSession],
   );
 
   return (

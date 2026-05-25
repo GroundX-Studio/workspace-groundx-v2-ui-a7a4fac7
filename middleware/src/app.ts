@@ -336,11 +336,67 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
+  // Server-side ChatSession row creation. Called by the frontend
+  // ChatStoreContext when a new local session is minted so that the
+  // DB has a parent row before the first POST /api/chat/messages.
+  //
+  // Idempotent: a repeat POST with the same id upserts the row. This
+  // matters for client retries after transient errors and for the
+  // localStorage rehydrate path (the store may try to ensure-create
+  // every session it knows about on bootstrap).
+  //
+  // Ownership rule:
+  //   - Authenticated session → ownerUserId = groundxUsername
+  //   - Anonymous session     → ownerAnonId = req.session.id (cookie)
+  // The F6 sign-up re-keys anon rows to owned rows via the claim route.
+  app.post("/api/chat-sessions", apiLimiter, requireSession, async (req, res, next) => {
+    try {
+      const session = req.session!;
+      const input = parseCreateChatSessionRequest(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      const isAuthed = Boolean(session.groundxUsername);
+      const now = new Date();
+      const existing = await repository.getChatSession(input.id);
+      const record: ChatSessionRecord = {
+        id: input.id,
+        onboardingSessionId: input.onboardingSessionId ?? input.id,
+        ownerUserId: isAuthed ? session.groundxUsername : existing?.ownerUserId ?? null,
+        ownerAnonId: isAuthed ? null : session.id,
+        title: input.title,
+        isOnboarding: input.isOnboarding,
+        activeEntityKey: input.activeEntityKey ?? null,
+        currentIntent: existing?.currentIntent ?? null,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        archivedAt: existing?.archivedAt ?? null,
+      };
+      await repository.upsertChatSession(record);
+      res.json({
+        chatSessionId: record.id,
+        ownerUserId: record.ownerUserId,
+        ownerAnonId: record.ownerAnonId,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Login-claim: ingest the anonymous user's localStorage chat-session
   // payload into the DB under their new owner_user_id. Triggered by the
   // frontend right after a successful F6 gate sign-up. The whole payload
   // is upserted in a single transaction so a partial failure does not
   // leave the user half-claimed.
+  //
+  // TODO(track F-claim-rekey): now that POST /api/chat-sessions creates
+  // server-side rows from day one for anonymous users, this endpoint's
+  // role shrinks to "re-key ownerAnonId → ownerUserId". Today it still
+  // bulk-inserts messages / summaries / viewer events, which will
+  // duplicate rows on F6 sign-up. Replace with a targeted re-key against
+  // session.id (cookie's anon id) before turning on the live chat
+  // surface for real users.
   app.post("/api/chat-sessions/claim", apiLimiter, requireAuthenticatedUser, async (req, res, next) => {
     try {
       const session = req.session!;
@@ -523,6 +579,33 @@ export function shouldSkipRequestLog(url: string | undefined): boolean {
 // handing them to the repository. Anything missing/wrong → null, the
 // endpoint returns 400.
 // ──────────────────────────────────────────────────────────────────────────
+
+interface CreateChatSessionInput {
+  id: string;
+  onboardingSessionId?: string;
+  title: string;
+  isOnboarding: boolean;
+  activeEntityKey?: string | null;
+}
+
+function parseCreateChatSessionRequest(body: unknown): CreateChatSessionInput | null {
+  if (!isObject(body)) return null;
+  if (typeof body.id !== "string" || !body.id) return null;
+  if (typeof body.title !== "string") return null;
+  if (typeof body.isOnboarding !== "boolean") return null;
+  if (body.onboardingSessionId !== undefined && typeof body.onboardingSessionId !== "string") return null;
+  if (body.activeEntityKey !== undefined && body.activeEntityKey !== null && typeof body.activeEntityKey !== "string") {
+    return null;
+  }
+  return {
+    id: body.id,
+    onboardingSessionId: typeof body.onboardingSessionId === "string" ? body.onboardingSessionId : undefined,
+    title: body.title,
+    isOnboarding: body.isOnboarding,
+    activeEntityKey:
+      typeof body.activeEntityKey === "string" ? body.activeEntityKey : body.activeEntityKey === null ? null : undefined,
+  };
+}
 
 function parseChatMessageRequest(body: unknown): HandleChatMessageRequest | null {
   if (!isObject(body)) return null;

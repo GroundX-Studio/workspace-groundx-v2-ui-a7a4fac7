@@ -295,6 +295,91 @@ describe("middleware API route contract", () => {
     expect(response.body.error).toBe("invalid_payload");
   });
 
+  it("POST /api/chat-sessions rejects unauthenticated requests", async () => {
+    const { app } = setup();
+    await request(app)
+      .post("/api/chat-sessions")
+      .send({ id: "chat-1", title: "Onboarding", isOnboarding: true })
+      .expect(401);
+  });
+
+  it("POST /api/chat-sessions creates a server-side row for an anon session (ownerAnonId from cookie)", async () => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+    const anonResp = await agent.post("/api/onboarding/session").expect(200);
+    const anonSessionId: string = anonResp.body.sessionId;
+
+    const response = await agent
+      .post("/api/chat-sessions")
+      .send({
+        id: "chat-anon-1",
+        onboardingSessionId: "onb-anon-1",
+        title: "Onboarding",
+        isOnboarding: true,
+        activeEntityKey: null,
+      })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      chatSessionId: "chat-anon-1",
+      ownerUserId: null,
+      ownerAnonId: anonSessionId,
+    });
+    const row = await repository.getChatSession("chat-anon-1");
+    expect(row).not.toBeNull();
+    expect(row!.ownerUserId).toBeNull();
+    expect(row!.ownerAnonId).toBe(anonSessionId);
+    expect(row!.title).toBe("Onboarding");
+    expect(row!.isOnboarding).toBe(true);
+  });
+
+  it("POST /api/chat-sessions creates a server-side row owned by the signed-in user", async () => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+
+    await agent
+      .post("/api/chat-sessions")
+      .send({
+        id: "chat-user-1",
+        onboardingSessionId: "onb-user-1",
+        title: "First chat",
+        isOnboarding: false,
+      })
+      .expect(200);
+
+    const row = await repository.getChatSession("chat-user-1");
+    expect(row!.ownerUserId).toBe("gx-user");
+    expect(row!.ownerAnonId).toBeNull();
+  });
+
+  it("POST /api/chat-sessions is idempotent on repeat calls (upsert by id)", async () => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+
+    await agent
+      .post("/api/chat-sessions")
+      .send({ id: "chat-dup", onboardingSessionId: "onb-dup", title: "v1", isOnboarding: true })
+      .expect(200);
+    await agent
+      .post("/api/chat-sessions")
+      .send({ id: "chat-dup", onboardingSessionId: "onb-dup", title: "v2", isOnboarding: true })
+      .expect(200);
+
+    const row = await repository.getChatSession("chat-dup");
+    expect(row!.title).toBe("v2");
+    // Only one session row total.
+    expect((await repository.listChatSessionsForUser("gx-user")).filter((s) => s.id === "chat-dup")).toHaveLength(0);
+  });
+
+  it("POST /api/chat-sessions returns 400 on malformed body", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    await agent.post("/api/chat-sessions").send({ id: 42 }).expect(400);
+  });
+
   it("PATCH /api/me/metadata returns ANONYMOUS_SESSION when anon", async () => {
     const { app } = setup();
     const agent = request.agent(app);
