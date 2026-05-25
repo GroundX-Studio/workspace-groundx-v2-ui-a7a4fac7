@@ -1,5 +1,4 @@
 import type {
-  AnonymousChatPayload,
   AppRepository,
   AppUserMetadata,
   ChatMessageRecord,
@@ -135,35 +134,21 @@ export class MemoryAppRepository implements AppRepository {
     return [...filtered].sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  // ── Login-claim ─────────────────────────────────────────────────
+  // ── Login-claim (re-key, not bulk-upload) ───────────────────────
 
-  async claimAnonymousChatPayload(ownerUserId: string, payload: AnonymousChatPayload): Promise<void> {
-    // Atomic in the in-memory impl (no transaction needed). The MySQL
-    // impl will wrap this in a single transaction.
-    for (const session of payload.chatSessions) {
-      this.chatSessions.set(session.id, {
-        ...session,
-        ownerUserId,
-        ownerAnonId: null, // The claim transfers ownership from anon to user.
-      });
+  async rekeyAnonymousChatSessions(anonId: string, ownerUserId: string): Promise<{ rekeyedSessions: number }> {
+    let rekeyedSessions = 0;
+    for (const [id, session] of this.chatSessions) {
+      if (session.ownerAnonId === anonId) {
+        this.chatSessions.set(id, {
+          ...session,
+          ownerUserId,
+          ownerAnonId: null,
+          updatedAt: new Date(),
+        });
+        rekeyedSessions += 1;
+      }
     }
-    for (const msg of payload.chatMessages) {
-      const list = this.chatMessages.get(msg.chatSessionId) ?? [];
-      list.push(msg);
-      this.chatMessages.set(msg.chatSessionId, list);
-    }
-    for (const summary of payload.conversationSummaries) {
-      const list = this.conversationSummaries.get(summary.chatSessionId) ?? [];
-      list.push(summary);
-      this.conversationSummaries.set(summary.chatSessionId, list);
-    }
-    for (const entity of payload.chatSessionEntities) {
-      this.chatSessionEntities.set(`${entity.chatSessionId}|${entity.entityKey}`, entity);
-    }
-    for (const event of payload.viewerEvents) {
-      const list = this.viewerEvents.get(event.chatSessionId) ?? [];
-      list.push(event);
-      this.viewerEvents.set(event.chatSessionId, list);
-    }
+    return { rekeyedSessions };
   }
 }

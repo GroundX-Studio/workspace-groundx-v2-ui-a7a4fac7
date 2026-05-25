@@ -15,10 +15,10 @@
  * the request body and shaping the Express response.
  *
  * NOTE: this implementation assumes the chat session already exists.
- * Session creation happens via the existing ChatStore flow (anon
- * localStorage) + `claimAnonymousChatPayload` (post-signup). New
- * authenticated sessions will need a sibling `createSession` route;
- * that's a separate task.
+ * The frontend creates it eagerly via `POST /api/chat-sessions` when
+ * a new local ChatSession is minted. On F6 sign-up, those anon rows
+ * are re-keyed to the user's id by `POST /api/chat-sessions/claim`
+ * (`rekeyAnonymousChatSessions` on the repository).
  */
 
 import { randomUUID } from "node:crypto";

@@ -152,45 +152,60 @@ describe("MemoryAppRepository — chat-session methods", () => {
     expect(recent.map((e) => e.id)).toEqual(["e3", "e2"]);
   });
 
-  it("claimAnonymousChatPayload transfers ownership from anon to user across all chat tables", async () => {
+  it("rekeyAnonymousChatSessions transfers ownership from an anon id to a user id (in-place)", async () => {
     const repo = new MemoryAppRepository();
-    const ownerUserId = "u-claimed";
-    await repo.claimAnonymousChatPayload(ownerUserId, {
-      chatSessions: [
-        { ...baseSession, id: "chat-A", ownerUserId: null, ownerAnonId: "anon-1" },
-      ],
-      chatMessages: [makeMessage("m1", "chat-A", 1, "user", "hi")],
-      conversationSummaries: [],
-      chatSessionEntities: [
-        {
-          chatSessionId: "chat-A",
-          entityKey: "sample:utility",
-          lastFrame: "f2",
-          completedFramesJson: "[]",
-          scanProgressJson: null,
-          extractedValuesJson: null,
-          createdAt: new Date(),
-          lastVisitedAt: new Date(),
-        },
-      ],
-      viewerEvents: [
-        {
-          id: "e1",
-          chatSessionId: "chat-A",
-          timestamp: 1000,
-          entityKey: "sample:utility",
-          action: "opened",
-          source: "user",
-          detailJson: null,
-        },
-      ],
+    // Pre-seed two chat_sessions for the same anon id — POST /api/chat-sessions
+    // would have created these on the fly when the anon user first hit F5.
+    await repo.upsertChatSession({ ...baseSession, id: "chat-A", ownerUserId: null, ownerAnonId: "anon-1" });
+    await repo.upsertChatSession({ ...baseSession, id: "chat-B", ownerUserId: null, ownerAnonId: "anon-1" });
+    // Plus an unrelated row owned by a different anon — must not be touched.
+    await repo.upsertChatSession({ ...baseSession, id: "chat-C", ownerUserId: null, ownerAnonId: "anon-other" });
+    // Existing message + entity + viewer event rows on chat-A — must
+    // survive the re-key untouched (the re-key only flips ownership on
+    // the parent chat_sessions row).
+    await repo.appendChatMessage(makeMessage("m1", "chat-A", 1, "user", "hi"));
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-A",
+      entityKey: "sample:utility",
+      lastFrame: "f2",
+      completedFramesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+    await repo.appendViewerEvent({
+      id: "e1",
+      chatSessionId: "chat-A",
+      timestamp: 1000,
+      entityKey: "sample:utility",
+      action: "opened",
+      source: "user",
+      detailJson: null,
     });
 
-    const claimedSession = await repo.getChatSession("chat-A");
-    expect(claimedSession?.ownerUserId).toBe(ownerUserId);
-    expect(claimedSession?.ownerAnonId).toBeNull();
+    const result = await repo.rekeyAnonymousChatSessions("anon-1", "u-claimed");
+
+    expect(result.rekeyedSessions).toBe(2);
+    const a = await repo.getChatSession("chat-A");
+    const b = await repo.getChatSession("chat-B");
+    const c = await repo.getChatSession("chat-C");
+    expect(a?.ownerUserId).toBe("u-claimed");
+    expect(a?.ownerAnonId).toBeNull();
+    expect(b?.ownerUserId).toBe("u-claimed");
+    expect(b?.ownerAnonId).toBeNull();
+    // Unrelated row untouched.
+    expect(c?.ownerUserId).toBeNull();
+    expect(c?.ownerAnonId).toBe("anon-other");
+    // Child rows untouched.
     expect((await repo.listChatMessages("chat-A")).map((m) => m.id)).toEqual(["m1"]);
     expect((await repo.listChatSessionEntities("chat-A"))).toHaveLength(1);
     expect((await repo.listViewerEvents("chat-A"))).toHaveLength(1);
+  });
+
+  it("rekeyAnonymousChatSessions returns 0 when the anon id matches nothing", async () => {
+    const repo = new MemoryAppRepository();
+    const result = await repo.rekeyAnonymousChatSessions("anon-nothing", "u-claimed");
+    expect(result.rekeyedSessions).toBe(0);
   });
 });

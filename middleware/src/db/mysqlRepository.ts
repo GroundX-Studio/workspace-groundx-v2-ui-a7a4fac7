@@ -2,7 +2,6 @@ import mysql from "mysql2/promise";
 
 import type { AppEnv } from "../config/env.js";
 import type {
-  AnonymousChatPayload,
   AppRepository,
   AppUserMetadata,
   ChatMessageRecord,
@@ -464,108 +463,22 @@ export class MySqlAppRepository implements AppRepository {
     return rows.map(rowToViewerEvent);
   }
 
-  // ── Login-claim ─────────────────────────────────────────────────
+  // ── Login-claim (re-key, not bulk-upload) ───────────────────────
 
-  async claimAnonymousChatPayload(ownerUserId: string, payload: AnonymousChatPayload): Promise<void> {
-    // All-or-nothing: ingest every record in a single transaction so a
-    // partial failure doesn't leave the user half-claimed.
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-
-      for (const session of payload.chatSessions) {
-        await connection.execute(
-          `INSERT INTO chat_sessions (
-            id, onboarding_session_id, owner_user_id, owner_anon_id, title,
-            is_onboarding, active_entity_key, current_intent_json,
-            created_at, updated_at, archived_at
-          ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE
-            owner_user_id = VALUES(owner_user_id),
-            owner_anon_id = NULL,
-            updated_at = VALUES(updated_at)`,
-          [
-            session.id,
-            session.onboardingSessionId,
-            ownerUserId,
-            session.title,
-            session.isOnboarding ? 1 : 0,
-            session.activeEntityKey,
-            session.currentIntent != null ? JSON.stringify(session.currentIntent) : null,
-            session.createdAt,
-            session.updatedAt,
-            session.archivedAt,
-          ],
-        );
-      }
-      for (const msg of payload.chatMessages) {
-        await connection.execute(
-          `INSERT INTO chat_messages (
-            id, chat_session_id, turn_index, role, content,
-            citations_json, tool_calls_json, attachments_json,
-            compressed_into_summary_id, llm_provider, llm_model_id,
-            latency_ms, prompt_tokens, completion_tokens, error_code, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            msg.id,
-            msg.chatSessionId,
-            msg.turnIndex,
-            msg.role,
-            msg.content,
-            msg.citationsJson,
-            msg.toolCallsJson,
-            msg.attachmentsJson,
-            msg.compressedIntoSummaryId,
-            msg.llmProvider,
-            msg.llmModelId,
-            msg.latencyMs,
-            msg.promptTokens,
-            msg.completionTokens,
-            msg.errorCode,
-            msg.createdAt,
-          ],
-        );
-      }
-      for (const s of payload.conversationSummaries) {
-        await connection.execute(
-          `INSERT INTO conversation_summaries (
-            id, chat_session_id, from_message_id, to_message_id, generation,
-            absorbed_summary_ids_json, content, model, tokens_in, tokens_out, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [s.id, s.chatSessionId, s.fromMessageId, s.toMessageId, s.generation, s.absorbedSummaryIdsJson, s.content, s.model, s.tokensIn, s.tokensOut, s.createdAt],
-        );
-      }
-      for (const e of payload.chatSessionEntities) {
-        await connection.execute(
-          `INSERT INTO chat_session_entities (
-            chat_session_id, entity_key, last_frame, completed_frames_json,
-            scan_progress_json, extracted_values_json, created_at, last_visited_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE
-            last_frame = VALUES(last_frame),
-            completed_frames_json = VALUES(completed_frames_json),
-            scan_progress_json = VALUES(scan_progress_json),
-            extracted_values_json = VALUES(extracted_values_json),
-            last_visited_at = VALUES(last_visited_at)`,
-          [e.chatSessionId, e.entityKey, e.lastFrame, e.completedFramesJson, e.scanProgressJson, e.extractedValuesJson, e.createdAt, e.lastVisitedAt],
-        );
-      }
-      for (const v of payload.viewerEvents) {
-        await connection.execute(
-          `INSERT INTO viewer_events (
-            id, chat_session_id, ts_ms, entity_key, action, source, detail_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [v.id, v.chatSessionId, v.timestamp, v.entityKey, v.action, v.source, v.detailJson],
-        );
-      }
-
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+  async rekeyAnonymousChatSessions(anonId: string, ownerUserId: string): Promise<{ rekeyedSessions: number }> {
+    // One statement, atomic at the row level. Child rows (messages,
+    // summaries, entities, viewer_events) reference chat_sessions.id
+    // and inherit the new owner transitively — no need to touch them.
+    const [result] = await this.pool.execute(
+      `UPDATE chat_sessions
+         SET owner_user_id = ?,
+             owner_anon_id = NULL,
+             updated_at = NOW()
+       WHERE owner_anon_id = ?`,
+      [ownerUserId, anonId],
+    );
+    const affected = (result as mysql.ResultSetHeader).affectedRows ?? 0;
+    return { rekeyedSessions: affected };
   }
 }
 

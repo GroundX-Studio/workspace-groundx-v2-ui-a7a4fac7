@@ -200,99 +200,71 @@ describe("middleware API route contract", () => {
     const { app } = setup();
     const agent = request.agent(app);
     await agent.post("/api/onboarding/session").expect(200);
-    const response = await agent.post("/api/chat-sessions/claim").send({
-      chatSessions: [],
-      chatMessages: [],
-      conversationSummaries: [],
-      chatSessionEntities: [],
-      viewerEvents: [],
-    }).expect(401);
+    const response = await agent.post("/api/chat-sessions/claim").send({}).expect(401);
     expect(response.body.code).toBe("ANONYMOUS_SESSION");
   });
 
-  it("POST /api/chat-sessions/claim ingests the localStorage payload under the signed-in user", async () => {
+  it("POST /api/chat-sessions/claim re-keys anon chat_sessions to the signed-in user (no body required)", async () => {
     const { app, repository } = setup();
     const agent = request.agent(app);
-    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
-    const nowIso = new Date().toISOString();
-    const response = await agent
-      .post("/api/chat-sessions/claim")
-      .send({
-        chatSessions: [
-          {
-            id: "chat-A",
-            onboardingSessionId: "onb-A",
-            ownerUserId: null,
-            ownerAnonId: "anon-A",
-            title: "Onboarding",
-            isOnboarding: true,
-            activeEntityKey: "sample:utility",
-            currentIntent: null,
-            createdAt: nowIso,
-            updatedAt: nowIso,
-            archivedAt: null,
-          },
-        ],
-        chatMessages: [
-          {
-            id: "m1",
-            chatSessionId: "chat-A",
-            turnIndex: 1,
-            role: "user",
-            content: "Utility Bill",
-            createdAt: nowIso,
-          },
-        ],
-        conversationSummaries: [],
-        chatSessionEntities: [
-          {
-            chatSessionId: "chat-A",
-            entityKey: "sample:utility",
-            lastFrame: "f2",
-            completedFramesJson: "[]",
-            scanProgressJson: null,
-            extractedValuesJson: null,
-            createdAt: nowIso,
-            lastVisitedAt: nowIso,
-          },
-        ],
-        viewerEvents: [
-          {
-            id: "e1",
-            chatSessionId: "chat-A",
-            timestamp: Date.now(),
-            entityKey: "sample:utility",
-            action: "opened",
-            source: "user",
-            detailJson: null,
-          },
-        ],
-      })
+    // 1. Start anonymous, create two chat_sessions tied to the session cookie.
+    const anonResp = await agent.post("/api/onboarding/session").expect(200);
+    const anonSessionId: string = anonResp.body.sessionId;
+    await agent
+      .post("/api/chat-sessions")
+      .send({ id: "chat-A", onboardingSessionId: "onb-A", title: "Onboarding", isOnboarding: true })
       .expect(200);
-    expect(response.body).toMatchObject({
-      claimedSessions: 1,
-      claimedMessages: 1,
-      claimedEntities: 1,
-      claimedViewerEvents: 1,
+    await agent
+      .post("/api/chat-sessions")
+      .send({ id: "chat-B", onboardingSessionId: "onb-B", title: "Side chat", isOnboarding: false })
+      .expect(200);
+
+    // Plus an unrelated row owned by a different anon — must not be touched.
+    const otherNow = new Date();
+    await repository.upsertChatSession({
+      id: "chat-other",
+      onboardingSessionId: "onb-other",
+      ownerUserId: null,
+      ownerAnonId: "anon-someone-else",
+      title: "Other",
+      isOnboarding: false,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: otherNow,
+      updatedAt: otherNow,
+      archivedAt: null,
     });
-    // The chat session is now owned by the signed-in user.
-    const claimed = await repository.getChatSession("chat-A");
-    expect(claimed?.ownerUserId).toBe("gx-user");
-    expect(claimed?.ownerAnonId).toBeNull();
-    expect(await repository.listChatMessages("chat-A")).toHaveLength(1);
-    expect(await repository.listChatSessionEntities("chat-A")).toHaveLength(1);
-    expect(await repository.listViewerEvents("chat-A")).toHaveLength(1);
+
+    // 2. Sign in. The login handler reuses the existing session cookie
+    //    id, so ownerAnonId on the chat rows still matches req.session.id.
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+
+    // 3. Claim: no body required — anon id comes from the cookie.
+    const response = await agent.post("/api/chat-sessions/claim").send({}).expect(200);
+    expect(response.body).toMatchObject({ rekeyedSessions: 2 });
+
+    const a = await repository.getChatSession("chat-A");
+    const b = await repository.getChatSession("chat-B");
+    const other = await repository.getChatSession("chat-other");
+    expect(a?.ownerUserId).toBe("gx-user");
+    expect(a?.ownerAnonId).toBeNull();
+    expect(b?.ownerUserId).toBe("gx-user");
+    expect(b?.ownerAnonId).toBeNull();
+    // Unrelated row untouched.
+    expect(other?.ownerUserId).toBeNull();
+    expect(other?.ownerAnonId).toBe("anon-someone-else");
+
+    // The original anon id is still what was on the cookie.
+    expect(anonSessionId).toBeTruthy();
   });
 
-  it("POST /api/chat-sessions/claim returns 400 on a malformed payload", async () => {
+  it("POST /api/chat-sessions/claim returns rekeyedSessions: 0 when no anon rows exist for the user", async () => {
     const { app } = setup();
     const agent = request.agent(app);
+    // Sign in from scratch — no prior anon session and no chat rows.
     await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
-    const response = await agent
-      .post("/api/chat-sessions/claim")
-      .send({ chatSessions: [{ id: 123 }] }) // wrong type
-      .expect(400);
-    expect(response.body.error).toBe("invalid_payload");
+    const response = await agent.post("/api/chat-sessions/claim").send({}).expect(200);
+    expect(response.body).toMatchObject({ rekeyedSessions: 0 });
   });
 
   it("POST /api/chat-sessions rejects unauthenticated requests", async () => {

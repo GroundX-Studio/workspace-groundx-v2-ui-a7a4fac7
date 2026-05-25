@@ -107,15 +107,6 @@ export interface ViewerEventRecord {
   detailJson: string | null;
 }
 
-/** Bundle of records a single anonymous->signed-in claim migrates. */
-export interface AnonymousChatPayload {
-  chatSessions: ChatSessionRecord[];
-  chatMessages: ChatMessageRecord[];
-  conversationSummaries: ConversationSummaryRecord[];
-  chatSessionEntities: ChatSessionEntityRecord[];
-  viewerEvents: ViewerEventRecord[];
-}
-
 export interface AppRepository {
   createSchema(): Promise<void>;
   createSession(session: SessionRecord): Promise<void>;
@@ -153,8 +144,19 @@ export interface AppRepository {
   appendViewerEvent(record: ViewerEventRecord): Promise<void>;
   listViewerEvents(chatSessionId: string, sinceTimestamp?: number): Promise<ViewerEventRecord[]>;
 
-  // Login-claim: ingest anonymous localStorage payload into DB
-  claimAnonymousChatPayload(ownerUserId: string, payload: AnonymousChatPayload): Promise<void>;
+  /**
+   * Login-claim: re-key every chat_sessions row whose ownerAnonId
+   * matches the supplied anon id so it's instead owned by the
+   * supplied user id (ownerAnonId becomes null). Child rows (messages,
+   * summaries, entities, viewer_events) are untouched — they continue
+   * to reference the same chat_session_id and inherit the new owner
+   * transitively.
+   *
+   * Returns the number of chat_sessions rows that were re-keyed.
+   * Zero is a valid result (the user signed up from a different
+   * browser, or no anon sessions ever existed).
+   */
+  rekeyAnonymousChatSessions(anonId: string, ownerUserId: string): Promise<{ rekeyedSessions: number }>;
 }
 
 export interface GroundXPartnerClient {
