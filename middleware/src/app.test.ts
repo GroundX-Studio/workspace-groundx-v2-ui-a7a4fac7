@@ -329,6 +329,84 @@ describe("middleware scaffold", () => {
     await agent.post("/api/llm/chat/completions").send({ messages: [] }).expect(502, { error: "LLM failed" });
   });
 
+  it("POST /api/chat/messages rejects requests without a session cookie", async () => {
+    const { app } = setup();
+    await request(app)
+      .post("/api/chat/messages")
+      .send({ chatSessionId: "chat-1", newUserMessage: "hello" })
+      .expect(401);
+  });
+
+  it("POST /api/chat/messages returns 400 for malformed payload", async () => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    void repository; // ensure the in-memory session was created
+
+    await agent
+      .post("/api/chat/messages")
+      .send({ newUserMessage: "no session id" })
+      .expect(400, { error: "invalid_payload" });
+  });
+
+  it("POST /api/chat/messages returns 404 when the chat session is unknown", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+
+    const response = await agent
+      .post("/api/chat/messages")
+      .send({ chatSessionId: "does-not-exist", newUserMessage: "hello" })
+      .expect(404);
+    expect(response.body.error).toMatch(/chat_session_not_found/);
+  });
+
+  it("POST /api/chat/messages round-trips a user + assistant turn in mock mode", async () => {
+    const repository = new MemoryAppRepository();
+    const partnerClient = new FakePartnerClient();
+    const groundxClient = new FakeGroundXClient();
+    const llmClient = new FakeLlmClient();
+    const scenarioRegistry = new FakeScenarioRegistry();
+    const mockEnv = { ...testEnv, MOCK_MODE: true };
+    const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+
+    // Seed a chat session so the handler can find it.
+    const now = new Date();
+    await repository.upsertChatSession({
+      id: "chat-1",
+      onboardingSessionId: "onb-1",
+      ownerUserId: null,
+      ownerAnonId: "anon-1",
+      title: "Onboarding",
+      isOnboarding: true,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+
+    const response = await agent
+      .post("/api/chat/messages")
+      .send({ chatSessionId: "chat-1", newUserMessage: "What is RAG?" })
+      .expect(200);
+
+    expect(response.body.userMessageId).toEqual(expect.any(String));
+    expect(response.body.assistantMessageId).toEqual(expect.any(String));
+    expect(response.body.reply.mode).toBe("rag");
+    expect(response.body.reply.answer).toMatch(/Mock RAG/);
+    expect(response.body.compressionRan).toBe(false);
+
+    const messages = await repository.listChatMessages("chat-1");
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    // Mock mode must not have hit any upstream client.
+    expect(llmClient.calls).toHaveLength(0);
+    expect(groundxClient.calls).toHaveLength(0);
+  });
+
   it("returns safe upstream status context for direct Partner auth failures", async () => {
     class LoginErrorPartnerClient extends FakePartnerClient implements GroundXPartnerClient {
       async loginCustomer(): Promise<never> {

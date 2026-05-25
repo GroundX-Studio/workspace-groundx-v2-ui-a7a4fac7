@@ -77,12 +77,14 @@ describe("routeChat", () => {
     expect(res.suggestedActions.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("live mode throws a stable error until the wiring track lands", async () => {
+  it("live RAG mode requires GroundX client + api key (live wiring)", async () => {
+    // Now that live RAG is wired, the failure mode shifts from "not yet
+    // wired" to a typed configuration error when deps are missing.
     await expect(
       routeChat(makeRequest({ newUserMessage: "what is the total amount due?" }), {
         llmClient: fakeLlm,
         mockMode: false,
       }),
-    ).rejects.toThrow(/not yet wired/);
+    ).rejects.toThrow(/groundxClient/);
   });
 });

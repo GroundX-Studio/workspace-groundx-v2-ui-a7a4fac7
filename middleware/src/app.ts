@@ -11,6 +11,7 @@ import { encryptSecret } from "./lib/crypto.js";
 import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/metrics.js";
 import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
+import { ChatHandlerError, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
 import { sendUpstreamResponse } from "./services/http.js";
 import type {
   AnonymousChatPayload,
@@ -366,6 +367,45 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
+  // The chat surface's single entry point. Routes through chatHandler,
+  // which validates → persists the user message → builds the 3-axis
+  // context bundle → optionally compresses → calls routeChat (mock or
+  // live RAG path) → persists the assistant reply. Returns the typed
+  // envelope (mode/answer/citations/suggestedActions + the persisted
+  // message ids) so the client can render and link back to history.
+  app.post("/api/chat/messages", apiLimiter, requireSession, async (req, res, next) => {
+    try {
+      const session = req.session!;
+      const payload = parseChatMessageRequest(req.body);
+      if (!payload) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      // Anonymous onboarding sessions don't have a customer-scoped key;
+      // fall through to the partner-owned anon key (used for the samples
+      // bucket). Production deployments must set GROUNDX_ANON_API_KEY for
+      // the live RAG path to work for anonymous visitors.
+      const groundxApiKey = session.groundxApiKey ?? env.GROUNDX_ANON_API_KEY ?? null;
+
+      const result = await handleChatMessage(payload, {
+        repository,
+        llmClient,
+        groundxClient,
+        groundxApiKey,
+        searchBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
+        llmModelId: env.LLM_MODEL_ID ?? "model",
+        mockMode: env.MOCK_MODE,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ChatHandlerError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
   // Public onboarding catalog. Reads the samples bucket and returns the
   // ScenarioConfig list parsed from each manifest doc's filter. No session
   // required — the samples are partner-owned, public content.
@@ -483,6 +523,19 @@ export function shouldSkipRequestLog(url: string | undefined): boolean {
 // handing them to the repository. Anything missing/wrong → null, the
 // endpoint returns 400.
 // ──────────────────────────────────────────────────────────────────────────
+
+function parseChatMessageRequest(body: unknown): HandleChatMessageRequest | null {
+  if (!isObject(body)) return null;
+  if (typeof body.chatSessionId !== "string" || !body.chatSessionId) return null;
+  if (typeof body.newUserMessage !== "string") return null;
+  const intent = body.intent;
+  if (intent !== undefined && intent !== null && typeof intent !== "string") return null;
+  return {
+    chatSessionId: body.chatSessionId,
+    newUserMessage: body.newUserMessage,
+    intent: typeof intent === "string" ? intent : intent === null ? null : undefined,
+  };
+}
 
 function parseAnonymousChatPayload(body: unknown): AnonymousChatPayload | null {
   if (!isObject(body)) return null;

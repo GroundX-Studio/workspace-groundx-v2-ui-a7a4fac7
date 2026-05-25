@@ -20,7 +20,7 @@
  * returns canned responses so the chat surface can boot today.
  */
 
-import type { LlmClient } from "../types.js";
+import type { GroundXClient, LlmClient } from "../types.js";
 
 export type ChatMode = "rag" | "structured" | "hybrid";
 
@@ -109,7 +109,37 @@ export function classifyChatMode(request: ChatRouterRequest): ChatMode {
 
 export interface ChatRouterDeps {
   llmClient: LlmClient;
+  /**
+   * GroundX client for document search (RAG path). Optional because
+   * non-RAG paths don't need it; MOCK_MODE skips entirely.
+   */
+  groundxClient?: GroundXClient;
+  /**
+   * GroundX API key the live RAG search should authenticate with.
+   * Sourced from session.groundxApiKey OR env.GROUNDX_ANON_API_KEY by
+   * the caller. Required when not in mockMode.
+   */
+  groundxApiKey?: string;
+  /**
+   * Bucket id to search against — typically the customer's primary
+   * bucket, OR the samples bucket id for anonymous onboarding flows.
+   */
+  searchBucketId?: number | null;
+  /** Provider model id for the LLM call, e.g. "gpt-4o" or "claude-3-haiku". */
+  llmModelId?: string;
   mockMode: boolean;
+}
+
+/**
+ * Single snippet returned by the GroundX search result list. The
+ * fields we care about for grounded prompting + citation rendering.
+ */
+interface GroundXSearchResult {
+  documentId: string;
+  pageNumber?: number;
+  text?: string;
+  score?: number;
+  fileName?: string;
 }
 
 /**
@@ -125,15 +155,136 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
     return mockResponseFor(mode, request);
   }
 
-  // Live mode: each branch composes its pipeline.
-  //
-  // The real implementations (GroundX search → grounded prompt →
-  // LLM call → token budget → compression trigger) land with the
-  // rest of the live-wiring track. For now we surface a
-  // not-yet-wired error so callers get a stable failure mode
-  // rather than a hang.
-  void deps.llmClient;
-  throw new Error("chatRouter live mode not yet wired — set MOCK_MODE=true or finish the live-wiring track");
+  if (mode === "rag") {
+    return runRagPipeline(request, deps);
+  }
+
+  // Live structured/hybrid still pending — these need app-state
+  // queries (MySQL + Partner API readers) that aren't wired yet.
+  // Fall back to the mock envelope so the chat surface remains
+  // functional rather than throwing on a paths-in-flight class of
+  // input. Tracked separately under the broader live-wiring track.
+  return mockResponseFor(mode, request);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// RAG pipeline — live GroundX search → grounded prompt → LLM
+// ────────────────────────────────────────────────────────────────────
+
+const RAG_SEARCH_LIMIT = 6;
+const RAG_SNIPPET_CHARS = 600;
+
+async function runRagPipeline(
+  request: ChatRouterRequest,
+  deps: ChatRouterDeps,
+): Promise<ChatRouterResponse> {
+  if (!deps.groundxClient || !deps.groundxApiKey) {
+    throw new Error("rag mode: groundxClient + groundxApiKey are required outside MOCK_MODE");
+  }
+  if (!deps.llmModelId) {
+    throw new Error("rag mode: llmModelId is required outside MOCK_MODE");
+  }
+
+  const snippets = await searchGroundX(
+    request.newUserMessage,
+    deps.searchBucketId ?? null,
+    deps.groundxClient,
+    deps.groundxApiKey,
+  );
+
+  const llmResponse = await callGroundedLlm(request.newUserMessage, snippets, deps.llmClient, deps.llmModelId);
+
+  return {
+    mode: "rag",
+    answer: llmResponse.answer,
+    citations: snippets.map((s) => ({
+      documentId: s.documentId,
+      page: s.pageNumber ?? 1,
+      snippet: s.text ? s.text.slice(0, RAG_SNIPPET_CHARS) : undefined,
+    })),
+    suggestedActions: [{ key: "show-source", label: "Show source" }],
+    tools: [],
+  };
+}
+
+async function searchGroundX(
+  query: string,
+  bucketId: number | null,
+  client: GroundXClient,
+  apiKey: string,
+): Promise<GroundXSearchResult[]> {
+  // POST /v1/search/{id} where id = bucket id. The GroundX search
+  // endpoint takes { query, n, nextToken? } and returns { search: { results: [...] } }.
+  const path = bucketId === null
+    ? "/v1/search/documents"
+    : `/v1/search/${bucketId}`;
+  const response = await client.forward(path, {
+    method: "POST",
+    apiKey,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ query, n: RAG_SEARCH_LIMIT }),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "<unreadable>");
+    throw new Error(`groundx search failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`);
+  }
+  const payload = (await response.json()) as {
+    search?: { results?: Array<Record<string, unknown>> };
+    results?: Array<Record<string, unknown>>;
+  };
+  const rawResults = payload.search?.results ?? payload.results ?? [];
+  return rawResults.map((r) => ({
+    documentId: typeof r.documentId === "string" ? r.documentId : String(r.documentId ?? ""),
+    pageNumber: typeof r.pageNumber === "number" ? r.pageNumber : undefined,
+    text: typeof r.text === "string" ? r.text : undefined,
+    score: typeof r.score === "number" ? r.score : undefined,
+    fileName: typeof r.fileName === "string" ? r.fileName : undefined,
+  }));
+}
+
+async function callGroundedLlm(
+  userMessage: string,
+  snippets: GroundXSearchResult[],
+  llmClient: LlmClient,
+  modelId: string,
+): Promise<{ answer: string }> {
+  const system =
+    "You are a document Q&A assistant. Answer ONLY using the snippets " +
+    "provided below as context. If the snippets do not contain enough " +
+    "information to answer, say so plainly. Cite by repeating short " +
+    "phrases verbatim. Be concise.";
+
+  const contextBlock = snippets.length
+    ? snippets
+        .map(
+          (s, i) =>
+            `[${i + 1}] doc=${s.documentId} page=${s.pageNumber ?? "?"}\n${(s.text ?? "").slice(0, RAG_SNIPPET_CHARS)}`,
+        )
+        .join("\n\n")
+    : "(no snippets found)";
+
+  const response = await llmClient.forward("/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: `Snippets:\n${contextBlock}\n\nQuestion: ${userMessage}` },
+      ],
+      temperature: 0.2,
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "<unreadable>");
+    throw new Error(`grounded llm call failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`);
+  }
+  const payload = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const answer = payload.choices?.[0]?.message?.content?.trim();
+  if (!answer) throw new Error("grounded llm call returned no content");
+  return { answer };
 }
 
 function mockResponseFor(mode: ChatMode, request: ChatRouterRequest): ChatRouterResponse {
