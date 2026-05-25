@@ -354,3 +354,79 @@ describe("ChatHandlerError", () => {
     expect(err.name).toBe("ChatHandlerError");
   });
 });
+
+describe("handleChatMessage — typed error mapping", () => {
+  let repo: MemoryAppRepository;
+  let llmClient: LlmClient;
+  let groundxClient: GroundXClient;
+
+  beforeEach(async () => {
+    repo = new MemoryAppRepository();
+    await repo.upsertChatSession(makeSession());
+    llmClient = { forward: vi.fn(async () => jsonResponse({})) };
+    groundxClient = { forward: vi.fn(async () => jsonResponse({})) };
+  });
+
+  it("maps ChatRouteNotImplementedError to ChatHandlerError(501)", async () => {
+    // Live mode + a structured-hint message classifies to "structured",
+    // which throws ChatRouteNotImplementedError. The handler must catch
+    // and re-throw with statusCode=501 — NOT 502 (that would imply an
+    // upstream blew up) and NOT 200 with a fake mock body.
+    await expect(
+      handleChatMessage(
+        { chatSessionId: "chat-1", newUserMessage: "what are my saved schemas?" },
+        {
+          repository: repo,
+          llmClient,
+          groundxClient,
+          groundxApiKey: "k",
+          searchBucketId: null,
+          llmModelId: "test-model",
+          mockMode: false,
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: "ChatHandlerError",
+      statusCode: 501,
+    });
+    // Still records an errored assistant placeholder for conversation
+    // log consistency.
+    const messages = await repo.listChatMessages("chat-1");
+    expect(messages).toHaveLength(2);
+    expect(messages[1].role).toBe("assistant");
+    expect(messages[1].errorCode).toContain("not wired");
+  });
+
+  it("maps UpstreamTimeoutError to ChatHandlerError(504)", async () => {
+    const { UpstreamTimeoutError } = await import("./http.js");
+    // Force the LLM client to throw a timeout. RAG mode runs grounded
+    // LLM call → that throws → chatHandler catches → 504.
+    const timeoutClient: LlmClient = {
+      forward: vi.fn(async () => {
+        throw new UpstreamTimeoutError("llm", 30_000);
+      }),
+    };
+    const groundxOk: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonResponse({ search: { results: [{ documentId: "d", pageNumber: 1, text: "x" }] } }),
+      ),
+    };
+    await expect(
+      handleChatMessage(
+        { chatSessionId: "chat-1", newUserMessage: "what is the total?" },
+        {
+          repository: repo,
+          llmClient: timeoutClient,
+          groundxClient: groundxOk,
+          groundxApiKey: "k",
+          searchBucketId: 7,
+          llmModelId: "test-model",
+          mockMode: false,
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: "ChatHandlerError",
+      statusCode: 504,
+    });
+  });
+});

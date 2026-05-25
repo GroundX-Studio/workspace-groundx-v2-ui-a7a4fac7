@@ -87,4 +87,24 @@ describe("routeChat", () => {
       }),
     ).rejects.toThrow(/groundxClient/);
   });
+
+  it("non-MOCK structured mode throws ChatRouteNotImplementedError (no silent mock fallback)", async () => {
+    const { ChatRouteNotImplementedError } = await import("./chatRouter.js");
+    await expect(
+      routeChat(makeRequest({ newUserMessage: "what are my saved schemas?" }), {
+        llmClient: fakeLlm,
+        mockMode: false,
+      }),
+    ).rejects.toBeInstanceOf(ChatRouteNotImplementedError);
+  });
+
+  it("non-MOCK hybrid mode throws ChatRouteNotImplementedError", async () => {
+    const { ChatRouteNotImplementedError } = await import("./chatRouter.js");
+    await expect(
+      routeChat(makeRequest({ newUserMessage: "explain this sample" }), {
+        llmClient: fakeLlm,
+        mockMode: false,
+      }),
+    ).rejects.toBeInstanceOf(ChatRouteNotImplementedError);
+  });
 });

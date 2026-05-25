@@ -46,6 +46,18 @@ describe("middleware scaffold", () => {
     expect(() => loadEnv({ ...testEnv, NODE_ENV: "production", LLM_MODEL_ID: undefined } as any)).toThrow(
       /LLM_MODEL_ID/,
     );
+    // SESSION_SECRET must be overridden in production — the dev default
+    // gives signable session cookies and would be forgeable.
+    expect(() =>
+      loadEnv({
+        ...testEnv,
+        NODE_ENV: "production",
+        SESSION_SECRET: "dev-session-secret-change-before-production",
+      } as any),
+    ).toThrow(/SESSION_SECRET/);
+    // UPSTREAM_TIMEOUT_MS is configurable and bounded.
+    expect(loadEnv({ ...testEnv, UPSTREAM_TIMEOUT_MS: "5000" } as any).UPSTREAM_TIMEOUT_MS).toBe(5_000);
+    expect(() => loadEnv({ ...testEnv, UPSTREAM_TIMEOUT_MS: "500" } as any)).toThrow(/UPSTREAM_TIMEOUT_MS/);
   });
 
   it("serves health without authentication", async () => {

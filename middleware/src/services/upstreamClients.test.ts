@@ -114,3 +114,80 @@ describe("upstream fetch clients", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("fetchWithTimeout", () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+    vi.useRealTimers();
+  });
+
+  it("returns the response when fetch resolves before the timeout fires", async () => {
+    const { fetchWithTimeout } = await import("./http.js");
+    global.fetch = vi.fn(async () => new Response("ok", { status: 200 }));
+    const res = await fetchWithTimeout("https://x.test/", { method: "GET" }, { timeoutMs: 1_000 });
+    expect(res.status).toBe(200);
+  });
+
+  it("throws UpstreamTimeoutError when fetch never resolves within the timeout", async () => {
+    const { fetchWithTimeout, UpstreamTimeoutError } = await import("./http.js");
+    // Simulate a hung upstream — fetch resolves only when signal aborts.
+    global.fetch = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+    await expect(
+      fetchWithTimeout("https://hang.test/", { method: "GET" }, { timeoutMs: 50, label: "llm" }),
+    ).rejects.toBeInstanceOf(UpstreamTimeoutError);
+  });
+
+  it("propagates an external AbortError (does not relabel as timeout)", async () => {
+    const { fetchWithTimeout } = await import("./http.js");
+    global.fetch = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+    const controller = new AbortController();
+    const promise = fetchWithTimeout(
+      "https://hang.test/",
+      { method: "GET", signal: controller.signal },
+      { timeoutMs: 60_000 },
+    );
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("clients (groundx / llm / partner) propagate UpstreamTimeoutError up to the caller", async () => {
+    const { UpstreamTimeoutError } = await import("./http.js");
+    // Make fetch hang so the configured timeout fires.
+    global.fetch = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+    const tightEnv = { ...testEnv, UPSTREAM_TIMEOUT_MS: 30 };
+    await expect(
+      new FetchGroundXClient(tightEnv).forward("/search/x", { method: "POST", apiKey: "k" }),
+    ).rejects.toBeInstanceOf(UpstreamTimeoutError);
+    await expect(
+      new FetchLlmClient(tightEnv).forward("/chat/completions", { method: "POST" }),
+    ).rejects.toBeInstanceOf(UpstreamTimeoutError);
+  });
+});

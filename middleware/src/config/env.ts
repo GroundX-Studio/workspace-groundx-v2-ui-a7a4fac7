@@ -31,6 +31,11 @@ const envSchema = z.object({
   MYSQL_USER: z.string().optional(),
   MYSQL_PASSWORD: z.string().optional(),
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters").default("dev-session-secret-change-before-production"),
+  // Hard timeout for every upstream fetch (GroundX search/Partner/LLM).
+  // Set well above the slowest legit call (grounded LLM completion is
+  // 5–15s P95) but short enough to prevent a hung backend from holding
+  // a DB pool connection indefinitely.
+  UPSTREAM_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   GROUNDX_BASE_URL: z.string().url().default("https://api.groundx.ai/api/v1"),
   GROUNDX_PARTNER_API_KEY: z.string().optional(),
   GROUNDX_ANON_API_KEY: z.string().optional(),
@@ -72,6 +77,13 @@ const envSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["MOCK_MODE"],
       message: "MOCK_MODE cannot be enabled in production",
+    });
+  }
+  if (env.NODE_ENV === "production" && env.SESSION_SECRET === "dev-session-secret-change-before-production") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["SESSION_SECRET"],
+      message: "SESSION_SECRET must be set to a non-default value in production",
     });
   }
   if (env.NODE_ENV === "production" && !env.GROUNDX_PARTNER_API_KEY) {

@@ -36,8 +36,9 @@ import {
   shouldCompress,
   type BundleChatContextInput,
 } from "./contextBundler.js";
-import { routeChat, type ChatRouterRequest, type ChatRouterResponse } from "./chatRouter.js";
+import { ChatRouteNotImplementedError, routeChat, type ChatRouterRequest, type ChatRouterResponse } from "./chatRouter.js";
 import { runCompression } from "./conversationCompressor.js";
+import { UpstreamTimeoutError } from "./http.js";
 
 export interface HandleChatMessageRequest {
   chatSessionId: string;
@@ -227,7 +228,11 @@ export async function handleChatMessage(
     });
   } catch (err) {
     // Record the failure as an assistant message so the conversation
-    // history stays consistent. The client receives a 502.
+    // history stays consistent. The status code we re-throw depends on
+    // why we failed:
+    //   - ChatRouteNotImplementedError -> 501 (mode not wired)
+    //   - UpstreamTimeoutError         -> 504 (LLM/GroundX hung)
+    //   - anything else                -> 502 (router/upstream blew up)
     errorCode = err instanceof Error ? err.message.slice(0, 200) : "unknown_error";
     const assistantId = idGen();
     await deps.repository.appendChatMessage({
@@ -240,6 +245,12 @@ export async function handleChatMessage(
       latencyMs: Date.now() - startedAt,
       createdAt: new Date(),
     });
+    if (err instanceof ChatRouteNotImplementedError) {
+      throw new ChatHandlerError(`mode_not_implemented:${err.mode}`, 501);
+    }
+    if (err instanceof UpstreamTimeoutError) {
+      throw new ChatHandlerError(`upstream_timeout:${errorCode}`, 504);
+    }
     throw new ChatHandlerError(`router_failed:${errorCode}`, 502);
   }
   const latencyMs = Date.now() - startedAt;

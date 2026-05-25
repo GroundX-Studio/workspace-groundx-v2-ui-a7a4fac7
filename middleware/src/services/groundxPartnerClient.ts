@@ -6,7 +6,7 @@ import type {
   LoginCustomerInput,
   RegisterCustomerInput,
 } from "../types.js";
-import { basicAuth, ensureJsonHeaders, readJson, upstreamError } from "./http.js";
+import { basicAuth, ensureJsonHeaders, fetchWithTimeout, readJson, upstreamError } from "./http.js";
 
 export class FetchGroundXPartnerClient implements GroundXPartnerClient {
   constructor(private env: AppEnv) {}
@@ -80,7 +80,11 @@ export class FetchGroundXPartnerClient implements GroundXPartnerClient {
     const headers = ensureJsonHeaders(init);
     headers.set("X-API-Key", this.env.GROUNDX_PARTNER_API_KEY ?? "");
     if (init.customerKey) headers.set("X-Customer-Key", init.customerKey);
-    return fetch(`${this.env.GROUNDX_BASE_URL}${path}`, { ...init, headers });
+    return fetchWithTimeout(
+      `${this.env.GROUNDX_BASE_URL}${path}`,
+      { ...init, headers },
+      { timeoutMs: this.env.UPSTREAM_TIMEOUT_MS, label: "partner" },
+    );
   }
 
   private async parseAuth(response: Response): Promise<AuthResponse> {

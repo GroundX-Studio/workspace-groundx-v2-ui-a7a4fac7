@@ -23,6 +23,7 @@ export const testEnv: AppEnv = {
   MYSQL_USER: "test",
   MYSQL_PASSWORD: "test",
   SESSION_SECRET: "01234567890123456789012345678901",
+  UPSTREAM_TIMEOUT_MS: 30_000,
   GROUNDX_BASE_URL: "https://api.groundx.test/api/v1",
   GROUNDX_PARTNER_API_KEY: "partner-key",
   GROUNDX_ANON_API_KEY: "",

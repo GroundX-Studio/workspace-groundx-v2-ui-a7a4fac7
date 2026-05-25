@@ -1,6 +1,6 @@
 import type { AppEnv } from "../config/env.js";
 import type { LlmClient } from "../types.js";
-import { ensureJsonHeaders } from "./http.js";
+import { ensureJsonHeaders, fetchWithTimeout } from "./http.js";
 
 export class FetchLlmClient implements LlmClient {
   constructor(private env: AppEnv) {}
@@ -14,6 +14,10 @@ export class FetchLlmClient implements LlmClient {
       ? `${this.env.LLM_AUTH_SCHEME} ${this.env.LLM_API_KEY}`
       : this.env.LLM_API_KEY;
     headers.set(this.env.LLM_AUTH_HEADER_NAME, value);
-    return fetch(`${this.env.LLM_BASE_URL}${path}`, { ...init, headers });
+    return fetchWithTimeout(
+      `${this.env.LLM_BASE_URL}${path}`,
+      { ...init, headers },
+      { timeoutMs: this.env.UPSTREAM_TIMEOUT_MS, label: "llm" },
+    );
   }
 }

@@ -154,7 +154,15 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
   app.use(cookieParser());
   app.use(sessionMiddleware(env, repository));
 
-  // Rate-limit buckets.
+  // Rate-limit buckets. Key by session id when one is present, falling
+  // back to client IP — this prevents one user behind a corporate NAT
+  // from exhausting the bucket for everyone sharing the same egress IP.
+  // The 'session+IP' keyGenerator preserves IP-only behavior for the
+  // auth endpoints (no session yet at /api/auth/login etc.).
+  const sessionAwareKey = (req: Request): string => {
+    // express-rate-limit needs a non-empty string; fall back to ip.
+    return req.session?.id ?? req.ip ?? "unknown";
+  };
   const authLimiter = rateLimit({
     windowMs: 60_000,
     limit: env.RATE_LIMIT_AUTH_PER_MIN,
@@ -168,6 +176,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     standardHeaders: "draft-7",
     legacyHeaders: false,
     skip: () => env.NODE_ENV === "test",
+    keyGenerator: sessionAwareKey,
   });
   const llmLimiter = rateLimit({
     windowMs: 60_000,
@@ -175,6 +184,7 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     standardHeaders: "draft-7",
     legacyHeaders: false,
     skip: () => env.NODE_ENV === "test",
+    keyGenerator: sessionAwareKey,
   });
 
   app.get("/api/healthz", (_req, res) => res.json({ status: "ok" }));

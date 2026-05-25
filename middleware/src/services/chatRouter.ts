@@ -131,6 +131,25 @@ export interface ChatRouterDeps {
 }
 
 /**
+ * Thrown when routeChat classifies a request into a mode that isn't
+ * wired live yet (structured / hybrid). The chatHandler maps this to
+ * HTTP 501 so the client can distinguish "we don't support this yet"
+ * from "the upstream broke" (502) or "you don't have access" (401).
+ *
+ * Replaces the previous silent fallback to mock responses in non-MOCK
+ * mode — that path returned plausible-looking but fake data in
+ * production, which is worse than failing fast.
+ */
+export class ChatRouteNotImplementedError extends Error {
+  readonly mode: ChatMode;
+  constructor(mode: ChatMode) {
+    super(`chat mode '${mode}' is not wired for live use yet`);
+    this.name = "ChatRouteNotImplementedError";
+    this.mode = mode;
+  }
+}
+
+/**
  * Single snippet returned by the GroundX search result list. The
  * fields we care about for grounded prompting + citation rendering.
  */
@@ -159,12 +178,15 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
     return runRagPipeline(request, deps);
   }
 
-  // Live structured/hybrid still pending — these need app-state
-  // queries (MySQL + Partner API readers) that aren't wired yet.
-  // Fall back to the mock envelope so the chat surface remains
-  // functional rather than throwing on a paths-in-flight class of
-  // input. Tracked separately under the broader live-wiring track.
-  return mockResponseFor(mode, request);
+  // Structured / hybrid live wiring isn't ready yet — those need MySQL
+  // + Partner readers we haven't built. The earlier code returned a
+  // mock envelope in production, which looked plausible but was fake
+  // data; downstream clients had no way to distinguish a real answer
+  // from a stub. Failing fast with a typed error so the handler can
+  // map to HTTP 501 is the safer behavior. Use MOCK_MODE=true during
+  // development to keep the chat surface usable while the live wiring
+  // catches up.
+  throw new ChatRouteNotImplementedError(mode);
 }
 
 // ────────────────────────────────────────────────────────────────────
