@@ -78,3 +78,61 @@ The standard stack is the scaffold:
 Don't bring in Next.js, SQLite, Postgres, Prisma, or Drizzle
 without explicit user direction. Don't add new top-level deps
 without thinking about scaffold scope.
+
+## 7. Definition of done = user-visible test
+
+A feature is done when a test exercising **real user-visible
+behavior** passes. A seam test (interface compiles, dispatcher
+dispatches, mock returns) is `in-progress`, not done. If the
+implementation behind the seam is a stub or a frank "not wired"
+response, the item stays `in-progress` until the real
+implementation lands.
+
+Concrete corollaries:
+
+- **No "P0 done" commit titles for seam-only work.** Honest
+  titles look like "X: seam + 3 of 7 sub-cases wired" — a
+  `git log --oneline` reader should be able to tell what's
+  shippable.
+- **When you close one item, write the follow-on backlog id
+  FIRST.** If your closure creates new pending work, that work
+  goes in `docs/agents/backlog.md` with a real id before you
+  add the inline `TODO(<id>)` and before you mark the parent
+  closed. Inline TODOs without a backlog-id resolution are
+  forbidden.
+- **Per-status client error mapping, real readers, real
+  prompts.** These are not "polish" — they're the user-visible
+  layer that determines whether the seam is doing anything.
+
+## 8. Single backlog, no tombstones, verify before flagging
+
+Pending work lives in exactly one file:
+[`docs/agents/backlog.md`](backlog.md). Rules at the top of
+that file are part of this discipline.
+
+Operational rules:
+
+- **One backlog.** Do not create new top-level tracking files
+  (no `chat-fix-list.md`, no `open-work.md`, no
+  `phase-X-tracker.md`). Memory's "Still open" section points at
+  the backlog. The backlog is the truth.
+- **No tombstones.** When you remove a file, delete it. Don't
+  leave a one-line stub saying "this file was merged into Y."
+  Single-agent project; the audit trail is in git.
+- **Verify before flagging `not-started`.** Before adding any
+  item with `not-started` status, grep for the seam first:
+  `grep -rn "<feature-name>" middleware/src app/src`. If a
+  component / hook / file matching the name exists, the item is
+  likely `in-progress`, not `not-started`. The UR-02 false
+  positive (drag-to-resize divider, listed `not-started` while
+  the component + hook + mount + test all existed) caused this
+  rule.
+- **Audits use the full discovery checklist** (14 methods at the
+  bottom of `backlog.md`), not just `grep TODO`. Past audits
+  missed work because they used one method.
+- **Closure deletes the inline TODO.** A `TODO(<id>)` in source
+  pointing at a closed item is a drift signal. Grep should never
+  find one.
+- **WIP cap = 3 per epic.** Before opening a 4th `in-progress`
+  in any one epic, close one to genuine done OR move one back
+  to `not-started`.

@@ -5,8 +5,7 @@ tissue between external specs (design bundle, GroundX APIs, harness
 skills) and this codebase.
 
 - [**Backlog (single source of truth)**](docs/agents/backlog.md) — every pending item across 14 epics with stable `<EPIC>-N` ids + a discovery checklist for the next audit pass. Inline `TODO(<id>)` markers in source resolve here. **Read the Rules of Engagement at the top before opening new work.**
-- [**Postmortem 2026-05-25 — muddied memory, half-done work, and how this backlog came to be**](docs/agents/postmortem-2026-05-25.md) — what went wrong on this project (multiple drifting truth sources, closed-the-seam-called-it-done, missed-features-during-audit) and the locked-in rules now in place. Read once before you start writing code.
-- [**Discipline rules — TDD, secrets, response style**](docs/agents/discipline.md) — failing test first, never commit `.env*` or Partner API `*username` fields, tight responses.
+- [**Discipline rules**](docs/agents/discipline.md) — failing test first, never commit `.env*` or Partner API `*username` fields, tight responses, **definition of done = user-visible test (not seam test)**, **single backlog (no tombstones)**, **verify before flagging not-started**, WIP cap = 3 per epic, closure deletes inline TODOs.
 - [**Project overview + stack**](docs/agents/overview.md) — chat-driven GroundX onboarding UI on Vite + React + MUI + Express + MySQL + EKS. Two-mode model (Onboarding + Steady).
 - [**Getting started — first day**](docs/agents/getting-started.md) — clone → local preview → test loop → deploy loop → MCP tool usage.
 - [**Architecture**](docs/agents/architecture.md) — Shell, contexts (ChatStore root, EntityRegistry derived facade, OnboardingSession), views (F1–F7), Helm chart. Where things go when you add a feature.
