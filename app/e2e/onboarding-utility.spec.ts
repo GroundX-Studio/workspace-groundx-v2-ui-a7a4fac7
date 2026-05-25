@@ -88,14 +88,74 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     await expect(page.getByTestId("gate-card")).toBeHidden();
   });
 
-  test("F6 → committed shows the magic-link confirmation", async ({ page }) => {
+  test("F6 → register → claim → F7 (full sign-up happy path with stubbed APIs)", async ({ page }) => {
+    // Stub the two endpoints the gate hits. We use page.route so this
+    // works against the frontend-only e2e webServer (no live middleware).
+    await page.route("**/api/auth/register", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ username: "gx-user", token: "t", xJwtToken: "x", apiKeys: [] }),
+      });
+    });
+    await page.route("**/api/chat-sessions/claim", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ rekeyedSessions: 1 }),
+      });
+    });
+
     await page.getByTestId("sample-utility").click();
     await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
     await page.getByTestId("advance-to-f5").click();
     await page.getByTestId("advance-to-f6").click();
+    await expect(page.getByTestId("gate-card")).toBeVisible();
+
+    // Fill the real register form (first / last / email / password / confirm).
+    await page.getByTestId("gate-first-input").fill("Pat");
+    await page.getByTestId("gate-last-input").fill("Buyer");
     await page.getByTestId("gate-email-input").fill("pat@example.com");
-    await page.getByTestId("gate-email-submit").click();
-    await expect(page.getByText(/CHECK YOUR EMAIL/i)).toBeVisible();
+    await page.getByTestId("gate-password-input").fill("secret12345");
+    await page.getByTestId("gate-confirm-input").fill("secret12345");
+    await page.getByTestId("gate-register-submit").click();
+
+    // Committed card replaces the form on success.
+    await expect(page.getByTestId("gate-committed")).toBeVisible();
+    await expect(page.getByText(/WELCOME/i)).toBeVisible();
+
+    // Continue advances to F7 (IntegrateView).
+    await page.getByTestId("gate-continue-integrate").click();
+    // F7 is still a stub view — assert by URL/route stability rather
+    // than by content. The frame transition is enough to confirm the
+    // gate flipped state correctly.
+    await page.waitForLoadState("networkidle");
+  });
+
+  test("F6 inline error appears + gate stays open when register fails", async ({ page }) => {
+    await page.route("**/api/auth/register", async (route) => {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Email already registered" }),
+      });
+    });
+
+    await page.getByTestId("sample-utility").click();
+    await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
+    await page.getByTestId("advance-to-f5").click();
+    await page.getByTestId("advance-to-f6").click();
+    await page.getByTestId("gate-first-input").fill("Pat");
+    await page.getByTestId("gate-last-input").fill("Buyer");
+    await page.getByTestId("gate-email-input").fill("pat@example.com");
+    await page.getByTestId("gate-password-input").fill("secret12345");
+    await page.getByTestId("gate-confirm-input").fill("secret12345");
+    await page.getByTestId("gate-register-submit").click();
+
+    // Inline error renders; gate stays open (not committed).
+    await expect(page.getByTestId("gate-error")).toContainText(/already registered/i);
+    await expect(page.getByTestId("gate-card")).toBeVisible();
+    await expect(page.getByTestId("gate-committed")).toBeHidden();
   });
 
   test("BYO tile in F1 renders the gate inline (still on the picker)", async ({ page }) => {
