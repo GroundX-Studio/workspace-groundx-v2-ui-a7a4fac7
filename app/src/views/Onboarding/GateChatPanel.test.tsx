@@ -185,7 +185,7 @@ describe("GateChatPanel", () => {
     function CommittedHarness() {
       const { commitGate } = useOnboardingSession();
       return (
-        <button data-testid="commit-gate" onClick={() => commitGate("magic-link")}>
+        <button data-testid="commit-gate" onClick={() => commitGate("register")}>
           commit
         </button>
       );

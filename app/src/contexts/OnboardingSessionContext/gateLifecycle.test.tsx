@@ -52,13 +52,13 @@ describe("LC3 · gate lifecycle state machine", () => {
     }
   });
 
-  it("open → committed(magic-link) terminal", () => {
+  it("open → committed(register) terminal", () => {
     const { result } = renderHook(() => useOnboardingSession(), { wrapper });
     act(() => result.current.openGate("save"));
-    act(() => result.current.commitGate("magic-link"));
+    act(() => result.current.commitGate("register"));
     expect(result.current.state.gate.status).toBe("committed");
     if (result.current.state.gate.status === "committed") {
-      expect(result.current.state.gate.method).toBe("magic-link");
+      expect(result.current.state.gate.method).toBe("register");
     }
   });
 
@@ -74,7 +74,7 @@ describe("LC3 · gate lifecycle state machine", () => {
   it("committed is terminal — openGate from committed is a no-op", () => {
     const { result } = renderHook(() => useOnboardingSession(), { wrapper });
     act(() => result.current.openGate("save"));
-    act(() => result.current.commitGate("magic-link"));
+    act(() => result.current.commitGate("register"));
     act(() => result.current.openGate("threshold"));
     expect(result.current.state.gate.status).toBe("committed");
   });
@@ -129,7 +129,7 @@ describe("LC3 · gate lifecycle state machine", () => {
   it("dismissGate from committed is a no-op (committed wins)", () => {
     const { result } = renderHook(() => useOnboardingSession(), { wrapper });
     act(() => result.current.openGate("save"));
-    act(() => result.current.commitGate("magic-link"));
+    act(() => result.current.commitGate("register"));
     act(() => result.current.dismissGate());
     expect(result.current.state.gate.status).toBe("committed");
   });

@@ -61,7 +61,7 @@ describe("OnboardingSessionContext", () => {
   it("once committed, openGate is a no-op (single commit per session)", () => {
     const { result } = renderHook(() => useOnboardingSession(), { wrapper });
     act(() => result.current.openGate("save"));
-    act(() => result.current.commitGate("magic-link"));
+    act(() => result.current.commitGate("register"));
     act(() => result.current.openGate("threshold"));
     expect(result.current.state.gate.status).toBe("committed");
   });

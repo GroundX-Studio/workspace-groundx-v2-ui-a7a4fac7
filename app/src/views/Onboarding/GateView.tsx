@@ -1,6 +1,7 @@
 import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
 import CloseIcon from "@mui/icons-material/Close";
 import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import IconButton from "@mui/material/IconButton";
@@ -10,6 +11,8 @@ import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useState, type FC, type FormEvent } from "react";
 
+import { register } from "@/api/entities/customerEntity";
+import { claimAnonymousChat } from "@/api/claimAnonymousChat";
 import {
   BODY_TEXT,
   BORDER,
@@ -34,25 +37,73 @@ const PREAMBLE: Record<GateTrigger, string> = {
 
 /**
  * F6 GateView — three options gate. Never modal. Lives inline in the chat
- * column. Email is the primary commit path (magic link); engineer call is
- * an alternative commit path; SSO is hidden unless `SSO_ENABLED` is true.
+ * column. Registration is the primary commit path (POST /api/auth/register
+ * + POST /api/chat-sessions/claim); engineer call is an alternative commit
+ * path; SSO is hidden unless `SSO_ENABLED` is true.
  */
 export const GateView: FC = () => {
   const { state, dismissGate, commitGate, advanceFrame } = useOnboardingSession();
   const { state: appMode, promoteToSignedIn } = useAppMode();
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [committedCollapsed, setCommittedCollapsed] = useState(false);
 
-  const handleEmailSubmit = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+  const handleRegisterSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (!email.trim()) return;
-      // In production, the form posts to a magic-link endpoint and shows a
-      // "check your inbox" state. The commit transitions to signed-in only
-      // after the user clicks the magic link.
-      commitGate("magic-link");
+      if (submitting) return;
+      setError(null);
+
+      // Client-side validation before the network round-trip. The server
+      // also validates, but catching obvious mismatches here saves a
+      // round-trip + lights up the inline error immediately.
+      const trimmedEmail = email.trim();
+      if (!first.trim() || !last.trim() || !trimmedEmail || !password) {
+        setError("Please fill in every field.");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError("Passwords don't match — please re-enter the confirmation.");
+        return;
+      }
+      if (password.length < 8) {
+        setError("Password must be at least 8 characters.");
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await register({
+          first: first.trim(),
+          last: last.trim(),
+          email: trimmedEmail,
+          password,
+          confirmPassword,
+          endUserLicenseAgreement: true,
+        });
+        // Register set the session cookie. Now re-key the anon chat rows
+        // to the new user. This is best-effort: if it fails the user is
+        // still signed up, they just lose their pre-signup chat history.
+        try {
+          await claimAnonymousChat();
+        } catch (claimErr) {
+          // eslint-disable-next-line no-console
+          console.error("claimAnonymousChat failed after register", claimErr);
+        }
+        promoteToSignedIn();
+        commitGate("register");
+      } catch (err) {
+        setError(extractErrorMessage(err));
+      } finally {
+        setSubmitting(false);
+      }
     },
-    [email, commitGate]
+    [first, last, email, password, confirmPassword, submitting, commitGate, promoteToSignedIn],
   );
 
   const handleBookCall = useCallback(() => {
@@ -62,9 +113,8 @@ export const GateView: FC = () => {
   }, [commitGate]);
 
   const handleContinueToIntegrate = useCallback(() => {
-    promoteToSignedIn();
     advanceFrame("f7");
-  }, [advanceFrame, promoteToSignedIn]);
+  }, [advanceFrame]);
 
   // LC5 ESC-key dismiss (project-state-machines-backout). Wired as a global
   // listener while the gate is open; respects existing input focus by only
@@ -89,6 +139,18 @@ export const GateView: FC = () => {
 
   if (state.gate.status === "committed") {
     const method = state.gate.method;
+    const eyebrow =
+      method === "engineer-call"
+        ? "THANKS - CALL REQUESTED"
+        : method === "register"
+        ? "WELCOME - YOU'RE SIGNED IN"
+        : "THANKS - SIGNED IN";
+    const body =
+      method === "engineer-call"
+        ? "You'll get a Calendly confirmation shortly. Until then, keep exploring — your work is preserved."
+        : method === "register"
+        ? "Your sample work is now saved to your account. Continue to Integrate to wire your real data."
+        : "You're signed in. Continue to Integrate to wire your real data.";
     return (
       <Card sx={{ p: 3, borderRadius: BORDER_RADIUS_CARD, position: "relative" }} aria-label="Gate committed" data-testid="gate-committed">
         <IconButton
@@ -101,12 +163,10 @@ export const GateView: FC = () => {
           <CloseIcon fontSize="small" />
         </IconButton>
         <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
-          {method === "engineer-call" ? "THANKS - CALL REQUESTED" : "THANKS - CHECK YOUR EMAIL"}
+          {eyebrow}
         </Typography>
         <Typography variant="body1" sx={{ mt: 1 }}>
-          {method === "engineer-call"
-            ? "You'll get a Calendly confirmation shortly. Until then, keep exploring — your work is preserved."
-            : "We sent a magic link. Click it on this device to keep going. Your sample work is preserved."}
+          {body}
         </Typography>
         <Box
           component="button"
@@ -143,7 +203,7 @@ export const GateView: FC = () => {
       <Stack spacing={2}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
           <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
-            SIGN IN
+            SIGN UP
           </Typography>
           <IconButton
             size="small"
@@ -160,8 +220,28 @@ export const GateView: FC = () => {
           {PREAMBLE[trigger]}
         </Typography>
 
-        <Box component="form" onSubmit={handleEmailSubmit}>
+        <Box component="form" onSubmit={handleRegisterSubmit}>
           <Stack spacing={1}>
+            <Stack direction="row" spacing={1}>
+              <TextField
+                fullWidth
+                size="small"
+                label="First name"
+                required
+                value={first}
+                onChange={(event) => setFirst(event.target.value)}
+                inputProps={{ "data-testid": "gate-first-input" }}
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label="Last name"
+                required
+                value={last}
+                onChange={(event) => setLast(event.target.value)}
+                inputProps={{ "data-testid": "gate-last-input" }}
+              />
+            </Stack>
             <TextField
               fullWidth
               size="small"
@@ -175,10 +255,37 @@ export const GateView: FC = () => {
                 startAdornment: <EmailOutlinedIcon sx={{ mr: 1, color: NAVY }} fontSize="small" />,
               }}
             />
+            <TextField
+              fullWidth
+              size="small"
+              type="password"
+              label="Password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              inputProps={{ "data-testid": "gate-password-input" }}
+              helperText="At least 8 characters."
+            />
+            <TextField
+              fullWidth
+              size="small"
+              type="password"
+              label="Confirm password"
+              required
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              inputProps={{ "data-testid": "gate-confirm-input" }}
+            />
+            {error ? (
+              <Alert severity="error" data-testid="gate-error" sx={{ alignItems: "center" }}>
+                {error}
+              </Alert>
+            ) : null}
             <Box
               component="button"
               type="submit"
-              data-testid="gate-email-submit"
+              disabled={submitting}
+              data-testid="gate-register-submit"
               sx={{
                 p: 1,
                 borderRadius: BORDER_RADIUS_PILL,
@@ -186,14 +293,15 @@ export const GateView: FC = () => {
                 color: NAVY,
                 textAlign: "center",
                 fontWeight: 600,
-                cursor: "pointer",
+                cursor: submitting ? "wait" : "pointer",
+                opacity: submitting ? 0.7 : 1,
                 border: "none",
                 fontFamily: "inherit",
                 fontSize: 14,
                 width: "100%",
               }}
             >
-              Send magic link
+              {submitting ? "Creating account…" : "Create account"}
             </Box>
           </Stack>
         </Box>
@@ -261,3 +369,20 @@ export const GateView: FC = () => {
     </Card>
   );
 };
+
+/**
+ * Pull a human-readable error message out of an axios error envelope.
+ * Falls back to a generic fallback so we never render `[object Object]`.
+ */
+function extractErrorMessage(err: unknown): string {
+  if (err && typeof err === "object") {
+    const e = err as { response?: { data?: { error?: string; message?: string } }; message?: string };
+    return (
+      e.response?.data?.error ??
+      e.response?.data?.message ??
+      e.message ??
+      "Couldn't create your account. Please try again."
+    );
+  }
+  return typeof err === "string" ? err : "Couldn't create your account. Please try again.";
+}

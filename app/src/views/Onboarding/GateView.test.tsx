@@ -1,16 +1,38 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
+// Hoisted vi.mock + factory pattern: every test gets a fresh function it can
+// configure per-case without leaking state across files.
+const mocks = vi.hoisted(() => ({
+  register: vi.fn(),
+  claimAnonymousChat: vi.fn(),
+}));
+
+vi.mock("@/api/entities/customerEntity", () => ({
+  register: mocks.register,
+}));
+vi.mock("@/api/claimAnonymousChat", () => ({
+  claimAnonymousChat: mocks.claimAnonymousChat,
+}));
+
 import { GateView } from "./GateView";
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  mocks.register.mockReset();
+  mocks.claimAnonymousChat.mockReset();
+  mocks.register.mockResolvedValue({ username: "gx-user", token: "t", xJwtToken: "x", apiKeys: [] });
+  mocks.claimAnonymousChat.mockResolvedValue({ rekeyedSessions: 1 });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 const OpenGateHarness = ({ trigger = "save" }: { trigger?: "save" | "export" | "byo" | "threshold" }) => {
@@ -32,13 +54,25 @@ const StateProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { authState: string
   return null;
 };
 
+async function fillRegisterForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(await screen.findByTestId("gate-first-input"), "Pat");
+  await user.type(await screen.findByTestId("gate-last-input"), "Buyer");
+  await user.type(await screen.findByTestId("gate-email-input"), "buyer@example.com");
+  await user.type(await screen.findByTestId("gate-password-input"), "secret123");
+  await user.type(await screen.findByTestId("gate-confirm-input"), "secret123");
+}
+
 describe("GateView (F6)", () => {
-  it("renders the inline gate with email, engineer call, and keep-exploring actions", async () => {
+  it("renders the inline gate with register form, engineer call, and keep-exploring actions", async () => {
     renderWithOnboardingProviders(<OpenGateHarness />, { initialScenario: "utility", initialFrame: "f6" });
 
     expect(await screen.findByTestId("gate-card")).toBeInTheDocument();
     expect(screen.getByText("Save your work to come back to it. One quick step.")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-first-input")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-last-input")).toBeInTheDocument();
     expect(screen.getByTestId("gate-email-input")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-password-input")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-confirm-input")).toBeInTheDocument();
     expect(screen.getByTestId("gate-book-call")).toBeInTheDocument();
     expect(screen.getByTestId("gate-keep-exploring")).toHaveTextContent("Keep chatting with the sample");
   });
@@ -62,7 +96,7 @@ describe("GateView (F6)", () => {
     expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
   });
 
-  it("commits email, then continues to the Integrate frame with signed-in app state", async () => {
+  it("registers, claims, and commits with method=register on submit", async () => {
     const user = userEvent.setup();
     let snapshot = { authState: "", frame: "", gateStatus: "" };
 
@@ -74,15 +108,101 @@ describe("GateView (F6)", () => {
       { initialScenario: "utility", initialFrame: "f6" },
     );
 
-    await user.type(await screen.findByTestId("gate-email-input"), "buyer@example.com");
-    await user.click(screen.getByTestId("gate-email-submit"));
+    await fillRegisterForm(user);
+    await user.click(screen.getByTestId("gate-register-submit"));
 
+    // Register fires with the form's contents.
+    await waitFor(() => expect(mocks.register).toHaveBeenCalledTimes(1));
+    const arg = mocks.register.mock.calls[0][0];
+    expect(arg).toMatchObject({
+      first: "Pat",
+      last: "Buyer",
+      email: "buyer@example.com",
+      password: "secret123",
+      confirmPassword: "secret123",
+      endUserLicenseAgreement: true,
+    });
+
+    // Claim follows register.
+    await waitFor(() => expect(mocks.claimAnonymousChat).toHaveBeenCalledTimes(1));
+    const order = mocks.register.mock.invocationCallOrder[0];
+    const claimOrder = mocks.claimAnonymousChat.mock.invocationCallOrder[0];
+    expect(claimOrder).toBeGreaterThan(order);
+
+    // Gate transitions to committed; app mode promoted.
     expect(await screen.findByTestId("gate-committed")).toBeInTheDocument();
-    await user.click(screen.getByTestId("gate-continue-integrate"));
-
     await waitFor(() => {
       expect(snapshot.authState).toBe("signed-in");
-      expect(snapshot.frame).toBe("f7");
+      expect(snapshot.gateStatus).toBe("committed");
+    });
+
+    // "Continue to Integrate" advances to F7.
+    await user.click(screen.getByTestId("gate-continue-integrate"));
+    await waitFor(() => expect(snapshot.frame).toBe("f7"));
+  });
+
+  it("shows an inline error and leaves the gate open when register fails", async () => {
+    const user = userEvent.setup();
+    mocks.register.mockRejectedValueOnce({ response: { data: { error: "Email already registered" } } });
+
+    let snapshot = { authState: "", frame: "", gateStatus: "" };
+    renderWithOnboardingProviders(
+      <>
+        <OpenGateHarness />
+        <StateProbe onSnapshot={(next) => (snapshot = next)} />
+      </>,
+      { initialScenario: "utility", initialFrame: "f6" },
+    );
+
+    await fillRegisterForm(user);
+    await user.click(screen.getByTestId("gate-register-submit"));
+
+    await waitFor(() => expect(mocks.register).toHaveBeenCalledTimes(1));
+    expect(mocks.claimAnonymousChat).not.toHaveBeenCalled();
+
+    // Inline error rendered.
+    expect(await screen.findByTestId("gate-error")).toHaveTextContent(/already registered/i);
+
+    // Gate is still open (not committed, not dismissed).
+    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+    expect(snapshot.gateStatus).toBe("open");
+    expect(snapshot.authState).toBe("anonymous");
+  });
+
+  it("rejects mismatched password + confirm before calling register", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OpenGateHarness />, { initialScenario: "utility", initialFrame: "f6" });
+
+    await user.type(await screen.findByTestId("gate-first-input"), "Pat");
+    await user.type(await screen.findByTestId("gate-last-input"), "Buyer");
+    await user.type(await screen.findByTestId("gate-email-input"), "buyer@example.com");
+    await user.type(await screen.findByTestId("gate-password-input"), "secret123");
+    await user.type(await screen.findByTestId("gate-confirm-input"), "different");
+    await user.click(screen.getByTestId("gate-register-submit"));
+
+    expect(await screen.findByTestId("gate-error")).toHaveTextContent(/passwords/i);
+    expect(mocks.register).not.toHaveBeenCalled();
+  });
+
+  it("still commits even if claim fails after a successful register (best-effort)", async () => {
+    const user = userEvent.setup();
+    mocks.claimAnonymousChat.mockRejectedValueOnce(new Error("claim 502"));
+
+    let snapshot = { authState: "", frame: "", gateStatus: "" };
+    renderWithOnboardingProviders(
+      <>
+        <OpenGateHarness />
+        <StateProbe onSnapshot={(next) => (snapshot = next)} />
+      </>,
+      { initialScenario: "utility", initialFrame: "f6" },
+    );
+
+    await fillRegisterForm(user);
+    await user.click(screen.getByTestId("gate-register-submit"));
+
+    expect(await screen.findByTestId("gate-committed")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(snapshot.authState).toBe("signed-in");
       expect(snapshot.gateStatus).toBe("committed");
     });
   });
@@ -99,8 +219,8 @@ describe("GateView (F6)", () => {
       { initialScenario: "utility", initialFrame: "f6" },
     );
 
-    await user.type(await screen.findByTestId("gate-email-input"), "buyer@example.com");
-    await user.click(screen.getByTestId("gate-email-submit"));
+    await fillRegisterForm(user);
+    await user.click(screen.getByTestId("gate-register-submit"));
     await user.click(await screen.findByTestId("gate-committed-close"));
 
     await waitFor(() => expect(gateStatus).toBe("committed"));

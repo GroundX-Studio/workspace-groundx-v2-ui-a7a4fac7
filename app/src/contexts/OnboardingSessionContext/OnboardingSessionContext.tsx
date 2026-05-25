@@ -200,7 +200,7 @@ function useSessionFacade(): OnboardingSessionApi {
   }, [appendViewerEvent]);
 
   const commitGate = useCallback(
-    (method: "magic-link" | "sso" | "engineer-call") => {
+    (method: "register" | "sso" | "engineer-call") => {
       setGate({ status: "committed", method });
       appendViewerEvent({
         action: "intent-dispatched",

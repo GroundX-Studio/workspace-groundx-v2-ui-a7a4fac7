@@ -3,7 +3,7 @@ import type { FFrame, GateTrigger, Scenario } from "@/types/onboarding";
 export type GateStatus =
   | { status: "idle" }
   | { status: "open"; trigger: GateTrigger; openedAt: number }
-  | { status: "committed"; method: "magic-link" | "sso" | "engineer-call" }
+  | { status: "committed"; method: "register" | "sso" | "engineer-call" }
   | { status: "dismissed"; trigger: GateTrigger; dismissedAt: number };
 
 export interface OnboardingSessionState {
@@ -26,5 +26,5 @@ export interface OnboardingSessionApi {
   advanceFrame: (frame: FFrame) => void;
   openGate: (trigger: GateTrigger) => void;
   dismissGate: () => void;
-  commitGate: (method: "magic-link" | "sso" | "engineer-call") => void;
+  commitGate: (method: "register" | "sso" | "engineer-call") => void;
 }
