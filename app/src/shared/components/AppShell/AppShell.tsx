@@ -193,8 +193,11 @@ export function AppShell({
             type="button"
             data-testid="appshell-compact-view-toggle"
             onClick={() => setMode(showCanvas ? "focus-chat" : "focus-canvas")}
-            aria-label={showCanvas ? "Show chat" : "Show canvas"}
+            aria-label={showCanvas ? "View chat" : "View canvas"}
             sx={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 0.5,
               border: `1px solid ${BORDER}`,
               borderRadius: 999,
               backgroundColor: WHITE,
@@ -208,7 +211,19 @@ export function AppShell({
               "&:hover": { backgroundColor: WARM_OFFWHITE },
             }}
           >
-            {showCanvas ? "Chat" : "Canvas"}
+            {/* Tiny panel-swap glyph: two stacked rectangles to hint the
+                action is "switch which pane is foregrounded". Inline SVG
+                so we don't pull in @mui/icons-material for one icon. */}
+            <Box
+              component="svg"
+              aria-hidden
+              viewBox="0 0 14 14"
+              sx={{ width: 12, height: 12, display: "block" }}
+            >
+              <rect x="1" y="1" width="8" height="8" rx="1.5" fill="none" stroke={NAVY} strokeWidth="1.5" />
+              <rect x="5" y="5" width="8" height="8" rx="1.5" fill={WHITE} stroke={NAVY} strokeWidth="1.5" />
+            </Box>
+            {showCanvas ? "View chat" : "View canvas"}
           </Box>
         </Box>
 
@@ -254,7 +269,12 @@ export function AppShell({
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
-            backgroundColor: WHITE,
+            // Warm-offwhite surface tone matches the nav rail's
+            // background and gives the inner chat/canvas card visual
+            // context — without it the card floats in a sea of flat
+            // white and the empty space below it reads as "page broken"
+            // rather than "intentional padding".
+            backgroundColor: WARM_OFFWHITE,
           }}
         >
           {showCanvas ? (
