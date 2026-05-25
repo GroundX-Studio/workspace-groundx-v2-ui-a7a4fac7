@@ -336,6 +336,20 @@ export class MySqlAppRepository implements AppRepository {
     return rows.map(rowToChatMessage);
   }
 
+  async markChatMessagesCompressed(messageIds: string[], summaryId: string): Promise<void> {
+    if (messageIds.length === 0) return;
+    // mysql2 expands the bound array into the ?-placeholder list, e.g.
+    // [["m1","m2","m3"]] → IN (?, ?, ?). Bounded by the compression
+    // planner so this is never a million-id array.
+    const placeholders = messageIds.map(() => "?").join(", ");
+    await this.pool.execute(
+      `UPDATE chat_messages
+         SET compressed_into_summary_id = ?
+       WHERE id IN (${placeholders})`,
+      [summaryId, ...messageIds],
+    );
+  }
+
   // ── Summaries ───────────────────────────────────────────────────
 
   async appendConversationSummary(record: ConversationSummaryRecord): Promise<void> {

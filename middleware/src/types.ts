@@ -132,6 +132,14 @@ export interface AppRepository {
   // Messages
   appendChatMessage(record: ChatMessageRecord): Promise<void>;
   listChatMessages(chatSessionId: string): Promise<ChatMessageRecord[]>;
+  /**
+   * Mark a batch of chat messages as compressed into a given summary.
+   * Used by the compression chain (Phase J): after a new
+   * ConversationSummary is written, the absorbed messages get their
+   * compressedIntoSummaryId set so subsequent live-tail reads
+   * (`compressedIntoSummaryId IS NULL`) skip them.
+   */
+  markChatMessagesCompressed(messageIds: string[], summaryId: string): Promise<void>;
 
   // Summaries (compression chain)
   appendConversationSummary(record: ConversationSummaryRecord): Promise<void>;

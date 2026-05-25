@@ -312,7 +312,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
   autoSeedDefaultSession = false,
 }) => {
   const [state, setState] = useState<ChatStoreState>(() => {
-    if (initialSessions || initialOwnerKey || initialActiveSessionId !== undefined) {
+    // If the caller pre-loaded sessions or an explicit active id,
+    // that wins outright — tests use this to construct a known state.
+    if (initialSessions || initialActiveSessionId !== undefined) {
       return {
         ownerKey: initialOwnerKey ?? mintAnonOwnerKey(),
         sessions: initialSessions ?? new Map(),
@@ -320,7 +322,11 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       };
     }
     if (ephemeral) {
-      return { ownerKey: mintAnonOwnerKey(), sessions: new Map(), activeSessionId: null };
+      return {
+        ownerKey: initialOwnerKey ?? mintAnonOwnerKey(),
+        sessions: new Map(),
+        activeSessionId: null,
+      };
     }
     const persisted = rehydrate();
     if (persisted) return persisted;

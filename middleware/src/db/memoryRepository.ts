@@ -78,6 +78,25 @@ export class MemoryAppRepository implements AppRepository {
     );
   }
 
+  async markChatMessagesCompressed(messageIds: string[], summaryId: string): Promise<void> {
+    if (messageIds.length === 0) return;
+    const idSet = new Set(messageIds);
+    // The in-memory store is sharded by chatSessionId. To stay simple
+    // we walk every shard; production callers always pass ids from a
+    // single session so the cost is bounded by the active session's
+    // message count. The MySQL impl will use a single UPDATE ... WHERE
+    // id IN (...) and won't pay this cost.
+    for (const [sessionId, messages] of this.chatMessages.entries()) {
+      let mutated = false;
+      const next = messages.map((m) => {
+        if (!idSet.has(m.id)) return m;
+        mutated = true;
+        return { ...m, compressedIntoSummaryId: summaryId };
+      });
+      if (mutated) this.chatMessages.set(sessionId, next);
+    }
+  }
+
   // ── Summaries ───────────────────────────────────────────────────
 
   async appendConversationSummary(record: ConversationSummaryRecord): Promise<void> {

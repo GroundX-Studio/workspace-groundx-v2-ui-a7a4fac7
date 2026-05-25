@@ -68,6 +68,26 @@ describe("MemoryAppRepository — chat-session methods", () => {
     expect(list.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
   });
 
+  it("marks chat messages as compressed into a summary id (compression chain Phase J)", async () => {
+    // When the compression runner writes a new ConversationSummary it
+    // must also update the absorbed messages' compressedIntoSummaryId
+    // field so subsequent live-tail reads skip them. The repo exposes
+    // a batch update keyed by message ids.
+    const repo = new MemoryAppRepository();
+    await repo.appendChatMessage(makeMessage("m1", "chat-1", 1, "user", "hello"));
+    await repo.appendChatMessage(makeMessage("m2", "chat-1", 2, "assistant", "hi"));
+    await repo.appendChatMessage(makeMessage("m3", "chat-1", 3, "user", "follow-up"));
+
+    await repo.markChatMessagesCompressed(["m1", "m2"], "summary-1");
+
+    const all = await repo.listChatMessages("chat-1");
+    const byId = new Map(all.map((m) => [m.id, m]));
+    expect(byId.get("m1")?.compressedIntoSummaryId).toBe("summary-1");
+    expect(byId.get("m2")?.compressedIntoSummaryId).toBe("summary-1");
+    // m3 must remain in the live tail (compressedIntoSummaryId stays null).
+    expect(byId.get("m3")?.compressedIntoSummaryId).toBeNull();
+  });
+
   it("appends conversation summaries and lists newest first", async () => {
     const repo = new MemoryAppRepository();
     const older: ConversationSummaryRecord = {
