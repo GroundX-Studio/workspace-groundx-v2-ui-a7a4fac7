@@ -10,19 +10,25 @@ import { expect, test } from "@playwright/test";
  * surface on a 375-px viewport (iPhone X-class) and a 768-px viewport
  * (iPad-portrait class) to defend against regressions that the
  * jsdom-based unit tests can't catch.
+ *
+ * Setup: every test picks the Utility sample to transition F1 → F2.
+ * That gets us into F2 with no auth required (no gate card; just the
+ * compact layout we want to assert).
  */
 
 const MOBILE = { width: 375, height: 812 } as const;
 const TABLET_PORTRAIT = { width: 768, height: 1024 } as const;
+const DESKTOP = { width: 1280, height: 800 } as const;
 
 test.describe("F2 compact mode", () => {
   test("mobile (375px): hamburger opens the nav drawer; backdrop closes it", async ({ page }) => {
     await page.setViewportSize(MOBILE);
     await page.goto("/onboarding");
-
-    // Land on F1, kick BYO flow to advance to F2 (the gate-as-message lives there).
-    const byo = page.getByRole("button", { name: /bring your own data/i }).first();
-    await byo.click();
+    await page.getByTestId("sample-utility").click();
+    // Compact mode mounts the top bar as soon as F2 enters; the
+    // `onboarding-frame-f2` element lives in the canvas slot which is
+    // unmounted until the user taps "View canvas".
+    await expect(page.getByTestId("appshell-compact-topbar")).toBeVisible();
 
     // Compact top bar present; aside (desktop nav column) is NOT in the row.
     await expect(page.getByTestId("appshell-compact-topbar")).toBeVisible();
@@ -44,7 +50,11 @@ test.describe("F2 compact mode", () => {
   test("mobile (375px): view-swap pill toggles between chat and canvas", async ({ page }) => {
     await page.setViewportSize(MOBILE);
     await page.goto("/onboarding");
-    await page.getByRole("button", { name: /bring your own data/i }).first().click();
+    await page.getByTestId("sample-utility").click();
+    // Compact mode mounts the top bar as soon as F2 enters; the
+    // `onboarding-frame-f2` element lives in the canvas slot which is
+    // unmounted until the user taps "View canvas".
+    await expect(page.getByTestId("appshell-compact-topbar")).toBeVisible();
 
     // Compact mode starts in focus-chat: chat pane visible, canvas hidden.
     await expect(page.getByTestId("appshell-chat")).toBeVisible();
@@ -70,8 +80,13 @@ test.describe("F2 compact mode", () => {
   test("mobile (375px): no horizontal overflow at F2", async ({ page }) => {
     await page.setViewportSize(MOBILE);
     await page.goto("/onboarding");
-    await page.getByRole("button", { name: /bring your own data/i }).first().click();
-    // The gate card and its parent layout must stay within the viewport.
+    await page.getByTestId("sample-utility").click();
+    // Compact mode mounts the top bar as soon as F2 enters; the
+    // `onboarding-frame-f2` element lives in the canvas slot which is
+    // unmounted until the user taps "View canvas".
+    await expect(page.getByTestId("appshell-compact-topbar")).toBeVisible();
+    // The chat content must stay within the viewport — no surprise
+    // horizontal scrollbar.
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -81,15 +96,17 @@ test.describe("F2 compact mode", () => {
   test("tablet portrait (768px): also runs compact-mode top bar", async ({ page }) => {
     await page.setViewportSize(TABLET_PORTRAIT);
     await page.goto("/onboarding");
-    await page.getByRole("button", { name: /bring your own data/i }).first().click();
+    await page.getByTestId("sample-utility").click();
     await expect(page.getByTestId("appshell-compact-topbar")).toBeVisible();
     await expect(page.locator("aside[aria-label='Primary navigation']")).toHaveCount(0);
   });
 
   test("desktop (1280px): NO compact top bar; the three-pane layout renders", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize(DESKTOP);
     await page.goto("/onboarding");
-    await page.getByRole("button", { name: /bring your own data/i }).first().click();
+    await page.getByTestId("sample-utility").click();
+    // At desktop the canvas slot mounts and the f2 frame is rendered there.
+    await expect(page.getByTestId("onboarding-frame-f2")).toBeVisible();
     await expect(page.getByTestId("appshell-compact-topbar")).toHaveCount(0);
     await expect(page.locator("aside[aria-label='Primary navigation']")).toBeVisible();
   });

@@ -7,7 +7,7 @@ import { SessionSwitcher } from "./SessionSwitcher";
 
 function Harness({ children }: { children: React.ReactNode }) {
   return (
-    <ChatStoreProvider ownerKey="anon-test" autoSeedDefaultSession>
+    <ChatStoreProvider initialOwnerKey="anon-test" autoSeedDefaultSession>
       {children}
     </ChatStoreProvider>
   );

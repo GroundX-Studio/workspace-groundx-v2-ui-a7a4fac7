@@ -11,7 +11,7 @@ import { SteadyShell } from "./SteadyShell";
 function Harness({ initialUrl, children }: { initialUrl: string; children: React.ReactNode }) {
   return (
     <GxThemeProvider>
-      <ChatStoreProvider ownerKey="anon-test" autoSeedDefaultSession>
+      <ChatStoreProvider initialOwnerKey="anon-test" autoSeedDefaultSession>
         <MemoryRouter initialEntries={[initialUrl]}>
           <Routes>
             <Route path={ROUTER_PATHS.STEADY_SESSION} element={children} />

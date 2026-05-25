@@ -68,7 +68,7 @@ describe("serializeChatPayload", () => {
       {
         id: "e1",
         timestamp: 1700000000500,
-        entityKey: "sample:utility",
+        entityKey: "sample:utility" as EntityKey,
         action: "opened",
         source: "user",
         detail: { foo: "bar" },
@@ -77,8 +77,8 @@ describe("serializeChatPayload", () => {
 
     const session = makeSession({
       messages: [
-        { id: "m1", role: "user", content: "hi", createdAt: 1700000000100 },
-        { id: "m2", role: "assistant", content: "hello", createdAt: 1700000000200 },
+        { id: "m1", role: "user", content: "hi", timestamp: 1700000000100 },
+        { id: "m2", role: "assistant", content: "hello", timestamp: 1700000000200 },
       ],
       entities,
       activeEntityKey: "sample:utility" as EntityKey,

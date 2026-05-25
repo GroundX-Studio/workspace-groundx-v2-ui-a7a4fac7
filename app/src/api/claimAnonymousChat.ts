@@ -135,7 +135,7 @@ export function serializeChatPayload(
         promptTokens: null,
         completionTokens: null,
         errorCode: null,
-        createdAt: new Date(m.createdAt).toISOString(),
+        createdAt: new Date(m.timestamp).toISOString(),
       });
     });
 
