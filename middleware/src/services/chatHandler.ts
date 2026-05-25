@@ -135,11 +135,17 @@ export interface HandleChatMessageDeps {
   idGen?: () => string;
 }
 
-const DEFAULT_CONTEXT_WINDOW = 16_000;
-const DEFAULT_COMPRESSION_TARGET_TOKENS = 1_000;
-const DEFAULT_MAX_ACTIVE_SUMMARIES_BEFORE_META = 10;
-const DEFAULT_META_COMPACTION_BATCH_SIZE = 5;
-const DEFAULT_MAX_SUMMARY_OUTPUT_TOKENS = 600;
+/**
+ * In-code fallback constants — used ONLY when handleChatMessage is
+ * called from a test or other caller that omits the `deps.<field>`.
+ * Production always reads from env via app.ts; the values MUST stay
+ * pinned to the env Zod defaults (drift guard test enforces this).
+ */
+export const DEFAULT_CONTEXT_WINDOW = 16_000;
+export const DEFAULT_COMPRESSION_TARGET_TOKENS = 1_000;
+export const DEFAULT_MAX_ACTIVE_SUMMARIES_BEFORE_META = 10;
+export const DEFAULT_META_COMPACTION_BATCH_SIZE = 5;
+export const DEFAULT_MAX_SUMMARY_OUTPUT_TOKENS = 600;
 const RECENT_VIEWER_EVENTS = 10;
 
 /**

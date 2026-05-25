@@ -632,6 +632,36 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
     expect(summaries[0].toMessageId).toBe("m2");
   });
 
+  describe("CF-17 drift guard — in-code DEFAULT_* constants pinned to env Zod defaults", () => {
+    // If someone bumps an env default without updating the in-code
+    // fallback (or vice versa), these tests fail. That prevents the
+    // "production reads X, test reads Y" silent-divergence class of bug.
+    it("pins all 5 chatHandler defaults to the matching env Zod default", async () => {
+      const {
+        DEFAULT_CONTEXT_WINDOW,
+        DEFAULT_COMPRESSION_TARGET_TOKENS,
+        DEFAULT_MAX_ACTIVE_SUMMARIES_BEFORE_META,
+        DEFAULT_META_COMPACTION_BATCH_SIZE,
+        DEFAULT_MAX_SUMMARY_OUTPUT_TOKENS,
+      } = await import("./chatHandler.js");
+      const { loadEnv } = await import("../config/env.js");
+      // Load env with nothing set — Zod fills in every default.
+      const env = loadEnv({ NODE_ENV: "development", PORT: "3001" } as never);
+      expect(env.LLM_CONTEXT_WINDOW_TOKENS).toBe(DEFAULT_CONTEXT_WINDOW);
+      expect(env.COMPRESSION_TARGET_TOKENS).toBe(DEFAULT_COMPRESSION_TARGET_TOKENS);
+      expect(env.MAX_ACTIVE_SUMMARIES_BEFORE_META).toBe(DEFAULT_MAX_ACTIVE_SUMMARIES_BEFORE_META);
+      expect(env.META_COMPACTION_BATCH_SIZE).toBe(DEFAULT_META_COMPACTION_BATCH_SIZE);
+      expect(env.MAX_SUMMARY_OUTPUT_TOKENS).toBe(DEFAULT_MAX_SUMMARY_OUTPUT_TOKENS);
+    });
+
+    it("pins shouldCompress's default trigger ratio to the env Zod default", async () => {
+      const { DEFAULT_COMPRESSION_TRIGGER_RATIO } = await import("./contextBundler.js");
+      const { loadEnv } = await import("../config/env.js");
+      const env = loadEnv({ NODE_ENV: "development", PORT: "3001" } as never);
+      expect(env.COMPRESSION_TRIGGER_RATIO).toBe(DEFAULT_COMPRESSION_TRIGGER_RATIO);
+    });
+  });
+
   it("`maxSummaryOutputTokens` flows into the LLM call body as `max_tokens`", async () => {
     await repo.appendChatMessage(makeMessage("m1", "chat-1", 1, "user", "x".repeat(400)));
     await repo.appendChatMessage(makeMessage("m2", "chat-1", 2, "assistant", "y".repeat(400)));
