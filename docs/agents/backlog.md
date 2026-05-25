@@ -153,6 +153,8 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 | OB-05 | not-started | Sentry source-map upload on production builds. | Stack trace in Sentry shows TS file + line, not minified js. |
 | OB-06 | not-started | AWS Managed Prometheus dashboards + AWS X-Ray traces. Middleware emits both; no dashboards configured. | Open the dashboard URL → see live request rate + p99 latency. |
 | OB-07 | not-started | Alert rules: SLO violations, error-budget burn, ALB 5xx, unhealthy hosts. ALB-alarms workflow exists; SLO + budget alerts don't. | Synthetic burn fires a real Sentry/PagerDuty alert. |
+| OB-08 | not-started | Migrate raw frontend `console.error` calls to structured client telemetry. Today: AuthProvider (4 calls), GateView claim-fail (1), OnboardingShell adapter-failure (1), CanvasOrchestrator adapter-failures (2). Each is an `eslint-disable`-style escape from the lint rule that should catch this. Depends on OB-01 (browser Sentry SDK). | Grep `console.error` in `app/src/` outside test files returns no hits; each catch site routes via `Sentry.captureException(err, {extra})`. |
+| OB-09 | not-started | Migrate middleware `console.warn` calls in `chatRouter.ts` (hybrid-RAG-failed at L264, unknown-scope at L377) to pino structured logging. Both currently use `eslint-disable-next-line no-console` to bypass the lint rule. | Grep `console.warn` in `middleware/src/` outside tests returns no hits; the warns surface via `logger.warn({...}, "msg")` with the scrubber applied. |
 
 # Epic: SEC — security
 
@@ -168,7 +170,7 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 | ID | Status | Item | Closure test |
 |---|---|---|---|
 | UR-01 | not-started | `PdfViewer` wrapper component using `pdfjs-dist` v4. Worker bundled same-origin. Today F2 UnderstandView has a "flat-WHITE PDF placeholder" per inline comment. | Sample document renders real PDF with pdfjs in F2. |
-| UR-02 | not-started | Drag-to-resize chat/canvas divider — `useResizable` hook with snap zones (<200 → focus canvas, 280–640 live, >720 → focus chat), localStorage persistence, a11y arrow-key. Per `project_ui_runtime.md`. Today AppShell focus modes are click-toggled only. | Drag the divider; snap fires; reload preserves. |
+| UR-02 | in-progress | Drag-to-resize chat/canvas divider. ALREADY BUILT: `ResizeHandle` component with a11y arrow-key bump; `useResizableSplit` hook with `zone` output; AppShell wires both at line 362 and mirrors snap-zone into focus-mode. Still pending: localStorage persistence (no `localStorage` reference in either file) + `prefers-reduced-motion` gate on the drag animation. **Audit-discovered correction 2026-05-25** — was incorrectly listed not-started in the prior backlog. | Drag the divider, snap to a focus mode (works today). Reload preserves the width (pending). With OS reduced-motion preference, drag uses no transitions (pending). |
 | UR-03 | not-started | `<MotionConfig>` global with `prefers-reduced-motion` fallback (80ms crossfade). Today Framer Motion has no global config. | OS preference set → animations swap to 80ms crossfade. |
 | UR-04 | not-started | StepStrip sub-bracket: Analyze pill contains Extract/Interact/Report sub-pills per `project_ui_runtime.md`. Verify against current StepStrip implementation. | StepStrip renders the sub-pill row under Analyze. |
 | UR-05 | not-started | Hotkey surface (cmd-K, Esc, etc.) via `react-hotkeys-hook`. Per `project_ui_runtime.md`. | cmd-K opens session switcher; Esc dismisses overlays. |
@@ -201,6 +203,7 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 | TS-07 | not-started | Load test against `/api/chat/messages`: ≥100 concurrent SSE per `project_test_plan.md`. | P95 < 5s under load with mocked LLM. |
 | TS-08 | not-started | PII regex DoS guard: pathological input (50k repeated digits) doesn't trigger catastrophic backtracking. | Adversarial input completes in <100ms. |
 | TS-09 | not-started | Reduced-motion sweeps in CI. | Visual test with `prefers-reduced-motion: reduce` passes. |
+| TS-11 | not-started | Auth form test coverage: `LoginForm`, `RegisterForm`, `VerificationEmailForm`, `ConfirmChangePasswordForm`, `AuthLayout`. Scaffold-shipped, 0 tests each. Sister to TS-02 (which covers the contexts). | Each form has ≥3 tests: validation, submit, error display. |
 
 # Epic: OPS — operations + infra
 
@@ -208,6 +211,7 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 |---|---|---|---|
 | OPS-01 | not-started | Agent MCP-driven CI / cluster / pod-log reading. Today every deploy debug requires user paste. Deploy-audit ask delivered 2026-05-24; still open. | Agent can read GH Actions logs + cluster pod state via MCP tool. |
 | OPS-04 | not-started | Air-gapped / on-prem support seams. Per `project_decisions_stack.md` decision #20: "design for easy support, don't fully implement." Track as awareness item: every external dep (telemetry hosts, fonts, LLM provider URL) needs an env-var seam so an on-prem deploy can swap. Audit current code for hardcoded internet hosts. | Audit doc lists every external host used; each has an env-var override or a fallback. |
+| OPS-05 | not-started | ESLint flat-config migration. Running `npx eslint src` from `app/` prints ESLint's "migration guide" pointer in its output — we're on the legacy `.eslintrc` format and ESLint warns about it. Migration brings the lint config to ESLint 9.x style. | `npx eslint src` runs clean with no migration warning; flat config in `eslint.config.js`. |
 
 # Epic: POL — known minor bugs
 
@@ -236,6 +240,7 @@ exists, treat SDR as deferred.
 | PLUG-03 | blocked | SDR plugin content (tour script, voice, copy nuance, sales-flavored CTAs). Authored OUTSIDE the BFF codebase per locked decision. Blocked on PLUG-01. | The SDR plugin (loaded remotely) renders the three-options gate framing, the tour stepper, and SDR-specific assistant voice. |
 | PLUG-04 | blocked | Onboarding **overlay** surface (alternative to the inline F1-F7). Per `project_plugin_model.md`: "Onboarding overlay is deferred, but both surfaces will exist." Blocked on PLUG-01 + product spec for overlay UX. | Overlay onboarding renders on top of an existing product surface (not as a full-page replacement). |
 | PLUG-05 | blocked | Tour state machine (third intent source: user / agent / tour). Per `project_chat_session_model.md`: "When SDR plugin loads, the tour writes intents to the active chat session via the same `dispatchIntent` path." Today the dispatchIntent path doesn't surface a `source='tour'` writer. Blocked on PLUG-01 + UI-10 (intent dispatch fully wired). | Tour-loaded plugin advances frames via `dispatchIntent({source: "tour"})`; `intent_log.source = "tour"` written. |
+| PLUG-06 | not-started | `PLUGIN_PRESET` env var. Per `project_harness_model.md`: "TBD; locked but not implemented." Controls which plugin bundle the LLM-side harness loads at boot. Distinct from `APP_MODE_PRESET` (app shell). | env.ts declares `PLUGIN_PRESET`; boot reads it; the loader (PLUG-01) honors the preset. |
 
 ## Cross-epic dependency notes
 
@@ -246,27 +251,69 @@ exists, treat SDR as deferred.
 - **OB-02 (PostHog events) → CF-13 (Sentry) ordering: PostHog first** (telemetry coverage > error coverage when neither exists).
 - **UR-01 (PdfViewer) → UI-04 (F5 citation side panel).** Side panel needs the viewer.
 
-## Counts as of 2026-05-25
+## Counts as of 2026-05-25 (after expanded-discovery audit)
 
 | Status | Count |
 |---|---|
 | closed | 1 (CF-01) |
-| in-progress | 4 (CF-02, CF-04, CF-05, CF-17) |
+| in-progress | 5 (CF-02, CF-04, CF-05, CF-17, UR-02) |
 | blocked | 5 (AU-02, PLUG-03, PLUG-04, PLUG-05, SCEN-06) |
-| not-started | 74 |
-| **total** | **84** |
+| not-started | 78 |
+| **total** | **89** |
 
-Over the 3-per-epic WIP cap on CHAT (currently 4 in-progress). Next
-move closes one of those to genuine done OR moves one back to
-not-started before opening anything new under CHAT.
+Audit additions this pass (+5 items, +1 corrected status):
+- **UR-02 corrected** from `not-started` to `in-progress` —
+  drag-resize component + hook + AppShell wiring + tests all
+  exist; localStorage persist + reduced-motion gate are the
+  remaining slices.
+- OB-08, OB-09: console.* → structured logging (8 frontend
+  call sites + 2 middleware warns currently bypass lint).
+- TS-11: Auth form test coverage (5 form files, 0 tests).
+- PLUG-06: `PLUGIN_PRESET` env var (TBD but locked in memory).
+- OPS-05: ESLint flat-config migration (legacy config warns).
+
+Over the 3-per-epic WIP cap on CHAT (4 in-progress) — UR-02
+moving to in-progress puts UR at 1 in-progress (within cap).
+Next move closes one CHAT in-progress to genuine done OR
+moves one back to not-started before opening anything new
+under CHAT.
 
 ## How to use this file
 
 - Opening work: add a new id (use the right epic prefix), status
   `not-started`. Add an inline `TODO(<id>)` at the partial-code
   site if applicable.
+- **Before adding a `not-started` item, grep for the seam first.**
+  Audit-discovered correction 2026-05-25: UR-02 was incorrectly
+  listed not-started despite `ResizeHandle.tsx` + `useResizableSplit.ts`
+  + AppShell wiring already existing. Always run
+  `grep -rn "<feature-name>" middleware/src app/src` before
+  asserting something is unbuilt.
 - Starting: flip to `in-progress`.
 - Closing: write the user-visible test result; flip to `closed`;
   DELETE the inline `TODO(<id>)` from source.
 - The `memory/project_build_status.md` "Still open" list points
   here. This file is the truth.
+
+## Discovery checklist (run before each audit pass)
+
+Past audits missed work because they relied on a single
+`grep TODO`. Run all of these next time:
+
+| Method | Command |
+|---|---|
+| Standard markers | `grep -rn "TODO\|FIXME\|HACK\|XXX" middleware/src app/src` |
+| Broader vocabulary | `grep -rnE "\b(for now\|later we\|we'll\|punt\|deferred\|ideally\|stretch\|Phase [0-9]+ (wire\|land))" middleware/src app/src` |
+| Test framework markers | `grep -rnE "\.skip\(\|\.todo\(\|xit\(\|xdescribe\(" middleware/src app/src app/e2e` |
+| Type escape hatches | `grep -rnE "@ts-ignore\|@ts-expect-error\|as any\b\|as unknown as" middleware/src app/src` |
+| Lint suppressions | `grep -rn "eslint-disable" middleware/src app/src` |
+| Print-debug holdovers | `grep -rnE "console\.(log\|warn\|error)" middleware/src app/src` |
+| Stub-style throws | `grep -rnE "throw new Error.*(not implemented\|TODO\|placeholder\|stub)"` |
+| `@deprecated` markers | `grep -rn "@deprecated" middleware/src app/src` |
+| Files without sibling tests | walk `find`, compare `.ts` to `.test.ts` |
+| Git WIP / stash / unmerged | `git log --grep="wip\|WIP"`; `git stash list`; `git branch -a` |
+| Memory drafts / TBD / sketch | `grep -rnE "DRAFT\|TBD\|to be (decided\|determined)\|sketch" memory/` |
+| Env vars in code vs schema | compare `grep -oE "env\.[A-Z_]+"` against `env.ts` Zod fields |
+| Phase X markers | `grep -rnE "Phase [0-9]+" middleware/src app/src` |
+| ESLint warnings | `npx eslint src` (frontend); accumulated warnings hide deferred refactors |
+| **Verify before "not-started"** | `grep -rn "<feature-name>"` to confirm no seam already exists |
