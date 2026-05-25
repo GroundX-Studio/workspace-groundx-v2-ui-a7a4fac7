@@ -229,6 +229,23 @@ async function runRagPipeline(
   };
 }
 
+/**
+ * TODO(chat-fix-list P0 #2): ContentScope-aware filter routing.
+ * Today this picks one of two paths based on whether bucketId is
+ * set — that covers "whole workspace" OR "all docs" only. The
+ * real ContentScope routing per the user-visible entity is:
+ *   - Whole workspace (bucket)  → POST /v1/search/{bucketId} + {query, n}
+ *   - Single project            → POST /v1/search/{bucketId} +
+ *                                 {query, n, filter: {projectId: P}}
+ *   - Multiple projects         → POST /v1/search/{bucketId} +
+ *                                 {query, n, filter: {projectId: {$in: [P1, …]}}}
+ *   - Multiple workspaces       → ensure-create a group of those bucket
+ *                                 ids, then POST /v1/search/{groupId} + {query, n}
+ *   - Single document           → POST /v1/search/documents +
+ *                                 {query, n, documentIds: [docId]}
+ * ContentScope should flow from the chatHandler bundle's currentEntity
+ * axis. See docs/agents/open-work.md → "Chat stack — prioritized fix list".
+ */
 async function searchGroundX(
   query: string,
   bucketId: number | null,
@@ -264,6 +281,28 @@ async function searchGroundX(
   }));
 }
 
+/**
+ * TODO(chat-fix-list P1 #6): the grounded completion prompt is naïve.
+ * Open items:
+ *   - Token-budget guard so the LLM plans its answer length against
+ *     snippet count + length (today it can blow past context if
+ *     snippets are large).
+ *   - Structured citation output (current "repeat short phrases
+ *     verbatim" produces inconsistent citation extraction; a JSON
+ *     citations field is more reliable).
+ *   - "I don't know" calibration when snippets don't contain the
+ *     answer — the LLM currently hedges; should refuse cleanly.
+ *   - An eval set per scenario for regression testing once telemetry
+ *     is live.
+ *
+ * TODO(chat-fix-list P1 #7): viewer intent inference. Ask the LLM to
+ * optionally output a `suggestedIntent: {intent, confidence, reason}`
+ * when the question implies the user should look at a different view
+ * (source PDF, extraction table, specific citation). Dispatch logic
+ * must surface as a suggestedActions chip (user opt-in) ONLY when
+ * `confidence >= 0.85` — never auto-navigate. Auto-navigation on a
+ * low-confidence guess is more disruptive than a missed suggestion.
+ */
 async function callGroundedLlm(
   userMessage: string,
   snippets: GroundXSearchResult[],

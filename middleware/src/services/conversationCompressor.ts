@@ -41,6 +41,19 @@ import type { CompressionPlan } from "./contextBundler.js";
  * specific: we want output the next LLM call can splice in as a
  * "context preamble", not a chatty paragraph.
  */
+/**
+ * TODO(chat-fix-list P0 #1): The leaf-compaction path should call
+ * this with `priorSummary=null` and never splice prior summary text
+ * into the new LLM call. Today's `runCompression` threads the prior
+ * summary in + auto-increments generation on every run — that
+ * causes telephone-game decay (by run N, the most recent summary
+ * has been re-summarized N times in different LLM calls). The
+ * correct design is independent leaf summaries (generation=0,
+ * absorbedSummaryIds=[]) for the common case, with rare meta-
+ * compaction that batches old leaves into a super-summary. See
+ * docs/agents/chat-session-model.md "Compression chain — leaf
+ * summaries + meta-compaction" for the full spec.
+ */
 export function buildSummaryPrompt(
   messages: ReadonlyArray<Pick<ChatMessageRecord, "role" | "content">>,
   priorSummary: string | null,

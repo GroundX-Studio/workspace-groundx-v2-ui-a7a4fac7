@@ -104,34 +104,80 @@ calls the LLM, it bundles three axes via
 `listChatSessionEntities`, and `listViewerEvents` against the
 repository — no client-shipped content, no anon special case.
 
-## Compression chain
+## Compression chain — leaf summaries + meta-compaction
 
-The router runs token counting on the assembled bundle BEFORE the
-LLM call. If `shouldCompress(estimatedTokens, contextWindow)` is
-true (>=70% of context window), it triggers compression:
+**Design corrected 2026-05-25.** The original code path threaded
+the prior summary into every new summarization call, which makes
+every generation re-summarize previously-summarized prose (a
+telephone-game decay). The intended design is:
+
+### Level 1: leaf compaction (liveTail too long)
+
+When the assembled bundle exceeds the compression threshold:
 
 1. `planCompression(liveTail, latestSummaryId, target)` walks the
-   tail oldest-first and picks the message range to summarize.
-   Always leaves at least one live-tail message intact as the
-   LLM's prompt anchor.
-2. `summarizeChunk(messages, priorSummary, deps)` (in
-   `conversationCompressor.ts`) builds the summary prompt
-   (role-stamped USER:/ASSISTANT: turns + prior summary spliced
-   in when chain depth > 0) and forwards a chat.completions
-   request through the LlmClient. Temperature pinned at 0.1.
-3. `runCompression(chatSessionId, plan, deps)` writes a new
-   `conversation_summaries` row with the generation number (prior
-   + 1) and `absorbedSummaryIdsJson` listing every prior summary
-   it subsumes.
+   tail oldest-first and picks the contiguous message range to
+   summarize. Always leaves at least one live-tail message intact
+   as the LLM's prompt anchor.
+2. **Leaf summarization** — `summarizeChunk(messages, **NO prior summary**, deps)`
+   takes ONLY the messages in the range and produces a new summary
+   covering exactly that range. The previous summary is NOT
+   spliced into the prompt.
+3. `runCompression` writes a `conversation_summaries` row with
+   `generation = 0` and `absorbedSummaryIdsJson = "[]"`. The new
+   summary is independent of every prior summary — it covers
+   `fromMessageId..toMessageId` and that's it.
 4. Marks absorbed messages with
-   `compressed_into_summary_id = <new summary id>` via
-   `markChatMessagesCompressed`. `listChatMessages()` filtered by
-   `compressed_into_summary_id IS NULL` returns just the live tail.
+   `compressed_into_summary_id = <new summary id>`.
 
-**Phases I + J shipped 2026-05-24.** The whole chain runs in the
-request hot path on the chatHandler thread today. Moving compression
-to a background job is a deferred follow-up (see
-`docs/agents/open-work.md`).
+Bundle for the LLM after N level-1 runs:
+`[S_1, S_2, ..., S_N] + liveTail` — N independent leaf summaries
+in chronological order plus the uncompressed tail. Each summary
+preserves its slice of history at full fidelity (no recursive
+re-summarization).
+
+### Level 2: meta-compaction (summaries list too long)
+
+When `summaries.length > MAX_SUMMARIES` (target ~10), older leaf
+summaries get folded together:
+
+1. Pick a contiguous batch of the OLDEST summaries (e.g. the
+   oldest 5 of 10).
+2. `summarizeChunk(messages=[], priorSummaries=[S_a, S_b, …], deps)`
+   — a different prompt variant that takes summaries as input
+   and produces a super-summary.
+3. Write a new `conversation_summaries` row with
+   `generation = max(gen of inputs) + 1` and
+   `absorbedSummaryIdsJson = ["S_a", "S_b", ...]`.
+4. The absorbed leaf summaries stay in the table for audit
+   /replay but are filtered out of the active bundle (a summary
+   is "active" iff no other summary lists it in
+   `absorbedSummaryIdsJson`).
+
+Level 2 is rare. The point is that recently-spoken prose stays
+at leaf-summary fidelity for a long time, and only the truly
+old history gets compressed further.
+
+### What's wired today vs. what needs fixing
+
+- `planCompression`, `runCompression`, `summarizeChunk`,
+  `appendConversationSummary`, `markChatMessagesCompressed`
+  exist and have tests.
+- **Bug**: `buildSummaryPrompt` accepts and splices in
+  `priorSummary`. The level-1 path should pass `null` for that
+  argument every time. The current generation-incrementing logic
+  inside `runCompression` (`generation = priorGen + 1`) is also
+  wrong for leaf compaction — it should be 0.
+- **Missing**: meta-compaction trigger + the summary-of-summaries
+  prompt variant + the "active summary" filter
+  (`WHERE NOT EXISTS (SELECT 1 FROM conversation_summaries s2 WHERE s2.absorbed_summary_ids_json LIKE …)`).
+
+See P0 item in `docs/agents/open-work.md` — this is the highest-
+priority chat-stack fix.
+
+The whole chain still runs in the request hot path on the
+chatHandler thread today; background-job migration is a separate
+follow-up.
 
 ## Migrating an anonymous session to signed-in
 

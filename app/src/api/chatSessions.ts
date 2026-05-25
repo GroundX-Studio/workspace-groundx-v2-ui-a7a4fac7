@@ -164,6 +164,14 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
       // next send re-creates it.
       ensuredSessionIds.delete(input.chatSessionId);
     }
+    // TODO(chat-fix-list P1 #5): per-status mapping. Today the caller
+    // gets a generic "couldn't reach" message for everything except
+    // 404. Should branch:
+    //   401 -> re-auth flow (anon bootstrap OR /auth/login redirect)
+    //   501 -> user-facing "I can't answer that yet"
+    //   504 -> "took too long — retry?" + one auto-retry
+    //   502/5xx -> "something went wrong — retry in a moment"
+    //   400 -> developer-visible error (this is a programming bug)
     throw err;
   }
 }
