@@ -90,10 +90,45 @@ export interface HandleChatMessageDeps {
   byoPagesLimit?: number;
   /**
    * Estimated LLM context window in tokens. Compression triggers when
-   * the bundled context exceeds 70% of this value. Defaults to 16k
-   * which is a safe lower bound for most production models.
+   * the bundled context exceeds `compressionTriggerRatio` of this
+   * value. Defaults to 16k — a safe lower bound for most production
+   * models. Tune per model (Claude Sonnet=200k, GPT-4o=128k).
+   * Wired from `env.LLM_CONTEXT_WINDOW_TOKENS`.
    */
   contextWindowTokens?: number;
+  /**
+   * Fraction of the context window at which compression fires.
+   * Default 0.7. Lower (e.g. 0.5) compresses earlier — safer for
+   * streaming. Higher (e.g. 0.9) packs more context — riskier.
+   * Wired from `env.COMPRESSION_TRIGGER_RATIO`.
+   */
+  compressionTriggerRatio?: number;
+  /**
+   * Approximate token budget the leaf-compaction planner targets when
+   * picking the message range to fold. Larger = fewer-but-bigger leaf
+   * summaries; smaller = more-but-tinier leaves. Default 1000.
+   * Wired from `env.COMPRESSION_TARGET_TOKENS`.
+   */
+  compressionTargetTokens?: number;
+  /**
+   * Level-2 trigger: when the count of ACTIVE summaries exceeds this
+   * value, meta-compaction folds the oldest batch into a super-summary.
+   * Default 10. Wired from `env.MAX_ACTIVE_SUMMARIES_BEFORE_META`.
+   */
+  maxActiveSummariesBeforeMeta?: number;
+  /**
+   * Number of OLDEST active summaries to fold in one meta-compaction
+   * pass. Default 5. Wired from `env.META_COMPACTION_BATCH_SIZE`.
+   */
+  metaCompactionBatchSize?: number;
+  /**
+   * Hard cap on the LLM's output tokens for summarization calls
+   * (passed as `max_tokens` in the chat.completions body). Default
+   * 600 — long enough for 10–14 bullet lines, short enough that an
+   * over-eager model can't write a summary that defeats the
+   * compression. Wired from `env.MAX_SUMMARY_OUTPUT_TOKENS`.
+   */
+  maxSummaryOutputTokens?: number;
   /**
    * Override for tests; defaults to crypto.randomUUID.
    */
@@ -101,23 +136,11 @@ export interface HandleChatMessageDeps {
 }
 
 const DEFAULT_CONTEXT_WINDOW = 16_000;
-const COMPRESSION_TARGET_TOKENS = 1_000;
+const DEFAULT_COMPRESSION_TARGET_TOKENS = 1_000;
+const DEFAULT_MAX_ACTIVE_SUMMARIES_BEFORE_META = 10;
+const DEFAULT_META_COMPACTION_BATCH_SIZE = 5;
+const DEFAULT_MAX_SUMMARY_OUTPUT_TOKENS = 600;
 const RECENT_VIEWER_EVENTS = 10;
-/**
- * Level-2 trigger: when the count of ACTIVE summaries exceeds this,
- * meta-compaction folds the oldest batch into one super-summary.
- * Picked so the LLM sees ~10 mini-summaries before any meta fold —
- * each leaf is a contiguous slice of original prose at full fidelity,
- * so meta-compaction is genuinely rare in a normal session.
- */
-const MAX_ACTIVE_SUMMARIES_BEFORE_META = 10;
-/**
- * Number of OLDEST active summaries to fold in one meta-compaction
- * pass. Picked so the post-fold list drops back to a comfortable size
- * (after folding the oldest 5 of 11, the list is 7 — well under the
- * threshold so we don't fire again immediately).
- */
-const META_COMPACTION_BATCH_SIZE = 5;
 
 /**
  * Pure handler — takes a typed request + deps, returns a typed
@@ -227,23 +250,33 @@ export async function handleChatMessage(
   //    summaries) but each fires at most once per request to bound
   //    latency. Background-job migration is on the deferred list.
   let compressionRan = false;
+  const maxSummaryOutputTokens = deps.maxSummaryOutputTokens ?? DEFAULT_MAX_SUMMARY_OUTPUT_TOKENS;
   const compressionDeps = {
     repo: deps.repository,
     llmClient: deps.llmClient,
     modelId: deps.compressionModelId ?? deps.llmModelId,
+    maxOutputTokens: maxSummaryOutputTokens,
     idGen,
   };
-  if (shouldCompress(bundle.estimatedTokens, deps.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW)) {
-    const plan = planCompression(liveTail, COMPRESSION_TARGET_TOKENS);
+  const triggerCheck = shouldCompress(
+    bundle.estimatedTokens,
+    deps.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW,
+    deps.compressionTriggerRatio,
+  );
+  if (triggerCheck) {
+    const targetTokens = deps.compressionTargetTokens ?? DEFAULT_COMPRESSION_TARGET_TOKENS;
+    const plan = planCompression(liveTail, targetTokens);
     if (plan) {
       await runCompression(request.chatSessionId, plan, compressionDeps);
       compressionRan = true;
     }
   }
-  if (activeSummaries.length > MAX_ACTIVE_SUMMARIES_BEFORE_META) {
+  const metaCap = deps.maxActiveSummariesBeforeMeta ?? DEFAULT_MAX_ACTIVE_SUMMARIES_BEFORE_META;
+  if (activeSummaries.length > metaCap) {
     // Pick the oldest N active summaries to fold (oldest-first order
     // matches selectActiveSummaries' return order).
-    const batch = activeSummaries.slice(0, META_COMPACTION_BATCH_SIZE);
+    const batchSize = deps.metaCompactionBatchSize ?? DEFAULT_META_COMPACTION_BATCH_SIZE;
+    const batch = activeSummaries.slice(0, batchSize);
     if (batch.length >= 2) {
       await runMetaCompaction(
         request.chatSessionId,

@@ -56,6 +56,29 @@ const envSchema = z.object({
   // Override range: 4k floor (smallest practical) → 1M ceiling
   // (Gemini 1.5 Pro extended).
   LLM_CONTEXT_WINDOW_TOKENS: z.coerce.number().int().min(4_000).max(1_000_000).default(16_000),
+  // Fraction of the context window at which level-1 leaf compaction
+  // fires. 0.7 leaves room for the LLM response; 0.5 = compress
+  // earlier (streaming-friendly); 0.9 = pack more (risky).
+  COMPRESSION_TRIGGER_RATIO: z.coerce.number().min(0.3).max(0.95).default(0.7),
+  // Approximate token budget the leaf-compaction planner targets when
+  // picking the message range to fold. Larger = fewer-but-bigger leaf
+  // summaries; smaller = more leaves with finer time-slice fidelity.
+  COMPRESSION_TARGET_TOKENS: z.coerce.number().int().min(100).max(10_000).default(1_000),
+  // Level-2 meta-compaction trigger: when the count of ACTIVE
+  // summaries exceeds this, the oldest batch gets folded into a
+  // super-summary. Keep this comfortably > 1 so the LLM sees plenty
+  // of leaf-fidelity history before any meta fold.
+  MAX_ACTIVE_SUMMARIES_BEFORE_META: z.coerce.number().int().min(3).max(50).default(10),
+  // Number of OLDEST active summaries to fold in one meta-compaction
+  // pass. Pick so the post-fold active count is well under
+  // MAX_ACTIVE_SUMMARIES_BEFORE_META — otherwise meta fires again
+  // on the next chat post (wasteful LLM call).
+  META_COMPACTION_BATCH_SIZE: z.coerce.number().int().min(2).max(20).default(5),
+  // Hard cap on the LLM's output tokens for summarization calls.
+  // Passed as `max_tokens` in the chat.completions body. ~600 fits
+  // 10-14 bullet lines; an over-eager model can otherwise write a
+  // summary so long it defeats the point of the compression.
+  MAX_SUMMARY_OUTPUT_TOKENS: z.coerce.number().int().min(100).max(4_000).default(600),
   // Free-tier metering ceiling for BYO uploads (pages, not docs).
   BYO_PAGES_LIMIT: z.coerce.number().int().positive().default(100),
   // Rate limits. Tunable per-deploy via env so on-prem can dial down.

@@ -428,3 +428,233 @@ describe("handleChatMessage — typed error mapping", () => {
     });
   });
 });
+
+describe("handleChatMessage — CF-17 compression tunables", () => {
+  let repo: MemoryAppRepository;
+  let llmClient: LlmClient;
+  let groundxClient: GroundXClient;
+
+  async function seedSummaries(count: number): Promise<void> {
+    // Leaf summaries — all generation 0, absorbedSummaryIdsJson "[]",
+    // so they're all active.
+    const base = Date.now();
+    for (let i = 0; i < count; i++) {
+      await repo.appendConversationSummary({
+        id: `leaf-${i}`,
+        chatSessionId: "chat-1",
+        fromMessageId: `m${i * 2 + 1}`,
+        toMessageId: `m${i * 2 + 2}`,
+        generation: 0,
+        absorbedSummaryIdsJson: "[]",
+        content: `Leaf ${i} content`,
+        model: "m",
+        tokensIn: 50,
+        tokensOut: 30,
+        createdAt: new Date(base + i * 1000),
+      });
+    }
+  }
+
+  beforeEach(async () => {
+    repo = new MemoryAppRepository();
+    await repo.upsertChatSession(makeSession());
+    llmClient = {
+      forward: vi.fn(async () =>
+        jsonResponse({
+          choices: [{ message: { content: "ok" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+      ),
+    };
+    groundxClient = { forward: vi.fn(async () => jsonResponse({})) };
+  });
+
+  it("`maxActiveSummariesBeforeMeta` controls when level-2 meta-compaction fires", async () => {
+    // Seed 4 active leaf summaries.
+    await seedSummaries(4);
+    // With default (10) — 4 < 10 → meta should NOT fire on this post.
+    const defaultResult = await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "x" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: null,
+        samplesBucketId: null,
+        llmModelId: "m",
+        mockMode: true,
+      },
+    );
+    expect(defaultResult.compressionRan).toBe(false);
+
+    // Reset session message turn counter by adding to a fresh session
+    // and seeding the same 4 summaries.
+    const repo2 = new MemoryAppRepository();
+    await repo2.upsertChatSession(makeSession({ id: "chat-2" }));
+    const base = Date.now();
+    for (let i = 0; i < 4; i++) {
+      await repo2.appendConversationSummary({
+        id: `leaf-${i}`,
+        chatSessionId: "chat-2",
+        fromMessageId: `m${i * 2 + 1}`,
+        toMessageId: `m${i * 2 + 2}`,
+        generation: 0,
+        absorbedSummaryIdsJson: "[]",
+        content: `Leaf ${i} content`,
+        model: "m",
+        tokensIn: 50,
+        tokensOut: 30,
+        createdAt: new Date(base + i * 1000),
+      });
+    }
+    // With cap=3 — 4 > 3 → meta SHOULD fire.
+    const result = await handleChatMessage(
+      { chatSessionId: "chat-2", newUserMessage: "x" },
+      {
+        repository: repo2,
+        llmClient,
+        groundxClient,
+        groundxApiKey: null,
+        samplesBucketId: null,
+        llmModelId: "m",
+        mockMode: true,
+        maxActiveSummariesBeforeMeta: 3,
+      },
+    );
+    expect(result.compressionRan).toBe(true);
+    // A super-summary got written.
+    const summaries = await repo2.listConversationSummaries("chat-2");
+    expect(summaries.length).toBeGreaterThan(4); // 4 leaves + at least one super
+  });
+
+  it("`metaCompactionBatchSize` controls how many summaries each meta-fold absorbs", async () => {
+    await seedSummaries(8); // 8 > default 10? no, but we'll set cap to 4
+    // We override BOTH knobs so the test is hermetic. With cap=4 and
+    // batch=3, 8 > 4 fires; the new super absorbs the OLDEST 3.
+    const result = await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "x" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: null,
+        samplesBucketId: null,
+        llmModelId: "m",
+        mockMode: true,
+        maxActiveSummariesBeforeMeta: 4,
+        metaCompactionBatchSize: 3,
+      },
+    );
+    expect(result.compressionRan).toBe(true);
+    const summaries = await repo.listConversationSummaries("chat-1");
+    const supers = summaries.filter((s) => s.generation > 0);
+    expect(supers).toHaveLength(1);
+    // The super absorbed exactly 3 leaves.
+    expect(JSON.parse(supers[0].absorbedSummaryIdsJson)).toEqual([
+      "leaf-0",
+      "leaf-1",
+      "leaf-2",
+    ]);
+  });
+
+  it("`compressionTriggerRatio` controls when level-1 leaf compaction fires", async () => {
+    // Pre-seed the live tail with ~200 tokens of content.
+    await repo.appendChatMessage(makeMessage("m1", "chat-1", 1, "user", "x".repeat(400)));
+    await repo.appendChatMessage(makeMessage("m2", "chat-1", 2, "assistant", "y".repeat(400)));
+    // With trigger=0.5 + window=1000: 200/1000 = 20% — under 50%, no fire.
+    const resultNoFire = await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "z" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: null,
+        samplesBucketId: null,
+        llmModelId: "m",
+        mockMode: true,
+        contextWindowTokens: 1000,
+        compressionTriggerRatio: 0.5,
+      },
+    );
+    expect(resultNoFire.compressionRan).toBe(false);
+
+    // Fresh session — same input, lower window so 200/300 = 67% > 0.5 → fire.
+    const repo2 = new MemoryAppRepository();
+    await repo2.upsertChatSession(makeSession({ id: "chat-2" }));
+    await repo2.appendChatMessage(makeMessage("m1", "chat-2", 1, "user", "x".repeat(400)));
+    await repo2.appendChatMessage(makeMessage("m2", "chat-2", 2, "assistant", "y".repeat(400)));
+    const resultFire = await handleChatMessage(
+      { chatSessionId: "chat-2", newUserMessage: "z" },
+      {
+        repository: repo2,
+        llmClient,
+        groundxClient,
+        groundxApiKey: null,
+        samplesBucketId: null,
+        llmModelId: "m",
+        mockMode: true,
+        contextWindowTokens: 300,
+        compressionTriggerRatio: 0.5,
+      },
+    );
+    expect(resultFire.compressionRan).toBe(true);
+  });
+
+  it("`compressionTargetTokens` controls how many messages each leaf compaction absorbs", async () => {
+    // Seed 4 messages of ~100 tokens each (400 chars each → ~100 tokens via /4 estimator).
+    for (let i = 1; i <= 4; i++) {
+      await repo.appendChatMessage(
+        makeMessage(`m${i}`, "chat-1", i, i % 2 ? "user" : "assistant", "x".repeat(400)),
+      );
+    }
+    // Force compression to fire by setting a tiny window.
+    // With target=150: collect oldest until acc>=150. After m1 (100), acc=100. After
+    // m2 (100), acc=200 ≥ 150 → break. messageIds = [m1, m2].
+    const result = await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "z" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: null,
+        samplesBucketId: null,
+        llmModelId: "m",
+        mockMode: true,
+        contextWindowTokens: 100,
+        compressionTargetTokens: 150,
+      },
+    );
+    expect(result.compressionRan).toBe(true);
+    const summaries = await repo.listConversationSummaries("chat-1");
+    expect(summaries).toHaveLength(1);
+    // Plan absorbed m1 + m2 (the oldest two that hit the 150-token target).
+    expect(summaries[0].fromMessageId).toBe("m1");
+    expect(summaries[0].toMessageId).toBe("m2");
+  });
+
+  it("`maxSummaryOutputTokens` flows into the LLM call body as `max_tokens`", async () => {
+    await repo.appendChatMessage(makeMessage("m1", "chat-1", 1, "user", "x".repeat(400)));
+    await repo.appendChatMessage(makeMessage("m2", "chat-1", 2, "assistant", "y".repeat(400)));
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "z" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: null,
+        samplesBucketId: null,
+        llmModelId: "m",
+        mockMode: true,
+        contextWindowTokens: 100,
+        maxSummaryOutputTokens: 250,
+      },
+    );
+    // The leaf-compaction LLM call should have included max_tokens=250.
+    const summarizerCall = (llmClient.forward as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => c[0] === "/chat/completions",
+    );
+    expect(summarizerCall).toBeDefined();
+    const body = JSON.parse((summarizerCall![1] as RequestInit).body as string);
+    expect(body.max_tokens).toBe(250);
+  });
+});

@@ -122,6 +122,15 @@ export interface SummarizeChunkDeps {
   llmClient: LlmClient;
   /** Provider model id, e.g. "gpt-5.5" or "claude-3-haiku". */
   modelId: string;
+  /**
+   * Hard cap on LLM output tokens for this summarization call. Passed
+   * as `max_tokens` in the chat.completions body so the provider
+   * stops generating once the cap is hit. Defaults to undefined
+   * (provider's default) for backward compatibility; chatHandler
+   * always passes a real number derived from
+   * `env.MAX_SUMMARY_OUTPUT_TOKENS`.
+   */
+  maxOutputTokens?: number;
 }
 
 /**
@@ -156,13 +165,16 @@ async function invokeSummarizer(
   prompt: { messages: { role: "system" | "user"; content: string }[] },
   deps: SummarizeChunkDeps,
 ): Promise<SummarizeChunkResult> {
-  const body = {
+  const body: Record<string, unknown> = {
     model: deps.modelId,
     messages: prompt.messages,
     // Compression is a tight summarization task — low temperature
     // keeps the output deterministic and reduces token spread.
     temperature: 0.1,
   };
+  if (deps.maxOutputTokens != null) {
+    body.max_tokens = deps.maxOutputTokens;
+  }
 
   const response = await deps.llmClient.forward("/chat/completions", {
     method: "POST",

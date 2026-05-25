@@ -447,6 +447,11 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
         mockMode: env.MOCK_MODE,
         byoPagesLimit: env.BYO_PAGES_LIMIT,
         contextWindowTokens: env.LLM_CONTEXT_WINDOW_TOKENS,
+        compressionTriggerRatio: env.COMPRESSION_TRIGGER_RATIO,
+        compressionTargetTokens: env.COMPRESSION_TARGET_TOKENS,
+        maxActiveSummariesBeforeMeta: env.MAX_ACTIVE_SUMMARIES_BEFORE_META,
+        metaCompactionBatchSize: env.META_COMPACTION_BATCH_SIZE,
+        maxSummaryOutputTokens: env.MAX_SUMMARY_OUTPUT_TOKENS,
       });
       res.json(result);
     } catch (error) {

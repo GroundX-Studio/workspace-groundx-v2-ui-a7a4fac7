@@ -173,8 +173,8 @@ old history gets compressed further.
   (`WHERE NOT EXISTS (SELECT 1 FROM conversation_summaries s2 WHERE s2.absorbed_summary_ids_json LIKE …)`).
 
 See backlog items CF-01 (closed: leaf + meta-compaction shape) and
-CF-17 (in-progress: configurable compression tunables) in
-`docs/agents/backlog.md`.
+CF-17 (closed: configurable compression tunables — all six env vars
+wired) in `docs/agents/backlog.md`.
 
 The whole chain still runs in the request hot path on the
 chatHandler thread today; background-job migration is a separate

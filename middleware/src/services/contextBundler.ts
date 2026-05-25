@@ -111,12 +111,27 @@ export function bundleChatContext(input: BundleChatContextInput): BundledChatCon
 }
 
 /**
- * Whether the assembled context needs compression before the LLM call.
- * The 70% threshold leaves room for the LLM's response.
+ * Default ratio of the LLM context window at which compression
+ * triggers. 0.7 leaves room for the LLM's response token allocation
+ * AND for the response itself; deployments can tune via
+ * `COMPRESSION_TRIGGER_RATIO` env (CF-17).
  */
-export function shouldCompress(estimatedTokens: number, contextWindowTokens: number): boolean {
+export const DEFAULT_COMPRESSION_TRIGGER_RATIO = 0.7;
+
+/**
+ * Whether the assembled context needs compression before the LLM call.
+ * `triggerRatio` defaults to 0.7 — leaves room for the LLM's response.
+ * Configurable via `COMPRESSION_TRIGGER_RATIO` env so deployments can
+ * dial more conservative (0.5 = compress earlier, safer for streaming)
+ * or more aggressive (0.9 = pack more context, riskier).
+ */
+export function shouldCompress(
+  estimatedTokens: number,
+  contextWindowTokens: number,
+  triggerRatio: number = DEFAULT_COMPRESSION_TRIGGER_RATIO,
+): boolean {
   if (contextWindowTokens <= 0) return false;
-  return estimatedTokens >= contextWindowTokens * 0.7;
+  return estimatedTokens >= contextWindowTokens * triggerRatio;
 }
 
 /**

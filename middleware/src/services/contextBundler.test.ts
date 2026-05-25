@@ -101,13 +101,27 @@ describe("shouldCompress", () => {
     expect(shouldCompress(1000, 100_000)).toBe(false);
   });
 
-  it("is true at the 70% threshold", () => {
+  it("is true at the default 70% threshold", () => {
     expect(shouldCompress(70_000, 100_000)).toBe(true);
   });
 
   it("is false when contextWindowTokens is zero or negative (no window known)", () => {
     expect(shouldCompress(50_000, 0)).toBe(false);
     expect(shouldCompress(50_000, -1)).toBe(false);
+  });
+
+  it("honors a custom triggerRatio (e.g. 0.5 fires earlier)", () => {
+    // Below 50% — should not fire.
+    expect(shouldCompress(49_999, 100_000, 0.5)).toBe(false);
+    // At 50% — should fire.
+    expect(shouldCompress(50_000, 100_000, 0.5)).toBe(true);
+    // Default behavior still 0.7 when no ratio passed.
+    expect(shouldCompress(50_000, 100_000)).toBe(false);
+  });
+
+  it("honors a higher triggerRatio (e.g. 0.9 fires later)", () => {
+    expect(shouldCompress(80_000, 100_000, 0.9)).toBe(false);
+    expect(shouldCompress(90_000, 100_000, 0.9)).toBe(true);
   });
 });
 

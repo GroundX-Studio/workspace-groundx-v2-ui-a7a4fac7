@@ -89,7 +89,7 @@ in `app/src/api/chatSessions.ts` reference these rows.
 | CF-12 | not-started | Tool-call wiring in routeChat (see also TL-* below for the individual tool routes). | A query firing `show_extraction` produces the tool call in the reply. |
 | CF-13 | not-started | Frontend Sentry browser SDK + claim-failure telemetry. | Unit test: `Sentry.captureException` called on the chatSend + claim failure paths. |
 | CF-14 | not-started | DB pool sizing + batch reads. Pool=10 with 5–8 sequential reads per post. | Load test asserts P99 < 1s with 50 concurrent posts. |
-| CF-17 | in-progress | Configurable compression tunables. `LLM_CONTEXT_WINDOW_TOKENS` env shipped. Pending: `COMPRESSION_TRIGGER_RATIO`, `COMPRESSION_TARGET_TOKENS`, `MAX_ACTIVE_SUMMARIES_BEFORE_META`, `META_COMPACTION_BATCH_SIZE`, `MAX_SUMMARY_OUTPUT_TOKENS`. | Setting each non-default affects the right behavior. |
+| CF-17 | **closed** | Configurable compression tunables. All six env vars wired: `LLM_CONTEXT_WINDOW_TOKENS`, `COMPRESSION_TRIGGER_RATIO`, `COMPRESSION_TARGET_TOKENS`, `MAX_ACTIVE_SUMMARIES_BEFORE_META`, `META_COMPACTION_BATCH_SIZE`, `MAX_SUMMARY_OUTPUT_TOKENS`. Each threaded through `HandleChatMessageDeps` → `compressionDeps` → `summarizeChunk`/`summarizeSummaries`. | 5 chatHandler tests + 2 contextBundler tests assert each knob actually controls the right behavior (meta-fold cap, batch size, trigger ratio, target tokens, output max_tokens). |
 | CF-18 | not-started | F2 chat input wire-up. `ChatInputStub` in `OnboardingChatColumn.tsx` is still a visual stub. Pattern from F5 drops in. ~30 min. | F2 e2e posts a message and renders assistant turn. |
 
 # Epic: AUTH — sessions, magic-link, SSO, session merge
@@ -251,32 +251,27 @@ exists, treat SDR as deferred.
 - **OB-02 (PostHog events) → CF-13 (Sentry) ordering: PostHog first** (telemetry coverage > error coverage when neither exists).
 - **UR-01 (PdfViewer) → UI-04 (F5 citation side panel).** Side panel needs the viewer.
 
-## Counts as of 2026-05-25 (after expanded-discovery audit)
+## Counts as of 2026-05-25 (after CF-17 closure)
 
 | Status | Count |
 |---|---|
-| closed | 1 (CF-01) |
-| in-progress | 5 (CF-02, CF-04, CF-05, CF-17, UR-02) |
+| closed | 2 (CF-01, CF-17) |
+| in-progress | 4 (CF-02, CF-04, CF-05, UR-02) |
 | blocked | 5 (AU-02, PLUG-03, PLUG-04, PLUG-05, SCEN-06) |
 | not-started | 78 |
 | **total** | **89** |
 
-Audit additions this pass (+5 items, +1 corrected status):
-- **UR-02 corrected** from `not-started` to `in-progress` —
-  drag-resize component + hook + AppShell wiring + tests all
-  exist; localStorage persist + reduced-motion gate are the
-  remaining slices.
-- OB-08, OB-09: console.* → structured logging (8 frontend
-  call sites + 2 middleware warns currently bypass lint).
-- TS-11: Auth form test coverage (5 form files, 0 tests).
-- PLUG-06: `PLUGIN_PRESET` env var (TBD but locked in memory).
-- OPS-05: ESLint flat-config migration (legacy config warns).
-
-Over the 3-per-epic WIP cap on CHAT (4 in-progress) — UR-02
-moving to in-progress puts UR at 1 in-progress (within cap).
-Next move closes one CHAT in-progress to genuine done OR
-moves one back to not-started before opening anything new
-under CHAT.
+CHAT epic now at 3 in-progress (CF-02, CF-04, CF-05) — back at
+the WIP cap. CF-17 closed with 7 new tests proving each tunable
+actually controls the right behavior. Next-move candidates by
+leverage:
+- **UR-02**: small remaining scope (localStorage persist +
+  reduced-motion gate), would close cleanly + drop UR to 0
+  in-progress.
+- **CF-18**: ~30 min, identical pattern to F5 → wire F2 chat
+  input via `sendChatMessage`.
+- **CF-15** (currently not-started): unblocks CF-02 closure
+  AND TL-01 quality. Higher leverage but bigger.
 
 ## How to use this file
 
