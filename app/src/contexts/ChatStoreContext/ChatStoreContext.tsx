@@ -15,8 +15,37 @@ import type {
 
 const ChatStoreContext = createContext<ChatStoreApi | null>(null);
 
+/**
+ * The actions slice — `newSession`, `appendMessage`, etc. — is stable
+ * across state changes. Consumers that ONLY need to dispatch (e.g.
+ * the F5 chat input on submit) can subscribe to this context alone
+ * and skip re-renders when unrelated state mutates.
+ *
+ * Concrete shape: every field in ChatStoreApi EXCEPT `state`.
+ */
+type ChatStoreActions = Omit<ChatStoreApi, "state">;
+const ChatStoreStateContext = createContext<ChatStoreState | null>(null);
+const ChatStoreActionsContext = createContext<ChatStoreActions | null>(null);
+
 const STORAGE_KEY = "groundx-onboarding.chat-store.v1";
 const STORAGE_VERSION = 1;
+/**
+ * Maximum messages persisted per session. In-memory messages are not
+ * yet trimmed (compression will drop older ones into summaries before
+ * this matters for re-render cost); this cap protects localStorage
+ * from unbounded growth, which would silently fail with
+ * QuotaExceededError once a user accumulates ~5MB of chat. Bounded
+ * deliberately — bumping this is fine if you're sure the disk budget
+ * is there.
+ */
+const MAX_PERSISTED_MESSAGES_PER_SESSION = 500;
+/**
+ * In-memory cap on per-session viewer history. Only the recent slice
+ * informs LLM context bundling (~10 events), and older entries are
+ * pure noise from a cost perspective. Cap at 50 to give some headroom
+ * above the bundling slice for debugging without unbounded growth.
+ */
+const MAX_VIEWER_HISTORY_PER_SESSION = 50;
 /**
  * Legacy key from the standalone EntityRegistry persistence (Phase 2
  * of the state-preservation work). On ChatStore first mount we read
@@ -111,12 +140,20 @@ function serialize(state: ChatStoreState): string {
         },
       ]);
     }
+    // Persist only the most-recent N messages. In-memory keeps the full
+    // list (semantic continuity for the active chat) but localStorage
+    // stays bounded so a chatty session can't cause QuotaExceededError
+    // on the next persist tick.
+    const persistedMessages =
+      session.messages.length > MAX_PERSISTED_MESSAGES_PER_SESSION
+        ? session.messages.slice(-MAX_PERSISTED_MESSAGES_PER_SESSION)
+        : session.messages;
     sessions.push({
       id: session.id,
       title: session.title,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
-      messages: session.messages,
+      messages: persistedMessages,
       entities,
       activeEntityKey: session.activeEntityKey,
       isOnboardingSession: session.isOnboardingSession,
@@ -510,10 +547,18 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         source: input.source,
         detail: input.detail,
       };
+      // Cap viewerHistory at MAX_VIEWER_HISTORY_PER_SESSION; oldest
+      // entries drop off the front. Only the recent slice (~10) informs
+      // LLM context bundling, so older events are pure noise.
+      const next = [...current.viewerHistory, event];
+      const viewerHistory =
+        next.length > MAX_VIEWER_HISTORY_PER_SESSION
+          ? next.slice(-MAX_VIEWER_HISTORY_PER_SESSION)
+          : next;
       const sessions = new Map(prev.sessions);
       sessions.set(prev.activeSessionId, {
         ...current,
-        viewerHistory: [...current.viewerHistory, event],
+        viewerHistory,
         updatedAt: event.timestamp,
       });
       return { ...prev, sessions };
@@ -537,9 +582,13 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
   }, []);
 
-  const value = useMemo<ChatStoreApi>(
+  // Actions are reference-stable (each useCallback above has empty
+  // deps + reads latest state via setState's updater function). Putting
+  // them in their own context means consumers that ONLY dispatch
+  // (e.g. a chat input's onSubmit) don't re-render on unrelated state
+  // mutations.
+  const actions = useMemo<ChatStoreActions>(
     () => ({
-      state,
       newSession,
       switchTo,
       appendMessage,
@@ -548,14 +597,51 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       updateActiveEntity,
       appendViewerEvent,
     }),
-    [state, newSession, switchTo, appendMessage, activateEntity, upsertEntityAndActivate, updateActiveEntity, appendViewerEvent],
+    [newSession, switchTo, appendMessage, activateEntity, upsertEntityAndActivate, updateActiveEntity, appendViewerEvent],
   );
 
-  return <ChatStoreContext.Provider value={value}>{children}</ChatStoreContext.Provider>;
+  // Backward-compat combined value. Existing useChatStore() callers
+  // keep working unchanged. New code that's perf-sensitive should
+  // reach for useChatStoreState / useChatStoreActions instead.
+  const value = useMemo<ChatStoreApi>(
+    () => ({ state, ...actions }),
+    [state, actions],
+  );
+
+  return (
+    <ChatStoreContext.Provider value={value}>
+      <ChatStoreActionsContext.Provider value={actions}>
+        <ChatStoreStateContext.Provider value={state}>{children}</ChatStoreStateContext.Provider>
+      </ChatStoreActionsContext.Provider>
+    </ChatStoreContext.Provider>
+  );
 };
 
 export const useChatStore = (): ChatStoreApi => {
   const ctx = useContext(ChatStoreContext);
   if (!ctx) throw new Error("useChatStore must be used inside ChatStoreProvider");
+  return ctx;
+};
+
+/**
+ * Read-only subscription to the ChatStore state slice. Re-renders on
+ * every state change. Prefer the more specific `useChatStoreActions`
+ * if you only need to dispatch.
+ */
+export const useChatStoreState = (): ChatStoreState => {
+  const ctx = useContext(ChatStoreStateContext);
+  if (!ctx) throw new Error("useChatStoreState must be used inside ChatStoreProvider");
+  return ctx;
+};
+
+/**
+ * Subscription to the ChatStore action surface. Reference-stable —
+ * the returned object identity does NOT change when state mutates,
+ * so a component that only depends on actions will not re-render on
+ * unrelated state changes.
+ */
+export const useChatStoreActions = (): ChatStoreActions => {
+  const ctx = useContext(ChatStoreActionsContext);
+  if (!ctx) throw new Error("useChatStoreActions must be used inside ChatStoreProvider");
   return ctx;
 };

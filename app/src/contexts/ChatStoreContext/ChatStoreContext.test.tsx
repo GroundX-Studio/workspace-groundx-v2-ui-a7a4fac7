@@ -1,7 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ChatStoreProvider, useChatStore } from "./ChatStoreContext";
+import {
+  ChatStoreProvider,
+  useChatStore,
+  useChatStoreActions,
+  useChatStoreState,
+} from "./ChatStoreContext";
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <ChatStoreProvider>{children}</ChatStoreProvider>
@@ -303,6 +308,93 @@ describe("ChatStoreContext", () => {
       expect(active.entities.get("sample:loan" as never)?.lastFrame).toBe("f4");
       // Legacy key is removed post-migration.
       expect(window.localStorage.getItem("groundx-onboarding.entity-registry.v1")).toBeNull();
+    });
+  });
+
+  describe("split state/actions contexts", () => {
+    it("useChatStoreActions returns a reference-stable object across state changes", () => {
+      const wrap = ({ children }: { children: React.ReactNode }) => (
+        <ChatStoreProvider>{children}</ChatStoreProvider>
+      );
+      const { result } = renderHook(
+        () => ({ actions: useChatStoreActions(), state: useChatStoreState() }),
+        { wrapper: wrap },
+      );
+      const initialActions = result.current.actions;
+      act(() => {
+        result.current.actions.newSession({ isOnboardingSession: true });
+      });
+      // State has changed (a session was created), but the actions
+      // object identity is the same — this is the property that lets
+      // perf-sensitive consumers subscribe to actions alone.
+      expect(result.current.state.sessions.size).toBe(1);
+      expect(result.current.actions).toBe(initialActions);
+    });
+
+    it("useChatStoreState exposes the same state object as useChatStore().state", () => {
+      const wrap = ({ children }: { children: React.ReactNode }) => (
+        <ChatStoreProvider>{children}</ChatStoreProvider>
+      );
+      const { result } = renderHook(
+        () => ({ legacy: useChatStore(), state: useChatStoreState() }),
+        { wrapper: wrap },
+      );
+      expect(result.current.state).toBe(result.current.legacy.state);
+    });
+
+    it("throws a clear error when used outside the provider", () => {
+      // Calling renderHook without a wrapper triggers the throw paths.
+      expect(() => renderHook(() => useChatStoreActions())).toThrow(/ChatStoreProvider/);
+      expect(() => renderHook(() => useChatStoreState())).toThrow(/ChatStoreProvider/);
+    });
+  });
+
+  describe("growth caps", () => {
+    it("caps viewerHistory at 50 entries per session (oldest drop off)", () => {
+      const wrap = ({ children }: { children: React.ReactNode }) => (
+        <ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>
+      );
+      const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
+      act(() => {
+        for (let i = 0; i < 75; i++) {
+          result.current.appendViewerEvent({
+            entityKey: null,
+            action: "frame-advanced",
+            source: "user",
+            detail: { i },
+          });
+        }
+      });
+      const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+      expect(session.viewerHistory).toHaveLength(50);
+      // Oldest 25 dropped — the first remaining entry should be #25.
+      expect((session.viewerHistory[0].detail as { i: number }).i).toBe(25);
+      // Most recent entry is still #74.
+      expect((session.viewerHistory[49].detail as { i: number }).i).toBe(74);
+    });
+
+    it("persists only the most-recent 500 messages even when in-memory has more", () => {
+      const wrap = ({ children }: { children: React.ReactNode }) => (
+        <ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>
+      );
+      const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
+      act(() => {
+        for (let i = 0; i < 650; i++) {
+          result.current.appendMessage({ role: i % 2 === 0 ? "user" : "assistant", content: `m${i}` });
+        }
+      });
+      // In-memory keeps the full set (semantic continuity for the
+      // active chat). Persist-side cap only kicks in on the next
+      // serialize.
+      const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+      expect(session.messages).toHaveLength(650);
+      // Now check the serialized payload trimmed to 500.
+      const persisted = JSON.parse(window.localStorage.getItem("groundx-onboarding.chat-store.v1")!);
+      expect(persisted.sessions[0].messages).toHaveLength(500);
+      // Trim drops the OLDEST (front), keeps the newest — verify last
+      // message is m649.
+      expect(persisted.sessions[0].messages[499].content).toBe("m649");
+      expect(persisted.sessions[0].messages[0].content).toBe("m150");
     });
   });
 
