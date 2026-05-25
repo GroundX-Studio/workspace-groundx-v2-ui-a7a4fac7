@@ -32,36 +32,54 @@ user has visited inside this chat session — its `lastFrame`,
 A user's onboarding session has exactly one ChatSession
 (`isOnboardingSession: true`). Steady mode has N.
 
-## Storage strategy — anon vs signed-in
+## Storage strategy — DB is source of truth; localStorage caches
 
-This is the rule that drove the DB schema design. Memorize it.
+**Updated 2026-05-25.** The earlier "anon = localStorage only for
+content" rule is gone. The current rule:
 
 | Concept | Anonymous | Authenticated |
 |---|---|---|
-| **Content** (chat sessions, messages, summaries, entities) | **localStorage only** — anonymous content is browser-local | **DB primary** + localStorage as cache |
-| **Telemetry** (intent_log, viewer_events, gate_event, page_usage_event) | **DB** — rows tied to `anonymous_user_id` | **DB** — rows tied to `groundx_username` |
+| **Content** (chat sessions, messages, summaries, entities) | **DB primary** + localStorage cache. `ownerAnonId` = the cookie's session.id | **DB primary** + localStorage cache. `ownerUserId` = `groundxUsername` |
+| **Telemetry** (intent_log, viewer_events, gate_event, page_usage_event) | DB, tied to `anon_user_id` | DB, tied to `groundx_username` |
 
-Why the split: anonymous users get free-tier exploration without
-the BFF needing to provision DB rows for every casual visitor.
-Telemetry is always DB because metering + analytics + audit can't
-trust client-controlled data.
+Why the rule changed: the live chat surface
+(`POST /api/chat/messages` → chatHandler → RAG pipeline →
+compression) needs a parent `chat_sessions` row server-side. Anon
+users are ~95% of onboarding traffic — a localStorage-only path
+meant the live surface was dark until F6 sign-up. Server-row-from-
+day-one keeps the surface real for everyone.
 
-On sign-up (F6 commit), the **login-claim flow** flips
-ownership:
+Concrete client flow on each new session:
+1. ChatStoreContext mints `c-<uuid>` (Phase A still applies).
+2. `app/src/api/chatSessions.ts` `sendChatMessage()` runs an
+   ensure-create POST against `/api/chat-sessions` before the
+   first message goes out (cached per session id; invalidated on
+   404).
+3. Middleware writes the row with `ownerAnonId = req.session.id`
+   for anon, `ownerUserId = groundxUsername` for authed.
 
-1. Client serializes ChatStore state into the
-   `claimAnonymousChat` wire format
-   (`app/src/api/claimAnonymousChat.ts`).
-2. POST `/api/chat-sessions/claim` to the BFF.
-3. Middleware calls `repository.claimAnonymousChatPayload(ownerUserId, payload)`:
-   - One transaction, all-or-nothing.
-   - INSERT each chat_session / chat_message / chat_session_entity /
-     viewer_event under the new `ownerUserId`, nulling out
-     `ownerAnonId`.
-   - Anonymous-tagged telemetry rows already in DB
-     (`viewer_events` for anon users) get their owner updated
-     separately by the auth flow that creates the user.
-4. Local storage stays as cache (writes-through to DB after this).
+On sign-up (F6 commit), the **login-claim flow** is now a single
+re-key:
+
+1. Client POSTs `/api/chat-sessions/claim` with **no body**. The
+   anon id comes from the cookie — login reused `req.session?.id`
+   so it still matches.
+2. Middleware runs `repository.rekeyAnonymousChatSessions(anonId, ownerUserId)`:
+   ```sql
+   UPDATE chat_sessions
+      SET owner_user_id = ?, owner_anon_id = NULL, updated_at = NOW()
+    WHERE owner_anon_id = ?
+   ```
+3. Child rows (`chat_messages`, `conversation_summaries`,
+   `chat_session_entities`, `viewer_events`) reference
+   `chat_sessions.id` and inherit the new owner transitively. No
+   need to touch them.
+4. Response: `{ rekeyedSessions: number }`. localStorage stays as
+   cache.
+
+The old bulk-upload `serializeChatPayload` + `claimAnonymousChatPayload`
+code is **gone**. If you see references to those names in older
+notes or comments, treat them as stale.
 
 ## The three axes the LLM sees
 
@@ -80,16 +98,11 @@ calls the LLM, it bundles three axes via
    (typically last 10). Always server-side (telemetry, not user
    content).
 
-Where each axis is read from:
-
-| Axis | Anonymous | Authenticated |
-|---|---|---|
-| `conversation` | request body (client ships from localStorage) | DB (`chat_messages` + latest `conversation_summary`) |
-| `currentEntity` | request body | DB (`chat_session_entities`) |
-| `viewerTrail` | DB (`viewer_events`, by `anon_user_id`) | DB (`viewer_events`, by `groundx_username`) |
-
-Both paths converge in the same `bundleChatContext()`
-implementation; only the read source for the content axes differs.
+**All three axes are read from DB for both anon and authed users**
+(2026-05-25 shift). `chatHandler.handleChatMessage` calls
+`listChatMessages`, `listConversationSummaries`,
+`listChatSessionEntities`, and `listViewerEvents` against the
+repository — no client-shipped content, no anon special case.
 
 ## Compression chain
 
@@ -101,28 +114,38 @@ true (>=70% of context window), it triggers compression:
    tail oldest-first and picks the message range to summarize.
    Always leaves at least one live-tail message intact as the
    LLM's prompt anchor.
-2. (Future) The router asks the LLM to summarize that range.
-3. Writes a new `conversation_summary` row with
-   `absorbed_summary_ids = [previous_summary_id, ...]`.
+2. `summarizeChunk(messages, priorSummary, deps)` (in
+   `conversationCompressor.ts`) builds the summary prompt
+   (role-stamped USER:/ASSISTANT: turns + prior summary spliced
+   in when chain depth > 0) and forwards a chat.completions
+   request through the LlmClient. Temperature pinned at 0.1.
+3. `runCompression(chatSessionId, plan, deps)` writes a new
+   `conversation_summaries` row with the generation number (prior
+   + 1) and `absorbedSummaryIdsJson` listing every prior summary
+   it subsumes.
 4. Marks absorbed messages with
-   `compressed_into_summary_id = <new summary id>` so
-   `listChatMessages()` filtered by `compressed_into_summary_id IS NULL`
-   returns just the live tail.
+   `compressed_into_summary_id = <new summary id>` via
+   `markChatMessagesCompressed`. `listChatMessages()` filtered by
+   `compressed_into_summary_id IS NULL` returns just the live tail.
 
-The token-count + plan logic exists (`contextBundler.ts`). The
-LLM call itself + the DB writer for the summary row land with the
-real LLM router track (#70).
+**Phases I + J shipped 2026-05-24.** The whole chain runs in the
+request hot path on the chatHandler thread today. Moving compression
+to a background job is a deferred follow-up (see
+`docs/agents/open-work.md`).
 
 ## Migrating an anonymous session to signed-in
 
-Two parts move:
+Just the ownership pivot — no content moves anymore:
 
-1. **Content** (chat_sessions, chat_messages, chat_session_entities,
-   conversation_summaries) — currently localStorage-only, gets
-   INSERTed into DB via `claimAnonymousChatPayload`.
+1. **Content** (chat_sessions and its children) is already DB-
+   resident from day one. `rekeyAnonymousChatSessions` runs a
+   single UPDATE on `chat_sessions` flipping `ownerAnonId →
+   ownerUserId`. Child rows inherit transitively.
 2. **Telemetry** (intent_log, viewer_events, gate_event,
    page_usage_event) — already in DB tagged with `anon_user_id`,
-   gets `UPDATE … SET groundx_username = ?` on the matching rows.
+   gets `UPDATE … SET groundx_username = ?` on the matching rows
+   (separate from chat_sessions; happens in the auth flow that
+   creates the user, not in the claim endpoint).
 
 Per locked decision: pre-signin page-usage rows do NOT count
 toward the post-signin page budget. The counter resets at

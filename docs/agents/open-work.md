@@ -3,54 +3,70 @@
 What's pending, in priority order. Each has a brief "why deferred"
 note so you can decide whether to pick it up.
 
+## Recently closed (2026-05-25)
+
+### Live GroundX search + LLM wiring (Track F, task #70) — DONE
+
+`POST /api/chat/messages` is live. `chatHandler.handleChatMessage`
+validates, persists the user message, builds the 3-axis bundle,
+runs the compression pre-flight, calls `routeChat` (mock or live
+RAG), and persists the assistant reply. The RAG path hits
+`searchGroundX` → `callGroundedLlm` against `FetchGroundXClient`
+and `FetchLlmClient`. F5 InteractView is wired through
+`app/src/api/chatSessions.ts:sendChatMessage`.
+
+Still pending under this track (smaller scope):
+- Per-scenario MOCK_MODE fixtures (Utility / Loan / Solar
+  specifics in the canned envelope — today's mock is generic).
+- Live `structured` + `hybrid` paths (need MySQL + Partner
+  readers that aren't wired yet — chatRouter throws
+  `ChatRouteNotImplementedError` → 501 outside MOCK_MODE).
+- Streaming response (SSE / fetch-stream).
+- Tool-call recovery for canvas dispatch tools.
+
+### Compression chain (Phases I + J, task #73) — DONE
+
+`conversationCompressor.ts` ships `buildSummaryPrompt`,
+`summarizeChunk` (the LLM call with temperature 0.1 + role-stamped
+chunks + prior summary splicing), and `runCompression`
+(orchestrator that fetches absorbed messages, calls the LLM,
+writes the `conversation_summaries` row, marks messages
+compressed via `markChatMessagesCompressed`).
+
+Still pending: move compression off the request hot path
+(currently runs synchronously inside chatHandler when
+`shouldCompress` fires) — see "Compression background job" below.
+
+### F6 gate wired to real register + claim — DONE
+
+`GateView.tsx` now collects first / last / email / password /
+confirm and calls `register()` → `claimAnonymousChat()` →
+`promoteToSignedIn()` → `commitGate("register")`. The magic-link
+stub copy is gone. e2e covers the happy path + register-failure.
+
 ## High-impact, multi-week — needs roadmap planning before starting
 
-### Live GroundX search + LLM wiring (Track F, task #70)
+### Compression background job
 
-`middleware/src/services/chatRouter.ts` exists as a scaffold:
-three-mode classifier (rag / structured / hybrid), MOCK_MODE
-responses for the chat surface to boot today. Live mode throws
-"not yet wired."
+`runCompression` currently runs in the chatHandler request thread.
+When it fires, P99 latency for `POST /api/chat/messages` adds the
+LLM summarization round-trip (5–15s typical). At scale this
+contends with the DB connection pool and produces user-visible
+hiccups.
 
-What's needed to finish:
-- Real GroundX search via `FetchGroundXClient` with the active
-  scenario's bucket id. Assemble grounded prompts with citations.
-- LLM provider abstraction beyond OpenAI-compatible (Claude
-  native API, self-hosted via base URL with custom auth header).
-- Token budget counter (tiktoken-compatible or provider-specific)
-  → compression trigger (see § next).
-- Tool-call recovery for canvas dispatch tools per
-  `project_architecture.md`.
-- Per-scenario MOCK_MODE fixtures so canned responses thread
-  Utility / Loan / Solar specifics correctly.
-- Express endpoint wiring (POST `/api/chat/messages`) + client
-  SDK.
-- Stream support (SSE / fetch-stream) so the chat surface can
-  render tokens as they arrive.
+What's needed:
+- A job queue (BullMQ / SQS / similar) the middleware can enqueue
+  compression work onto.
+- Background worker process (separate container or in-process
+  worker pool with capped concurrency).
+- A 202 + polling endpoint OR a "compression pending" flag on
+  the session so the next chat post knows whether the previous
+  one's compression is still running.
+- Retry semantics: if the worker dies mid-write, the absorbed
+  messages must NOT get prematurely marked compressed.
 
-Why deferred: requires LLM provider credentials live + careful
-error budget design + tool-call validation pipeline. Multi-week
-scope.
-
-### Compression chain + LLM bundling (Phases I + J, task #73)
-
-`middleware/src/services/contextBundler.ts` exists:
-`bundleChatContext()`, `shouldCompress()`, `planCompression()` are
-pure functions, tested.
-
-What's needed to finish:
-- The actual LLM call that generates summary content for an
-  identified compression range (depends on live LLM router from
-  #70).
-- DB writer that creates the `conversation_summary` row +
-  flips `chat_messages.compressed_into_summary_id` for absorbed
-  messages.
-- Integration loop in the chat router that summarizes → re-bundles
-  → checks token budget → retries if still over.
-- Provider-specific tokenizer integration to replace the
-  chars/4 heuristic.
-
-Why deferred: gated by #70.
+Why deferred: needs job-runner infra that isn't in the scaffold
+today.
 
 ## Medium — tractable when prioritized
 
@@ -100,6 +116,68 @@ events + Sentry errors. What's NOT done:
 These are ops-y configurations, not code. Land when the project
 has live traffic to look at.
 
+### CSRF middleware
+
+`POST /api/auth/register`, `POST /api/auth/login`, and
+`POST /api/chat/messages` are protected only by SameSite=lax
+cookie semantics. That covers most cases but not all (cross-site
+form submissions targeting a known origin). Lands when the app
+needs to ship publicly:
+
+- CSRF token endpoint (`GET /api/csrf-token`).
+- Middleware checking header / body token on state-changing
+  routes.
+- Frontend axios interceptor adding the token to outgoing
+  POST/PATCH/DELETE.
+
+Why deferred: state-changing routes are session-cookie-gated
+today; CSRF is a defense-in-depth layer for the public-launch
+phase.
+
+### F4 SchemaView (chat-driven schema builder)
+
+The W7 Extract widget on the canvas. Biggest unstarted product
+surface. Needs: schema-builder canvas widget, intent dispatch
+from chat ("add field X" / "remove field Y"), live extraction
+preview, save-template flow. Multi-day.
+
+## Medium — tractable when prioritized
+
+### Sentry browser SDK + claim-failure telemetry
+
+`GateView.handleRegisterSubmit` wraps `claimAnonymousChat()` in
+try/catch and logs to `console.error`. If the claim fails on
+every sign-up, we'd never know without watching the BFF logs.
+The middleware side has Sentry; the frontend doesn't.
+
+Lands with the wider observability hardening track. For now,
+treat any sign-up flow regression as user-reported only.
+
+### Engineer-call Calendly wire-up
+
+`GateView.handleBookCall` calls `commitGate("engineer-call")`
+without actually opening a Calendly widget. Stub copy is in
+place. Needs:
+
+- `CALENDLY_URL` env var passed to the frontend (Vite envs).
+- `<a href={CALENDLY_URL} target="_blank">` OR Calendly's
+  inline embed widget.
+- `gate_event` row for analytics on call-booking conversion.
+
+### DB connection pool sizing + batch reads
+
+`chatHandler.handleChatMessage` makes 5–8 sequential DB calls
+per chat post (read session, messages, summaries, entities,
+viewer events, append user msg, append assistant msg). With
+`connectionLimit: 10` in the MySQL pool, 10 concurrent chat
+posts can starve the pool. Future:
+
+- Bump `connectionLimit` to 50+ with monitoring.
+- Batch reads into a single `SELECT … UNION ALL …` query per
+  chatHandler call.
+
+Why deferred: not biting until real load arrives.
+
 ## Small + isolated — pick up anytime
 
 ### F5 InteractView polish
@@ -128,10 +206,14 @@ plain strings. The wireframe shows some words bolded inside
 each note. Could extend the manifest field shape to support
 inline formatting OR parse markdown-lite at render time.
 
-### Per-scenario chat input handler
+### F2 chat input wire-up
 
-Right now the F2 chat input is a visual stub. Wiring it to the
-LLM router lands with #70.
+F5 InteractView is wired to the live chat endpoint
+(`sendChatMessage`). The F2 chat input (`ChatInputStub` near
+the bottom of `OnboardingChatColumn.tsx`) is still a visual
+stub — it doesn't dispatch anywhere. The wiring pattern from F5
+should drop in cleanly; just reuse `sendChatMessage` with the
+active chatSessionId. Probably 30 minutes of work.
 
 ### Knex migrations
 
