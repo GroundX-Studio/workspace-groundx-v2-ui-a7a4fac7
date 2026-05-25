@@ -127,6 +127,74 @@ describe("sendChatMessage", () => {
     expect(sendCalls).toHaveLength(2);
   });
 
+  it("invalidates the ensured-session cache when /api/chat/messages returns 404", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      // first send: ensure-create + 404 from message endpoint
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ chatSessionId: "chat-1" }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: "chat_session_not_found" }),
+      })
+      // second send: should re-create then succeed
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ chatSessionId: "chat-1" }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          userMessageId: "m-u",
+          assistantMessageId: "m-a",
+          reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [] },
+          compressionRan: false,
+        }),
+      });
+
+    const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
+
+    // First send fails with 404 → cache invalidated.
+    await expect(
+      sendChatMessage({ chatSessionId: "chat-1", newUserMessage: "first", sessionMeta: meta }),
+    ).rejects.toMatchObject({ status: 404 });
+
+    // Second send must re-run the ensure-create step (not skip it).
+    await sendChatMessage({ chatSessionId: "chat-1", newUserMessage: "second", sessionMeta: meta });
+    const ensureCalls = fetchMock.mock.calls.filter((c) => c[0] === "/api/chat-sessions");
+    expect(ensureCalls).toHaveLength(2); // once before each send
+  });
+
+  it("does NOT invalidate the cache on non-404 errors (5xx is transient)", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ chatSessionId: "chat-1" }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        json: async () => ({ error: "router_failed" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          userMessageId: "m-u",
+          assistantMessageId: "m-a",
+          reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [] },
+          compressionRan: false,
+        }),
+      });
+
+    const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
+
+    await expect(
+      sendChatMessage({ chatSessionId: "chat-1", newUserMessage: "first", sessionMeta: meta }),
+    ).rejects.toMatchObject({ status: 502 });
+
+    // Retry — ensure-create should NOT fire again (cache intact).
+    await sendChatMessage({ chatSessionId: "chat-1", newUserMessage: "second", sessionMeta: meta });
+    const ensureCalls = fetchMock.mock.calls.filter((c) => c[0] === "/api/chat-sessions");
+    expect(ensureCalls).toHaveLength(1);
+  });
+
   it("throws with the server error envelope when /api/chat/messages returns non-2xx", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
     fetchMock

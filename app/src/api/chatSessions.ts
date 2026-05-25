@@ -79,7 +79,7 @@ export interface SendChatMessageInput {
   };
 }
 
-class ChatApiError extends Error {
+export class ChatApiError extends Error {
   status: number;
   detail: unknown;
   constructor(message: string, status: number, detail: unknown) {
@@ -131,6 +131,14 @@ export async function createChatSession(input: CreateChatSessionInput): Promise<
  * calls go straight to /api/chat/messages. The ensure-create step is
  * idempotent server-side so a duplicate POST after a cache miss is
  * harmless.
+ *
+ * Cache-invalidation rules:
+ *   - If `createChatSession` throws, we don't add to the cache, so the
+ *     next call retries the create.
+ *   - If `/api/chat/messages` returns 404 (server has no row for this
+ *     chatSessionId — possible after retention sweep, DB wipe, or an
+ *     ownership flip we missed), we DROP the id from the cache and
+ *     re-throw, so the next call re-creates the row.
  */
 export async function sendChatMessage(input: SendChatMessageInput): Promise<SendChatMessageResult> {
   if (!ensuredSessionIds.has(input.chatSessionId)) {
@@ -144,9 +152,18 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
     ensuredSessionIds.add(input.chatSessionId);
   }
 
-  return postJson<SendChatMessageResult>("/api/chat/messages", {
-    chatSessionId: input.chatSessionId,
-    newUserMessage: input.newUserMessage,
-    intent: input.intent ?? null,
-  });
+  try {
+    return await postJson<SendChatMessageResult>("/api/chat/messages", {
+      chatSessionId: input.chatSessionId,
+      newUserMessage: input.newUserMessage,
+      intent: input.intent ?? null,
+    });
+  } catch (err) {
+    if (err instanceof ChatApiError && err.status === 404) {
+      // Server no longer has this row — invalidate the cache so the
+      // next send re-creates it.
+      ensuredSessionIds.delete(input.chatSessionId);
+    }
+    throw err;
+  }
 }
