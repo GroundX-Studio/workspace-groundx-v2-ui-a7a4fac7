@@ -70,8 +70,16 @@ export interface HandleChatMessageDeps {
   groundxClient: GroundXClient;
   /** GroundX API key for the live RAG path. */
   groundxApiKey: string | null;
-  /** Bucket id for RAG search. null = search across all docs. */
-  searchBucketId: number | null;
+  /**
+   * Onboarding samples bucket id (from env.GROUNDX_SAMPLES_BUCKET_ID).
+   * Used as the RAG content-scope fallback ONLY when the active entity
+   * doesn't carry a more specific bucket/project/group/document scope.
+   * In steady mode (signed-in customer with their own buckets) this
+   * should be ignored — the scope comes from the active entity. The
+   * name is deliberately onboarding-specific to avoid confusing this
+   * with the broader "where is the user searching right now" concept.
+   */
+  samplesBucketId: number | null;
   /** Provider model id, e.g. "gpt-4o" or "claude-3-haiku". */
   llmModelId: string;
   /** Model id used specifically for compression summaries. Defaults to llmModelId. */
@@ -270,12 +278,12 @@ export async function handleChatMessage(
     // we land here on either a samples-bucket scope (the env-provided
     // default for anon onboarding) or "unknown". The router logs
     // unknown-scope dispatches so we can spot the gap in telemetry.
-    const contentScope = deriveRagContentScope(activeEntity, deps.searchBucketId);
+    const contentScope = deriveRagContentScope(activeEntity, deps.samplesBucketId);
     reply = await routeChat(routerRequest, {
       llmClient: deps.llmClient,
       groundxClient: deps.groundxClient,
       groundxApiKey: deps.groundxApiKey ?? undefined,
-      searchBucketId: deps.searchBucketId,
+      samplesBucketId: deps.samplesBucketId,
       contentScope,
       repository: deps.repository,
       chatSessionId: request.chatSessionId,
@@ -359,7 +367,7 @@ export async function handleChatMessage(
  * group / doc references. When those fields land, this function picks
  * them up automatically — the only change needed.
  *
- * TODO(chat-fix-list P0 #2 follow-on): wire EntitySession scope refs.
+ * TODO(CF-02 + CF-15): wire EntitySession scope refs.
  */
 function deriveRagContentScope(
   _activeEntity: { entityKey: string } | null | undefined,

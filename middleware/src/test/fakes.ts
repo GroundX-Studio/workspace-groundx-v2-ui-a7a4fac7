@@ -33,6 +33,7 @@ export const testEnv: AppEnv = {
   LLM_AUTH_HEADER_NAME: "Authorization",
   LLM_AUTH_SCHEME: "Bearer",
   LLM_MODEL_ID: "model",
+  LLM_CONTEXT_WINDOW_TOKENS: 16_000,
   MOCK_MODE: false,
   BYO_PAGES_LIMIT: 100,
   RATE_LIMIT_AUTH_PER_MIN: 20,

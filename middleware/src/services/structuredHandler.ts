@@ -100,7 +100,7 @@ export async function runStructuredQuery(
 
 async function answerPagesRemaining(deps: StructuredHandlerDeps): Promise<ChatRouterResponse> {
   // The real answer needs `page_usage_event` aggregation by user.
-  // TODO(chat-fix-list P0 #3 follow-on): query page_usage_event for
+  // TODO(CF-04): query page_usage_event for
   // sum-of-pages-this-month for the user, subtract from byoPagesLimit.
   // For now we surface the budget itself + a frank note that usage
   // accounting needs the page_usage_event reader.
@@ -168,7 +168,7 @@ function answerUnimplementedSubkind(kind: StructuredQueryKind): ChatRouterRespon
   // We deliberately do NOT fabricate a plausible answer here. The
   // 501-for-modes-without-readers principle applies inside the
   // structured mode too: be honest about what's not wired.
-  // TODO(chat-fix-list P0 #3 follow-on): add per-subkind readers:
+  // TODO(CF-04): add per-subkind readers:
   //   - saved_schemas: SELECT FROM extraction_schemas WHERE user=?
   //   - my_projects:   SELECT FROM projects WHERE user=? (or Partner /project)
   //   - api_keys:      Partner /apikey list

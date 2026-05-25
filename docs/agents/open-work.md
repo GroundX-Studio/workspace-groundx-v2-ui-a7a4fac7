@@ -3,158 +3,30 @@
 What's pending, in priority order. Each has a brief "why deferred"
 note so you can decide whether to pick it up.
 
-## Chat stack — prioritized fix list (locked 2026-05-25; P0s closed PM 2026-05-25)
+## Chat stack
 
-Consolidated from the architecture review + a follow-up working
-session that surfaced design defects in the original implementation.
+**Single source of truth: [`docs/agents/chat-fix-list.md`](chat-fix-list.md).**
 
-### Recently closed (PM 2026-05-25)
+Every pending chat-stack item lives in that file with a `CF-N` id +
+honest status (`not-started` / `in-progress` / `blocked` / `closed`).
+Inline `TODO(CF-N)` markers in source point back to entries there.
+Rules: max 3 items in-progress at once, closure requires a user-
+visible test, inline TODOs are deleted on closure.
 
-1. **P0 #1: Compression chain redesign** — DONE. `runCompression`
-   no longer splices prior summary text into leaf LLM calls; every
-   leaf summary is written with `generation = 0` and
-   `absorbedSummaryIdsJson = "[]"`. New `runMetaCompaction` folds
-   the oldest active summaries into a super-summary when the
-   active count exceeds `MAX_ACTIVE_SUMMARIES_BEFORE_META = 10`
-   (folds the oldest 5 into 1). New `selectActiveSummaries` filter
-   excludes summaries listed in any other summary's
-   `absorbedSummaryIdsJson` from the bundle. `BundleConversationInput`
-   now carries `activeSummaries: []` (was `latestSummary: …|null`);
-   the bundler's token estimate walks all active summaries. 20
-   tests cover the new compressor + 10 cover the bundler.
+The big-picture sketch (read the ledger for the real list):
 
-2. **P0 #2: ContentScope routing in `searchGroundX`** — DONE.
-   `searchGroundX` is now exported and takes a `RagContentScope`
-   discriminated union with 4 live cases + 1 "unknown" fallback
-   that logs:
-     - `bucket` (no projectIds)   → `POST /v1/search/{bucketId}`
-     - `bucket` (1 projectId)     → `+ filter: { projectId: P }`
-     - `bucket` (N projectIds)    → `+ filter: { projectId: { $in: [...] } }`
-     - `group`                     → `POST /v1/search/{groupId}`
-     - `documents`                 → `POST /v1/search/documents + documentIds`
-     - `unknown`                   → legacy /v1/search/documents + console.warn
-   `deriveRagContentScope` lives in `chatHandler.ts` as the single
-   seam where future scope refinements land. Today it returns
-   `{kind: "bucket", bucketId: env.GROUNDX_SAMPLES_BUCKET_ID}` —
-   `EntitySession` doesn't yet carry project/group/doc refs.
-   See **follow-on** below.
+### Recently locked architecture decisions
+1. Compression chain = leaf summaries + meta-compaction (no
+   telephone-game decay). **CF-01 closed.**
+2. GroundX search dispatches on a 5-case ContentScope discriminated
+   union (bucket, bucket+projectIds, group, documents, unknown).
+   **CF-02 seam closed; CF-15 follow-on tracks scope-from-entity.**
+3. Structured + hybrid modes wired live with a "frank reply when
+   reader isn't built" rule rather than fabricating answers.
+   **CF-04 / CF-05 in-progress (3 of 7 sub-handlers real).**
 
-3. **P0 #3 + #4: Live `structured` + `hybrid` modes** — DONE
-   (framework + minimum-viable handlers). New
-   `services/structuredHandler.ts` ships `classifyStructuredQuery`
-   (7 sub-kinds) + `runStructuredQuery` (dispatches by sub-kind)
-   + `runHybridQuery` (folds RAG snippets + entity context into a
-   tour-style answer).
-   Sub-handlers wired with REAL data: `pages_remaining`,
-   `onboarding_state`, `current_entity` (these read chat_sessions
-   + chat_session_entities, which exist).
-   Sub-handlers that need readers not yet built (`saved_schemas`,
-   `my_projects`, `api_keys`) return a frank "I can answer once
-   the data readers are wired" reply instead of 501-ing the whole
-   request OR fabricating an answer. Same honesty principle as
-   the silent-mock fix earlier.
-   `routeChat` no longer throws `ChatRouteNotImplementedError`
-   for structured/hybrid when `repository + chatSessionId` are
-   supplied (they always are from chatHandler). The 501 path
-   remains for misconfigured callers.
-
-### P0 follow-ons (smaller scope, real work)
-
-1a. **`runMetaCompaction` chained-generation evolution.** Today the
-    handler triggers meta-compaction on `activeSummaries.length > 10`
-    + folds the oldest 5. Eventually super-summaries themselves
-    pile up; we'd want a 2nd-tier trigger (e.g. > 10 supers fold to
-    1 mega-super, gen=2). Test the actual session-lifetime curve
-    before tuning — the constants are easy to bump.
-
-2a. **`EntitySession` scope refs.** `deriveRagContentScope` in
-    chatHandler returns `{kind:"bucket", bucketId: env.SAMPLES}`
-    today. When EntitySession gains optional `projectIds[]` /
-    `groupId` / `documentIds[]` fields, the helper switches on
-    those automatically — single point of change. Also need:
-    helper that ensures-creates a group of buckets when the user
-    is looking across N workspaces.
-
-3a. **Real `saved_schemas`, `my_projects`, `api_keys` readers.**
-    Today these sub-kinds return a frank "not wired yet" reply.
-    Once the underlying tables / Partner reads exist, swap the
-    body of `answerUnimplementedSubkind` for real queries. The
-    dispatch + classify + envelope shape don't change.
-
-### P1 — quality / UX
-
-5. **Per-status client error mapping**
-   `app/src/api/chatSessions.ts:sendChatMessage` only branches
-   on 404 today (invalidates the ensure cache). Everything else
-   re-throws to F5's generic "couldn't reach the chat service"
-   handler. Need:
-   - 401 → re-auth flow (anon bootstrap OR redirect to login).
-   - 501 → user-facing "I can't answer that kind of question yet."
-   - 504 → "took too long — retry?" with one auto-retry.
-   - 502 / other 5xx → "something went wrong — retry in a moment."
-   - 400 → developer-visible error (this is a programming bug).
-
-6. **Iterate on the grounded completion prompt**
-   Current system prompt in `callGroundedLlm` is naïve: "Answer
-   ONLY using the snippets … Cite by repeating short phrases
-   verbatim. Be concise." Needs:
-   - Token-budget guard in the prompt (LLM should plan its
-     answer length against snippet count + length).
-   - Structured citation field (rather than "repeat short
-     phrases" — which the LLM does inconsistently).
-   - "I don't know" calibration (when snippets don't contain
-     the answer, the LLM should refuse rather than hedge).
-   - An eval set with at least 20 (query, expected-citation,
-     expected-refusal-or-answer) cases per scenario.
-   Open-ended; iterate against telemetry once live.
-
-7. **Viewer intent inference with confidence gate**
-   The grounded LLM call should optionally output a suggested
-   canvas-intent change ("user asked to see source of $X →
-   suggest opening F4 with citation_id=$Y"). Surface as a
-   suggestedActions chip, NEVER auto-navigate. Required:
-   - System-prompt addition asking for an optional
-     `suggestedIntent` field with a confidence in [0,1].
-   - Reply schema extension:
-     `reply.suggestedIntent?: {intent, confidence, reason}`.
-   - Dispatch: emit a chip ONLY when `confidence >= 0.85`.
-     User opt-in via click. The 0.85 threshold is a guard
-     against disrupting the user's current view on a
-     low-confidence guess.
-
-8. **Per-scenario MOCK_MODE fixtures**
-   `mockResponseFor` returns one canned envelope per mode
-   regardless of which scenario the user is on. Utility / Loan /
-   Solar should feel distinct in dev and demo.
-
-### P2 — scale / architecture
-
-9. **Compression off the request hot path** — background job +
-   202/poll endpoint OR a "compression pending" flag on the
-   session. Today P99 latency adds the summarization LLM
-   round-trip when compression fires (5-15s). Needs job-runner
-   infra not in the scaffold yet.
-
-10. **Streaming response (SSE / fetch-stream)** — today's
-    response is a single JSON envelope; F5 waits for the full
-    answer. Streaming would render tokens as they arrive.
-
-11. **Tool-call wiring in routeChat** — `reply.tools` always
-    `[]` today. Canvas dispatch tools (`show_understand`,
-    `show_extraction`, `pin_to_report`, `propose_schema_field`,
-    `propose_report_section`, `search_groundx`) need to flow
-    from the grounded LLM call through chatHandler into
-    `suggestedActions` / direct dispatch.
-
-### P3 — observability / scale follow-ups
-
-12. **Frontend Sentry browser SDK + claim-failure telemetry**
-    (existing item — `GateView` claim-fail logs to console only).
-
-13. **DB connection pool sizing + batch reads in chatHandler**
-    (existing item — pool=10 with ~5-8 sequential reads per
-    chat post).
-
+Old content in this section moved into the chat-fix-list ledger
+on 2026-05-25 — the prose duplication was drifting from the code.
 
 ## Recently closed (2026-05-25)
 

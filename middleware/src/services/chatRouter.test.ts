@@ -174,7 +174,7 @@ describe("routeChat", () => {
       chatSessionId: "chat-1",
       groundxClient,
       groundxApiKey: "k",
-      searchBucketId: 28454,
+      samplesBucketId: 28454,
       byoPagesLimit: 100,
     });
     expect(reply.mode).toBe("hybrid");

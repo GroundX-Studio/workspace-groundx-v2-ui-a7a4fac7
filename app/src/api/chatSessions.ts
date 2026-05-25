@@ -164,7 +164,7 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
       // next send re-creates it.
       ensuredSessionIds.delete(input.chatSessionId);
     }
-    // TODO(chat-fix-list P1 #5): per-status mapping. Today the caller
+    // TODO(CF-08): per-status mapping. Today the caller
     // gets a generic "couldn't reach" message for everything except
     // 404. Should branch:
     //   401 -> re-auth flow (anon bootstrap OR /auth/login redirect)

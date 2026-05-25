@@ -49,6 +49,13 @@ const envSchema = z.object({
   LLM_AUTH_HEADER_NAME: z.string().default("Authorization"),
   LLM_AUTH_SCHEME: z.string().default("Bearer"),
   LLM_MODEL_ID: z.string().optional(),
+  // LLM context window in tokens. Compression triggers at 70% of this.
+  // Different models have wildly different windows (Claude Sonnet=200k,
+  // GPT-4o=128k, GPT-3.5=16k) so the default is the conservative lower
+  // bound; production deployments MUST set this to match their model.
+  // Override range: 4k floor (smallest practical) → 1M ceiling
+  // (Gemini 1.5 Pro extended).
+  LLM_CONTEXT_WINDOW_TOKENS: z.coerce.number().int().min(4_000).max(1_000_000).default(16_000),
   // Free-tier metering ceiling for BYO uploads (pages, not docs).
   BYO_PAGES_LIMIT: z.coerce.number().int().positive().default(100),
   // Rate limits. Tunable per-deploy via env so on-prem can dial down.

@@ -127,9 +127,9 @@ export interface ChatRouterDeps {
    * bucket, OR the samples bucket id for anonymous onboarding flows.
    * Legacy single-bucket-only path; new code should pass `contentScope`.
    */
-  searchBucketId?: number | null;
+  samplesBucketId?: number | null;
   /**
-   * Explicit content scope. Wins over `searchBucketId` when supplied.
+   * Explicit content scope. Wins over `samplesBucketId` when supplied.
    * The chatHandler derives this from the active entity / current
    * intent / project membership; the chatRouter doesn't recompute it.
    */
@@ -252,8 +252,8 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
   if (deps.groundxClient && deps.groundxApiKey) {
     const scope: RagContentScope =
       deps.contentScope ??
-      (deps.searchBucketId != null
-        ? { kind: "bucket", bucketId: deps.searchBucketId }
+      (deps.samplesBucketId != null
+        ? { kind: "bucket", bucketId: deps.samplesBucketId }
         : { kind: "unknown" });
     try {
       snippets = await searchGroundX(request.newUserMessage, scope, deps.groundxClient, deps.groundxApiKey);
@@ -290,7 +290,7 @@ async function runRagPipeline(
   // fall back to the legacy single-bucket scope from env.
   const scope: RagContentScope =
     deps.contentScope ??
-    (deps.searchBucketId != null ? { kind: "bucket", bucketId: deps.searchBucketId } : { kind: "unknown" });
+    (deps.samplesBucketId != null ? { kind: "bucket", bucketId: deps.samplesBucketId } : { kind: "unknown" });
 
   const snippets = await searchGroundX(
     request.newUserMessage,
@@ -327,7 +327,7 @@ async function runRagPipeline(
  *   documents               → POST /v1/search/documents +
  *                             {query, n, documentIds: [...]}
  *
- * TODO(chat-fix-list P0 #2 follow-on): multi-bucket usage today
+ * TODO(CF-02 + CF-15): multi-bucket usage today
  * requires the caller to provide an existing groupId. The "ensure-
  * create group of buckets [B1, B2, …] if none exists" helper lives
  * outside this function and isn't built yet — when it lands, the
@@ -405,7 +405,7 @@ export async function searchGroundX(
 }
 
 /**
- * TODO(chat-fix-list P1 #6): the grounded completion prompt is naïve.
+ * TODO(CF-06): the grounded completion prompt is naïve.
  * Open items:
  *   - Token-budget guard so the LLM plans its answer length against
  *     snippet count + length (today it can blow past context if
@@ -418,7 +418,7 @@ export async function searchGroundX(
  *   - An eval set per scenario for regression testing once telemetry
  *     is live.
  *
- * TODO(chat-fix-list P1 #7): viewer intent inference. Ask the LLM to
+ * TODO(CF-07): viewer intent inference. Ask the LLM to
  * optionally output a `suggestedIntent: {intent, confidence, reason}`
  * when the question implies the user should look at a different view
  * (source PDF, extraction table, specific citation). Dispatch logic

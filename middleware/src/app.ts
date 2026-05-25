@@ -442,10 +442,11 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
         llmClient,
         groundxClient,
         groundxApiKey,
-        searchBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
+        samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
         llmModelId: env.LLM_MODEL_ID ?? "model",
         mockMode: env.MOCK_MODE,
         byoPagesLimit: env.BYO_PAGES_LIMIT,
+        contextWindowTokens: env.LLM_CONTEXT_WINDOW_TOKENS,
       });
       res.json(result);
     } catch (error) {
