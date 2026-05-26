@@ -113,6 +113,36 @@ export const STEP_STRIP_BADGE_FONT_SIZE_SLIM = 9;
 export const STEP_STRIP_PILL_FONT_SIZE_SLIM = 10;
 export const STEP_STRIP_ANALYZE_EYEBROW_FONT_SIZE_SLIM = 8;
 
+/**
+ * OnboardingNav small-text sizes. The nav item eyebrow (9px coral
+ * "NEW") and sub-label (11px muted gloss) are deliberately smaller
+ * than the typography primitive scale because the nav rail is the
+ * narrowest UI surface — labels need to fit a 180px column without
+ * truncation. Added as chrome tokens in ARCH-20 (2026-05-26) so the
+ * no-hardcoded-styles drift guard can lock the values without forcing
+ * a one-size-fits-all typography token.
+ */
+export const ONBOARDING_NAV_EYEBROW_FONT_SIZE = 9;
+export const ONBOARDING_NAV_SUBLABEL_FONT_SIZE = 11;
+
+/**
+ * Full-viewport minHeight — the "this surface owns the whole window"
+ * pattern used by full-bleed page-level layouts (AuthLayout, Banned,
+ * etc.). Added as a chrome token in ARCH-20 (2026-05-26) so the
+ * no-hardcoded-styles drift guard accepts the value without
+ * special-casing each consumer in ASSET_ALLOWLIST.
+ */
+export const FULL_VIEWPORT_MIN_HEIGHT = "100vh";
+
+/**
+ * PdfViewer thumbnail page-number overlay font size. Same 9px as
+ * the OnboardingNav eyebrow, but the meaning is unrelated — this is
+ * the tiny "1 / 2 / 3" page-index text that sits on top of each
+ * thumbnail in the PDF reel. Kept as its own token so changes to the
+ * viewer typography stay scoped to the viewer.
+ */
+export const PDF_THUMB_PAGE_NUMBER_FONT_SIZE = 9;
+
 /** Capability badge (E / I / R) — default size used inside sample cards. */
 export const CAPABILITY_BADGE_SIZE = 20;
 

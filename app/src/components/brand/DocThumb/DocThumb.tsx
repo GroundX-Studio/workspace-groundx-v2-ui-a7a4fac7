@@ -2,7 +2,7 @@ import Box from "@mui/material/Box";
 import { alpha } from "@mui/material/styles";
 import type { FC } from "react";
 
-import { BORDER_RADIUS_SM, NAVY, WHITE } from "@/constants";
+import { BORDER_RADIUS_PILL, BORDER_RADIUS_SM, NAVY, WHITE } from "@/constants";
 
 export interface DocThumbProps {
   /** Width in px. Defaults to 36 (F1 sample card spec). */
@@ -51,7 +51,7 @@ export const DocThumb: FC<DocThumbProps> = ({ w = 36, h = 46 }) => {
         "& > i": {
           display: "block",
           height: 4,
-          borderRadius: 999,
+          borderRadius: BORDER_RADIUS_PILL,
           backgroundColor: lineColor,
         },
         "& > i:nth-of-type(2)": { width: "70%", backgroundColor: lineDim },

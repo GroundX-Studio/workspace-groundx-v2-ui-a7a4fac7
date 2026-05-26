@@ -5,7 +5,16 @@ import { useTheme } from "@mui/material/styles";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
-import { BORDER, NAVY, WARM_OFFWHITE, WHITE } from "@/constants";
+import {
+  BORDER,
+  BORDER_RADIUS_PILL,
+  BORDER_RADIUS_SM,
+  FONT_SIZE_CAPTION,
+  FONT_WEIGHT_LABEL,
+  NAVY,
+  WARM_OFFWHITE,
+  WHITE,
+} from "@/constants";
 import { useFocusMode } from "@/shared/hooks/useFocusMode";
 import { useResizableSplit } from "@/shared/hooks/useResizableSplit";
 
@@ -289,9 +298,9 @@ export function AppShell({
                 justifyContent: "space-between",
               }}
             >
-              <Box sx={{ height: 2, width: "100%", backgroundColor: NAVY, borderRadius: 1 }} />
-              <Box sx={{ height: 2, width: "100%", backgroundColor: NAVY, borderRadius: 1 }} />
-              <Box sx={{ height: 2, width: "100%", backgroundColor: NAVY, borderRadius: 1 }} />
+              <Box sx={{ height: 2, width: "100%", backgroundColor: NAVY, borderRadius: BORDER_RADIUS_SM }} />
+              <Box sx={{ height: 2, width: "100%", backgroundColor: NAVY, borderRadius: BORDER_RADIUS_SM }} />
+              <Box sx={{ height: 2, width: "100%", backgroundColor: NAVY, borderRadius: BORDER_RADIUS_SM }} />
             </Box>
           </IconButton>
           {hideChat ? null : <Box
@@ -305,13 +314,13 @@ export function AppShell({
               alignItems: "center",
               gap: 0.5,
               border: `1px solid ${BORDER}`,
-              borderRadius: 999,
+              borderRadius: BORDER_RADIUS_PILL,
               backgroundColor: WHITE,
               color: NAVY,
               px: 1.5,
               py: 0.5,
-              fontSize: 13,
-              fontWeight: 600,
+              fontSize: FONT_SIZE_CAPTION,
+              fontWeight: FONT_WEIGHT_LABEL,
               cursor: "pointer",
               fontFamily: "inherit",
               "&:hover": { backgroundColor: WARM_OFFWHITE },

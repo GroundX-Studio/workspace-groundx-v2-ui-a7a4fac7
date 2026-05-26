@@ -24,6 +24,7 @@ import {
   BORDER,
   BORDER_RADIUS_SM,
   CYAN,
+  FONT_SIZE_LABEL,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
   GREEN,
@@ -73,7 +74,7 @@ export const SessionSwitcher: FC<SessionSwitcherProps> = ({
           color: MUTED_ON_LIGHT,
           fontWeight: FONT_WEIGHT_LABEL,
           letterSpacing: LETTER_SPACING_LABEL,
-          fontSize: 10,
+          fontSize: FONT_SIZE_LABEL,
           px: 0.5,
         }}
       >
@@ -107,7 +108,7 @@ export const SessionSwitcher: FC<SessionSwitcherProps> = ({
                   alignItems: "center",
                   gap: 0.75,
                   padding: "6px 8px",
-                  fontSize: 12,
+                  fontSize: FONT_SIZE_LABEL,
                   fontWeight: isActive ? FONT_WEIGHT_HEADLINE : FONT_WEIGHT_LABEL,
                   backgroundColor: isActive ? CYAN : "transparent",
                   border: isActive ? `1px solid ${BORDER}` : "1px solid transparent",
@@ -139,7 +140,7 @@ export const SessionSwitcher: FC<SessionSwitcherProps> = ({
         sx={{
           mt: 0.5,
           padding: "6px 8px",
-          fontSize: 12,
+          fontSize: FONT_SIZE_LABEL,
           fontWeight: FONT_WEIGHT_HEADLINE,
           backgroundColor: WHITE,
           border: `1.5px solid ${GREEN}`,

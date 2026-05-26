@@ -48,37 +48,37 @@ const ASSET_ALLOWLIST = new Set<string>([
   // externally owned and can't be tokenized into the GroundX brand
   // palette.
   "components/brand/ConnectorGlyph/ConnectorGlyph.tsx",
+  // Dev-only diagnostic overlay (gated on `?navdebug=1`). Uses bright
+  // debug-vibrant colors (#fff / #90ee90 / #ffd700 / #ff7070) that are
+  // intentionally NOT brand tokens — they're the "this is a debug
+  // panel" visual identity. Same logic for the small 9-11px font
+  // sizes (terminal-feel monospace text). ARCH-20 (2026-05-26): keep
+  // allowlisted rather than tokenizing — debug colors aren't brand.
+  "views/Onboarding/NavDebugOverlay.tsx",
+  // Framework-independent fallback UI — renders BEFORE the theme
+  // provider has a chance to load (it's the safety net for when the
+  // app tree throws during initial render). Uses inline `style={...}`
+  // with hardcoded hex + sizes so the error UI shows correctly even
+  // if `@/constants` fails to resolve or the MUI theme isn't mounted.
+  // Tokenizing would defeat the "always renders" guarantee.
+  // ARCH-20 (2026-05-26): allowlisted by design.
+  "components/layout/AppErrorBoundary/AppErrorBoundary.tsx",
 ]);
 
 /**
- * Files with historical inline literals that ARCH-19/20 (view
- * migrations to new primitives) will clean up. Each row carries the
- * offender count at the time of ARCH-17 expansion (2026-05-26) so
- * the cleanup progress is visible. To remove a row: replace its
- * inline literals with theme tokens / primitives, ensure the test
- * still passes (it now exercises that file), and delete the row.
+ * Files with historical inline literals from the ARCH-17 drift-guard
+ * expansion. Each row carried the offender count at that point.
+ * ARCH-20 (2026-05-26) burned this list to ZERO — every component
+ * + view file now resolves its visible styles through theme tokens
+ * (or sits in `ASSET_ALLOWLIST` for legitimate non-brand cases like
+ * the ConnectorGlyph third-party logos, the NavDebugOverlay debug
+ * panel, and the AppErrorBoundary framework-independent fallback).
  *
- * INVARIANT: this list is monotonically shrinking. Never add a new
- * file here unless you can name the ARCH-19/20 sub-task that will
- * clean it.
+ * INVARIANT: the list stays empty. Adding a new entry requires a
+ * named cleanup ticket; the preferred path is always to use a token
+ * (existing or new chrome token).
  */
-const EXEMPT_OFFENDER_COUNTS: Record<string, number> = {
-  "components/layout/AppErrorBoundary/AppErrorBoundary.tsx": 14,
-  "components/layout/AppShell/AppShell.tsx": 6,
-  "components/layout/OnboardingNav/OnboardingNav.tsx": 7,
-  "components/chat-widgets/BookingStatusCard/BookingStatusCard.tsx": 6,
-  "components/brand/CiteChip/CiteChip.tsx": 3,
-  "components/brand/DocThumb/DocThumb.tsx": 1,
-  "components/viewer-widgets/PdfViewer/PdfViewerWidget.tsx": 1,
-  "views/Auth/AuthLayout.tsx": 1,
-  "views/Banned/Banned.tsx": 1,
-  "views/Onboarding/NavDebugOverlay.tsx": 12,
-  "views/Onboarding/OnboardingChatColumn.tsx": 8,
-  "views/Onboarding/IntegrateView.tsx": 4,
-  "views/Onboarding/ExtractView.tsx": 3,
-  "views/Onboarding/InteractView.tsx": 2,
-  "views/Steady/SteadyShell/SessionSwitcher.tsx": 3,
-};
+const EXEMPT_OFFENDER_COUNTS: Record<string, number> = {};
 const EXEMPT = new Set(Object.keys(EXEMPT_OFFENDER_COUNTS));
 
 interface ForbiddenPattern {

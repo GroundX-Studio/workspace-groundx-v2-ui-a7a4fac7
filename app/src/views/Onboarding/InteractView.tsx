@@ -15,6 +15,7 @@ import {
   BORDER_RADIUS_PILL,
   CYAN,
   EYEBROW_ON_LIGHT,
+  FONT_SIZE_CAPTION,
   FONT_WEIGHT_LABEL,
   GREEN,
   NAVY,
@@ -226,8 +227,8 @@ export const InteractView: FC = () => {
             color: NAVY,
             border: `1px solid ${NAVY}`,
             cursor: "pointer",
-            fontSize: 13,
-            fontWeight: 600,
+            fontSize: FONT_SIZE_CAPTION,
+            fontWeight: FONT_WEIGHT_LABEL,
             "&:hover": { backgroundColor: alpha(NAVY, 0.04) },
           }}
         >

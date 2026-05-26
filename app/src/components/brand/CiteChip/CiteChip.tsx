@@ -8,8 +8,10 @@ import {
   BODY_TEXT,
   BORDER,
   BORDER_RADIUS,
+  BORDER_RADIUS_SM,
   CYAN,
   EYEBROW_ON_LIGHT,
+  FONT_SIZE_LABEL,
   FONT_WEIGHT_LABEL,
   LETTER_SPACING_LABEL,
   MUTED_ON_LIGHT,
@@ -83,10 +85,10 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate }) => 
         data-citation-page={citation.page}
         sx={{
           height: 20,
-          fontSize: 11,
+          fontSize: FONT_SIZE_LABEL,
           backgroundColor: CYAN,
           color: NAVY,
-          fontWeight: 600,
+          fontWeight: FONT_WEIGHT_LABEL,
           cursor: "pointer",
           "&:hover": { filter: "brightness(0.95)" },
         }}
@@ -134,7 +136,7 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate }) => 
               pl: 1,
               py: 0.5,
               backgroundColor: `${CYAN}1a`,
-              borderRadius: 0.5,
+              borderRadius: BORDER_RADIUS_SM,
             }}
           >
             <Typography variant="body2" sx={{ color: NAVY }}>

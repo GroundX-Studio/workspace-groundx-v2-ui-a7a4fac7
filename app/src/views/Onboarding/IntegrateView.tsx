@@ -12,6 +12,8 @@ import {
   BORDER_RADIUS,
   BORDER_RADIUS_PILL,
   EYEBROW_ON_LIGHT,
+  FONT_SIZE_CAPTION,
+  FONT_SIZE_LABEL,
   FONT_WEIGHT_LABEL,
   NAVY,
   WHITE,
@@ -83,7 +85,7 @@ export const IntegrateView: FC = () => {
             data-testid="integrate-snippet"
             sx={{
               fontFamily: "monospace",
-              fontSize: 13,
+              fontSize: FONT_SIZE_CAPTION,
               p: 2,
               m: 0,
               whiteSpace: "pre-wrap",
@@ -117,7 +119,7 @@ export const IntegrateView: FC = () => {
                   }}
                 >
                   <Stack spacing={0}>
-                    <Typography variant="body2" sx={{ fontWeight: 600, color: NAVY }}>
+                    <Typography variant="body2" sx={{ fontWeight: FONT_WEIGHT_LABEL, color: NAVY }}>
                       {plugin.label}
                     </Typography>
                     <Typography variant="caption" sx={{ color: BODY_TEXT }}>
@@ -141,8 +143,8 @@ export const IntegrateView: FC = () => {
                       borderRadius: BORDER_RADIUS_PILL,
                       backgroundColor: BORDER,
                       color: BODY_TEXT,
-                      fontWeight: 600,
-                      fontSize: 12,
+                      fontWeight: FONT_WEIGHT_LABEL,
+                      fontSize: FONT_SIZE_LABEL,
                       cursor: "not-allowed",
                       whiteSpace: "nowrap",
                     }}

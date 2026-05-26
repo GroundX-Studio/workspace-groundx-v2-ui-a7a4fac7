@@ -48,6 +48,7 @@ import {
   FONT_WEIGHT_LABEL,
   GREEN,
   NAVY,
+  PDF_THUMB_PAGE_NUMBER_FONT_SIZE,
   WHITE,
 } from "@/constants";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
@@ -261,7 +262,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({ documentId, mode, in
                     left: 0,
                     right: 0,
                     textAlign: "center",
-                    fontSize: 9,
+                    fontSize: PDF_THUMB_PAGE_NUMBER_FONT_SIZE,
                     fontWeight: FONT_WEIGHT_HEADLINE,
                     color: NAVY,
                     backgroundColor: `${WHITE}cc`,

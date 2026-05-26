@@ -41,12 +41,15 @@ import {
   BORDER_RADIUS_SM,
   CYAN,
   EYEBROW_ON_LIGHT,
+  FONT_SIZE_CAPTION,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
   GREEN,
   LETTER_SPACING_LABEL,
   MUTED_ON_LIGHT,
   NAVY,
+  ONBOARDING_NAV_EYEBROW_FONT_SIZE,
+  ONBOARDING_NAV_SUBLABEL_FONT_SIZE,
   ONBOARDING_NAV_WIDTH_COLLAPSED,
   ONBOARDING_NAV_WIDTH_FULL,
   WARM_OFFWHITE,
@@ -257,7 +260,7 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
               borderRadius: "50%",
               backgroundColor: NAVY,
               color: WHITE,
-              fontSize: 13,
+              fontSize: FONT_SIZE_CAPTION,
               fontWeight: FONT_WEIGHT_HEADLINE,
               display: "inline-flex",
               alignItems: "center",
@@ -323,7 +326,7 @@ function renderExpandedRow(
         alignItems: "center",
         gap: 1,
         padding: "6px 10px",
-        fontSize: 13,
+        fontSize: FONT_SIZE_CAPTION,
         fontWeight: isActive ? FONT_WEIGHT_HEADLINE : FONT_WEIGHT_LABEL,
         backgroundColor: isActive ? CYAN : "transparent",
         // 1.5px transparent border (matches the bottom-section CTA's
@@ -371,7 +374,7 @@ function renderCompactRow(
         alignItems: "center",
         justifyContent: "center",
         padding: "6px 4px",
-        fontSize: 13,
+        fontSize: FONT_SIZE_CAPTION,
         fontWeight: isActive ? FONT_WEIGHT_HEADLINE : FONT_WEIGHT_LABEL,
         backgroundColor: isActive ? CYAN : "transparent",
         border: isActive ? `1px solid ${BORDER}` : "1px solid transparent",
@@ -412,7 +415,7 @@ function renderCta(
           alignItems: "center",
           justifyContent: "center",
           padding: "6px 4px",
-          fontSize: 13,
+          fontSize: FONT_SIZE_CAPTION,
           fontWeight: FONT_WEIGHT_HEADLINE,
           backgroundColor: WHITE,
           border: `1.5px solid ${GREEN}`,
@@ -455,7 +458,7 @@ function renderCta(
       {item.eyebrow && (
         <Box
           sx={{
-            fontSize: 9,
+            fontSize: ONBOARDING_NAV_EYEBROW_FONT_SIZE,
             fontWeight: FONT_WEIGHT_HEADLINE,
             letterSpacing: LETTER_SPACING_LABEL,
             textTransform: "uppercase",
@@ -465,14 +468,14 @@ function renderCta(
           {item.eyebrow}
         </Box>
       )}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, fontSize: 13, fontWeight: FONT_WEIGHT_HEADLINE }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, fontSize: FONT_SIZE_CAPTION, fontWeight: FONT_WEIGHT_HEADLINE }}>
         <Box>{item.label}</Box>
         <Box aria-hidden sx={{ color: GREEN }}>
           →
         </Box>
       </Box>
       {item.subLabel && (
-        <Box sx={{ fontSize: 11, color: MUTED_ON_LIGHT, lineHeight: 1.2 }}>{item.subLabel}</Box>
+        <Box sx={{ fontSize: ONBOARDING_NAV_SUBLABEL_FONT_SIZE, color: MUTED_ON_LIGHT, lineHeight: 1.2 }}>{item.subLabel}</Box>
       )}
     </Box>
   );

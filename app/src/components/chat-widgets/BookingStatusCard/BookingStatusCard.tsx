@@ -36,7 +36,9 @@ import {
   BODY_TEXT,
   BORDER,
   BORDER_RADIUS_2X,
+  BORDER_RADIUS_PILL,
   EYEBROW_ON_LIGHT,
+  FONT_SIZE_CAPTION,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
   GREEN,
@@ -163,12 +165,12 @@ export const BookingStatusCard: FC<BookingStatusCardProps> = ({ mode = "onboardi
           sx={{
             mt: 2,
             border: `1px solid ${BORDER}`,
-            borderRadius: 999,
+            borderRadius: BORDER_RADIUS_PILL,
             backgroundColor: WHITE,
             color: NAVY,
             px: 1.5,
             py: 0.5,
-            fontSize: 13,
+            fontSize: FONT_SIZE_CAPTION,
             fontWeight: FONT_WEIGHT_HEADLINE,
             cursor: "pointer",
             fontFamily: "inherit",
@@ -197,7 +199,7 @@ export const BookingStatusCard: FC<BookingStatusCardProps> = ({ mode = "onboardi
           border: "none",
           background: "none",
           color: NAVY,
-          fontSize: 13,
+          fontSize: FONT_SIZE_CAPTION,
           fontWeight: FONT_WEIGHT_LABEL,
           cursor: "pointer",
           fontFamily: "inherit",
@@ -274,13 +276,13 @@ export const BookingStatusCard: FC<BookingStatusCardProps> = ({ mode = "onboardi
           WHAT WE&apos;LL COVER
         </Typography>
         <Box component="ul" sx={{ mt: 1, pl: 2.5, mb: 0, color: NAVY }}>
-          <Box component="li" sx={{ mb: 0.5, fontSize: 13 }}>
+          <Box component="li" sx={{ mb: 0.5, fontSize: FONT_SIZE_CAPTION }}>
             your document type · volume · accuracy bar
           </Box>
-          <Box component="li" sx={{ mb: 0.5, fontSize: 13 }}>
+          <Box component="li" sx={{ mb: 0.5, fontSize: FONT_SIZE_CAPTION }}>
             where GroundX fits vs. your current stack
           </Box>
-          <Box component="li" sx={{ fontSize: 13 }}>
+          <Box component="li" sx={{ fontSize: FONT_SIZE_CAPTION }}>
             next-step: pilot scope + eval set
           </Box>
         </Box>

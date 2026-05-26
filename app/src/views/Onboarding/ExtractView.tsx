@@ -17,6 +17,7 @@ import {
   BORDER_RADIUS_PILL,
   BORDER_RADIUS_SM,
   EYEBROW_ON_LIGHT,
+  FONT_SIZE_LABEL,
   FONT_WEIGHT_LABEL,
   GREEN,
   NAVY,
@@ -178,7 +179,7 @@ export const ExtractView: FC = () => {
             data-testid="extract-json"
             sx={{
               fontFamily: "monospace",
-              fontSize: 12,
+              fontSize: FONT_SIZE_LABEL,
               backgroundColor: WHITE,
               border: `1px solid ${BORDER}`,
               borderRadius: BORDER_RADIUS_2X,
@@ -237,7 +238,7 @@ export const ExtractView: FC = () => {
                     }}
                   >
                     <Stack spacing={0.25}>
-                      <Typography variant="body2" sx={{ color: NAVY, fontWeight: 600 }}>
+                      <Typography variant="body2" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
                         {field.name}
                       </Typography>
                       <Typography variant="caption" sx={{ color: BODY_TEXT }}>
@@ -278,7 +279,7 @@ export const ExtractView: FC = () => {
               border: `1px solid ${NAVY}`,
               color: NAVY,
               cursor: "pointer",
-              fontWeight: 600,
+              fontWeight: FONT_WEIGHT_LABEL,
               "&:hover": { backgroundColor: alpha(NAVY, 0.04) },
             }}
           >

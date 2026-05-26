@@ -42,11 +42,15 @@ import {
   BORDER,
   BORDER_RADIUS_2X,
   BORDER_RADIUS_PILL,
+  BORDER_RADIUS_SM,
   CYAN,
   EYEBROW_ON_LIGHT,
+  FONT_SIZE_CAPTION,
+  FONT_SIZE_LABEL,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
   GREEN,
+  ICON_SIZE_INLINE,
   LETTER_SPACING_LABEL,
   MUTED_ON_LIGHT,
   NAVY,
@@ -391,7 +395,7 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             alignItems: "center",
             gap: 1,
             cursor: "pointer",
-            borderRadius: 1,
+            borderRadius: BORDER_RADIUS_SM,
             "&:hover": { opacity: 0.85 },
             "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 2 },
           }}
@@ -404,7 +408,7 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
               borderRadius: "50%",
               backgroundColor: NAVY,
               color: WHITE,
-              fontSize: 12,
+              fontSize: FONT_SIZE_LABEL,
               fontWeight: FONT_WEIGHT_HEADLINE,
               display: "inline-flex",
               alignItems: "center",
@@ -437,7 +441,7 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
         </Box>
         <Box
           data-testid="onboarding-chat-sample-switch"
-          sx={{ display: "flex", alignItems: "center", gap: 0.75, mt: 0.5, fontSize: 11, color: MUTED_ON_LIGHT }}
+          sx={{ display: "flex", alignItems: "center", gap: 0.75, mt: 0.5, fontSize: FONT_SIZE_LABEL, color: MUTED_ON_LIGHT }}
         >
           <span>sample:</span>
           <span style={{ fontWeight: FONT_WEIGHT_HEADLINE, color: NAVY }}>{scenarioName}</span>
@@ -628,7 +632,7 @@ const UserBubble: FC<BubbleProps> = ({ children, testid }) => (
         borderRadius: BORDER_RADIUS_2X,
         backgroundColor: CYAN,
         color: NAVY,
-        fontSize: 13,
+        fontSize: FONT_SIZE_CAPTION,
         fontWeight: FONT_WEIGHT_LABEL,
       }}
     >
@@ -650,7 +654,7 @@ const BotBubble: FC<BubbleProps> = ({ children, testid }) => (
         backgroundColor: WHITE,
         border: `1px solid ${BORDER}`,
         color: BODY_TEXT,
-        fontSize: 13,
+        fontSize: FONT_SIZE_CAPTION,
         lineHeight: 1.4,
       }}
     >
@@ -693,7 +697,7 @@ const PickViewPillInner: FC<PickViewPillProps> = ({ label, testid, onClick }) =>
       backgroundColor: WHITE,
       border: `1.5px solid ${GREEN}`,
       color: NAVY,
-      fontSize: 12,
+      fontSize: FONT_SIZE_LABEL,
       fontWeight: FONT_WEIGHT_HEADLINE,
       cursor: "pointer",
       "&:hover": { backgroundColor: CYAN },
@@ -761,7 +765,7 @@ const LiveChatInputBar: FC<LiveChatInputBarProps> = ({ onSend, disabled }) => {
         // intents. Updated 2026-05-25.
         placeholder="Ask about your documents…"
         disabled={disabled}
-        sx={{ flex: 1, color: NAVY, fontSize: 13 }}
+        sx={{ flex: 1, color: NAVY, fontSize: FONT_SIZE_CAPTION }}
         inputProps={{ "aria-label": "Chat input" }}
       />
       <IconButton
@@ -784,7 +788,7 @@ const LiveChatInputBar: FC<LiveChatInputBarProps> = ({ onSend, disabled }) => {
           "&.Mui-disabled": { backgroundColor: BORDER, color: MUTED_ON_LIGHT },
         }}
       >
-        <SendOutlinedIcon sx={{ fontSize: 14 }} />
+        <SendOutlinedIcon sx={{ fontSize: ICON_SIZE_INLINE }} />
       </IconButton>
     </Box>
   );
