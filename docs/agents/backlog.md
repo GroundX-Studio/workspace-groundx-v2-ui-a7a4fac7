@@ -46,9 +46,10 @@ explicitly.
   ARCH-01 ✅, ARCH-02 ✅, ARCH-03 ✅, ARCH-05 ✅, ARCH-06 ✅,
   ARCH-07 ✅, ARCH-08 ✅, ARCH-14 ✅, ARCH-15 ✅, ARCH-16 ✅,
   ARCH-17 ✅, ARCH-18 ✅, ARCH-21 ✅, ARCH-22 ✅
-- **P1** — OPS-01 (blocked, harness-side). All ARCH P1 items closed
-  2026-05-26: ARCH-09 ✅, ARCH-10 ✅ (partial; the 3 remaining views
-  blocked on UI-01/02/05), ARCH-11 ✅, ARCH-13 ✅, ARCH-19 ✅, ARCH-20 ✅
+- **P1** — All closed 2026-05-26: OPS-01 ✅ (harness MCP shipped
+  `pod_logs` + friends), ARCH-09 ✅, ARCH-10 ✅ (partial; the 3
+  remaining views blocked on UI-01/02/05), ARCH-11 ✅, ARCH-13 ✅,
+  ARCH-19 ✅, ARCH-20 ✅
 - **P2** — everything else (implicit), plus **TS-05, TS-06, TS-07**
   (demoted 2026-05-25 — each has a real upstream blocker; see
   per-row "Blocker" notes), **ARCH-12, ARCH-23, ARCH-25**
@@ -291,7 +292,7 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| OPS-01 | blocked | **Reclassified 2026-05-25 — out of this repo's scope.** Agent MCP-driven cluster/pod-log reading is a feature of the `groundx-studio` MCP server, not this application. The deploy-audit ask was delivered upstream 2026-05-24 and the resolution lives with the harness team. Blocked on the harness team shipping the corresponding MCP tool surface. | Harness MCP server exposes a `cluster_logs` (or equivalent) tool. |
+| OPS-01 | closed (2026-05-26) | **Harness MCP shipped the cluster-ops surface.** Confirmed live in the groundx-studio MCP after a reload: `pod_logs` (the canonical "cluster_logs equivalent" from the original closure test), `pod_describe`, `helm_release_status`, `helm_uninstall`, `workflow_run_logs`, `workflow_run_status`, and a companion `deploy_config_from_local`. Together they give an agent end-to-end visibility into a managed deploy: GitHub Actions run state + logs → Helm release state → pod state + logs. The deploy-audit ask delivered upstream 2026-05-24 was acted on; nothing on this repo's side to do. | `pod_logs` and friends are callable from any agent attached to the groundx-studio MCP. |
 
 (Prior: OPS-04, OPS-05 — both closed 2026-05-25, swept 2026-05-26.)
 
@@ -340,7 +341,7 @@ the loader exists, treat SDR as deferred.
 |---|---|
 | closed | ARCH-01, ARCH-02, ARCH-03, ARCH-08, UI-08 (this file only — historical closes live in git) |
 | in-progress | 0 |
-| blocked | 8 (AU-02, OPS-01, PLUG-01..05, SCEN-06, TS-04) |
+| blocked | 7 (AU-02, PLUG-01..05, SCEN-06, TS-04) — OPS-01 unblocked 2026-05-26 |
 | not-started | live items in epic tables above |
 
 By priority:
@@ -348,7 +349,7 @@ By priority:
 | Pri | IDs | Notes |
 |---|---|---|
 | **P0** | ARCH-01..03 ✅, ARCH-05 ✅, ARCH-06 ✅, ARCH-07 ✅, ARCH-08 ✅, ARCH-14 ✅, ARCH-15 ✅, ARCH-16 ✅, ARCH-17 ✅, ARCH-18 ✅, ARCH-21 ✅, ARCH-22 ✅ | Architecture epic. **All P0 closed.** |
-| **P1** | OPS-01 (blocked) | ARCH-09 ✅, ARCH-10 ✅ (partial; remainder blocked on UI-01/02/05), ARCH-11 ✅, ARCH-13 ✅, ARCH-19 ✅, ARCH-20 ✅ — all ARCH P1 closed 2026-05-26. |
+| **P1** | OPS-01 ✅, ARCH-09 ✅, ARCH-10 ✅ (partial; remainder blocked on UI-01/02/05), ARCH-11 ✅, ARCH-13 ✅, ARCH-19 ✅, ARCH-20 ✅ — **all P1 closed 2026-05-26**. |
 | **P2** | everything else, plus TS-05/06/07, **ARCH-12, ARCH-23, ARCH-25** (ARCH-24 ✅) | Polish + scaffold cleanup deferred to later passes. |
 | **P3** | CF-06a, PLUG-07 | Deferred-late; pull forward only when upstream caller exists. |
 
