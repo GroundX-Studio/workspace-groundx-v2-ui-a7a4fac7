@@ -38,7 +38,7 @@ The drift pattern across `src/views/Onboarding/`:
 | File | Drift |
 |---|---|
 | `UnderstandView.tsx` | Standalone implementation reading `scenario.manifest`. Should be a thin wrapper that mounts the production PDF viewer widget with `documentId` from the active session + `mode` from `appMode`. |
-| `ExtractView.tsx` | Standalone implementation reading `scenario.manifest.extractionSchema` + `sampleExtractionValues`. Should mount the production Extract widget with `documentId` + `mode`. The schema + values come from `getGroundXDocumentExtract(documentId)`. |
+| `ExtractView.tsx` | Standalone implementation reading `scenario.manifest.extractionSchema` + `sampleExtractionValues`. Should mount the production Extract widget with `documentId` + `mode`. The schema metadata comes from `getGroundXWorkflow(document.filter.workflow_id)`; the values come from `getGroundXDocumentExtract(documentId)`. |
 | `InteractView.tsx` | Standalone implementation. Should mount the production Chat widget. The chat infrastructure is correct (real LLM + real RAG); the view just needs to delegate. |
 | `IntegrateView.tsx` | Standalone implementation with hardcoded plugin list. Should mount the production Integrations widget with `mode`. |
 
@@ -116,7 +116,14 @@ In `middleware/scripts/scenarios/utility.json` (and the other
 scenario JSONs once they're authored), drop:
 
 - `extractionSchema` — schema now comes from
-  `getGroundXDocumentExtract(documentId).schema` per doc
+  `getGroundXWorkflow(document.filter.workflow_id)`. The workflow's
+  `extract.{statement,meters,charges}.fields[]` IS the schema
+  (description + identifiers + type + format + default + per-group
+  meter / charge detection prompts). Per-doc lookup via
+  `filter.workflow_id` is the only mechanism — there is no
+  account-default-workflow path. See
+  `docs/agents/groundx-real-api-shapes.md` for the full response
+  shape.
 - `sampleExtractionValues` — values now come from the same call
 - `sampleChatScript` — delete; chat is real LLM
 
@@ -134,7 +141,7 @@ filter so the next `/api/scenarios` fetch returns the slim manifest.
 
 | Item | New status |
 |---|---|
-| SCEN-01 (utility 84 fields) | Closed-as-obsolete. The schema is whatever `getGroundXDocumentExtract` returns. |
+| SCEN-01 (utility 84 fields) | Closed-as-obsolete. The schema is whatever the workflow defines via `getGroundXWorkflow(filter.workflow_id)`. Today the workflow has 36 fields (statement 14 / meters 16 / charges 6) — re-author the workflow to grow / shrink the schema. |
 | SCEN-06 (real PDFs ingested) | Closed-as-obsolete. PDFs are already there; the view just wasn't reading them. |
 | TS-04 (widget integration tests) | **Re-anchor**: this row was always about adopting the production widgets. The current blocked classification was wrong — the widgets either exist in the scaffold (port them in) or need to be authored. Either way, tests follow the widgets. |
 | UR-01 (PdfViewer with pdfjs-dist) | Closure note update: the new flow is `PdfViewerWidget` reads `getGroundXDocumentXray(documentId)` → binary URL → existing `<PdfViewer>` primitive. The `previewUrl` field on `ScenarioDocument` becomes dead code. |

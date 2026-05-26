@@ -88,25 +88,85 @@ The extract-values data source.
 
 **Implication for Extract widget:**
 
-- Field IDs are snake_case in the response. Need a label rendering rule (snake_case → Title Case) unless the schema defines explicit labels.
+- Field IDs are snake_case in the response. The Extract widget pairs these with the workflow's schema metadata (see `GET /v1/workflow/{id}` below) to render labels / descriptions / types.
 - Nested values (meters → meter_charges) need a tree-or-table renderer.
 - `_currency` suffix pattern is a sibling-typed-value pattern; the widget can treat them as a unit.
 
-## `GET /v1/workflow` — empty today
+## `GET /v1/workflow/{workflow_id}` — **THE schema source** (verified 2026-05-25)
 
-```json
-{ "workflows": [] }
+Looked up using the `workflow_id` carried on the document's `filter.workflow_id`. Returns the full extraction schema including field-level prompts, identifiers, types, formats, and defaults.
+
+Top-level keys:
+
+```
+workflow:
+  workflowId: string                    # the same uuid we queried with
+  name: string
+  chunkStrategy: string                 # e.g. "element"
+  relationships: { account, documents, ids }
+  steps: { ... }                        # chunk / instruct / engine config
+  extract:
+    statement:
+      fields:
+        <field_id>:
+          prompt:
+            description: string         # field's natural-language description
+            format: string?             # optional shape hint (e.g. "string", "YYYY-MM-DD")
+            identifiers: string[]?      # optional list of label strings that may appear on the doc
+            instructions: string        # multi-line markdown instructions
+            type: string | string[]     # e.g. "str", ["int", "float"]
+            default: string?            # optional fallback value
+        # ... 14 fields total
+    meters:
+      prompt: { instructions: string }  # group-level prompt (meter-detection rules)
+      fields:
+        <field_id>:
+          prompt: { ... as above ... }
+        # ... 16 fields total
+    charges:
+      prompt: { instructions: string }  # group-level prompt (charge-detection rules)
+      fields:
+        <field_id>:
+          prompt: { ... as above ... }
+        # ... 6 fields total
 ```
 
-No workflows defined on this account.
+**Group counts** observed today (extraction workflow `9910308e-3100-473e-9da6-3ac29f5958a6`):
 
-## `GET /v1/workflow/relationship` — empty today
+| Group | Field count | Has group-level prompt? |
+|---|---|---|
+| statement | 14 | no |
+| meters | 16 | yes (meter-detection rules) |
+| charges | 6 | yes (charge-detection rules) |
+
+This is the canonical schema source for the Extract widget. **The Extract widget render path:**
+
+1. Read `document.filter.workflow_id` from the doc list.
+2. Call `getGroundXWorkflow(workflow_id)` → cache per workflow id, keyed by id.
+3. Call `getGroundXDocumentExtract(documentId)` → values keyed by `<field_id>`.
+4. For each `extract.<group>.fields.<field_id>`:
+   - Field id = the key.
+   - Label = `prompt.description` (or snake_case-titled if absent).
+   - Type = `prompt.type`.
+   - Format = `prompt.format` (optional).
+   - Default = `prompt.default` (optional).
+5. Match the extract response's keys to schema field ids; nested values (e.g. `meters[].meter_charges[]`) line up with the workflow's nested group structure.
+
+## `GET /v1/workflow` (account workflows list)
+
+```json
+{ "workflows": [ ...workflow summaries ] }
+```
+
+May be empty when no workflow has been authored. Today (2026-05-25) the sample bucket's workflow (`9910308e-...`) was authored via Studio Agents directly and may not appear in this list under this account; query by id (`GET /v1/workflow/{id}`) when the id is known from a document's `filter.workflow_id`.
+
+## `GET /v1/workflow/relationship` (account-default workflow)
 
 ```json
 { "workflow": {} }
 ```
 
-No account-default workflow assigned. **This is the open question** — see "Where does the schema metadata live?" below.
+When empty, no default is set; the per-doc `filter.workflow_id` is the source of truth for which schema to fetch. The Extract widget reads the per-doc id; it does not depend on an account default.
 
 ## `GET /v1/bucket/{id}` — no schema reference
 
@@ -150,34 +210,16 @@ hardcoded `extractionSchema` + `sampleChatScript` + `sampleExtractionValues`** b
 
 Note `"extracted": false` despite the extract endpoint returning real values — possibly a status field that lags or means something else.
 
-## The schema-metadata gap
+## Schema-metadata source — RESOLVED 2026-05-25
 
-**Extract endpoint returns values without schema metadata.**
+The schema metadata comes from `GET /v1/workflow/{workflow_id}`, looked up via the document's `filter.workflow_id`. See the dedicated section above.
 
-- Field IDs are present (the JSON keys: `account_number`, `amount_due`, etc.).
-- Field LABELS, DESCRIPTIONS, and TYPES are **not** in the response.
-- The `/v1/workflow` endpoint is empty for this account.
-- The `/v1/workflow/relationship` endpoint is empty.
-- The bucket object has no schema reference.
-
-So **today** there is no GroundX endpoint that returns the schema's display metadata (name, description, type) for the keys in the extract response. The hardcoded `extractionSchema` in `utility.json` was filling that gap.
-
-**Open question for the user (2026-05-25):**
-
-Where SHOULD the schema metadata live? Three options:
-
-1. **In the workflow** — `/v1/workflow/{id}` returns a schema definition with field-level name/description/type. Today no workflow is assigned to this bucket, so the schema doesn't exist via this path. To get F3 working with real schema metadata, someone needs to author + assign a workflow.
-
-2. **Inferred at render-time from the extract response.** Snake_case → Title Case for labels. Type inferred from value (number / string / date / array / nested object). No descriptions. Looks reasonable but no per-field intent (e.g. `amount_due` vs `total_amount`).
-
-3. **Hybrid (current)** — schema definitions live in the seed manifest, values come from the extract endpoint. The schema is hand-authored; values are real. **This is the current state of the codebase** and matches one read of "the schema builder is based on the real data: it BUILDS the workflow that GroundX runs."
-
-The user already declined option 3 ("nothing hardcoded"). The question is whether option 1 or option 2 is the intent.
+The earlier "no workflow assigned" observation was a transient state: as of 2026-05-25 the sample bucket doc carries `filter.workflow_id = 9910308e-3100-473e-9da6-3ac29f5958a6`, and that workflow returns the full schema (statement 14 / meters 16 / charges 6 fields = 36 fields total). The Extract widget's render path is locked: per-doc → workflow_id → workflow.extract.{group}.fields → match extract values by field id.
 
 ## Action items
 
-1. **Decide schema source** (workflow API vs. inferred).
-2. **Implement PdfViewer widget** against `xray.sourceUrl` + `documentPages[].pageUrl`.
-3. **Implement Extract widget** against `getGroundXDocumentExtract` + whichever schema source wins #1.
-4. **Strip the manifest's `extractionSchema` + `sampleExtractionValues` + `sampleChatScript`** from `utility.json`. Re-seed.
+1. ~~Decide schema source.~~ **DONE** — workflow API via per-doc `filter.workflow_id`.
+2. **PdfViewer widget** — closed (PdfViewerWidget shipped 2026-05-25). Reads `xray.sourceUrl` + `documentPages[].pageUrl`.
+3. **Extract widget** — pending. Reads `document.filter.workflow_id` → `getGroundXWorkflow(workflow_id)` for schema → `getGroundXDocumentExtract(documentId)` for values → merge by field id.
+4. **Strip the manifest's `extractionSchema` + `sampleExtractionValues` + `sampleChatScript`** from `utility.json` once the Extract widget lands. Re-seed.
 5. **Keep `chatSeeds` + `hero` + `thinkingScript`** as scenario-level UX strings (Option A in the rewire gap doc).
