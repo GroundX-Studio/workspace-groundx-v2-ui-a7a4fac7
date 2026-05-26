@@ -1,22 +1,39 @@
 import { HelmetProvider } from "react-helmet-async";
 import { RouterProvider } from "react-router-dom";
+import type { FC, ReactNode } from "react";
 
 import { AuthProvider } from "@/contexts/AuthContext/AuthProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
 import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarContext";
 import { AppModeProvider } from "@/contexts/AppModeContext";
+import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
 import { OnboardingSessionProvider } from "@/contexts/OnboardingSessionContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { AgentToolBusProvider } from "@/contexts/AgentToolBusContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
 import { ScenarioRegistryProviderWithDemoHooks } from "@/contexts/ScenarioRegistryContext";
+import { AppErrorBoundary } from "@/shared/components/AppErrorBoundary";
 import { MotionRoot } from "@/shared/components/MotionRoot";
 import { WireframeFilters } from "@/shared/components/WireframeFilters";
 import { GxThemeProvider } from "@/ThemeProvider";
 import { router } from "@/router/router";
 
-export default function App() {
-  return (
+/**
+ * AppProviders — the production provider stack, factored out of `App`
+ * so tests can mount it around any probe without going through the
+ * router.
+ *
+ * **The order matters and must stay the same as the runtime mount.**
+ * When you add a new provider to the App tree, add it here too; the
+ * `App.test.tsx` smoke test verifies the chain is intact.
+ *
+ * Drift between this stack and a test helper is exactly how the
+ * 2026-05-25 `useDocumentsContext`-missing crash got into production:
+ * the helper had `DocumentsProvider`, this didn't. Lesson burned in
+ * — keep the test helper aligned with this component.
+ */
+export const AppProviders: FC<{ children: ReactNode }> = ({ children }) => (
+  <AppErrorBoundary>
     <GxThemeProvider>
       {/* UR-03: global MotionConfig — honors OS `prefers-reduced-motion`
           for every descendant `motion.X`. When reduced is on, the
@@ -29,26 +46,39 @@ export default function App() {
         <WireframeFilters />
         <LoadingProvider>
           <MessageBarProvider>
-            <AuthProvider>
-              <AppModeProvider>
-                <ScenarioRegistryProviderWithDemoHooks>
-                  <OnboardingSessionProvider>
-                    <AgentToolBusProvider>
-                      <CanvasOrchestratorProvider>
-                        <OnboardingSkillProvider>
-                          <HelmetProvider>
-                            <RouterProvider router={router} />
-                          </HelmetProvider>
-                        </OnboardingSkillProvider>
-                      </CanvasOrchestratorProvider>
-                    </AgentToolBusProvider>
-                  </OnboardingSessionProvider>
-                </ScenarioRegistryProviderWithDemoHooks>
-              </AppModeProvider>
-            </AuthProvider>
+            {/* DocumentsProvider sits above AuthProvider so any
+                widget — sign-in modal, onboarding canvas, steady
+                shell — can read it. The widget hooks
+                (`useDocumentsContext`) throw if this is missing;
+                the AppErrorBoundary above is the last-line catch. */}
+            <DocumentsProvider>
+              <AuthProvider>
+                <AppModeProvider>
+                  <ScenarioRegistryProviderWithDemoHooks>
+                    <OnboardingSessionProvider>
+                      <AgentToolBusProvider>
+                        <CanvasOrchestratorProvider>
+                          <OnboardingSkillProvider>
+                            <HelmetProvider>{children}</HelmetProvider>
+                          </OnboardingSkillProvider>
+                        </CanvasOrchestratorProvider>
+                      </AgentToolBusProvider>
+                    </OnboardingSessionProvider>
+                  </ScenarioRegistryProviderWithDemoHooks>
+                </AppModeProvider>
+              </AuthProvider>
+            </DocumentsProvider>
           </MessageBarProvider>
         </LoadingProvider>
       </MotionRoot>
     </GxThemeProvider>
+  </AppErrorBoundary>
+);
+
+export default function App() {
+  return (
+    <AppProviders>
+      <RouterProvider router={router} />
+    </AppProviders>
   );
 }
