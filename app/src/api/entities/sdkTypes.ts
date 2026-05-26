@@ -4,7 +4,7 @@ export interface SdkMessageResponse {
   message: string;
 }
 
-export interface SdkListResponse<T, K extends string> {
+export interface SdkListResponse<T, _K extends string> {
   count?: number;
   total?: number;
   remaining?: number;

@@ -139,7 +139,6 @@ export const OnboardingShell: FC = () => {
         Number.isFinite(bucketFromUrl) &&
         bucketFromUrl !== scenarioRegistry.bucketId
       ) {
-        // eslint-disable-next-line no-console
         console.warn(
           `[OnboardingShell] URL bucket ${bucketFromUrl} doesn't match registry bucket ${scenarioRegistry.bucketId}; activating scenario anyway.`,
         );
@@ -361,10 +360,20 @@ export const OnboardingShell: FC = () => {
         window.open("https://docs.groundx.ai", "_blank", "noopener,noreferrer");
         return;
       }
-      // Book a call CTA → calendly (URL is a placeholder; wire the real
-      // one through deploy_config or appConfig once it exists).
+      // Book a call CTA → Calendly. URL is env-driven so on-prem /
+      // demo deploys can point at their own calendar. When unset, we
+      // skip the open (the previous hardcoded `calendly.com/groundx/30min`
+      // returns a 404 today). UI-08 / airgap-audit Gap 2 carries the
+      // long-term wire-up (gate_event + per-deploy URL).
       if (key === "call") {
-        window.open("https://calendly.com/groundx/30min", "_blank", "noopener,noreferrer");
+        const calendlyUrl = import.meta.env.VITE_CALENDLY_URL as string | undefined;
+        if (calendlyUrl) {
+          window.open(calendlyUrl, "_blank", "noopener,noreferrer");
+        } else {
+          console.warn(
+            "[OnboardingShell] Book-a-call clicked but VITE_CALENDLY_URL is unset. Set the env to wire this CTA.",
+          );
+        }
         return;
       }
       // Settings is in-app for signed-in users — client-side route.

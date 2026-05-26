@@ -115,4 +115,45 @@ describe("CiteChip", () => {
       expect.objectContaining({ documentId: "utility-bill-2026-04" }),
     );
   });
+
+  describe("peek popover (pre-UI-04)", () => {
+    /**
+     * Until UI-04 lands the F5 side panel, clicking a CiteChip was
+     * effectively silent — the dispatch went through but no adapter
+     * is registered in production. The peek popover gives the click
+     * a visible response: a small panel anchored to the chip showing
+     * the source page + snippet, with a "coming soon" footer for the
+     * full source viewer. When the explicit `onActivate` override is
+     * supplied (e.g. by F5's eventual side-panel wiring) the popover
+     * does NOT open — the override takes over the click.
+     */
+    it("opens a popover with the page number after a default click", async () => {
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<CiteChip citation={citation} index={2} />);
+      await user.click(screen.getByTestId("cite-chip-2"));
+      const peek = await screen.findByTestId("cite-peek");
+      expect(peek).toBeInTheDocument();
+      expect(peek).toHaveTextContent(/page 3/i);
+    });
+
+    it("renders the snippet text inside the popover when the citation has one", async () => {
+      const user = userEvent.setup();
+      const withSnippet: Citation = { ...citation, snippet: "Total amount due: $234.56" };
+      renderWithOnboardingProviders(<CiteChip citation={withSnippet} index={2} />);
+      await user.click(screen.getByTestId("cite-chip-2"));
+      const peek = await screen.findByTestId("cite-peek");
+      expect(peek).toHaveTextContent("Total amount due: $234.56");
+    });
+
+    it("does NOT open the popover when an onActivate override is provided", async () => {
+      const user = userEvent.setup();
+      const onActivate = vi.fn();
+      renderWithOnboardingProviders(
+        <CiteChip citation={citation} index={1} onActivate={onActivate} />,
+      );
+      await user.click(screen.getByTestId("cite-chip-1"));
+      expect(onActivate).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId("cite-peek")).not.toBeInTheDocument();
+    });
+  });
 });

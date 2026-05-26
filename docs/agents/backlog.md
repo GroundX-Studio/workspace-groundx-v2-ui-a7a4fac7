@@ -33,16 +33,17 @@ points here.
 - **blocked** — external dependency (data table, env, product call)
 - **closed** — user-visible test passes; inline TODOs deleted
 
-## Priority (set 2026-05-25)
+## Priority (set 2026-05-25; revised 2026-05-25 after audit)
 
 Priority is orthogonal to status — a blocked P0 still beats a
 not-started P2. The default is P2; non-default IDs are listed
 explicitly. Grep `^- \*\*P[0-9]` for the four buckets.
 
-- **P0** — UR-03, UR-04, all TS-* (TS-02, TS-03, TS-04, TS-05,
-  TS-06, TS-07, TS-08, TS-09, TS-11)
+- **P0** — UR-03, UR-04, TS-02, TS-03, TS-08, TS-09, TS-11
 - **P1** — OPS-01, OPS-04, OPS-05
-- **P2** — everything else (implicit; do not list individually)
+- **P2** — everything else (implicit), plus **TS-05, TS-06, TS-07**
+  (demoted 2026-05-25 — each has a real upstream blocker; see
+  per-row "Blocker" notes)
 - **P3** — every `deferred-late` item (CF-06a, PLUG-07)
 
 Rationale: P0 is "ship-quality runtime" — the motion fallback, the
@@ -52,6 +53,12 @@ ergonomics + air-gap seams that aren't user-visible but block our
 ability to debug and sell. P3 is parked work where pulling forward
 burns credit (LLM eval) or commitment (plugin ADR) before the
 upstream caller exists.
+
+**Demotion rationale (2026-05-25):** TS-05, TS-06, TS-07 each need
+work that doesn't exist yet OR a platform decision the project
+hasn't made. Better to stop calling them P0 than to ship a watered-
+down version that loses the original closure intent. Re-promote each
+when the corresponding blocker clears.
 
 ## ID conventions
 
@@ -198,12 +205,12 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| TS-02 | not-started | Context coverage: `AuthContext`, `BucketsContext`, `ProjectsContext`, `DocumentsContext`, `GroupsContext`, `HealthContext`, `ApiKeysContext` — scaffold-shipped, 0 onboarding-flow tests. | Each context has ≥3 tests for its real surface. |
+| TS-02 | closed | 6 new test files (`BucketsProvider.test.tsx`, `ProjectsProvider.test.tsx`, `DocumentsProvider.test.tsx`, `GroupsProvider.test.tsx`, `HealthProvider.test.tsx`, `ApiKeysProvider.test.tsx`) — 18 tests total, 3 per provider. AuthContext already had `AuthProvider.test.tsx` (1 file × 7 tests) carried from earlier work, so all 7 contexts now have coverage. Each suite mocks `@/api`, wraps the provider in LoadingProvider + MessageBarProvider, and asserts three contracts: list/fetch populates state, create/ingest emits the contextual success message, and a thrown API error surfaces the contextual failure message (isSuccess=false, no partial state mutation). ApiKeys suite uses obviously-stub key values (`test-key-stub-*`) — no real key material. Closed 2026-05-25. | 18 new tests pass first run; full app sweep 651 tests pass; TS + lint clean. |
 | TS-03 | closed | `ChatStoreContext.test.tsx` extended with a 4-test `persistence failure modes (TS-03)` block: (1) `QuotaExceededError` on setItem doesn't crash; in-memory state still mutates, (2) malformed JSON snapshot rehydrates as empty store, (3) wrong-version snapshot is treated as no snapshot, (4) cross-tab `StorageEvent` does NOT silently mutate this tab's state (locks the "no cross-tab sync yet, that's intentional" contract). Closed 2026-05-25. | 25 ChatStore tests pass; the 4 new ones lock the existing error-swallowing + rehydrate-guard behavior and the deliberate no-cross-tab-listener contract. |
 | TS-04 | blocked | **Reclassified 2026-05-25.** Original framing assumed harness widget directories (`widgets/extraction-workbench/`, `widgets/chat-with-sources/`, `widgets/smart-report/`) are present in this repo. They are not — this is a greenfield project that built F3 ExtractView, F5 InteractView, and F7 IntegrateView natively without copying widgets. Either (a) the equivalent native surfaces get an integration-test layer (see TS-05 for the Playwright path; the unit tests already exist), OR (b) the widgets get imported per `references/widgets.md` and we test those copies. **Blocked on the decision**: do we want exact-use widgets in this project at all? Until then this row is not actionable. | Decision made on widget adoption; closure path follows. |
-| TS-05 | not-started | Browser smoke + a11y suite: golden-path F1→F2→F3→F5→F6→F7 at desktop/mobile via Playwright + axe WCAG A/AA. Partial coverage today; not all 9 frames per scenario. | All scenarios' golden paths pass at both viewports. |
-| TS-06 | not-started | Nightly visual regression (Chromatic) — non-blocking baseline. | First baseline runs; diff flagged on PR. |
-| TS-07 | not-started | Load test against `/api/chat/messages`: ≥100 concurrent SSE per `project_test_plan.md`. | P95 < 5s under load with mocked LLM. |
+| TS-05 | not-started | **(P2; demoted 2026-05-25.)** Browser smoke + a11y suite: golden-path F1→F2→F3→F5→F6→F7 at desktop/mobile via Playwright + axe WCAG A/AA. Partial coverage today (`onboarding-utility.spec.ts` reaches F5, `onboarding-loan.spec.ts` reaches F5, `onboarding-compact.spec.ts` covers F2 mobile). **Blockers:** (a) **F4 surface doesn't exist** — UI-01 (SchemaView) is not-started, so the "full golden path" can't traverse F4. (b) **Solar scenario can't be tested** — only `utility.json` exists under `middleware/scripts/scenarios/`; SCEN-03 (Solar tree UI) and SCEN-06 (real PDFs) both not-started/blocked. (c) **F6 + F7 lack e2e** but the surfaces exist — that subset is the realistic do-now scope. **Re-promotion path:** when UI-01 lands AND a Solar fixture lands, the full closure is reachable; until then either accept scope = "F1→F2→F3→F5→F6→F7 on Utility+Loan, no Solar, skip F4" or wait. | All scenarios' golden paths pass at both viewports. |
+| TS-06 | not-started | **(P2; demoted 2026-05-25.)** Nightly visual regression — non-blocking baseline. **Blocker — platform decision not made:** four real choices, each with cost / brittleness tradeoffs. (1) **Chromatic** (paid SaaS, ~$149/mo for 5k snapshots; Storybook-driven; account + token required), (2) **Playwright `toHaveScreenshot()`** (free; PNGs committed in-repo; brittle on font rendering across OSes), (3) **Percy / BrowserStack** (paid), (4) **Argos** (free tier, repo-stored). Also: PR-blocking or non-blocking baseline? Which surfaces baseline first? **Re-promotion path:** make the tool + storage decision, then this becomes mechanical wiring. Cheapest start would be Playwright snapshots — no account, no recurring cost. | First baseline runs; diff flagged on PR. |
+| TS-07 | not-started | **(P2; demoted 2026-05-25.)** Load test against `/api/chat/messages`: ≥100 concurrent SSE per `project_test_plan.md`. **Blockers:** (a) **SSE doesn't exist** — `/api/chat/messages` is a regular JSON POST today. CF-11 (streaming response via SSE / fetch-stream) is not-started, so "100 concurrent SSE" is testing a feature that isn't built. (b) **Tool decision not made** — k6 (Grafana, JS scripting, modern) vs Artillery (YAML, mature) vs Autocannon (Node-native, simplest). (c) **Target environment** — local middleware + MOCK_MODE LLM (cheap, repeatable) vs staging (more realistic, hits real upstream costs). **Re-promotion path:** wait for CF-11 to land SSE OR rewrite the closure test to "≥100 concurrent JSON POST against the mocked LLM" — but the JSON path is the easy load shape; the SSE one is where real bottlenecks surface. | P95 < 5s under load with mocked LLM. |
 | TS-08 | closed | `middleware/src/lib/pii.test.ts` extended with a 5-test DoS guard suite covering: (1) 50k repeated digits → credit-card regex, (2) alternating digit+separator runs, (3) long phone-shaped period-separated runs, (4) account-prefix + 100k digits, (5) deeply nested object with pathological string payloads. Closure budget: every shape scrubs in <50 ms. Confirmed the existing regexes don't catastrophically backtrack — `\b` anchors + non-greedy `[ -]*?` keep them linear. The test locks that property so a future regex tweak that re-introduces nested-quantifier ambiguity fails CI. Closed 2026-05-25. | 15 pii tests pass; all 5 pathological-shape elapsed times sub-50ms. |
 | TS-09 | closed | `app/e2e/reduced-motion.spec.ts` — Playwright spec running with `test.use({ reducedMotion: "reduce" })` against the MOCK_MODE preview. Three sweeps: (1) AppShell `data-app-shell-reduced-motion="true"` after a scenario pick, (2) F2 scan-line `display: none` (the looping `repeat: Infinity` motion is actually gone), (3) F2 page transition completes within 1.5s under reduced-motion. Pairs with UR-03 — the `<MotionRoot>` is the seam these assertions exercise end-to-end. Closed 2026-05-25. | `npm run test:e2e -- reduced-motion` passes all 3 specs under Playwright's reducedMotion=reduce fixture. |
 | TS-11 | closed | 5 new test files in `app/src/views/Auth/Form/` + `app/src/views/Auth/AuthLayout.test.tsx`. Each form has ≥3 tests covering validation (required-field errors), submit happy-path (onSubmit called with the typed values), and one error-display branch (yup .email() shape, code-must-be-6-digits, passwords-do-not-match, EULA-must-be-accepted). AuthLayout has 3 layout/`isTall` tests. Per-suite `vi.spyOn(console, "error").mockImplementation()` follows the existing `Login.test.tsx` pattern — Formik's blur/change triggers React `act(...)` warnings under user-event which would otherwise trip the global setup.ts spy. Closed 2026-05-25. | 15 new tests pass (3 per form × 4 forms + 3 for AuthLayout); full app sweep 101 files / 633 tests pass. |
@@ -213,7 +220,7 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 | ID | Status | Item | Closure test |
 |---|---|---|---|
 | OPS-01 | blocked | **Reclassified 2026-05-25 — out of this repo's scope.** Agent MCP-driven cluster/pod-log reading is a feature of the `groundx-studio` MCP server (i.e. the harness plugin), not this application. The deploy-audit ask was delivered upstream 2026-05-24 and the resolution lives with the harness team. This row should track the upstream conversation, not produce code here. Blocked on the harness team shipping the corresponding MCP tool surface. | Harness MCP server exposes a `cluster_logs` (or equivalent) tool that this project's agent can call. |
-| OPS-04 | not-started | Air-gapped / on-prem support seams. Per `project_decisions_stack.md` decision #20: "design for easy support, don't fully implement." Track as awareness item: every external dep (telemetry hosts, fonts, LLM provider URL) needs an env-var seam so an on-prem deploy can swap. Audit current code for hardcoded internet hosts. | Audit doc lists every external host used; each has an env-var override or a fallback. |
+| OPS-04 | closed | `docs/agents/airgap-audit.md` lists all 13 production-runtime external hosts with their source location and seam status. **6 have proper env-var overrides** (GROUNDX_BASE_URL, LLM_BASE_URL, LLM_LIGHT_BASE_URL, SENTRY_DSN, VITE_POSTHOG_HOST, VITE_GA_MEASUREMENT_ID — the telemetry trio follows the no-op-when-unset pattern from CF-13/OB-02/OB-03). **4 are hardcoded gaps** flagged with recommended follow-ups: `docs.groundx.ai` → VITE_DOCS_URL, `calendly.com/groundx/30min` → VITE_CALENDLY_URL (pairs with UI-08), the two font `@import`s (Inter + Thicccboi) → self-host woff2, and the eyelevel.ai terms URL → VITE_TERMS_URL. CSP allowlist hardcodes are derived: once the underlying URLs flip env-driven, the CSP composer reads the same env. Closed 2026-05-25. | Audit doc exists with every external host categorized; ✅/⚠️/❌ seam status per row; 5 follow-up tickets recommended at the bottom for the gaps. |
 | OPS-05 | closed | Installed `@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks`, `globals` at the workspace root. Authored `app/eslint.config.js` and `middleware/eslint.config.js` — flat config, `@eslint/js` recommended + `typescript-eslint` recommended, plus `react-hooks/rules-of-hooks` (error) and `react-hooks/exhaustive-deps` (warn) on the frontend, and `no-console` (warn, info allowed) on the middleware. Per-package `npm run lint` scripts added. **Net rule hits today**: app = 0 errors / 9 warnings; middleware = 0 errors / 3 warnings. Warnings flag real cleanup work (unused imports, unused eslint-disable directives, `console.warn` calls awaiting OB-09 migration, `let errorCode = null` pattern). Demoted rules with documented exceptions: `no-empty-object-type` (deliberate API option type naming in `api/common.ts`), `no-namespace` (Express type augmentation), `no-useless-assignment` (let+catch reassignment pattern). Verified rules surface real issues via a planted `definitely_unused` offender — fires `no-unused-vars` as expected. Closed 2026-05-25. | `npx eslint src` runs in both packages with 0 errors; planted offender fires the expected rule. |
 
 # Epic: POL — known minor bugs
@@ -263,30 +270,46 @@ exists, treat SDR as deferred.
 | blocked | 7 (AU-02, PLUG-01..05, SCEN-06) |
 | not-started | live items in epic tables below |
 
-By priority:
+By priority (revised 2026-05-25 after batch closures + TS-05/06/07 demotion):
 
 | Pri | IDs | Notes |
 |---|---|---|
-| **P0** | UR-03, UR-04, TS-02, TS-03, TS-04, TS-05, TS-06, TS-07, TS-08, TS-09, TS-11 | Ship-quality runtime + test coverage gaps. 11 items. |
-| **P1** | OPS-01, OPS-04, OPS-05 | Agent loop + air-gap seams. 3 items. |
-| **P2** | everything else not listed in P0/P1/P3 | Default. |
+| **P0** | UR-03 ✅, UR-04 ✅, TS-02 ✅, TS-03 ✅, TS-08 ✅, TS-09 ✅, TS-11 ✅ | All 7 P0 items closed 2026-05-25. |
+| **P1** | OPS-01 (blocked, harness-side), OPS-04 ✅, OPS-05 ✅ | OPS-04 + OPS-05 closed. OPS-01 awaits harness MCP work. |
+| **P2** | everything else not listed, **plus TS-05, TS-06, TS-07** (demoted 2026-05-25) | Defaults + the three demotions. |
 | **P3** | CF-06a, PLUG-07 | Deferred-late; pull forward only when upstream caller exists. |
 
-Next-move candidates (within P0):
-- **UR-03** — `<MotionConfig>` global with reduced-motion 80ms
-  crossfade fallback. Small, surface-level, ships now.
-- **UR-04** — StepStrip Analyze→{Extract,Interact,Report} sub-bracket.
-  Visual completeness for the nav vocabulary.
-- **TS-09** — reduced-motion CI sweep. Pairs naturally with UR-03.
-- **TS-02 / TS-11** — Auth context + form coverage. 0 tests today.
-- **TS-05** — Playwright golden-path + axe a11y across F1→F7. Largest
-  test gap; pays back per-scenario.
+P0 / P1 standing as of 2026-05-25: **9 of 10 closed, 1 blocked
+upstream**. The remaining tier-1 work is now in P2 (default product
+backlog) or P3 (deferred).
 
-Next-move candidates (within P1):
-- **OPS-01** — Agent MCP cluster/pod-log reading. Removes the
-  per-deploy paste loop.
-- **OPS-05** — ESLint flat-config migration. Cleans the lint-warning
-  noise so future lint suppressions are visible.
+Why TS-05 / TS-06 / TS-07 moved to P2:
+- **TS-05** — Soft-blocked. F4 doesn't exist (UI-01 not-started);
+  no Solar scenario fixture (SCEN-03/06). Only F6+F7 on
+  Utility/Loan is reachable; that's a scope-down from the
+  original closure intent.
+- **TS-06** — Platform decision not made. Chromatic vs Playwright
+  snapshots vs Argos each have different cost / brittleness
+  tradeoffs. Better to decide once than half-ship.
+- **TS-07** — Soft-blocked on CF-11 (SSE doesn't exist yet, so
+  "100 concurrent SSE" isn't testable). Also needs a load-tool
+  decision (k6 / Artillery / Autocannon).
+
+Re-promotion conditions for the demoted P2s:
+- **TS-05** — re-promote when UI-01 (SchemaView) lands AND a Solar
+  scenario fixture lands. OR accept the scope-down and re-promote
+  with reduced closure ("Utility + Loan, no F4, no Solar").
+- **TS-06** — re-promote after the visual-reg tool decision is
+  made.
+- **TS-07** — re-promote when CF-11 (SSE streaming) lands. OR
+  rewrite the closure test to "JSON POST load" and pick a tool.
+
+Next-move candidates (P2 only now):
+- **CF-10** — compression off the request hot path.
+- **CF-11** — streaming response (SSE). Unblocks TS-07 re-promotion.
+- **UI-01** — F4 SchemaView (biggest unstarted product surface).
+  Unblocks TS-05 re-promotion.
+- **AU-01** — magic-link provisioning endpoint.
 
 Out-of-scope until pulled forward (P3):
 - **CF-06a** — LLM eval set in CI. Burns credit; soft-blocked on SCEN-06.

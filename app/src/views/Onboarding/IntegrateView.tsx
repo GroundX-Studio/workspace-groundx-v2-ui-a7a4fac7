@@ -13,7 +13,6 @@ import {
   BORDER_RADIUS_PILL,
   EYEBROW_ON_LIGHT,
   FONT_WEIGHT_LABEL,
-  GREEN,
   NAVY,
   WHITE,
 } from "@/constants";
@@ -125,21 +124,30 @@ export const IntegrateView: FC = () => {
                       {plugin.desc}
                     </Typography>
                   </Stack>
+                  {/* UI-02: the plugin Download button is non-functional
+                      pending the agent-plugin artifact pipeline. Surface
+                      the not-yet state so a clicker doesn't get a silent
+                      no-op. Aria-disabled + cursor + visual treatment
+                      all read as "labeled, not interactive." */}
                   <Box
                     role="button"
-                    tabIndex={0}
+                    aria-disabled="true"
+                    tabIndex={-1}
+                    title="Plugin downloads ship with the agent integration pipeline (UI-02)."
+                    data-testid={`plugin-${plugin.id}-download`}
                     sx={{
                       px: 1.5,
                       py: 0.5,
                       borderRadius: BORDER_RADIUS_PILL,
-                      backgroundColor: GREEN,
-                      color: NAVY,
+                      backgroundColor: BORDER,
+                      color: BODY_TEXT,
                       fontWeight: 600,
                       fontSize: 12,
-                      cursor: "pointer",
+                      cursor: "not-allowed",
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    Download
+                    Coming soon
                   </Box>
                 </Box>
               ))}

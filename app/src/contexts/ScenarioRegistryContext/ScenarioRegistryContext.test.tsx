@@ -20,7 +20,6 @@ describe("ScenarioRegistryProvider", () => {
     render(
       <ScenarioRegistryProvider
         initialScenarios={[
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
         ]}
       >
@@ -41,7 +40,6 @@ describe("ScenarioRegistryProvider", () => {
     render(
       <ScenarioRegistryProvider
         initialScenarios={[
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
         ]}
         forcedDemoState={forced}

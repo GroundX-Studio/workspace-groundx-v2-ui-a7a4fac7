@@ -77,7 +77,7 @@ const stepChipSx = (state: StepPillState) => {
   }
 };
 
-const badgeSx = (state: StepPillState, n: number | "check") => {
+const badgeSx = (state: StepPillState, _n: number | "check") => {
   const filled = state === "active" || state === "done-traversed";
   return {
     display: "inline-flex",

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 
 import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntityRegistryContext";
 import type { FFrame } from "@/types/onboarding";
