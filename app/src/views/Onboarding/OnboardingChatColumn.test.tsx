@@ -37,6 +37,13 @@ afterEach(() => {
 });
 
 describe("OnboardingChatColumn", () => {
+  // Replay-bug fix (2026-05-25) gates the thinking-stream behind
+  // a sessionStorage key per scenario. Each test starts with a
+  // clean slate so the stream always plays.
+  beforeEach(() => {
+    if (typeof window !== "undefined") window.sessionStorage.clear();
+  });
+
   it("on F1 (no scenario picked), shows the idle placeholder", () => {
     renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f1", initialScenario: null });
     expect(screen.getByText(/Ask anything about the sample/i)).toBeInTheDocument();
@@ -69,7 +76,11 @@ describe("OnboardingChatColumn", () => {
     // 6 notes; 10 ticks is comfortably past the stream.
     for (let i = 0; i < 10; i += 1) {
       act(() => {
-        vi.advanceTimersByTime(1100);
+        // Per-note pause is now randomized 1500..2800ms (2026-05-25);
+        // advance by the upper bound + a margin so every loop iter is
+        // guaranteed to fire at most one reveal regardless of the
+        // RNG seed.
+        vi.advanceTimersByTime(3000);
       });
     }
     // Then the DONE_REVEAL_DELAY_MS pause + a margin.
@@ -102,7 +113,11 @@ describe("OnboardingChatColumn", () => {
     // Walk forward through the stream until the pills appear.
     for (let i = 0; i < 12; i += 1) {
       act(() => {
-        vi.advanceTimersByTime(1100);
+        // Per-note pause is now randomized 1500..2800ms (2026-05-25);
+        // advance by the upper bound + a margin so every loop iter is
+        // guaranteed to fire at most one reveal regardless of the
+        // RNG seed.
+        vi.advanceTimersByTime(3000);
       });
     }
 
@@ -118,7 +133,11 @@ describe("OnboardingChatColumn", () => {
     renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "loan" });
     for (let i = 0; i < 12; i += 1) {
       act(() => {
-        vi.advanceTimersByTime(1100);
+        // Per-note pause is now randomized 1500..2800ms (2026-05-25);
+        // advance by the upper bound + a margin so every loop iter is
+        // guaranteed to fire at most one reveal regardless of the
+        // RNG seed.
+        vi.advanceTimersByTime(3000);
       });
     }
     // Loan schema categories are `applicant` and `risk` (per the
@@ -148,7 +167,11 @@ describe("OnboardingChatColumn", () => {
     );
     for (let i = 0; i < 4; i += 1) {
       act(() => {
-        vi.advanceTimersByTime(1100);
+        // Per-note pause is now randomized 1500..2800ms (2026-05-25);
+        // advance by the upper bound + a margin so every loop iter is
+        // guaranteed to fire at most one reveal regardless of the
+        // RNG seed.
+        vi.advanceTimersByTime(3000);
       });
     }
     const pill = screen.getByTestId("onboarding-chat-pick-view-interact");

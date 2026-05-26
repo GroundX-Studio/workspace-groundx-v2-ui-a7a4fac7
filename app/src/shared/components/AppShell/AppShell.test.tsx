@@ -82,8 +82,17 @@ describe("AppShell", () => {
     renderShell();
     const separator = screen.getByRole("separator");
     expect(separator).toHaveAttribute("aria-orientation", "vertical");
-    expect(separator).toHaveAttribute("aria-valuemin", "0");
-    expect(separator).toHaveAttribute("aria-valuemax", "1200");
+    // After the 2026-05-25 drag-clamp fix:
+    //   - min = MIN_CHAT_PANE_PX (280) so chat never shrinks below
+    //     its usable width
+    //   - max = viewport - nav - MIN_CANVAS_PANE_PX (320) so the
+    //     canvas always has at least its minimum width; under jsdom
+    //     `window.innerWidth` defaults to 1024 → max = 1024 - 180 -
+    //     320 = 524 here
+    expect(separator).toHaveAttribute("aria-valuemin", "280");
+    expect(separator).toHaveAttribute("aria-valuemax", "524");
+    // initial=360, which is already inside the band, so valuenow
+    // stays at 360.
     expect(separator).toHaveAttribute("aria-valuenow", "360");
   });
 
@@ -109,7 +118,10 @@ describe("AppShell", () => {
   // UR-02 closure: reload-survives-width + reduced-motion gate
   // ────────────────────────────────────────────────────────────────────────
   describe("UR-02 closure (persistence + reduced-motion)", () => {
-    const STORAGE_KEY = "appshell.chatWidth.v1";
+    // v1 → v2 bumped on 2026-05-25 to invalidate any pre-clamp-fix
+    // stored values (v1 could be 0..1200, v2 is guaranteed inside
+    // MIN_CHAT_PANE_PX..viewport - nav - MIN_CANVAS_PANE_PX).
+    const STORAGE_KEY = "appshell.chatWidth.v2";
 
     beforeEach(() => {
       localStorage.clear();

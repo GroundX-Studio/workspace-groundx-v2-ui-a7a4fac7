@@ -118,8 +118,9 @@ export interface ChatRouterDeps {
   groundxClient?: GroundXClient;
   /**
    * GroundX API key the live RAG search should authenticate with.
-   * Sourced from session.groundxApiKey OR env.GROUNDX_ANON_API_KEY by
-   * the caller. Required when not in mockMode.
+   * Sourced from session.groundxApiKey (customer key after sign-up)
+   * OR env.GROUNDX_PARTNER_API_KEY (samples bucket access for
+   * anonymous visitors) by the caller. Required when not in mockMode.
    */
   groundxApiKey?: string;
   /**

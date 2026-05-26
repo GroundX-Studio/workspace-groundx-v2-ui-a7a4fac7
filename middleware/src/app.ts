@@ -528,11 +528,12 @@ export function createApp({
         res.status(400).json({ error: "invalid_payload" });
         return;
       }
-      // Anonymous onboarding sessions don't have a customer-scoped key;
-      // fall through to the partner-owned anon key (used for the samples
-      // bucket). Production deployments must set GROUNDX_ANON_API_KEY for
-      // the live RAG path to work for anonymous visitors.
-      const groundxApiKey = session.groundxApiKey ?? env.GROUNDX_ANON_API_KEY ?? null;
+      // Anonymous onboarding sessions don't have a customer-scoped
+      // key; fall through to the partner key. The partner owns the
+      // samples bucket — anonymous visitors read it via the partner's
+      // credentials. There is no separate "anonymous" identity in the
+      // auth model (locked 2026-05-25).
+      const groundxApiKey = session.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY ?? null;
 
       const result = await handleChatMessage(payload, {
         repository,
@@ -580,7 +581,10 @@ export function createApp({
 
   app.use("/api/v1", apiLimiter, requireSession, async (req: Request, res: Response, next) => {
     try {
-      const apiKey = req.session!.groundxApiKey ?? env.GROUNDX_ANON_API_KEY;
+      // Per-session customer key when the user has signed up; partner
+      // key as fallback for anonymous visitors reading the samples
+      // bucket. There is no separate "anonymous" identity.
+      const apiKey = req.session!.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY;
       if (!apiKey) {
         res.status(503).json({ error: "GroundX API key is not available for this session" });
         return;

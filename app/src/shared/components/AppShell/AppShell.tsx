@@ -60,7 +60,22 @@ const MOTION_REDUCED = { type: "tween", duration: 0, ease: "easeOut" } as const;
  * localStorage key for the drag-resize width. Versioned so we can
  * invalidate stored values cleanly if the layout band ever changes.
  */
-const CHAT_WIDTH_STORAGE_KEY = "appshell.chatWidth.v1";
+// Bumped from v1 → v2 on 2026-05-25 to invalidate any stored value
+// from before the drag-clamp fix. Old v1 values could be anywhere in
+// 0..1200 (including focus-mode zones); v2 values are guaranteed to
+// be inside MIN_CHAT_PANE_PX..MIN_CHAT_PANE_PX+1000 so they always
+// keep both panes visible.
+const CHAT_WIDTH_STORAGE_KEY = "appshell.chatWidth.v2";
+
+/**
+ * Minimum width either pane must keep when the user drags the
+ * divider. The user cannot drag below this on the chat side, nor can
+ * they shrink the canvas below this. Picked at 280 to keep a usable
+ * chat column at the spec's split-live lower bound, and to ensure
+ * the PdfViewer widget can render a legible page at minimum width.
+ */
+const MIN_CHAT_PANE_PX = 280;
+const MIN_CANVAS_PANE_PX = 320;
 
 /**
  * AppShell — the three-column shell for the onboarding + steady experience.
@@ -118,25 +133,48 @@ export function AppShell({
   // asked for.
   const effectiveInitialFocus = compact ? "focus-chat" : initialFocus;
   const { mode, setMode } = useFocusMode({ initial: effectiveInitialFocus });
-  const { width, zone, startDrag, bump } = useResizableSplit({
+
+  // Drag bounds: keep BOTH panes visible at minimum widths. Max is
+  // computed dynamically from the viewport so larger windows allow
+  // the chat to grow without crowding the canvas. The user's prior
+  // behavior — drag past 200 to flip to focus-canvas, drag past 720
+  // to flip to focus-chat — was removed 2026-05-25 because it
+  // produced a state with no visible affordance to recover (no
+  // resize handle once in focus mode, no toggle to restore split).
+  // Focus modes are still selectable via the useFocusMode API; just
+  // not via drag.
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1440,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const navWidthForBounds = hideNav ? 0 : navWidthProp;
+  const maxChatWidth = Math.max(
+    MIN_CHAT_PANE_PX,
+    viewportWidth - navWidthForBounds - MIN_CANVAS_PANE_PX,
+  );
+
+  const { width, startDrag, bump, setWidth } = useResizableSplit({
     initial: initialChatWidth,
-    min: 0,
-    max: 1200,
+    min: MIN_CHAT_PANE_PX,
+    max: maxChatWidth,
     storageKey: CHAT_WIDTH_STORAGE_KEY,
   });
 
-  // Mirror the drag-snap zone into the focus mode (per spec W5: dragging to
-  // either extreme is itself a request to enter the corresponding focus mode).
-  // We skip the first render so `initialFocus` isn't immediately clobbered by
-  // the default zone derived from `initialChatWidth`.
-  const lastZoneRef = useRef(zone);
+  // When the viewport shrinks below what the persisted width allows,
+  // clamp the in-memory value so the canvas never gets squeezed
+  // below its minimum. This catches "I dragged wide on a 27" monitor
+  // then opened the laptop lid" cases.
   useEffect(() => {
-    if (lastZoneRef.current === zone) return;
-    lastZoneRef.current = zone;
-    if (zone === "workspace-focus" && mode !== "focus-canvas") setMode("focus-canvas");
-    else if (zone === "chat-focus" && mode !== "focus-chat") setMode("focus-chat");
-    else if (zone === "split-live" && mode !== "split") setMode("split");
-  }, [zone, mode, setMode]);
+    if (width > maxChatWidth) {
+      setWidth(maxChatWidth);
+    }
+  }, [width, maxChatWidth, setWidth]);
 
   // When the viewport crosses the compact <-> desktop boundary, reset
   // the focus mode so the user doesn't get stuck. Without this, a user
@@ -387,7 +425,13 @@ export function AppShell({
         </AnimatePresence>
 
         {mode === "split" ? (
-          <ResizeHandle value={width} min={0} max={1200} onPointerDown={startDrag} onBump={(delta) => bump(delta)} />
+          <ResizeHandle
+            value={width}
+            min={MIN_CHAT_PANE_PX}
+            max={maxChatWidth}
+            onPointerDown={startDrag}
+            onBump={(delta) => bump(delta)}
+          />
         ) : null}
 
         <AnimatePresence initial={false}>

@@ -192,29 +192,47 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
         transition: "width 180ms ease-out",
       }}
     >
-      {/* Brand mark — G avatar (always visible) + GroundX wordmark (expanded only) */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 0.5, px: collapsed ? 0 : 0.5 }}>
-        <Box
-          aria-hidden
-          sx={{
-            width: 22,
-            height: 22,
-            borderRadius: "50%",
-            backgroundColor: NAVY,
-            color: WHITE,
-            fontSize: 13,
-            fontWeight: FONT_WEIGHT_HEADLINE,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          G
-        </Box>
-        {!collapsed && (
-          <Box sx={{ fontSize: 16, fontWeight: FONT_WEIGHT_HEADLINE, color: NAVY, lineHeight: 1 }}>
-            GroundX
+      {/* Brand mark.
+          Expanded: full GroundX Studio lockup (groundx-studio-color.png,
+          1328x277 — natural ~4.79:1 aspect; rendered at 26px tall ≈
+          124px wide, which fits the 178px expanded nav comfortably).
+          Collapsed: G avatar (no icon-only variant of the lockup
+          ships with this scaffold, so we fall back to the badge). */}
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          mb: 0.5,
+          px: collapsed ? 0 : 0.5,
+          minHeight: 28,
+        }}
+      >
+        {collapsed ? (
+          <Box
+            aria-hidden
+            sx={{
+              width: 22,
+              height: 22,
+              borderRadius: "50%",
+              backgroundColor: NAVY,
+              color: WHITE,
+              fontSize: 13,
+              fontWeight: FONT_WEIGHT_HEADLINE,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            G
           </Box>
+        ) : (
+          <Box
+            component="img"
+            src="/assets/logos/groundx-studio-color.png"
+            alt="GroundX Studio"
+            data-testid="onboarding-nav-logo"
+            sx={{ height: 26, width: "auto", display: "block" }}
+          />
         )}
       </Box>
       <Box sx={{ height: "1px", background: BORDER, my: 0.5, flexShrink: 0 }} />

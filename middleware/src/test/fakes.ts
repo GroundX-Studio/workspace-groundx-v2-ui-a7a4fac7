@@ -26,7 +26,6 @@ export const testEnv: AppEnv = {
   UPSTREAM_TIMEOUT_MS: 30_000,
   GROUNDX_BASE_URL: "https://api.groundx.test/api/v1",
   GROUNDX_PARTNER_API_KEY: "partner-key",
-  GROUNDX_ANON_API_KEY: "",
   LLM_SERVICE: "openai",
   LLM_BASE_URL: "https://llm.test/v1",
   LLM_API_KEY: "llm-key",
