@@ -35,6 +35,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEv
 import { useNavigate } from "react-router-dom";
 
 import { chatErrorToUserCopy, sendChatMessage } from "@/api/chatSessions";
+import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 
 import {
@@ -62,26 +63,12 @@ import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 
 import { GateChatPanel } from "./GateChatPanel";
 
-/**
- * Each note's reveal pause is randomized within this window so the
- * stream feels like a real agent thinking, not a deterministic
- * cadence (which reads as scripted). Lower bound keeps it from
- * stalling; upper bound keeps the whole stream under ~15s for a
- * 6-line script. Update both ends together if you want a calmer or
- * snappier overall feel.
- */
-const THINKING_NOTE_MIN_MS = 1500;
-const THINKING_NOTE_MAX_MS = 2800;
-
-/** A pause after the last note streams in before Done + Pick-a-view appear. */
-const DONE_REVEAL_DELAY_MS = 1200;
-
-function nextThinkingPause(): number {
-  return (
-    THINKING_NOTE_MIN_MS +
-    Math.random() * (THINKING_NOTE_MAX_MS - THINKING_NOTE_MIN_MS)
-  );
-}
+// ARCH-11 (2026-05-26): the timed thinking-note reveal + done-state
+// persistence is now owned by `chat-widgets/ThinkingStream` — F2 mounts
+// the widget and listens for `onDone` to reveal the "Done." bubble +
+// Pick-a-view CTAs. Cadence constants + sessionStorage key live in
+// the widget; this file's responsibility is conversation-flow
+// orchestration only.
 
 interface PickViewOption {
   key: string;
@@ -315,60 +302,12 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
   }, [registryState, scenarioId]);
   const bucketId = registryState.status === "ready" ? registryState.bucketId : null;
 
-  // Thinking-stream playback. Replay bug fix (2026-05-25):
-  // sessionStorage records when a scenario's stream has finished
-  // playing in this tab. If the OnboardingChatColumn unmounts and
-  // remounts (e.g. AppShell compact-mode toggle on viewport resize),
-  // re-rendering replayed the whole script. Now we check the
-  // storage key on mount and jump straight to Done if it's set.
-  const thinkingDoneStorageKey = `groundx-onboarding.thinking-stream-done.${scenarioId}`;
-  const alreadyPlayed =
-    typeof window !== "undefined" &&
-    window.sessionStorage.getItem(thinkingDoneStorageKey) === "1";
-
-  // Streamed note count — starts at the full length if already
-  // played (avoids the replay); otherwise 1 so the user sees motion
-  // immediately.
-  const [noteCount, setNoteCount] = useState<number>(
-    alreadyPlayed
-      ? thinkingScript.length
-      : thinkingScript.length > 0
-        ? 1
-        : 0,
-  );
-  const [showDone, setShowDone] = useState<boolean>(
-    alreadyPlayed || thinkingScript.length === 0,
-  );
-
-  useEffect(() => {
-    if (noteCount >= thinkingScript.length) return;
-    const id = window.setTimeout(() => {
-      setNoteCount((n) => Math.min(n + 1, thinkingScript.length));
-    }, nextThinkingPause());
-    return () => window.clearTimeout(id);
-  }, [noteCount, thinkingScript.length]);
-
-  useEffect(() => {
-    if (noteCount < thinkingScript.length) return;
-    if (showDone) return;
-    const id = window.setTimeout(() => setShowDone(true), DONE_REVEAL_DELAY_MS);
-    return () => window.clearTimeout(id);
-  }, [noteCount, thinkingScript.length, showDone]);
-
-  // Persist the "done" state once it's reached so the replay never
-  // happens again in this tab.
-  useEffect(() => {
-    if (!showDone) return;
-    if (typeof window === "undefined") return;
-    try {
-      window.sessionStorage.setItem(thinkingDoneStorageKey, "1");
-    } catch {
-      // sessionStorage may be disabled or full — degrade silently;
-      // worst case is one replay on next mount, not a crash.
-    }
-  }, [showDone, thinkingDoneStorageKey]);
-
-  const visibleNotes = thinkingScript.slice(0, noteCount);
+  // ARCH-11 (2026-05-26): thinking-stream state owned by the
+  // `ThinkingStream` chat-widget; this surface just listens for its
+  // `onDone` callback to know when to reveal the "Done." bubble +
+  // Pick-a-view pills. The widget handles the timer cadence + the
+  // per-scenario sessionStorage replay guard internally.
+  const [showDone, setShowDone] = useState<boolean>(thinkingScript.length === 0);
 
   return (
     <Box data-testid="onboarding-chat-conversation" sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
@@ -509,28 +448,13 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
           </Box>
         </BotBubble>
 
-        {visibleNotes.length > 0 && (
-          // Drop the literal `·` middot. The user flagged it as
-          // looking like an unwanted bullet (2026-05-25). The left
-          // border alone is enough to read as a quoted-aside.
-          <Stack spacing={0.75} sx={{ pl: 0.5 }}>
-            {visibleNotes.map((note, i) => (
-              <Typography
-                key={i}
-                data-testid={`onboarding-chat-thinking-note-${i}`}
-                variant="caption"
-                sx={{
-                  fontStyle: "italic",
-                  color: BODY_TEXT,
-                  lineHeight: 1.4,
-                  paddingLeft: 1,
-                  borderLeft: `2px solid ${BORDER}`,
-                }}
-              >
-                {note}
-              </Typography>
-            ))}
-          </Stack>
+        {thinkingScript.length > 0 && (
+          <ThinkingStream
+            notes={thinkingScript}
+            scenarioKey={scenarioId}
+            mode="onboarding"
+            onDone={() => setShowDone(true)}
+          />
         )}
 
         {showDone && (

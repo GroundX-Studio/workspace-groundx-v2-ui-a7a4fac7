@@ -93,7 +93,7 @@ describe("OnboardingChatColumn", () => {
     renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
 
     // First note is visible immediately.
-    expect(screen.getAllByTestId(/onboarding-chat-thinking-note-/).length).toBe(1);
+    expect(screen.getAllByTestId(/thinking-note-/).length).toBe(1);
     // Done + Pick-a-view do NOT show before the stream finishes.
     expect(screen.queryByTestId("onboarding-chat-done")).not.toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-pick-a-view")).not.toBeInTheDocument();
@@ -115,7 +115,7 @@ describe("OnboardingChatColumn", () => {
       vi.advanceTimersByTime(1200);
     });
 
-    const notes = screen.getAllByTestId(/onboarding-chat-thinking-note-/);
+    const notes = screen.getAllByTestId(/thinking-note-/);
     expect(notes.length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("onboarding-chat-done")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-chat-pick-a-view")).toBeInTheDocument();
