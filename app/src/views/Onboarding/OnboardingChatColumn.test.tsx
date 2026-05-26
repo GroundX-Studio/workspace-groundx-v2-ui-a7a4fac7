@@ -52,13 +52,40 @@ describe("OnboardingChatColumn", () => {
 
   it("on F2 with a scenario, renders the wireframe conversation chrome", () => {
     renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
-    // Wireframe markers: a Conversation header, the scenario name as the
-    // first user bubble, a sample-switcher subline.
+    // Wireframe markers: a header that shows the FILE NAME (was
+    // "Conversation" pre-2026-05-25, user wanted real context), the
+    // scenario name as the first user bubble, a sample-switcher
+    // subline.
     expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
-    expect(screen.getByTestId("onboarding-chat-header")).toHaveTextContent(/Conversation/i);
+    // Header text now reads the document fileName instead of the
+    // generic "Conversation" label.
+    const header = screen.getByTestId("onboarding-chat-header");
+    expect(header.textContent ?? "").not.toMatch(/^Conversation/i);
+    expect(header.textContent ?? "").toMatch(/\.pdf|utility/i);
     expect(screen.getByTestId("onboarding-chat-sample-switch")).toHaveTextContent(/Utility Bill/i);
     expect(screen.getByTestId("onboarding-chat-user-bubble")).toHaveTextContent(/Utility Bill/i);
     expect(screen.getByTestId("onboarding-chat-bot-lead")).toHaveTextContent(/Reading/i);
+  });
+
+  it("the chat header G icon is a button that navigates to /onboarding", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const { useLocation } = await import("react-router-dom");
+    let pathname = "";
+    const PathProbe = () => {
+      pathname = useLocation().pathname;
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingChatColumn />
+        <PathProbe />
+      </>,
+      { initialFrame: "f2", initialScenario: "utility" },
+    );
+    const home = screen.getByTestId("onboarding-chat-home");
+    expect(home).toBeInTheDocument();
+    await user.click(home);
+    expect(pathname).toBe("/onboarding");
   });
 
   it("streams thinking notes into the chat one at a time, then surfaces Done + Pick-a-view", () => {
@@ -369,7 +396,7 @@ describe("OnboardingChatColumn", () => {
     // card depending on its composing delay — either is fine here.
     const hasGateIndicator =
       screen.queryByTestId("gate-typing-indicator") !== null ||
-      screen.queryByTestId("gate-card") !== null;
+      screen.queryByTestId("gate-rail-preamble") !== null;
     expect(hasGateIndicator).toBe(true);
   });
 });

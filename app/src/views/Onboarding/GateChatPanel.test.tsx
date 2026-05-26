@@ -46,7 +46,7 @@ describe("GateChatPanel", () => {
   it("renders the idle chat placeholder when gate is not active", () => {
     renderWithOnboardingProviders(<GateChatPanel />, { initialFrame: "f2", initialScenario: "utility" });
     expect(screen.getByText(/Ask anything about the sample/i)).toBeInTheDocument();
-    expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
   });
 
@@ -66,7 +66,7 @@ describe("GateChatPanel", () => {
     });
 
     expect(screen.getByTestId("gate-typing-indicator")).toBeInTheDocument();
-    expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
 
     // Standard composing delay is ~600ms for save/export/threshold.
     act(() => {
@@ -74,7 +74,7 @@ describe("GateChatPanel", () => {
     });
 
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
-    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
   });
 
   it("uses a longer composing delay AND a more substantial typing message for the BYO/signup trigger", async () => {
@@ -114,14 +114,14 @@ describe("GateChatPanel", () => {
       vi.advanceTimersByTime(700);
     });
     expect(screen.getByTestId("gate-typing-indicator")).toBeInTheDocument();
-    expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
 
     // At 1700ms total, the longer BYO delay has elapsed.
     act(() => {
       vi.advanceTimersByTime(1000);
     });
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
-    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
   });
 
   it("does NOT replay the typing animation on re-entry after dismiss within the same session", async () => {
@@ -161,13 +161,13 @@ describe("GateChatPanel", () => {
       vi.advanceTimersByTime(1600);
     });
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
-    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
 
     // Dismiss (simulates clicking Ingest in the StepStrip).
     act(() => {
       screen.getByTestId("dismiss-gate").click();
     });
-    expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
 
     // Re-open (user clicks Sign Up again). MUST jump straight to
     // GateView with no typing indicator.
@@ -175,7 +175,7 @@ describe("GateChatPanel", () => {
       screen.getByTestId("open-gate-byo").click();
     });
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
-    expect(screen.getByTestId("gate-card")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
   });
 
   it("skips the typing indicator if gate is already committed on mount", () => {
@@ -203,6 +203,6 @@ describe("GateChatPanel", () => {
     // Committed state should render the GateView's committed mode
     // immediately, no typing indicator beforehand.
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
-    expect(screen.getByTestId("gate-committed")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-committed")).toBeInTheDocument();
   });
 });

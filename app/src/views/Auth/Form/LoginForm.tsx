@@ -9,7 +9,7 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 
 import { LoginI } from "@/api/entities/customerEntity";
 import { DARK_GREY, GRAY, WHITE } from "@/constants";
-import { CommonSubmitButton } from "@/shared/components/CommonSubmitButton";
+import { Button } from "@/components/primitives/Button/Button";
 import { makeAnimationStartHandler } from "@/shared/utils/makeAnimationStartHandler";
 
 interface LoginFormProps {
@@ -106,9 +106,9 @@ export const LoginForm: FC<LoginFormProps> = ({ values, forgotPassword, onSubmit
 
       {forgotPassword}
 
-      <CommonSubmitButton type="submit" id="login-submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
+      <Button variant="primary" type="submit" id="login-submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
         {LOGIN_SUBMIT_LABEL}
-      </CommonSubmitButton>
+      </Button>
     </form>
   );
 };

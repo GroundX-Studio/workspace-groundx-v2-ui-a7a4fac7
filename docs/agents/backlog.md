@@ -24,6 +24,9 @@ points here.
    "X: done."
 5. **No silent additions.** New work goes here with a status before
    any code lands.
+6. **Closed rows are swept periodically** to keep this file
+   readable. The closure context lives in git history + commit
+   messages, not here. Last sweep: 2026-05-26.
 
 ## Status legend
 
@@ -33,32 +36,26 @@ points here.
 - **blocked** — external dependency (data table, env, product call)
 - **closed** — user-visible test passes; inline TODOs deleted
 
-## Priority (set 2026-05-25; revised 2026-05-25 after audit)
+## Priority (revised 2026-05-26 after ARCH epic addition)
 
 Priority is orthogonal to status — a blocked P0 still beats a
 not-started P2. The default is P2; non-default IDs are listed
-explicitly. Grep `^- \*\*P[0-9]` for the four buckets.
+explicitly.
 
-- **P0** — UR-03, UR-04, TS-02, TS-03, TS-08, TS-09, TS-11
-- **P1** — OPS-01, OPS-04, OPS-05
+- **P0** — Architecture epic. All 14 items closed (2026-05-26):
+  ARCH-01 ✅, ARCH-02 ✅, ARCH-03 ✅, ARCH-05 ✅, ARCH-06 ✅,
+  ARCH-07 ✅, ARCH-08 ✅, ARCH-14 ✅, ARCH-15 ✅, ARCH-16 ✅,
+  ARCH-17 ✅, ARCH-18 ✅, ARCH-21 ✅, ARCH-22 ✅
+- **P1** — OPS-01 (blocked, harness-side), ARCH-09, ARCH-10,
+  ARCH-11, ARCH-13, ARCH-19, ARCH-20
 - **P2** — everything else (implicit), plus **TS-05, TS-06, TS-07**
   (demoted 2026-05-25 — each has a real upstream blocker; see
-  per-row "Blocker" notes)
+  per-row "Blocker" notes), **ARCH-12, ARCH-23, ARCH-25**
 - **P3** — every `deferred-late` item (CF-06a, PLUG-07)
 
-Rationale: P0 is "ship-quality runtime" — the motion fallback, the
-StepStrip sub-bracket, and the testing coverage gaps are what keep a
-demo from breaking under a customer's hands. P1 is the agent-loop
-ergonomics + air-gap seams that aren't user-visible but block our
-ability to debug and sell. P3 is parked work where pulling forward
-burns credit (LLM eval) or commitment (plugin ADR) before the
-upstream caller exists.
-
-**Demotion rationale (2026-05-25):** TS-05, TS-06, TS-07 each need
-work that doesn't exist yet OR a platform decision the project
-hasn't made. Better to stop calling them P0 than to ship a watered-
-down version that loses the original closure intent. Re-promote each
-when the corresponding blocker clears.
+The original 2026-05-25 P0 tier (UR-03, UR-04, TS-02, TS-03, TS-08,
+TS-09, TS-11) is fully closed; those rows were swept from the epic
+tables on 2026-05-26 to reduce noise.
 
 ## ID conventions
 
@@ -78,6 +75,7 @@ when the corresponding blocker clears.
 | `OPS-N` | Operations | Migrations infra, MCP cluster reading |
 | `POL-N` | Polish | Known minor bugs |
 | `PLUG-N` | Plugin system | Plugin loader, OnboardingSkillContext, SDR content, tour state machine, onboarding overlay surface |
+| `ARCH-N` | Architecture | Widget contract, single-AppShell unification, primitives + brand reorg |
 
 ---
 
@@ -91,6 +89,80 @@ current epic is actionable.
 | **DT-01** | not-started | Knex migrations directory + Helm pre-install job. Today `createSchema()` inlines `CREATE TABLE IF NOT EXISTS`. Productionizing: versioned `middleware/src/db/migrations/NNNN_*.sql` + Helm pre-install/upgrade Job that runs them. Memory: project_database.md "knex migrations deferred." | Schema change between two migrations rolls forward + back cleanly. |
 | **DT-02** | not-started | MySQL primary in production. Schema + repo impls + claim endpoint exist. Provision RDS/self-hosted, set `APP_REPOSITORY_MODE=mysql` + creds, first deploy runs `createSchema()`. | Production deploy reads/writes against MySQL; in-memory repo unused. |
 
+# Epic: ARCH — widget contract + single-AppShell unification + component-library reorg
+
+Added 2026-05-26 after a multi-day pattern of bugs caused by an
+unclear separation between "onboarding views" and "production
+widgets," compounded by drift between two PdfViewer files. Expanded
+2026-05-26 (round 2) to also include: the `primitives/` + `brand/` +
+`layout/` taxonomy for shared components; the no-hardcoded-styles
+drift guard expansion; the cleanup of scaffold-default views
+(`Home`, `CoreLayouts/Dashboard`, `AppStatus`, `Banned`) that the
+product doesn't use; and a `views/_scaffold/` carve-out for
+non-product-but-kept-around surfaces (`Health`).
+
+**Locked design**:
+
+- ONE app shell — `AppShell = nav | (header + (chat | viewer))` —
+  used by every route.
+- Onboarding is an OVERLAY decorating that shell, not a parallel
+  hierarchy.
+- Two slot-scoped widget contracts: `chat-widgets` and
+  `viewer-widgets`, each in their own directory.
+- F1 `IngestView` is the explicit exception (per
+  `memory/feedback_no_onboarding_duplicates.md`: F1, sign-up,
+  onboarding-nav are the only onboarding-only surfaces).
+- `components/` has FIVE siblings: `primitives/` (unbranded atoms),
+  `brand/` (Gx molecules), `layout/` (chrome singletons),
+  `chat-widgets/` (slot), `viewer-widgets/` (slot).
+- All visible styling resolves to theme tokens. The
+  no-hardcoded-styles drift guard expands from 6 F1 files to every
+  component + view file.
+
+**Execution order** (option-B per user direction — primitives
+first, bug fix after):
+
+ARCH-01 (contract doc) → ARCH-08 (drift guard) → ARCH-02 (delete
+dead PdfViewer) → ARCH-03 (slot reorg) → ARCH-14 (taxonomy doc) →
+ARCH-15 (component map) → ARCH-18 (build primitives) → ARCH-16
+(move components) → ARCH-17 (expand drift guard) → ARCH-22 (delete
+CoreLayouts) → ARCH-21 (Home redirect) → ARCH-24 (delete
+AppStatus/Banned, move Health under `_scaffold/`) → ARCH-19 (migrate
+F1) → ARCH-20 (migrate other views) → ARCH-05 (sign-up split — the
+bug fix that motivated the epic) → ARCH-06 (collapse
+OnboardingShell) → ARCH-07 (unified steady) → ARCH-09 (memory
+updates) → ARCH-10 (thin view wrappers) → ARCH-11 (ThinkingStream
+widget) → ARCH-23 / ARCH-25 (cleanup) → ARCH-13 (audit memo to
+harness team — last).
+
+| ID | Status | Item | Closure test |
+|---|---|---|---|
+| ARCH-01 | closed | **Define the widget contract**. `scaffold/docs/agents/widget-contract.md` shipped 2026-05-26. Documents slot directories, `mode` prop contract, README + test requirements, primitives catalog (PillRow/StatusCard/BotBubble/UserBubble/ThinkingNote/LoadingDots/MagicLinkInput), widget catalog, F1 IngestView carve-out exception. | Doc exists + drift guard (ARCH-08) passes. |
+| ARCH-02 | closed | **Delete dead `shared/components/PdfViewer.tsx`**. Closed 2026-05-26 — file + sibling test deleted; zero imports remained. | `grep -rn "shared/components/PdfViewer" src` returns nothing; tests pass. |
+| ARCH-03 | closed | **Reorganize widget tree** to `components/chat-widgets/<Name>/` + `components/viewer-widgets/<Name>/`. Moved 2026-05-26: PdfViewer + BookCallView to viewer-widgets; BookCallChatPanel renamed → BookingStatusCard in chat-widgets. READMEs + mode prop + data-mode / data-widget attrs added. `components/widgets/` deleted. | All 683 tests green after move; drift guard passes. |
+| ARCH-04 | (dropped 2026-05-26) | ~~Refactor F1 picker into a viewer widget~~. **Decision**: F1 stays as onboarding-only `IngestView` per `feedback_no_onboarding_duplicates.md` carve-out. Documented in `widget-contract.md` § The exception. | n/a |
+| ARCH-05 | closed (2026-05-26) | **Sign-up split — the bug that motivated this epic.** Sliced into three commits: (A) built `components/viewer-widgets/SignUpWidget/` (form + register pipeline + committed-state celebration) and `components/chat-widgets/GateChatRail/` (eyebrow + per-trigger preamble + book-a-call + dismiss + committed-state Continue CTA), each contract-compliant (README + sibling test + `mode` prop, auto-discovered by `widget-contract.test.ts`); composes from the new primitives so the drift-guard stays green. (B) wired OnboardingShell's `canvasContent` to swap to `<SignUpWidget>` when `gate.status === "open"|"committed"` (precedence: bookCall > gate > frame); GateChatPanel mounts `<GateChatRail>` post-composing-animation instead of the old GateView. (C) deleted `GateView.tsx` + `GateView.test.tsx`; removed its 6-offender EXEMPT entry; migrated `gate-*` testids to `gate-rail-*`/`signup-*` across vitest + Playwright e2e specs; added a new shell-level integration test AND a Playwright regression pinning the canvas swap (sample → gate → form visible, sample hidden → dismiss → sample restored). Magic-link backend deferred to AU-01 (unchanged scope; today's path is direct register). | E2e: from F5 sample → advance-to-f6 → canvas shows `signup-submit`, NOT `onboarding-frame-f5`; chat shows `gate-rail-preamble`; dismiss restores `onboarding-frame-f6`. Plus the existing happy-path + error-path + ESC/keep-exploring dismiss tests still pass under the new selectors. |
+| ARCH-06 | closed (2026-05-26) | **Single AppShell instance with F1 as overlay.** Three slices: (A) extended AppShell with `hideChat?: boolean` (mirror of `hideNav`) + `data-shell-instance` attribute (useId-based, stable across re-renders, distinct across mounts) — 4 new tests. (B) Refactored OnboardingShell to mount ONE AppShell across F1 + F2+; F1's `f1Layout` (IngestView + StepStrip) is now an absolute-positioned overlay above the AppShell; AppShell flips `hideNav`/`hideChat`/`header` based on `isF1` so the underneath shell goes from canvas-only (under F1) to fully populated (F2+) as F1 lifts away. Animation reframed per the user's "F1 is the overlay" mental model: A · Sheet dismiss spec — 900ms dismiss with cubic-bezier(0.32, 0.72, 0, 1), opacity holds through 70% then wipes (lift not dissolve); 700ms return with opacity fade in first 30%; F2 zoom 0.985↔1 + opacity 0.92↔1; reduced-motion bypass. (C) Deleted SlideOverlay component + SWIPE_* constants + slideIn/Out keyframes + transitionPhase state machine (~180 lines); deleted 5 SlideOverlay-specific tests; added ARCH-06B closure test asserting `data-shell-instance` is stable across F1→F2→F1 click chain. Animation prototype validated by user via standalone HTML mock (`/tmp/arch-06-animation-preview.html` — three alternatives evaluated A/B/C, A selected with dual-slider tuning). | Closure test passes: `screen.getByTestId("appshell-root").getAttribute("data-shell-instance")` is identical before dismiss, after F1→F2, and after F2→F1 round-trip. Plus the existing 19 OnboardingShell tests still pass under the new architecture. |
+| ARCH-07 | closed (2026-05-26) | **Unified steady-state shell.** Refactored `SteadyShell.tsx` to mount the canonical `<AppShell />` with steady-mode widgets in the slots. Before: custom `Box display=flex flexDirection=row` layout with `OnboardingNav` + stacked content body, bypassing AppShell entirely. After: AppShell with `nav={OnboardingNav accountState="free"}`, `chat={SessionSwitcher + session-id panel + unknown-session hint}`, `canvas={"select a doc" placeholder card}`. Chat-side and canvas-side widgets stay placeholders (UI-05 lands the real `ChatWithSources` + steady-mode `PdfViewer` wire-up) — the structural unification is what ARCH-07 closes. Closure test pins `data-testid="appshell-root"` is present in DOM and `data-shell-instance` (ARCH-06A's stable id) carries a value. Existing 3 SteadyShell behavior tests (session-id surfacing, switchTo URL sync, unknown-session hint) still pass under the new structure — testids migrated from a sibling Box into the chat slot's content. Test count 763 → 764. | Authenticated user at `/c/:sessionId` → SteadyShell renders `appshell-root`; same AppShell component as OnboardingShell mounts; no parallel custom shell exists. |
+| ARCH-08 | closed | **TDD drift-guard `widget-contract.test.ts`**. Shipped 2026-05-26. Auto-discovers every widget under both slot directories; asserts each has a README, a sibling test, and a `mode` prop. 11 tests pass; deliberately failing a contract piece fails the suite. | Drift guard passes; failing a slot fails the test. |
+| ARCH-09 | not-started | **Memory + agent references** for the new architecture. Rewrite `memory/feedback_no_onboarding_duplicates.md` around the contract. Add `memory/feedback_widget_contract.md`. Update local `harness-web-ui` skill references if cached. | Memory files updated; spawned agents picking up the project mid-stream see the new rules. |
+| ARCH-10 | not-started | **Migrate onboarding view wrappers**. `UnderstandView` / `ExtractView` / `InteractView` / `IntegrateView` collapse to 5-20-line wrappers that mount the appropriate viewer-widget with `mode="onboarding"`. The visible-affordances-locked behavior comes from the widget reading its mode prop, not from the wrapper. | Each view is ≤ 20 lines; passes the existing F2-F7 e2e tests unchanged. |
+| ARCH-11 | not-started | **`ThinkingStream` chat-widget**. Today the timed "parsing layout · 8 rows / found header · account 1023456 / …" stream lives inline in `OnboardingChatColumn`'s F2ConversationFlow. Extract into `chat-widgets/ThinkingStream/` so steady mode can show the same beat when a real document is parsing. | Steady-mode upload triggers the same `ThinkingStream` widget instance with real progress events. |
+| ARCH-12 | not-started | **(P2 — polish)** Graduation animation when onboarding overlay drops away (StepStrip animates out, header slot empties). | Visual: after sign-up commits, StepStrip slides out with motion-config-respecting transition. |
+| ARCH-13 | not-started | **Audit memo to harness team**. After ARCH-01..11 + 14..22 land, author `scaffold/docs/agents/harness-audit-widget-architecture.md`. Describes the generally-applicable patterns ONLY — not GroundX-specific deletions. Generally-applicable items: (a) single-AppShell architecture + onboarding-as-overlay, (b) chat-widget vs viewer-widget contract, (c) slot directory convention (`chat-widgets/` + `viewer-widgets/`), (d) `primitives/` + `brand/` + `layout/` taxonomy under `components/`, (e) the no-canvas-one-offs rule + failure modes, (f) drift-guard test pattern (ARCH-08), (g) no-hardcoded-styles drift-guard expansion (ARCH-17), (h) **the "follow MUI where it makes sense" rule** for primitives — primitives mirror MUI's component split, prop names, and variant taxonomy; brand-locked semantics layer on top, not in place of MUI's API. Cite the `Button`/`IconButton` 2026-05-26 split-vs-merge correction as the canonical example. See `memory/feedback_follow_mui.md`. Generally-applicable raises to the harness team: (i) "consider whether your scaffold default Home/Dashboard/AppStatus/Banned stubs serve products that use a custom shell" (do NOT recommend deleting them outright — that's a per-project call). Asks the harness team to codify the contract in `harness-web-ui` skill references + update the `groundx-web-ui-scaffold` template repo so new managed projects ship with `chat-widgets/`, `viewer-widgets/`, `primitives/`, `brand/`, `layout/` pre-wired + a starter widget-contract doc + the follow-MUI rule + scaffold-side drift-guard tests. **Timing**: last ticket before any post-refactor commit, so the memo reflects landed state not plan. | Memo file exists; references the actually-shipped state; per-project deletions ARE NOT recommended to harness, only the contract + taxonomy + drift-guard patterns + follow-MUI rule. |
+| ARCH-14 | closed (2026-05-26) | **Five-tier component taxonomy documented** in `widget-contract.md`: `components/primitives/` (unbranded atoms; theme-resolving; e.g. Button/Heading/TextField), `components/brand/` (Gx-prefixed branded molecules; e.g. GxCard, GxPill, CapabilityBadge), `components/layout/` (chrome singletons mounted at root or once; e.g. AppShell, OnboardingNav, StepStrip), `components/chat-widgets/` (slot widgets for the chat column), `components/viewer-widgets/` (slot widgets for the canvas). Each level has its own rules section. Also documented: views catalog (per-route view inventory) + contexts catalog (18 contexts annotated by role). The doc is referenced by the ARCH-15 mapping table that drove the moves. |
+| ARCH-15 | closed (2026-05-26) | **Mapping table for every `shared/components/` file** shipped in `widget-contract.md` § "Component mapping". Each row carries the old path, new path, and rename rationale. Orphans handled per spec: `SampleScenarioCard` + `ByoTile` colocated into `views/Onboarding/IngestView/` (only used there); `SessionSwitcher` into `views/Steady/SteadyShell/`. The table was the single reviewable artifact that drove ARCH-16's execution. |
+| ARCH-16 | closed (2026-05-26) | **All moves executed.** `src/shared/components/` deleted; `src/components/` now has the five-tier tree: `primitives/` (13: BodyText, Button, Caption, DialogTitle, DropdownMenu, Heading, IconButton, Label, LoadingDots, MotionRoot, Stack, TextField, Tooltip), `brand/` (9: CapabilityBadge, CiteChip, ConnectorGlyph, DocThumb, EducationalTooltip, GxCard, GxPill, GxSectionHeader, WireframeFilters), `layout/` (4: AppErrorBoundary, AppShell, OnboardingNav, StepStrip), `chat-widgets/` (2: BookingStatusCard, GateChatRail — `GateChatRail` per ARCH-05A), `viewer-widgets/` (3: BookCallView, PdfViewer, SignUpWidget — `SignUpWidget` per ARCH-05A). MUI-follow consolidation per the user's locked rule (`feedback_follow_mui.md`): instead of the proposed `<Button variant="submit\|cancel\|icon">` monolith, split into `Button` (primary/secondary) + `IconButton` (icon-only) matching MUI's own split — corrected mid-implementation when the user said "follow MUI; split." `src/shared/` retained for non-component infrastructure (`hooks/`, `utils/`). All imports updated; `grep -rn "from \"@/shared/components/" src/` returns zero. |
+| ARCH-17 | closed (2026-05-26) | **Drift guard expanded to all `components/` + `views/` files.** `src/test/no-hardcoded-styles.test.ts` now auto-discovers every `.tsx` under both directories (no more hand-maintained file list); each file gets a generated `it()` that fails CI on inline `fontSize:`/`fontWeight:`/`borderRadius:` numerics, viewport-unit `maxHeight/minHeight` string literals, or hex color literals. `ASSET_ALLOWLIST` carries third-party brand-color exemptions (currently just `ConnectorGlyph` for Box/Microsoft/Google logo hex values). `EXEMPT_OFFENDER_COUNTS` carries transitional file-level exemptions for the view-migration cleanup (ARCH-19/20 will burn this down to zero) — drift sentry asserts each file's offender count matches the recorded number, so adding new literals to an exempted file ALSO fails. Self-test pins the FORBIDDEN regexes against known-bad samples so a regex bug can't silently green the suite. Currently 16 files exempt (the EXEMPT list); 0 unauthorized offenders. |
+| ARCH-18 | closed (2026-05-26) | **Built 13 primitives** under `components/primitives/`. Each ships its own directory + sibling `*.test.tsx` + `README.md` (auto-enforced by `widget-contract.test.ts`). Typography family (Heading w/ 8 levels including display, BodyText w/ md/sm, Label, Caption); button family split per MUI (Button w/ primary/secondary variants, IconButton for icon-only — split mid-implementation when user said "follow MUI; split" → locked in `memory/feedback_follow_mui.md`); form (TextField); chrome (Tooltip, DialogTitle); composite (Stack, DropdownMenu, LoadingDots, MotionRoot). Pre-existing `CommonSubmitButton` tests ported to the new `Button` variant tests. SignUpWidget, GateChatRail, Home, SteadyShell all compose from these primitives end-to-end. The old `Common*`/`Gx*`-prefixed primitives are gone from `shared/components/` (deleted in ARCH-16). |
+| ARCH-19 | not-started | **Migrate F1 `IngestView` to compose entirely from new primitives + brand**. Proof point + template for the rest. The view should contain ~zero inline `sx` blocks — all styling resolves through primitives. | F1 IngestView passes the expanded no-hardcoded-styles drift guard (ARCH-17); visual snapshot unchanged; e2e specs pass. |
+| ARCH-20 | not-started | **Migrate remaining views to new primitives**. `UnderstandView`, `ExtractView`, `InteractView`, `IntegrateView`, `OnboardingChatColumn`, `OnboardingShell`, `SteadyShell`. Mostly mechanical after ARCH-19 sets the pattern. | All views pass the expanded drift guard (ARCH-17); no view has >10 inline `sx` blocks. |
+| ARCH-21 | closed (2026-05-26) | **Replaced scaffold-default `views/Home/Home.tsx`** with an auth-aware redirect. New `Home` reads `useAuthContext()` for the auth signal and reads `localStorage["groundx-onboarding.chat-store.v1"].activeSessionId` directly (ChatStoreProvider isn't mounted at the `/` boundary). Anonymous → `/onboarding`; signed-in with persisted session → `/c/<sessionId>`; signed-in without one → `/onboarding`. The `/c/new` fallback in the original spec was dropped — that route doesn't exist; only `/c/:sessionId` does. Home is now ~30 LOC (was 161). Pulled `views/Home/Home.tsx: 2` from `EXEMPT_OFFENDER_COUNTS` (drift-guard count goes to zero). Test count 742 → 747 (+5 redirect-branch tests). |
+| ARCH-22 | closed (2026-05-26) | **`views/CoreLayouts/` deleted** along with `Dashboard.tsx` + `appNavigation.tsx`. The scaffold-default "boxed-content + topbar" wrapper that previously wrapped the `/` route is gone; `router.tsx` now mounts `AppInitialization + OnboardingProvider + <Outlet />` at the `/` boundary and child routes mount the canonical AppShell directly (OnboardingShell on `/onboarding`, SteadyShell on `/c/:sessionId` per ARCH-07). Routing tests + the scaffolded route navigation continue to pass. Per-project change — not generalized to the ARCH-13 harness memo (which raises only the principle "consider whether your scaffold's Dashboard layout serves the product"). |
+| ARCH-23 | not-started | **(P2 — revisit later)** Audit `views/Auth/` (Login / Register / ForgotPassword / ResetPassword / AuthLayout / Form/). Today the product uses the in-app gate (ARCH-05 SignUpWidget + GateChatRail) for sign-up; the standalone `/auth/*` pages are partially still useful as magic-link landing URLs but `/auth/register` may be dead. **Decision deferred** per user direction 2026-05-26: keep both for now. Revisit when magic-link/SSO actually ship (AU-01, AU-02) — at that point we'll know which standalone pages are still load-bearing and which can be deleted. | Decision made; dead pages deleted (if any); load-bearing pages kept and documented in widget-contract.md § views catalog. |
+| ARCH-24 | closed (2026-05-26) | **Scope-adjusted on contact.** Original spec said delete both `AppStatus/` + `Banned/`; grep showed `/banned` is load-bearing (`api/axios.ts` 403-on-archived-customer redirect + `Login.tsx` banned-login branch), so Banned stayed (stub content; route real). Delivered: (a) `views/AppStatus/` deleted (no callers, no real surface); (b) `ROUTER_PATHS.APP_STATUS` removed + route stripped from `router.tsx`; (c) `views/Health/` → `views/_scaffold/Health/` to mark it non-product scaffold infrastructure; (d) router Health import updated; (e) `widget-contract.md` views catalog updated with the new shape (Home active, Banned active-stub, `_scaffold/` active). TS + tests green. The "build a real banned-account surface" work is now a future ticket — out of scope for the ARCH epic. |
+| ARCH-25 | not-started | **(P2 — deferred but tracked)** Audit `contexts/`. 8 of 18 contexts are scaffold-default Partner-API state holders that the product doesn't use today: `ApiKeysContext`, `BucketsContext`, `GroupsContext`, `ProjectsContext`, `SearchContext`, `WorkflowsContext`, `HealthContext`, plus the original `OnboardingContext` (anon-id tracker, replaced by `OnboardingSessionContext`). Confirm whether each is dead or will be wired into UI-05 (steady-mode chat/canvas); delete the dead ones. **Deferred** per user direction 2026-05-26 — revisit during UI-05 work when we'll know which contexts get real consumers. | Each scaffold-default context audited; dead ones deleted; the rest documented with "wired by UI-XX" notes. |
+
 # Epic: CHAT — LLM runtime + RAG + compression
 
 CF-01 through CF-18. Inline `TODO(CF-N)` markers in middleware
@@ -100,7 +172,7 @@ in `app/src/api/chatSessions.ts` reference these rows.
 | ID | Status | Item | Closure test |
 |---|---|---|---|
 | CF-19 | not-started | `ensureBucketGroup(bucketIds[]) → groupId` helper. Multi-workspace pivots (user looking across 2+ buckets) need a pre-created GroundX Group. Builds: stable hash of sorted bucket-id list → cached groupId → fallback to Partner API `POST /v1/groups` with deterministic name. Sub-deferral of CF-15 — no upstream caller produces a multi-bucket scope yet, so no user-visible test exists until that caller (UI-05 SteadyShell, or a multi-bucket project view) lands. Don't ship this until a real call site exists. | A multi-bucket entity (`bucketIds:[B1,B2]`) sent through the chat path triggers `ensureBucketGroup([B1,B2])`; first call creates the group via Partner API; second call returns the cached id without a second POST; chatHandler then routes the search via `{kind:"group", groupId}`. |
-| CF-06a | **deferred-late** | Eval-set-in-CI follow-up to CF-06. ≥20 (query, expected-cite, expected-refusal) tuples per scenario (Utility/Loan/Solar). Runner exercises `callGroundedLlm` against the live LLM (or a configurable provider) and grades each answer against the expected cite/refusal. Regression fails the CI job. Splits from CF-06 because the runner + ground-truth authoring is genuinely separate work from the prompt code. Requires: (a) eval fixture per scenario, (b) grading function (cite presence + refusal-pattern match), (c) opt-in CI workflow that uses a real key (paid + flaky-tolerant). Soft-blocked on SCEN-06 (real sample PDFs) for the cite-against-real-text portion. **Per locked decision 2026-05-25:** deferred to the late-stage closure pass — no upstream item is blocked on it, and shipping it early would burn LLM credits before the prompt has stabilized. Pull forward only if (a) SCEN-06 lands AND (b) prompt regressions actually start happening in production. | The 60-tuple eval set runs in CI; a deliberate prompt regression (e.g. stripping the refusal contract) fails the job. |
+| CF-06a | **deferred-late** (P3) | Eval-set-in-CI follow-up to CF-06. ≥20 (query, expected-cite, expected-refusal) tuples per scenario (Utility/Loan/Solar). Runner exercises `callGroundedLlm` against the live LLM (or a configurable provider) and grades each answer against the expected cite/refusal. Regression fails the CI job. Splits from CF-06 because the runner + ground-truth authoring is genuinely separate work from the prompt code. Requires: (a) eval fixture per scenario, (b) grading function (cite presence + refusal-pattern match), (c) opt-in CI workflow that uses a real key (paid + flaky-tolerant). Soft-blocked on SCEN-06 (real sample PDFs) for the cite-against-real-text portion. **Per locked decision 2026-05-25:** deferred to late-stage closure pass — no upstream item is blocked on it, and shipping it early would burn LLM credits before the prompt has stabilized. Pull forward only if (a) SCEN-06 lands AND (b) prompt regressions actually start happening in production. | The 60-tuple eval set runs in CI; a deliberate prompt regression (e.g. stripping the refusal contract) fails the job. |
 | CF-10 | not-started | Compression off the request hot path. Job queue + background worker + 202/poll OR "pending" flag on session. | Posting near threshold returns 200 promptly; compression completes async; next post sees new active summary. |
 | CF-11 | not-started | Streaming response (SSE / fetch-stream). | E2e renders a long answer token-by-token. |
 | CF-12 | not-started | Tool-call wiring in routeChat (see also TL-* below for the individual tool routes). | A query firing `show_extraction` produces the tool call in the reply. |
@@ -110,7 +182,7 @@ in `app/src/api/chatSessions.ts` reference these rows.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| AU-01 | not-started | Magic-link provisioning endpoint `POST /api/auth/magic-link/send` + callback handler. Currently no magic-link route exists; `commitGate("register")` does direct register only. Memory: `project_auth_state_machine.md` references magic-link as an auth method. | User clicks "send magic link" → POST → email contains link → click → session created. |
+| AU-01 | not-started | Magic-link provisioning endpoint `POST /api/auth/magic-link/send` + callback handler. Currently no magic-link route exists; `commitGate("register")` does direct register only. Memory: `project_auth_state_machine.md` references magic-link as an auth method. Pairs with ARCH-05's `GateChatRail` which needs this endpoint. | User clicks "send magic link" → POST → email contains link → click → session created. |
 | AU-02 | blocked | SSO with Partner-API verification. `SSO_ENABLED` flag gates UI but no OAuth/callback middleware routes. Blocked on product decision: which IdPs (Google, Okta, custom)? | SSO_ENABLED + IdP-configured deploy → user clicks SSO → callback → session minted. |
 | AU-03 | not-started | Session merge on signin from new browser. Pre-signin pinned answers + schemas (in localStorage on old browser) carry over after user signs in elsewhere. Memory: `project_auth_state_machine.md` "session merge." | User signs in on browser B; sees pinned answer from browser A's anon session. |
 | AU-04 | not-started | AuthProvider race tests (anon→authed flip during in-flight chat send). Today `app/src/contexts/AuthContext/` has 0 race tests. | Test: chat-message in flight when login fires; assert no orphaned message, no wrong-owner write. |
@@ -132,13 +204,13 @@ in `app/src/api/chatSessions.ts` reference these rows.
 | UI-02 | not-started | **F7 IntegrateView** real connector cards + agent-plugin download buttons. Today the buttons are non-functional. | E2e: user clicks "download" on an agent plugin, gets a real artifact. |
 | UI-03 | not-started | **F3a edit-schema branch**. Inline schema editor stub today; wire to schema-builder widget pattern. | User edits a field's prompt in F3, extraction re-runs against the new schema. |
 | UI-04 | not-started | **F5 InteractView polish**. Citation chips inline with bot turns; clicking a chip opens a side panel with the source page. Today F5 has citation chips but no side panel. | Click chip → side panel opens with PDF page. |
-| UI-05 | not-started | **Steady-mode chat + canvas inside SteadyShell**. Currently a placeholder with `SessionSwitcher` mounted. | Authed user navigates to `/c/:sessionId` → real chat + canvas surface renders. |
+| UI-05 | not-started | **Steady-mode chat + canvas inside SteadyShell**. Currently a placeholder with `SessionSwitcher` mounted. Pairs with ARCH-07 (unified steady shell mounts AppShell instead of bespoke SteadyShell). | Authed user navigates to `/c/:sessionId` → real chat + canvas surface renders. |
 | UI-06 | not-started | Session list fetch from BFF when URL session id isn't in localStorage. Today the "unknown session" hint is an inline `<code>` placeholder. | Open `/c/:unknownId` on a fresh browser → BFF fetch populates the session → UI renders. |
 | UI-07 | not-started | Multi-session keyboard shortcuts (cmd-K to switch). | cmd-K opens a session picker; arrow keys navigate; Enter switches. |
-| UI-08 | not-started | Engineer-call Calendly wire-up. `commitGate("engineer-call")` is a stub with no Calendly round-trip. Needs `CALENDLY_URL` env + embed or `<a target=_blank>`. | "Book a call" button opens Calendly; `gate_event` recorded. |
+| UI-08 | closed | Engineer-call Calendly wire-up — closed by ARCH-05/ARCH-13 era widgets (`BookCallView` viewer-widget + `BookingStatusCard` chat-widget). `VITE_CALENDLY_URL` env wired, postMessage origin-guarded, `?bookCall=1` URL state preserves across reload. | F6a click → Calendly iframe in viewer, BOOKING IN PROGRESS in chat, postMessage commits gate. (Note: kept-as-closed even though the ARCH-13 audit memo will reference the underlying widgets.) |
 | UI-09 | not-started | Richer thinking-note formatting. Manifest `thinkingScript` is `string[]`; wireframe shows bolded words. Extend to support markdown-lite. | Manifest with `**bold**` renders bold in F2 thinking stream. |
 | UI-11 | not-started | Variable inference / `{project}` placeholder UX. Per `project_dev_contracts.md` decision #12: "automatic variable inference is parked... UX for proposing variables is the hybrid pattern (deferred)." Today S3a section editor doesn't propose variables; user can only inline-edit. | User selects "the project" → "make variable" surfaces a chip; future runs render `{project}`. |
-| UI-12 | not-started | **BYO upload UI passes `filter.workflow_id` on every uploaded doc.** Per `memory/project_workflow_id_filter.md` (locked 2026-05-25): when the user-facing upload UI ships (no surface today; F1 has a BYO tile but no upload widget behind it), the ingest payload's `filter` must include `workflow_id` whenever the upload was scoped to a workflow. Implementation when this surface lands: (a) accept a workflow id at the upload-flow entry (selected by user OR inherited from the active scenario / project / bucket); (b) construct `filter: { ..., workflow_id }` in the `IngestDocumentsInput.documents[].filter` before calling `ingestRemoteDocuments`; (c) the entity layer + middleware proxy already pass the filter through unchanged, so no new wire-up there. Frontend tests must assert the filter contains workflow_id when ingest is triggered from a workflow context. | A BYO upload that originates inside a workflow-scoped surface produces a GroundX doc whose `filter.workflow_id` matches the originating workflow; a test mocks the ingest call and asserts the filter payload. |
+| UI-12 | not-started | **BYO upload UI passes `filter.workflow_id` on every uploaded doc.** Per `memory/project_workflow_id_filter.md` (locked 2026-05-25): when the user-facing upload UI ships, the ingest payload's `filter` must include `workflow_id` whenever the upload was scoped to a workflow. Implementation when this surface lands: (a) accept a workflow id at the upload-flow entry; (b) construct `filter: { ..., workflow_id }` before calling `ingestRemoteDocuments`; (c) the entity layer + middleware proxy already pass the filter through unchanged. Frontend tests must assert the filter contains workflow_id when ingest is triggered from a workflow context. | A BYO upload from a workflow-scoped surface produces a GroundX doc whose `filter.workflow_id` matches the originating workflow; a test mocks the ingest and asserts the filter payload. |
 
 # Epic: TOOLS — agent canvas-dispatch + content tools
 
@@ -181,21 +253,21 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| UR-01 | closed | **Re-closed 2026-05-25 against the real architecture.** Initially shipped a `PdfViewer` primitive (`app/src/shared/components/PdfViewer.tsx`) using pdfjs-dist that consumed a `scenario.documents[0].previewUrl` field from a hardcoded manifest. Per the architectural correction (`memory/feedback_no_onboarding_duplicates.md`): the right shape is a **production widget** (`app/src/components/widgets/PdfViewer/PdfViewerWidget.tsx`) that takes `documentId` + `mode`, calls `getGroundXDocumentXray(documentId)` via `DocumentsContext`, and renders the real per-page images from `xray.documentPages[].pageUrl`. `UnderstandView` is now a thin layout wrapper (~50 lines) that mounts the widget with `mode="onboarding"`. The pdfjs primitive stays in-tree for future steady-mode source-viewer needs that want text-selection. The mock `previewUrl` field on `ScenarioDocument` is dead code (kept for now; will be stripped with the manifest cleanup). Closed 2026-05-25. | 7 PdfViewerWidget tests pass (loading + first page image + LIVE PARSE label + thumbnails + getDocumentXray call + thumb-switch + error + data-mode); 3 UnderstandView tests pass (BYO branch + widget mount + real-data wiring). Full app sweep 657 tests pass; TS + lint clean. |
-| UR-03 | closed | `MotionRoot` component (`app/src/shared/components/MotionRoot.tsx`) — wraps the App tree in a single `<MotionConfig reducedMotion="user">`. When `useReducedMotion()` reports the OS preference is set, supplies a global default `transition: { duration: 0.08, ease: "linear" }` so any motion site that doesn't override gets an 80 ms crossfade. When reduced is off, transition is undefined so per-site animations drive themselves. `reducedMotion="user"` makes framer-motion auto-disable transform/scale/rotate animations under reduced-motion; opacity continues to animate (= the crossfade). Mounted at the App root inside GxThemeProvider so the contract covers the entire tree. Per-site `useReducedMotion()` calls (AppShell drag, F2 scan-line, GateChatPanel) keep their own logic — MotionRoot is the floor, not the ceiling. Closed 2026-05-25. | 4 tests: renders children, sets reducedMotion="user", swaps to 80 ms crossfade when reduced, omits global transition when not reduced. Full app sweep 96 files / 614 tests pass; TS clean. |
-| UR-04 | closed | **Verify-first hit — already built.** `StepStrip.tsx` already renders the ANALYZE dashed bracket with the three sub-pills (`SubPill` component at L146, bracket at L282-316). `OnboardingShell.analyzeSubsteps()` (L62) wires `{extract, interact, report}` with per-frame `active` / `reachable-todo` / `disabled` state. The closure test already exists at `StepStrip.test.tsx:37` ("renders all four primary slots + substep bracket when analyze is active") — asserts Ingest / Understand / ANALYZE / Integrate / Extract / Interact / Report all in the strip. Audit 2026-05-25 confirmed the row was mis-flagged not-started because of the verify-first ask. No code change. Closed 2026-05-25. | Existing `StepStrip.test.tsx:37` passes — assertions cover all three sub-pills inside the ANALYZE bracket. |
 | UR-05 | not-started | Hotkey surface (cmd-K, Esc, etc.) via `react-hotkeys-hook`. Per `project_ui_runtime.md`. | cmd-K opens session switcher; Esc dismisses overlays. |
+
+(Prior closures: UR-01 / UR-03 / UR-04 — all closed 2026-05-25, swept 2026-05-26.)
 
 # Epic: SCEN — scenario completeness
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| SCEN-01 | obsolete | **Closed-as-obsolete 2026-05-25.** This row originally tracked "extend `utility.json`'s hardcoded schema from 14 → 84 fields and re-seed." The architectural correction supersedes it: the schema lives in the GroundX workflow (`getGroundXWorkflow(filter.workflow_id)`), not in the seeded manifest. The Utility scenario doc now carries `filter.workflow_id = 9910308e-3100-473e-9da6-3ac29f5958a6`; that workflow defines 36 fields (statement 14 / meters 16 / charges 6). To grow / shrink the schema, re-author the workflow — do not touch `utility.json.extractionSchema` (which will be stripped per the manifest cleanup tracked in the real-data rewire). | n/a — replaced by Extract widget rewire + manifest strip (see `docs/agents/real-data-rewire-gap.md`). |
 | SCEN-02 | not-started | Loan 12-doc packet: 3 paystubs + W-2 + employment letter + 3 bank statements + 4 debt docs. Fixtures drafted; needs product sign-off + real docs ingested. | Pick Loan → 12 docs listed; cross-doc citations work. |
 | SCEN-03 | not-started | Solar 142-doc portfolio tree: hierarchical Fund→Project, virtualized scroll >50 nodes. Today no tree UI. | Pick Solar → tree renders 142 nodes; scroll smooth; search filters. |
 | SCEN-04 | not-started | Solar IC brief 4-section template: executive_summary, risk_roll_up, comparable_projects, recommendation. Per `project_scenario_fixtures.md`. | F7 generates IC brief from template; 4 sections present. |
-| SCEN-06 | blocked | Sample document assets + page images. Per `project_phased_plan.md`: assets need to exist before Phase 2 UI work is real (today F2 uses a "flat-WHITE PDF placeholder"). Blocked on Product delivering the real Utility/Loan/Solar PDFs. | Real PDFs ingested into samples bucket; F2 PdfViewer (UR-01) renders pages from them. |
-| SCEN-07 | not-started | **Seed script attaches `filter.workflow_id` to every uploaded doc.** Per `memory/project_workflow_id_filter.md` (locked 2026-05-25): every doc seeded into a GroundX bucket must carry `filter.workflow_id` when a workflow was used to extract it. Today `middleware/scripts/seed-bucket.ts` does not carry a workflow id; scenario specs in `middleware/scripts/scenarios/*.json` don't carry one either. Required: (a) add a `workflowId` field to each `scenarios/*.json` (Utility scenario value today: `9910308e-3100-473e-9da6-3ac29f5958a6`); (b) `ScenarioSpec` type adds the field; (c) on every doc ingest (initial `POST /v1/ingest/documents/remote`) and every filter refresh (`refreshManifestIfChanged()`), include `workflow_id` in the filter alongside `kind`, `scenarioId`, `manifest`, etc. (d) `refreshManifestIfChanged()` should also drift-check `workflow_id` and PUT an update when it changes. **Note:** the sample utility doc `c3bfff49-6640-4213-822b-e81c3a771e45` was manually updated 2026-05-25 with this workflow_id — the next un-guarded re-seed will preserve it only if the script also carries it. | A fresh re-seed of the Utility scenario produces a doc whose `filter.workflow_id` matches the scenario's authored workflowId; the filter diff-check picks up workflow_id changes alongside manifest changes. |
+| SCEN-06 | blocked | Sample document assets + page images. Per `project_phased_plan.md`: assets need to exist before Phase 2 UI work is real (today F2 uses a "flat-WHITE PDF placeholder"). Blocked on Product delivering the real Utility/Loan/Solar PDFs. | Real PDFs ingested into samples bucket; F2 PdfViewer renders pages from them. |
+| SCEN-07 | not-started | **Seed script attaches `filter.workflow_id` to every uploaded doc.** Per `memory/project_workflow_id_filter.md` (locked 2026-05-25): every doc seeded into a GroundX bucket must carry `filter.workflow_id` when a workflow was used to extract it. Today `middleware/scripts/seed-bucket.ts` does not carry a workflow id. Required: (a) add a `workflowId` field to each `scenarios/*.json`; (b) `ScenarioSpec` type adds the field; (c) on every doc ingest and filter refresh, include `workflow_id` in the filter. (d) `refreshManifestIfChanged()` should drift-check `workflow_id` and PUT an update when it changes. **Note:** sample doc `c3bfff49-6640-4213-822b-e81c3a771e45` was manually updated 2026-05-25 with workflow_id `9910308e-3100-473e-9da6-3ac29f5958a6`. | A fresh re-seed produces a doc whose `filter.workflow_id` matches the scenario's authored workflowId. |
+
+(Prior: SCEN-01 closed-as-obsolete 2026-05-25, swept 2026-05-26.)
 
 # Epic: SL — scale + perf
 
@@ -207,23 +279,20 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| TS-02 | closed | 6 new test files (`BucketsProvider.test.tsx`, `ProjectsProvider.test.tsx`, `DocumentsProvider.test.tsx`, `GroupsProvider.test.tsx`, `HealthProvider.test.tsx`, `ApiKeysProvider.test.tsx`) — 18 tests total, 3 per provider. AuthContext already had `AuthProvider.test.tsx` (1 file × 7 tests) carried from earlier work, so all 7 contexts now have coverage. Each suite mocks `@/api`, wraps the provider in LoadingProvider + MessageBarProvider, and asserts three contracts: list/fetch populates state, create/ingest emits the contextual success message, and a thrown API error surfaces the contextual failure message (isSuccess=false, no partial state mutation). ApiKeys suite uses obviously-stub key values (`test-key-stub-*`) — no real key material. Closed 2026-05-25. | 18 new tests pass first run; full app sweep 651 tests pass; TS + lint clean. |
-| TS-03 | closed | `ChatStoreContext.test.tsx` extended with a 4-test `persistence failure modes (TS-03)` block: (1) `QuotaExceededError` on setItem doesn't crash; in-memory state still mutates, (2) malformed JSON snapshot rehydrates as empty store, (3) wrong-version snapshot is treated as no snapshot, (4) cross-tab `StorageEvent` does NOT silently mutate this tab's state (locks the "no cross-tab sync yet, that's intentional" contract). Closed 2026-05-25. | 25 ChatStore tests pass; the 4 new ones lock the existing error-swallowing + rehydrate-guard behavior and the deliberate no-cross-tab-listener contract. |
-| TS-04 | blocked | **Reclassified 2026-05-25.** Original framing assumed harness widget directories (`widgets/extraction-workbench/`, `widgets/chat-with-sources/`, `widgets/smart-report/`) are present in this repo. They are not — this is a greenfield project that built F3 ExtractView, F5 InteractView, and F7 IntegrateView natively without copying widgets. Either (a) the equivalent native surfaces get an integration-test layer (see TS-05 for the Playwright path; the unit tests already exist), OR (b) the widgets get imported per `references/widgets.md` and we test those copies. **Blocked on the decision**: do we want exact-use widgets in this project at all? Until then this row is not actionable. | Decision made on widget adoption; closure path follows. |
-| TS-05 | not-started | **(P2; demoted 2026-05-25.)** Browser smoke + a11y suite: golden-path F1→F2→F3→F5→F6→F7 at desktop/mobile via Playwright + axe WCAG A/AA. Partial coverage today (`onboarding-utility.spec.ts` reaches F5, `onboarding-loan.spec.ts` reaches F5, `onboarding-compact.spec.ts` covers F2 mobile). **Blockers:** (a) **F4 surface doesn't exist** — UI-01 (SchemaView) is not-started, so the "full golden path" can't traverse F4. (b) **Solar scenario can't be tested** — only `utility.json` exists under `middleware/scripts/scenarios/`; SCEN-03 (Solar tree UI) and SCEN-06 (real PDFs) both not-started/blocked. (c) **F6 + F7 lack e2e** but the surfaces exist — that subset is the realistic do-now scope. **Re-promotion path:** when UI-01 lands AND a Solar fixture lands, the full closure is reachable; until then either accept scope = "F1→F2→F3→F5→F6→F7 on Utility+Loan, no Solar, skip F4" or wait. | All scenarios' golden paths pass at both viewports. |
-| TS-06 | not-started | **(P2; demoted 2026-05-25.)** Nightly visual regression — non-blocking baseline. **Blocker — platform decision not made:** four real choices, each with cost / brittleness tradeoffs. (1) **Chromatic** (paid SaaS, ~$149/mo for 5k snapshots; Storybook-driven; account + token required), (2) **Playwright `toHaveScreenshot()`** (free; PNGs committed in-repo; brittle on font rendering across OSes), (3) **Percy / BrowserStack** (paid), (4) **Argos** (free tier, repo-stored). Also: PR-blocking or non-blocking baseline? Which surfaces baseline first? **Re-promotion path:** make the tool + storage decision, then this becomes mechanical wiring. Cheapest start would be Playwright snapshots — no account, no recurring cost. | First baseline runs; diff flagged on PR. |
-| TS-07 | not-started | **(P2; demoted 2026-05-25.)** Load test against `/api/chat/messages`: ≥100 concurrent SSE per `project_test_plan.md`. **Blockers:** (a) **SSE doesn't exist** — `/api/chat/messages` is a regular JSON POST today. CF-11 (streaming response via SSE / fetch-stream) is not-started, so "100 concurrent SSE" is testing a feature that isn't built. (b) **Tool decision not made** — k6 (Grafana, JS scripting, modern) vs Artillery (YAML, mature) vs Autocannon (Node-native, simplest). (c) **Target environment** — local middleware + MOCK_MODE LLM (cheap, repeatable) vs staging (more realistic, hits real upstream costs). **Re-promotion path:** wait for CF-11 to land SSE OR rewrite the closure test to "≥100 concurrent JSON POST against the mocked LLM" — but the JSON path is the easy load shape; the SSE one is where real bottlenecks surface. | P95 < 5s under load with mocked LLM. |
-| TS-08 | closed | `middleware/src/lib/pii.test.ts` extended with a 5-test DoS guard suite covering: (1) 50k repeated digits → credit-card regex, (2) alternating digit+separator runs, (3) long phone-shaped period-separated runs, (4) account-prefix + 100k digits, (5) deeply nested object with pathological string payloads. Closure budget: every shape scrubs in <50 ms. Confirmed the existing regexes don't catastrophically backtrack — `\b` anchors + non-greedy `[ -]*?` keep them linear. The test locks that property so a future regex tweak that re-introduces nested-quantifier ambiguity fails CI. Closed 2026-05-25. | 15 pii tests pass; all 5 pathological-shape elapsed times sub-50ms. |
-| TS-09 | closed | `app/e2e/reduced-motion.spec.ts` — Playwright spec running with `test.use({ reducedMotion: "reduce" })` against the MOCK_MODE preview. Three sweeps: (1) AppShell `data-app-shell-reduced-motion="true"` after a scenario pick, (2) F2 scan-line `display: none` (the looping `repeat: Infinity` motion is actually gone), (3) F2 page transition completes within 1.5s under reduced-motion. Pairs with UR-03 — the `<MotionRoot>` is the seam these assertions exercise end-to-end. Closed 2026-05-25. | `npm run test:e2e -- reduced-motion` passes all 3 specs under Playwright's reducedMotion=reduce fixture. |
-| TS-11 | closed | 5 new test files in `app/src/views/Auth/Form/` + `app/src/views/Auth/AuthLayout.test.tsx`. Each form has ≥3 tests covering validation (required-field errors), submit happy-path (onSubmit called with the typed values), and one error-display branch (yup .email() shape, code-must-be-6-digits, passwords-do-not-match, EULA-must-be-accepted). AuthLayout has 3 layout/`isTall` tests. Per-suite `vi.spyOn(console, "error").mockImplementation()` follows the existing `Login.test.tsx` pattern — Formik's blur/change triggers React `act(...)` warnings under user-event which would otherwise trip the global setup.ts spy. Closed 2026-05-25. | 15 new tests pass (3 per form × 4 forms + 3 for AuthLayout); full app sweep 101 files / 633 tests pass. |
+| TS-04 | blocked | **Reclassified 2026-05-25.** Original framing assumed harness widget directories are present in this repo. They are not — this project built native surfaces. Either (a) the native surfaces get an integration-test layer (see TS-05), OR (b) widgets get imported per `references/widgets.md` and tested. **Blocked on the decision** — do we want exact-use widgets at all? Until then this row is not actionable. | Decision made on widget adoption; closure path follows. |
+| TS-05 | not-started | **(P2; demoted 2026-05-25.)** Browser smoke + a11y suite: golden-path F1→F2→F3→F5→F6→F7 at desktop/mobile via Playwright + axe WCAG A/AA. Partial coverage today. **Blockers:** (a) F4 surface doesn't exist (UI-01 not-started), (b) Solar scenario can't be tested (SCEN-03 / SCEN-06 blocked), (c) F6 + F7 lack e2e but the surfaces exist. **Re-promotion path:** when UI-01 lands AND a Solar fixture lands. | All scenarios' golden paths pass at both viewports. |
+| TS-06 | not-started | **(P2; demoted 2026-05-25.)** Nightly visual regression — non-blocking baseline. **Blocker — platform decision not made:** Chromatic (paid SaaS) vs Playwright `toHaveScreenshot()` (free, brittle on font rendering) vs Percy / BrowserStack (paid) vs Argos (free tier). **Re-promotion path:** make the tool + storage decision; the wiring is then mechanical. Cheapest start: Playwright snapshots. | First baseline runs; diff flagged on PR. |
+| TS-07 | not-started | **(P2; demoted 2026-05-25.)** Load test against `/api/chat/messages`: ≥100 concurrent SSE per `project_test_plan.md`. **Blockers:** (a) **SSE doesn't exist** — `/api/chat/messages` is a regular JSON POST today; CF-11 not-started. (b) Tool decision not made (k6 vs Artillery vs Autocannon). **Re-promotion path:** wait for CF-11 OR rewrite closure to "100 concurrent JSON POST against mocked LLM." | P95 < 5s under load with mocked LLM. |
+
+(Prior: TS-02, TS-03, TS-08, TS-09, TS-11 — all closed 2026-05-25, swept 2026-05-26.)
 
 # Epic: OPS — operations + infra
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| OPS-01 | blocked | **Reclassified 2026-05-25 — out of this repo's scope.** Agent MCP-driven cluster/pod-log reading is a feature of the `groundx-studio` MCP server (i.e. the harness plugin), not this application. The deploy-audit ask was delivered upstream 2026-05-24 and the resolution lives with the harness team. This row should track the upstream conversation, not produce code here. Blocked on the harness team shipping the corresponding MCP tool surface. | Harness MCP server exposes a `cluster_logs` (or equivalent) tool that this project's agent can call. |
-| OPS-04 | closed | `docs/agents/airgap-audit.md` lists all 13 production-runtime external hosts with their source location and seam status. **6 have proper env-var overrides** (GROUNDX_BASE_URL, LLM_BASE_URL, LLM_LIGHT_BASE_URL, SENTRY_DSN, VITE_POSTHOG_HOST, VITE_GA_MEASUREMENT_ID — the telemetry trio follows the no-op-when-unset pattern from CF-13/OB-02/OB-03). **4 are hardcoded gaps** flagged with recommended follow-ups: `docs.groundx.ai` → VITE_DOCS_URL, `calendly.com/groundx/30min` → VITE_CALENDLY_URL (pairs with UI-08), the two font `@import`s (Inter + Thicccboi) → self-host woff2, and the eyelevel.ai terms URL → VITE_TERMS_URL. CSP allowlist hardcodes are derived: once the underlying URLs flip env-driven, the CSP composer reads the same env. Closed 2026-05-25. | Audit doc exists with every external host categorized; ✅/⚠️/❌ seam status per row; 5 follow-up tickets recommended at the bottom for the gaps. |
-| OPS-05 | closed | Installed `@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks`, `globals` at the workspace root. Authored `app/eslint.config.js` and `middleware/eslint.config.js` — flat config, `@eslint/js` recommended + `typescript-eslint` recommended, plus `react-hooks/rules-of-hooks` (error) and `react-hooks/exhaustive-deps` (warn) on the frontend, and `no-console` (warn, info allowed) on the middleware. Per-package `npm run lint` scripts added. **Net rule hits today**: app = 0 errors / 9 warnings; middleware = 0 errors / 3 warnings. Warnings flag real cleanup work (unused imports, unused eslint-disable directives, `console.warn` calls awaiting OB-09 migration, `let errorCode = null` pattern). Demoted rules with documented exceptions: `no-empty-object-type` (deliberate API option type naming in `api/common.ts`), `no-namespace` (Express type augmentation), `no-useless-assignment` (let+catch reassignment pattern). Verified rules surface real issues via a planted `definitely_unused` offender — fires `no-unused-vars` as expected. Closed 2026-05-25. | `npx eslint src` runs in both packages with 0 errors; planted offender fires the expected rule. |
+| OPS-01 | blocked | **Reclassified 2026-05-25 — out of this repo's scope.** Agent MCP-driven cluster/pod-log reading is a feature of the `groundx-studio` MCP server, not this application. The deploy-audit ask was delivered upstream 2026-05-24 and the resolution lives with the harness team. Blocked on the harness team shipping the corresponding MCP tool surface. | Harness MCP server exposes a `cluster_logs` (or equivalent) tool. |
+
+(Prior: OPS-04, OPS-05 — both closed 2026-05-25, swept 2026-05-26.)
 
 # Epic: POL — known minor bugs
 
@@ -232,24 +301,21 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 
 # Epic: PLUG — plugin system + skills + SDR
 
-The entire plugin/skill mechanism described across
-`project_plugin_model.md` + `project_harness_model.md` +
-`project_architecture.md` + `project_implementation_contract.md`
-is deferred. `OnboardingSkillContext` exists as an empty stub
-preserving provider shape. No plugin discovery, no remote manifest
-fetch, no SDR content. Locked decisions: skills live in remote
-plugins, NOT in `middleware/src/skills/` folders. Until the loader
-exists, treat SDR as deferred.
+The entire plugin/skill mechanism is deferred. `OnboardingSkillContext`
+exists as an empty stub preserving provider shape. No plugin discovery,
+no remote manifest fetch, no SDR content. Locked decisions: skills
+live in remote plugins, NOT in `middleware/src/skills/` folders. Until
+the loader exists, treat SDR as deferred.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| **PLUG-07** | **deferred-late** | **Plugin tool-surface ADR — must land before PLUG-01.** Per locked decision 2026-05-25: deferred until the plugin track actually unblocks (currently no caller, PLUG-01..05 all blocked here intentionally). Pull forward when (a) a real first plugin gets scoped OR (b) someone wants to start PLUG-01. Decide + document, in writing, the four open contracts the plugin loader needs settled: (1) **Manifest shape** — required fields (name, version, semver range, capability flags), system-prompt fragment shape, tool list shape, UI extension slot taxonomy, tour metadata shape; (2) **Tool transport** — native LLM tool-use (OpenAI/Anthropic JSON-Schema function-calling) vs MCP-as-protocol vs custom JSON-RPC; (3) **Tool runtime** — in-process JS (sandboxed `vm` / `isolated-vm`?) vs MCP subprocess vs remote HTTP webhook; (4) **Discovery + trust** — where do plugins come from (remote registry URL, signed npm package, baked-in?), signature verification, and what they can/can't access (the BFF's session, the user's Partner API key, fetch). Recommendation in this turn's response: **native function-calling for the LLM tool surface + in-process JS for the tool runtime + remote registry with signed manifests for discovery**. MCP-as-protocol is a wrong-shape commitment when we control both ends. ADR file lands at `docs/agents/adr/0001-plugin-tool-surface.md` with each of the four contracts decided, rationale, and rejected alternatives. | An ADR document exists at the named path with each of the four contracts decided + signed off. The PLUG-01 row text is updated to point at the ADR. |
-| PLUG-01 | blocked | Plugin loader (BFF side). Fetches plugin manifests from a remote source, validates schema, composes the agent's system-prompt + tool surface from active plugins. **Blocked on PLUG-07** (the manifest + transport + runtime contract has to be decided before the loader can be scoped). | A test plugin manifest loads and contributes a system-prompt fragment + a tool to the next agent call. |
-| PLUG-02 | blocked | `OnboardingSkillContext` real implementation. Today an empty stub. Once PLUG-01 ships, consume plugin manifests, expose UI extension slots + system-prompt fragments + tour metadata. Blocked on PLUG-01 (which is blocked on PLUG-07). | A loaded plugin manifest's UI slot renders in the right surface; tour metadata reaches `useOnboardingSkill()`. |
-| PLUG-03 | blocked | SDR plugin content (tour script, voice, copy nuance, sales-flavored CTAs). Authored OUTSIDE the BFF codebase per locked decision. Blocked on PLUG-01 (which is blocked on PLUG-07). | The SDR plugin (loaded remotely) renders the three-options gate framing, the tour stepper, and SDR-specific assistant voice. |
-| PLUG-04 | blocked | Onboarding **overlay** surface (alternative to the inline F1-F7). Per `project_plugin_model.md`: "Onboarding overlay is deferred, but both surfaces will exist." Blocked on PLUG-01 + product spec for overlay UX. | Overlay onboarding renders on top of an existing product surface (not as a full-page replacement). |
-| PLUG-05 | blocked | Tour state machine (third intent source: user / agent / tour). Per `project_chat_session_model.md`: "When SDR plugin loads, the tour writes intents to the active chat session via the same `dispatchIntent` path." Blocked on PLUG-01 (which is blocked on PLUG-07) — UI-10 + UI-10b (intent_log triple-write at memory + DB layers) both closed 2026-05-25; the dispatch path itself is fully wired. | Tour-loaded plugin advances frames via `dispatchIntent({source: "tour"})`; `intent_log.source = "tour"` written. |
-| PLUG-06 | not-started | `PLUGIN_PRESET` env var. Per `project_harness_model.md`: "TBD; locked but not implemented." Controls which plugin bundle the LLM-side harness loads at boot. Distinct from `APP_MODE_PRESET` (app shell). | env.ts declares `PLUGIN_PRESET`; boot reads it; the loader (PLUG-01) honors the preset. |
+| **PLUG-07** | **deferred-late** (P3) | Plugin tool-surface ADR — must land before PLUG-01. Decide + document the four open contracts the plugin loader needs settled: (1) Manifest shape, (2) Tool transport (native function-calling vs MCP vs JSON-RPC), (3) Tool runtime (in-process JS vs MCP subprocess vs remote HTTP), (4) Discovery + trust (registry, signature verification, sandboxing). Recommendation: **native function-calling + in-process JS + remote signed registry.** ADR lands at `docs/agents/adr/0001-plugin-tool-surface.md`. | ADR exists with each contract decided; PLUG-01 text updated to point at it. |
+| PLUG-01 | blocked | Plugin loader (BFF side). Blocked on PLUG-07. | A test plugin manifest loads and contributes a system-prompt fragment + a tool. |
+| PLUG-02 | blocked | `OnboardingSkillContext` real implementation. Blocked on PLUG-01. | A loaded plugin manifest's UI slot renders; tour metadata reaches `useOnboardingSkill()`. |
+| PLUG-03 | blocked | SDR plugin content. Authored OUTSIDE the BFF codebase per locked decision. Blocked on PLUG-01. | The SDR plugin (loaded remotely) renders the three-options gate framing, tour stepper, SDR voice. |
+| PLUG-04 | blocked | Onboarding **overlay** surface (alternative to the inline F1-F7). Blocked on PLUG-01 + product spec for overlay UX. **Related to ARCH-06** (which collapses the existing inline onboarding into an overlay context already). | Overlay onboarding renders on top of an existing product surface. |
+| PLUG-05 | blocked | Tour state machine (third intent source: user / agent / tour). Blocked on PLUG-01. | Tour-loaded plugin advances frames via `dispatchIntent({source: "tour"})`. |
+| PLUG-06 | not-started | `PLUGIN_PRESET` env var. Controls which plugin bundle the LLM-side harness loads at boot. Distinct from `APP_MODE_PRESET`. | env.ts declares `PLUGIN_PRESET`; loader honors the preset. |
 
 ## Cross-epic dependency notes
 
@@ -260,63 +326,45 @@ exists, treat SDR as deferred.
 - **DT-01 → DT-02.** Migrations infra before production MySQL.
 - **TL-01–TL-07 → CF-12 closure.** Individual tool routes finish the umbrella.
 - **OB-02 (PostHog events) → CF-13 (Sentry) ordering: PostHog first** (telemetry coverage > error coverage when neither exists).
-- **UR-01 (PdfViewer) → UI-04 (F5 citation side panel).** Side panel needs the viewer.
-- **PLUG-07 (tool-surface ADR) → PLUG-01..05.** Manifest + tool transport + runtime contract has to be decided before the loader can be scoped. CF-12 / TL-* are NOT blocked on PLUG-07 — in-app native function-calling works regardless of how plugins eventually publish tools.
+- **PLUG-07 (tool-surface ADR) → PLUG-01..05.** Manifest + tool transport + runtime contract has to be decided before the loader can be scoped.
+- **ARCH-18 (primitives) → ARCH-17 (drift-guard expansion).** Drift guard can only pass once typography primitives exist for widgets to compose from.
+- **ARCH-14..16 + ARCH-18 → ARCH-19..20.** View migrations need the new primitives + reorganized component tree.
+- **ARCH-22 (delete CoreLayouts) → ARCH-07 (unified steady shell).** SteadyShell needs to mount AppShell instead of Dashboard before Dashboard is deleted.
+- **ARCH-01..18 → ARCH-05 (sign-up split).** Per user direction 2026-05-26: ship the bug fix against the new primitives, not the old.
+- **ARCH-01..22 → ARCH-13 (audit memo).** Memo reflects landed state, not plan.
 
-## Counts as of 2026-05-25 (after UR-01 closure + priority pass)
+## Counts as of 2026-05-26
 
 | Status | Count |
 |---|---|
-| closed | 1 (UR-01) — historical closes were swept from the table; build status memory holds the long list |
+| closed | ARCH-01, ARCH-02, ARCH-03, ARCH-08, UI-08 (this file only — historical closes live in git) |
 | in-progress | 0 |
-| blocked | 7 (AU-02, PLUG-01..05, SCEN-06) |
-| not-started | live items in epic tables below |
+| blocked | 8 (AU-02, OPS-01, PLUG-01..05, SCEN-06, TS-04) |
+| not-started | live items in epic tables above |
 
-By priority (revised 2026-05-25 after batch closures + TS-05/06/07 demotion):
+By priority:
 
 | Pri | IDs | Notes |
 |---|---|---|
-| **P0** | UR-03 ✅, UR-04 ✅, TS-02 ✅, TS-03 ✅, TS-08 ✅, TS-09 ✅, TS-11 ✅ | All 7 P0 items closed 2026-05-25. |
-| **P1** | OPS-01 (blocked, harness-side), OPS-04 ✅, OPS-05 ✅ | OPS-04 + OPS-05 closed. OPS-01 awaits harness MCP work. |
-| **P2** | everything else not listed, **plus TS-05, TS-06, TS-07** (demoted 2026-05-25) | Defaults + the three demotions. |
+| **P0** | ARCH-01..03 ✅, ARCH-05 ✅, ARCH-06 ✅, ARCH-07 ✅, ARCH-08 ✅, ARCH-14 ✅, ARCH-15 ✅, ARCH-16 ✅, ARCH-17 ✅, ARCH-18 ✅, ARCH-21 ✅, ARCH-22 ✅ | Architecture epic. **All P0 closed.** |
+| **P1** | OPS-01 (blocked), ARCH-09, ARCH-10, ARCH-11, ARCH-13, ARCH-19, ARCH-20 | Memory/migrations + view rewrites after ARCH-16. |
+| **P2** | everything else, plus TS-05/06/07, **ARCH-12, ARCH-23, ARCH-25** (ARCH-24 ✅) | Polish + scaffold cleanup deferred to later passes. |
 | **P3** | CF-06a, PLUG-07 | Deferred-late; pull forward only when upstream caller exists. |
 
-P0 / P1 standing as of 2026-05-25: **9 of 10 closed, 1 blocked
-upstream**. The remaining tier-1 work is now in P2 (default product
-backlog) or P3 (deferred).
-
-Why TS-05 / TS-06 / TS-07 moved to P2:
-- **TS-05** — Soft-blocked. F4 doesn't exist (UI-01 not-started);
-  no Solar scenario fixture (SCEN-03/06). Only F6+F7 on
-  Utility/Loan is reachable; that's a scope-down from the
-  original closure intent.
-- **TS-06** — Platform decision not made. Chromatic vs Playwright
-  snapshots vs Argos each have different cost / brittleness
-  tradeoffs. Better to decide once than half-ship.
-- **TS-07** — Soft-blocked on CF-11 (SSE doesn't exist yet, so
-  "100 concurrent SSE" isn't testable). Also needs a load-tool
-  decision (k6 / Artillery / Autocannon).
-
 Re-promotion conditions for the demoted P2s:
-- **TS-05** — re-promote when UI-01 (SchemaView) lands AND a Solar
-  scenario fixture lands. OR accept the scope-down and re-promote
-  with reduced closure ("Utility + Loan, no F4, no Solar").
-- **TS-06** — re-promote after the visual-reg tool decision is
-  made.
-- **TS-07** — re-promote when CF-11 (SSE streaming) lands. OR
-  rewrite the closure test to "JSON POST load" and pick a tool.
+- **TS-05** — UI-01 (SchemaView) lands AND Solar scenario fixture lands. OR accept scope-down.
+- **TS-06** — visual-reg tool decision is made.
+- **TS-07** — CF-11 (SSE streaming) lands. OR rewrite closure to "JSON POST load."
 
 Next-move candidates (P2 only now):
 - **CF-10** — compression off the request hot path.
 - **CF-11** — streaming response (SSE). Unblocks TS-07 re-promotion.
-- **UI-01** — F4 SchemaView (biggest unstarted product surface).
-  Unblocks TS-05 re-promotion.
-- **AU-01** — magic-link provisioning endpoint.
+- **UI-01** — F4 SchemaView (biggest unstarted product surface). Unblocks TS-05 re-promotion.
+- **AU-01** — magic-link provisioning endpoint. Pairs with ARCH-05's GateChatRail.
 
 Out-of-scope until pulled forward (P3):
-- **CF-06a** — LLM eval set in CI. Burns credit; soft-blocked on SCEN-06.
-- **PLUG-07** — Plugin tool-surface ADR. Blocked on a real first
-  plugin being scoped.
+- **CF-06a** — LLM eval set in CI. Soft-blocked on SCEN-06.
+- **PLUG-07** — Plugin tool-surface ADR. Blocked on a real first plugin being scoped.
 
 ## How to use this file
 
@@ -325,13 +373,14 @@ Out-of-scope until pulled forward (P3):
   site if applicable.
 - **Before adding a `not-started` item, grep for the seam first.**
   Audit-discovered correction 2026-05-25: UR-02 was incorrectly
-  listed not-started despite `ResizeHandle.tsx` + `useResizableSplit.ts`
-  + AppShell wiring already existing. Always run
+  listed not-started despite seams already existing. Always run
   `grep -rn "<feature-name>" middleware/src app/src` before
   asserting something is unbuilt.
 - Starting: flip to `in-progress`.
 - Closing: write the user-visible test result; flip to `closed`;
   DELETE the inline `TODO(<id>)` from source.
+- Periodically sweep closed rows out of epic tables to keep this
+  file readable — the closure context lives in git history.
 - The `memory/project_build_status.md` "Still open" list points
   here. This file is the truth.
 

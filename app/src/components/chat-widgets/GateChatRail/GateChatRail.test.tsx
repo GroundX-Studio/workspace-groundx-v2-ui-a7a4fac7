@@ -1,0 +1,135 @@
+/**
+ * ARCH-05A (2026-05-26): GateChatRail is the chat-slot half of the
+ * sign-up surface. The viewer-side half is `SignUpWidget`. Together
+ * they replace the monolithic `GateView`.
+ *
+ * What this widget owns:
+ *   - The eyebrow + preamble that explains WHY the gate appeared
+ *     (varies by trigger: save / export / byo / threshold).
+ *   - The "← keep exploring" dismiss link.
+ *   - The "Book a call with an engineer" CTA (sets ?bookCall=1).
+ *   - The committed-state success card + "Continue to Integrate" CTA.
+ *
+ * What it does NOT own:
+ *   - The form fields, the password validation, the register call.
+ *     Those live in `SignUpWidget` in the viewer slot.
+ */
+
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+
+const dismissGate = vi.fn();
+let mockGate: { status: "open" | "committed" | "dismissed" | "idle"; trigger?: string; method?: string } = {
+  status: "open",
+  trigger: "byo",
+};
+
+vi.mock("@/contexts/OnboardingSessionContext", () => ({
+  useOnboardingSession: () => ({
+    state: { gate: mockGate, currentFrame: "f6" },
+    commitGate: vi.fn(),
+    dismissGate,
+    advanceFrame,
+  }),
+}));
+
+const advanceFrame = vi.fn();
+
+import { GateChatRail } from "./GateChatRail";
+
+const LocationProbe = () => {
+  const loc = useLocation();
+  return <div data-testid="location">{`${loc.pathname}${loc.search}`}</div>;
+};
+
+const renderWidget = (ui: ReactNode = <GateChatRail />, initialUrl = "/onboarding/signup") =>
+  render(
+    <MemoryRouter initialEntries={[initialUrl]}>
+      <Routes>
+        <Route path="*" element={<><div>{ui}</div><LocationProbe /></>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+describe("GateChatRail", () => {
+  beforeEach(() => {
+    dismissGate.mockReset();
+    advanceFrame.mockReset();
+    mockGate = { status: "open", trigger: "byo" };
+  });
+
+  it("renders the BYO preamble when triggered by BYO", () => {
+    renderWidget();
+    expect(screen.getByTestId("gate-rail-preamble")).toHaveTextContent(/bring your own/i);
+  });
+
+  it("renders the save preamble when triggered by save", () => {
+    mockGate = { status: "open", trigger: "save" };
+    renderWidget();
+    expect(screen.getByTestId("gate-rail-preamble")).toHaveTextContent(/save your work/i);
+  });
+
+  it("renders the export preamble when triggered by export", () => {
+    mockGate = { status: "open", trigger: "export" };
+    renderWidget();
+    expect(screen.getByTestId("gate-rail-preamble")).toHaveTextContent(/export/i);
+  });
+
+  it("renders the threshold preamble when triggered by threshold", () => {
+    mockGate = { status: "open", trigger: "threshold" };
+    renderWidget();
+    expect(screen.getByTestId("gate-rail-preamble")).toHaveTextContent(/free-tier/i);
+  });
+
+  it("dismiss link calls dismissGate", () => {
+    renderWidget();
+    fireEvent.click(screen.getByTestId("gate-rail-dismiss"));
+    expect(dismissGate).toHaveBeenCalledTimes(1);
+  });
+
+  it("book-a-call CTA sets ?bookCall=1 in the URL", () => {
+    renderWidget();
+    fireEvent.click(screen.getByTestId("gate-rail-book-call"));
+    expect(screen.getByTestId("location")).toHaveTextContent("/onboarding/signup?bookCall=1");
+  });
+
+  it("renders the register-committed success card with Continue-to-Integrate CTA", () => {
+    mockGate = { status: "committed", method: "register" };
+    renderWidget();
+    expect(screen.getByTestId("gate-rail-committed")).toHaveTextContent(/welcome/i);
+    expect(screen.getByTestId("gate-rail-continue-integrate")).toBeInTheDocument();
+  });
+
+  it("Continue-to-Integrate calls advanceFrame('f7')", () => {
+    mockGate = { status: "committed", method: "register" };
+    renderWidget();
+    fireEvent.click(screen.getByTestId("gate-rail-continue-integrate"));
+    expect(advanceFrame).toHaveBeenCalledWith("f7");
+  });
+
+  it("renders the engineer-call-committed thanks card", () => {
+    mockGate = { status: "committed", method: "engineer-call" };
+    renderWidget();
+    expect(screen.getByTestId("gate-rail-committed")).toHaveTextContent(/call requested/i);
+  });
+
+  it("returns null when gate is idle (not open and not committed)", () => {
+    mockGate = { status: "idle" };
+    const { container } = renderWidget();
+    expect(container.querySelector('[data-widget="gate-chat-rail"]')).toBeNull();
+  });
+
+  it("returns null when gate is dismissed", () => {
+    mockGate = { status: "dismissed" };
+    const { container } = renderWidget();
+    expect(container.querySelector('[data-widget="gate-chat-rail"]')).toBeNull();
+  });
+
+  it("in steady mode, does not render the Continue-to-Integrate CTA even when committed", () => {
+    mockGate = { status: "committed", method: "register" };
+    renderWidget(<GateChatRail mode="steady" />);
+    expect(screen.queryByTestId("gate-rail-continue-integrate")).not.toBeInTheDocument();
+  });
+});

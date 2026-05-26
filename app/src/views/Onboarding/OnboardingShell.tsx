@@ -1,7 +1,8 @@
 import Box from "@mui/material/Box";
-import { keyframes, useTheme } from "@mui/material/styles";
+import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
@@ -17,19 +18,57 @@ import {
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
-import { AppShell } from "@/shared/components/AppShell";
-import { OnboardingNav, useOnboardingNavCollapsed } from "@/shared/components/OnboardingNav";
-import type { OnboardingNavItemKey } from "@/shared/components/OnboardingNav";
-import { StepStrip } from "@/shared/components/StepStrip";
-import type { StepDescriptor, StepId, StepPillState } from "@/shared/components/StepStrip";
+import { AppShell } from "@/components/layout/AppShell";
+import { OnboardingNav } from "@/components/layout/OnboardingNav/OnboardingNav";
+import type { OnboardingNavItemKey } from "@/components/layout/OnboardingNav/OnboardingNav";
+import { StepStrip } from "@/components/layout/StepStrip";
+import type { StepDescriptor, StepId, StepPillState } from "@/components/layout/StepStrip";
 import type { FFrame, Scenario } from "@/types/onboarding";
 
+import { BookingStatusCard } from "@/components/chat-widgets/BookingStatusCard/BookingStatusCard";
+import { BookCallView } from "@/components/viewer-widgets/BookCallView/BookCallView";
+import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
 import { ExtractView } from "./ExtractView";
 import { IngestView } from "./IngestView";
 import { OnboardingChatColumn } from "./OnboardingChatColumn";
 import { IntegrateView } from "./IntegrateView";
 import { InteractView } from "./InteractView";
+import { NavDebugOverlay } from "./NavDebugOverlay";
 import { UnderstandView } from "./UnderstandView";
+
+// ─────────────────────────────────────────────────────────────────────
+// ARCH-06 F1 overlay animation spec (locked 2026-05-26).
+//
+// Mental model: F1 (the picker) is an OVERLAY on top of F2+ (the
+// canonical AppShell). When the user picks a sample / clicks BYO,
+// F1 lifts up off the top edge to reveal what was always underneath.
+// When they click the Ingest pill, F1 returns over the top.
+//
+// Spec — A · Sheet dismiss (Iris/Curtain alternatives evaluated &
+// rejected; A is the "premium calm" choice for a first-impression
+// surface that ages well on repeat visits):
+//
+//   • Easing: cubic-bezier(0.32, 0.72, 0, 1) — iOS-style ease-out
+//     curve. Front-loaded distance, no overshoot.
+//   • Dismiss (F1 leaves, 900ms): F1 translates Y 0 → -100%; opacity
+//     holds at 1 through the first 70% of the timeline, then wipes
+//     1 → 0 over the final 30% (270ms). The held-opacity window
+//     reads as a physical lift instead of a dissolve.
+//   • Return (F1 comes back, 700ms): F1 translates Y -100% → 0;
+//     opacity fades 0 → 1 over the first 30% (210ms), then holds.
+//     Asymmetric duration is intentional — return is slightly
+//     snappier so users don't feel "stuck on F1" when bouncing back.
+//   • F2 zoom: scale 0.985 → 1, opacity 0.92 → 1 on dismiss; inverse
+//     on return. Deliberately subtle (~1.5% scale) so it reads as
+//     "settling into focus" rather than swelling.
+//   • Reduced motion: animations bypassed; instant swap.
+// ─────────────────────────────────────────────────────────────────────
+const F1_DISMISS_DURATION_S = 0.9;
+const F1_RETURN_DURATION_S = 0.7;
+const F1_OPACITY_PORTION = 0.3; // 30% of the duration for the fade tail
+const F1_OVERLAY_EASE = [0.32, 0.72, 0, 1] as const;
+const F2_ZOOM_SCALE = 0.985;
+const F2_ZOOM_OPACITY = 0.92;
 
 const FRAME_TO_STEP: Record<FFrame, StepId> = {
   f1: "ingest",
@@ -212,14 +251,11 @@ export const OnboardingShell: FC = () => {
       // sample card (or BYO) first.
       if ((stepId === "understand" || stepId === "analyze") && session.scenario == null) return;
       if (stepId === "ingest") {
-        // Returning to the F1 picker is a URL navigation. Capture the
-        // current scenario into the leaving snapshot BEFORE the
-        // navigate fires — the URL change synchronously flips
-        // session.scenario to null, so the SlideOverlay needs a frozen
-        // value to keep rendering the F2 content during slide-out.
-        if (session.scenario != null && !isF1) {
-          setLeavingScenarioSnapshot(session.scenario);
-        }
+        // Returning to the F1 picker is a URL navigation. The session
+        // scenario gets cleared by the URL→state effect; AppShell
+        // underneath keeps rendering whatever the canvas resolves to
+        // (likely UnderstandView's BYO placeholder during the brief
+        // return window before F1 covers it).
         navigate("/onboarding");
         return;
       }
@@ -234,10 +270,44 @@ export const OnboardingShell: FC = () => {
     [advanceFrame, appMode.authState, isF1, navigate, session.scenario],
   );
 
+  // F6a — Book a Call · Calendly embed.
+  // Activated by `?bookCall=1` in the URL (set by the GateChatRail's
+  // Book-a-call CTA). Lives on the same route as F2-F7 so all back-
+  // button / reload semantics work out of the box: the URL is the
+  // source of truth. When the param is present we override BOTH the
+  // canvas (Calendly iframe) and the gate chat (BookingStatusCard).
+  // The rest of the shell stays put — StepStrip remains visible on
+  // top, the nav stays mounted in its compact/expanded state.
+  const bookCallActive = new URLSearchParams(location.search).get("bookCall") === "1";
+
+  // ARCH-05B (2026-05-26): gate-active canvas swap. When the session-
+  // level gate is `open` or `committed`, the canvas mounts the
+  // `SignUpWidget` instead of whichever frame view would normally
+  // render. Fixes the bug where the user clicked Sign Up from F1
+  // BYO (or from F2-F6) and the viewer kept rendering the sample doc
+  // behind the chat-side form. Canvas precedence:
+  //   1. bookCall=1   → BookCallView (highest; even overrides gate)
+  //   2. gate active  → SignUpWidget
+  //   3. frame switch → IngestView / UnderstandView / ExtractView / ...
+  // BookCall sits above gate because the user *opted* into the
+  // calendar from inside the gate; the chat rail tracks the booking
+  // status via BookingStatusCard and re-renders the gate when the
+  // booking modal closes.
+  const gateActive =
+    session.gate.status === "open" || session.gate.status === "committed";
+
   const canvasContent = useMemo(() => {
+    if (bookCallActive) return <BookCallView />;
+    if (gateActive) return <SignUpWidget />;
     switch (session.currentFrame) {
       case "f1":
-        return <IngestView />;
+        // ARCH-06B (2026-05-26): IngestView is rendered ONLY inside
+        // the F1 overlay (see render below). The canvas underneath
+        // stays blank so the user doesn't see IngestView duplicated
+        // during the 700ms return-window before the F1 overlay
+        // finishes covering. The brief blank moment is masked by the
+        // overlay sliding into place.
+        return null;
       case "f2":
         return <UnderstandView />;
       case "f3":
@@ -252,7 +322,7 @@ export const OnboardingShell: FC = () => {
       default:
         return null;
     }
-  }, [session.currentFrame]);
+  }, [bookCallActive, gateActive, session.currentFrame]);
 
   // Theme-driven breakpoint detection. Compact step strip activates below
   // md (900 = MUI default; iPad-portrait-to-landscape divide). Phones +
@@ -287,57 +357,40 @@ export const OnboardingShell: FC = () => {
     </Box>
   );
 
-  // F1 ↔ shell transition staging.
-  //
-  // Per spec: F1 does not animate. It sits underneath while the three
-  // shell panes slide in (F1 → F2) or out (shell → F1) from / to
-  // their edges. F1 is the static base; the panes are the moving
-  // overlay. The transition phase drives both:
-  //
-  //   • "entering" — isF1 just flipped FALSE. F1 stays mounted
-  //     underneath for SWIPE_DURATION_MS while panes slide IN.
-  //   • "leaving"  — isF1 just flipped TRUE. The shell stays mounted
-  //     on top for SWIPE_DURATION_MS while panes slide OUT to their
-  //     edges, revealing F1 underneath.
-  //   • "idle"     — no transition in flight. Only the active layer
-  //     is mounted.
-  //
-  // We previously used `<AnimatePresence>` with a no-op exit
-  // (animate=opacity:1, exit=opacity:1). Framer-motion never fired
-  // onComplete for the no-op exit, so F1 stayed in the DOM forever.
-  // The replacement is a plain timed flag — clearer to reason about,
-  // and testable with fake timers without depending on the
-  // framer-motion test stub running its animation cycle.
-  const [transitionPhase, setTransitionPhase] = useState<"idle" | "entering" | "leaving">("idle");
-  const wasF1Ref = useRef(isF1);
-  // Snapshot of session.scenario captured the moment a F2->F1 leave
-  // begins. Lets the SlideOverlay render the conversation that is
-  // sliding away with frozen state, even though the live session has
-  // already flipped to F1 (the new active frame).
-  const [leavingScenarioSnapshot, setLeavingScenarioSnapshot] = useState<Scenario | null>(null);
-  useEffect(() => {
-    if (wasF1Ref.current && !isF1) {
-      setTransitionPhase("entering");
-      const id = window.setTimeout(() => setTransitionPhase("idle"), SWIPE_DURATION_MS);
-      wasF1Ref.current = isF1;
-      return () => window.clearTimeout(id);
-    }
-    if (!wasF1Ref.current && isF1) {
-      setTransitionPhase("leaving");
-      const id = window.setTimeout(() => {
-        setTransitionPhase("idle");
-        // Drop the leaving snapshot once the slide completes so the
-        // frozen scenario doesn't leak into the next interaction.
-        setLeavingScenarioSnapshot(null);
-      }, SWIPE_DURATION_MS);
-      wasF1Ref.current = isF1;
-      return () => window.clearTimeout(id);
-    }
-    wasF1Ref.current = isF1;
-  }, [isF1]);
+  // ARCH-06B (2026-05-26): F1 ↔ F2 transition is now driven by the
+  // AnimatePresence on the F1 overlay in render below; the previous
+  // transitionPhase state machine + setTimeout-based leaving-snapshot
+  // ref was retired when the dual-shell mount pattern was replaced
+  // by a single AppShell + overlay model. AppShell stays mounted at
+  // all times; F1 enters/exits over top of it. See animation spec
+  // constants at the top of this file.
+  const reducedMotion = useReducedMotion();
 
-  // Shell-level nav state — chevron toggle persisted across frames.
-  const [navCollapsed, setNavCollapsed] = useOnboardingNavCollapsed();
+  // Nav-collapse state. The previous useOnboardingNavCollapsed hook
+  // read from localStorage and could leave stale `true` values from
+  // before the chevron-toggle removal (2026-05-25). Force the
+  // expanded mode unconditionally for onboarding — the rail (48px)
+  // mode is no longer reachable via UI and is not what the wireframe
+  // calls for. Below 900px the AppShell renders the nav inside a
+  // drawer (where the slim 156px expanded form still fits fine), so
+  // we don't need a viewport-conditional branch here.
+  //
+  // Also actively clear any stale localStorage value on mount so a
+  // returning user whose previous session had collapsed=true gets a
+  // clean slate — without this, the persisted value would still
+  // affect SteadyShell (which still consults the hook).
+  const navCollapsed = false;
+  // No-op accepts a boolean to keep the callsite signature stable
+  // (OnboardingNav's onToggleCollapsed prop type). The arg is ignored
+  // because the chevron toggle was removed 2026-05-25.
+  const setNavCollapsed = (_next: boolean): void => {};
+  useEffect(() => {
+    try {
+      window.localStorage.removeItem("groundx-onboarding.nav-collapsed.v1");
+    } catch {
+      // localStorage disabled — nothing to clear.
+    }
+  }, []);
   const handleNavItemClick = useCallback(
     (key: OnboardingNavItemKey) => {
       // Task #52: Workspaces and Projects are the steady-mode app surfaces.
@@ -393,8 +446,21 @@ export const OnboardingShell: FC = () => {
     <Box
       data-testid="onboarding-shell-chat-pane"
       sx={{
+        // width: 100% + flex: 1 so the chat column fills the AppShell's
+        // motion.section width (which is set in px via the drag-resize
+        // handle). Without width:100%, a flex-row parent only stretches
+        // children on the cross axis, so the inner content would clamp
+        // to its intrinsic width and leave whitespace on the right.
+        width: "100%",
+        flex: 1,
         height: "100%",
-        backgroundColor: WHITE,
+        // WARM_OFFWHITE — same tone as the nav rail. Gives the chat
+        // pane a distinct surface from the WHITE canvas next to it so
+        // the chat ↔ canvas divide reads cleanly even without the
+        // resize-handle hairline. Chat bubbles + the input bar each
+        // retain their own white/cyan surfaces, so they pop crisply
+        // against this warm-tinted column.
+        backgroundColor: WARM_OFFWHITE,
         overflow: "auto",
         p: 2,
         display: "flex",
@@ -403,254 +469,185 @@ export const OnboardingShell: FC = () => {
       }}
       aria-label="Chat column"
     >
-      <OnboardingChatColumn />
+      {bookCallActive ? <BookingStatusCard /> : <OnboardingChatColumn />}
     </Box>
   );
 
   const canvasIdle = (
     <Box
       data-testid="onboarding-shell-canvas-pane"
-      sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: WHITE }}
+      sx={{
+        // Same stretching contract as chatIdle — fill the AppShell's
+        // canvas motion.section width so PdfViewer and other widgets
+        // get the full pane to work with. The StepStrip used to live
+        // inside this pane; it now sits in AppShell's `header` slot
+        // (see below) so it can span both chat + canvas.
+        width: "100%",
+        flex: 1,
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        backgroundColor: WHITE,
+      }}
     >
-      <Box sx={{ borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE, px: 3 }}>
-        <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
-      </Box>
       <Box
         sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }}
-        data-testid={`onboarding-frame-${session.currentFrame}`}
+        // When isF1, the AppShell canvas slot is intentionally empty
+        // (F1 overlay covers it). Omit the testid so it doesn't
+        // duplicate the F1 overlay's own `onboarding-frame-f1` and
+        // break selector-based assertions.
+        data-testid={isF1 ? undefined : `onboarding-frame-${session.currentFrame}`}
       >
         {canvasContent}
       </Box>
     </Box>
   );
 
-  const inTransition = transitionPhase !== "idle";
-  const showF1 = isF1 || transitionPhase === "entering";
-  const showIdleShell = !isF1 && transitionPhase === "idle";
+  // StepStrip lifted out of the canvas pane (2026-05-26) so it spans
+  // both chat + canvas. AppShell renders this in its `header` slot
+  // (right of nav, above the chat | canvas split). The bottom border
+  // here matches the visual treatment it had inside the canvas pane.
+  //
+  // px:2 (was px:3) — when the strip lived in the canvas pane the
+  // 3-step inset matched the surrounding view paddings. Now that the
+  // strip spans both panes (each of which has its own internal
+  // padding), the wider header inset earns less; 2-step gives the
+  // strip another 16 px of usable width so it stays on its full pill
+  // chain down to viewport 947 px.
+  const headerStrip = (
+    <Box
+      sx={{
+        borderBottom: `1px solid ${BORDER}`,
+        backgroundColor: WHITE,
+        px: 2,
+      }}
+    >
+      <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
+    </Box>
+  );
 
-  // OnboardingNav is mounted as the AppShell's nav slot for F2+
-  // surfaces ONLY. Per spec-nav-v2.jsx Canvas_Ingest: "F1: nav
-  // HIDDEN entirely — no sidebar so the demo gets the full width."
-  // The nav slides in from the left on F1->F2 and slides out on
-  // F2->F1 (driven by SlideOverlay, not by mount/unmount of this
-  // node).
+  // OnboardingNav is the AppShell's nav slot. It's always mounted now
+  // (ARCH-06B 2026-05-26): F1 used to NOT mount the AppShell at all,
+  // so the nav literally wasn't in the DOM on the picker. Today
+  // AppShell is the canonical underlay and F1 floats over it as an
+  // overlay — the nav is in the DOM, just visually obscured while F1
+  // covers the viewport. When F1 dismisses, the nav is revealed.
   const navIdle = (
     <OnboardingNav
       accountState="loggedOut"
       collapsed={navCollapsed}
       onToggleCollapsed={() => setNavCollapsed(!navCollapsed)}
       onItemClick={handleNavItemClick}
+      onLogoClick={() => navigate("/onboarding")}
     />
   );
+
+  // ARCH-06B transitions — see the locked spec at the top of this file.
+  // F2 zoom (the AppShell underneath) and F1 overlay translate/fade are
+  // expressed as framer-motion variants so the reduced-motion gate
+  // collapses both to instant on the appropriate setting.
+  const f2ZoomAnimate = isF1
+    ? { scale: F2_ZOOM_SCALE, opacity: F2_ZOOM_OPACITY }
+    : { scale: 1, opacity: 1 };
+  const f2ZoomTransition = reducedMotion
+    ? { duration: 0 }
+    : {
+        duration: isF1 ? F1_RETURN_DURATION_S : F1_DISMISS_DURATION_S,
+        ease: F1_OVERLAY_EASE,
+      };
 
   return (
     <Box
       sx={{ position: "relative", height: "100vh", overflow: "hidden", backgroundColor: WHITE }}
       data-testid="onboarding-shell"
     >
-      {showF1 ? (
-        <Box sx={{ position: "absolute", inset: 0, zIndex: 0 }}>{f1Layout}</Box>
-      ) : null}
-      {showIdleShell ? (
-        <Box sx={{ position: "absolute", inset: 0, zIndex: 1 }}>
-          <AppShell
-            nav={navIdle}
-            chat={chatIdle}
-            canvas={canvasIdle}
-            initialChatWidth={360}
-            navWidth={navCollapsed ? ONBOARDING_NAV_WIDTH_COLLAPSED : ONBOARDING_NAV_WIDTH_FULL}
-          />
-        </Box>
-      ) : null}
-      {inTransition ? (
-        <SlideOverlay
-          phase={transitionPhase}
-          // During the leaving phase (F2 -> F1) the panes carry
-          // their content with them as they slide out so the user
-          // sees what they had — not an empty rectangle. The
-          // session has already flipped to F1 by this point, so we
-          // render frozen-state copies using the scenario snapshot
-          // captured before the navigate fired.
-          //
-          // During entering, panes stay empty so internal
-          // animations (composing dots, scan line) don't pre-fire
-          // before the pane arrives at its final position.
-          chatContent={
-            transitionPhase === "leaving" ? (
-              <Box
-                sx={{
-                  height: "100%",
-                  overflow: "auto",
-                  p: 2,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
-                }}
-                aria-label="Chat column (leaving)"
-              >
-                <OnboardingChatColumn
-                  overrideScenarioId={leavingScenarioSnapshot}
-                  overrideFrame="f2"
-                />
-              </Box>
-            ) : null
-          }
-          canvasContent={
-            transitionPhase === "leaving" ? (
-              <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                <Box sx={{ borderBottom: `1px solid ${BORDER}`, px: 3 }}>
-                  <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
-                </Box>
-                <Box sx={{ flex: 1, overflow: "hidden", minHeight: 0 }} data-testid="onboarding-frame-f2-leaving">
-                  <UnderstandView overrideScenarioId={leavingScenarioSnapshot} />
-                </Box>
-              </Box>
-            ) : null
-          }
+      {/* Dev-only diagnostic overlay — gated on `?navdebug=1` URL param.
+          Used to trace cross-browser viewport / breakpoint discrepancies
+          (e.g. user-side Chrome shows AppShell compact at 1325px while
+          headless-Chromium preview shows it expanded). Safe to leave
+          mounted: the component returns null unless the flag is set. */}
+      <NavDebugOverlay />
+
+      {/* AppShell — always mounted, the canonical underneath. Wrapped
+          in a motion.div so the entire shell does a subtle scale +
+          opacity settle when F1 dismisses (and the inverse when F1
+          returns), reinforcing the "shell coming into focus" feel
+          without any one element doing the heavy lift. */}
+      <motion.div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 0,
+          transformOrigin: "center center",
+        }}
+        animate={f2ZoomAnimate}
+        transition={f2ZoomTransition}
+      >
+        {/* ARCH-06B (2026-05-26): keep AppShell fully populated even
+            on F1. Toggling hideNav/hideChat would re-trigger AppShell's
+            internal AnimatePresence width-grow on nav + chat as F1
+            lifts away — visually competing with the F1 overlay's lift.
+            With nav/chat always mounted, the underneath shell is
+            stable; only the wrapper's F2 zoom + the F1 overlay's lift
+            play during the transition. The user sees the shell as
+            "always already there." */}
+        <AppShell
+          nav={navIdle}
+          header={headerStrip}
+          chat={chatIdle}
+          canvas={canvasIdle}
+          initialChatWidth={360}
+          navWidth={navCollapsed ? ONBOARDING_NAV_WIDTH_COLLAPSED : ONBOARDING_NAV_WIDTH_FULL}
         />
-      ) : null}
+      </motion.div>
+
+      {/* F1 overlay — the picker floats on top of the always-there
+          AppShell. Lifts up on dismiss (900ms, opacity held till 70%
+          for a tactile lift instead of dissolve), returns down on
+          Ingest-pill click (700ms, opacity fades in over first 30%).
+          AnimatePresence drives the mount/unmount via the isF1 flag;
+          initial={false} suppresses the entrance animation on first
+          page load so users landing on /onboarding don't see F1 fly
+          in from above. */}
+      <AnimatePresence initial={false}>
+        {isF1 ? (
+          <motion.div
+            key="f1-overlay"
+            style={{ position: "absolute", inset: 0, zIndex: 10 }}
+            initial={{ y: "-100%", opacity: 0 }}
+            animate={{
+              y: "0%",
+              opacity: 1,
+              transition: reducedMotion
+                ? { duration: 0 }
+                : {
+                    y: { duration: F1_RETURN_DURATION_S, ease: F1_OVERLAY_EASE },
+                    opacity: {
+                      duration: F1_RETURN_DURATION_S * F1_OPACITY_PORTION,
+                      ease: F1_OVERLAY_EASE,
+                    },
+                  },
+            }}
+            exit={{
+              y: "-100%",
+              opacity: 0,
+              transition: reducedMotion
+                ? { duration: 0 }
+                : {
+                    y: { duration: F1_DISMISS_DURATION_S, ease: F1_OVERLAY_EASE },
+                    opacity: {
+                      duration: F1_DISMISS_DURATION_S * F1_OPACITY_PORTION,
+                      ease: F1_OVERLAY_EASE,
+                      delay: F1_DISMISS_DURATION_S * (1 - F1_OPACITY_PORTION),
+                    },
+                  },
+            }}
+          >
+            {f1Layout}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </Box>
   );
 };
-
-/**
- * Renders the three shell panes as flex siblings inside a single
- * viewport-clipped container during F1 ↔ shell transitions. The panes
- * are deliberately rendered OUTSIDE the AppShell slot hierarchy
- * because AppShell's slot motion components have `overflow: hidden`,
- * which clips translating pane content back to its slot bounds. With
- * the slots clipping, the chat could never visually slide in from the
- * page edge — its content always appeared to fade in starting from
- * its slot's left edge (180px in from the viewport). Bypassing the
- * slot structure and clipping at the viewport edge instead lets the
- * panes slide in/out from the actual page edge.
- *
- * Pane content is intentionally empty during the slide. Mounting
- * GateChatPanel or UnderstandView would kick off their internal
- * animations (composing dots, scan line) before the pane has finished
- * arriving — visually noisy. Real content mounts once the slide
- * completes and OnboardingShell swaps to the AppShell render path.
- */
-interface SlideOverlayProps {
-  phase: "entering" | "leaving";
-  /** Optional content to render INSIDE the chat pane while it animates. */
-  chatContent?: ReactNode;
-  /** Optional content to render INSIDE the canvas pane while it animates. */
-  canvasContent?: ReactNode;
-}
-
-const SlideOverlay: FC<SlideOverlayProps> = ({ phase, chatContent, canvasContent }) => {
-  const dir = phase === "leaving" ? "out" : "in";
-  // Nav + chat slide from the LEFT together (one cohesive left block);
-  // canvas slides from the RIGHT.
-  const leftAnim = dir === "in" ? slideInFromLeft : slideOutToLeft;
-  const rightAnim = dir === "in" ? slideInFromRight : slideOutToRight;
-  const animStyle = (kf: ReturnType<typeof keyframes>) =>
-    `${kf} ${SWIPE_DURATION_S}s ${SWIPE_EASE_CSS} both`;
-
-  // Per the wireframe, F1 has no nav at all — the nav animates IN on
-  // F1->F2 and OUT on F2->F1. Three panes here: nav, chat, canvas.
-  return (
-    <Box
-      sx={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 1,
-        display: "flex",
-        flexDirection: "row",
-        overflow: "hidden",
-      }}
-    >
-      <Box
-        data-testid="onboarding-shell-nav-pane"
-        sx={{
-          width: ONBOARDING_NAV_WIDTH_FULL,
-          flexShrink: 0,
-          height: "100%",
-          backgroundColor: WARM_OFFWHITE,
-          animation: animStyle(leftAnim),
-        }}
-      />
-      <Box
-        data-testid="onboarding-shell-chat-pane"
-        sx={{
-          width: 360,
-          flexShrink: 0,
-          height: "100%",
-          backgroundColor: WHITE,
-          animation: animStyle(leftAnim),
-        }}
-      >
-        {chatContent}
-      </Box>
-      <Box
-        data-testid="onboarding-shell-canvas-pane"
-        sx={{
-          flex: 1,
-          height: "100%",
-          backgroundColor: WHITE,
-          animation: animStyle(rightAnim),
-        }}
-      >
-        {canvasContent}
-      </Box>
-    </Box>
-  );
-};
-
-/**
- * F1 → F2 transition — F1 stays still underneath; the three shell
- * panes slide in over it from their respective edges:
- *
- *   Nav  (180px)  ─►  slides in from the LEFT
- *   Chat (340px)  ─►  slides in from the LEFT
- *   Canvas (rest) ◄─  slides in from the RIGHT
- *
- * F1 doesn't animate at all. It just sits underneath at zIndex 0, and
- * gets progressively covered as the three panes converge to their final
- * positions. Once the panes are in place (~SWIPE_DURATION_MS later),
- * F1 is fully occluded and unmounts (driven by a timed flag in
- * OnboardingShell, NOT by an AnimatePresence exit — the no-op exit
- * approach left F1 in the DOM forever).
- */
-const SWIPE_DURATION_S = 0.7;
-const SWIPE_DURATION_MS = SWIPE_DURATION_S * 1000;
-const SWIPE_EASE_CSS = "cubic-bezier(0.16, 1, 0.3, 1)"; // easeOutExpo
-
-// CSS @keyframes definitions. Native browser animations run on the
-// compositor thread, so they fire on mount regardless of JS thread
-// health, RAF throttling, or framer-motion's initial-state race.
-//
-// Translations are viewport-relative (100vw) rather than pane-relative
-// (100% of each pane's own width). Why: with pane-relative translates,
-// each pane only moves by its own width — fine for the nav (180px,
-// flush against the page edge) but broken for the chat (360px, offset
-// 180px from the left edge). On slide-out, the chat ended at
-// translateX(-360px), which still left its right half visible on
-// screen — half-covered by the nav. The pane then snap-unmounted,
-// reading as a "weird fade".
-//
-// Using 100vw guarantees every pane travels the same distance and
-// fully exits the viewport edge regardless of slot position. As a
-// bonus, nav and chat now slide together at the same speed, so the
-// left column reads as one cohesive block sliding in/out.
-const slideInFromLeft = keyframes`
-  from { transform: translateX(-100vw); }
-  to   { transform: translateX(0); }
-`;
-
-const slideInFromRight = keyframes`
-  from { transform: translateX(100vw); }
-  to   { transform: translateX(0); }
-`;
-
-const slideOutToLeft = keyframes`
-  from { transform: translateX(0); }
-  to   { transform: translateX(-100vw); }
-`;
-
-const slideOutToRight = keyframes`
-  from { transform: translateX(0); }
-  to   { transform: translateX(100vw); }
-`;
-

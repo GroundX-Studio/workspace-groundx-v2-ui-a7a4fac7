@@ -124,7 +124,7 @@ describe("App provider tree (smoke)", () => {
     // in the tree. Mounting against the REAL AppProviders chain
     // proves the production tree has the provider.
     const { PdfViewerWidget } = await import(
-      "@/components/widgets/PdfViewer/PdfViewerWidget"
+      "@/components/viewer-widgets/PdfViewer/PdfViewerWidget"
     );
     await act(async () => {
       render(

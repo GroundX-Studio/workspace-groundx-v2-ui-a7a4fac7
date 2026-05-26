@@ -9,7 +9,7 @@ import { UnderstandView } from "./UnderstandView";
 /**
  * UnderstandView is now a thin layout wrapper that mounts the
  * production `PdfViewerWidget`. The widget itself is tested under
- * `src/components/widgets/PdfViewer/`. Here we only assert:
+ * `src/components/viewer-widgets/PdfViewer/`. Here we only assert:
  *
  *   1. BYO branch (no scenario) → sign-in placeholder.
  *   2. With a scenario, the widget mounts with the right documentId

@@ -8,7 +8,7 @@ import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 
 import { DARK_GREY, GRAY, WHITE } from "@/constants";
-import { CommonSubmitButton } from "@/shared/components/CommonSubmitButton";
+import { Button } from "@/components/primitives/Button/Button";
 
 export interface ConfirmChangePasswordI {
   code: string;
@@ -64,9 +64,9 @@ export const ConfirmChangePasswordForm: FC<ConfirmChangePasswordFormProps> = ({ 
         }}
         sx={{ mt: 2, input: { background: WHITE } }}
       />
-      <CommonSubmitButton type="submit" id="change-password-submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
+      <Button variant="primary" type="submit" id="change-password-submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
         Submit
-      </CommonSubmitButton>
+      </Button>
     </form>
   );
 };

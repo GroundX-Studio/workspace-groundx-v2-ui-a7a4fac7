@@ -12,9 +12,9 @@ import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext
 import { AgentToolBusProvider } from "@/contexts/AgentToolBusContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
 import { ScenarioRegistryProviderWithDemoHooks } from "@/contexts/ScenarioRegistryContext";
-import { AppErrorBoundary } from "@/shared/components/AppErrorBoundary";
-import { MotionRoot } from "@/shared/components/MotionRoot";
-import { WireframeFilters } from "@/shared/components/WireframeFilters";
+import { AppErrorBoundary } from "@/components/layout/AppErrorBoundary/AppErrorBoundary";
+import { MotionRoot } from "@/components/primitives/MotionRoot/MotionRoot";
+import { WireframeFilters } from "@/components/brand/WireframeFilters/WireframeFilters";
 import { GxThemeProvider } from "@/ThemeProvider";
 import { router } from "@/router/router";
 

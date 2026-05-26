@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -133,19 +133,58 @@ describe("OnboardingShell", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f5", initialScenario: "utility" });
 
     await user.click(screen.getByTestId("advance-to-f6"));
-    expect(await screen.findByTestId("gate-card")).toBeInTheDocument();
+    expect(await screen.findByTestId("gate-rail-preamble")).toBeInTheDocument();
 
-    await user.click(screen.getByTestId("gate-dismiss"));
+    await user.click(screen.getByTestId("gate-rail-dismiss"));
 
-    await waitFor(() => expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument());
     expect(screen.getByText("Ask anything about the sample. Citations appear next to every answer.")).toBeInTheDocument();
   });
 
+  // ARCH-05B (2026-05-26): the canvas (viewer slot) MUST swap to
+  // `<SignUpWidget>` when the gate becomes active. Before the split,
+  // the canvas kept rendering whatever frame view was previously
+  // active — so a user who clicked Sign Up while looking at an F2
+  // sample saw the sample PDF sitting behind a chat-side form. The
+  // motivating ARCH-05 bug. Pin the new behavior here.
+  it("ARCH-05B: canvas swaps to SignUpWidget while the gate is open (F5 sample → Sign Up)", async () => {
+    const user = userEvent.setup();
+
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f5", initialScenario: "utility" });
+
+    // Pre-condition: canvas shows the InteractView for the sample.
+    expect(screen.getByTestId("onboarding-frame-f5")).toBeInTheDocument();
+    expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
+
+    // Trigger the gate via the F6 advance pill — same path as a real
+    // user clicking through.
+    await user.click(screen.getByTestId("advance-to-f6"));
+
+    // Canvas swaps to the SignUpWidget form. The previous frame view
+    // is gone (so the user isn't staring at the sample behind the
+    // form). The chat-side preamble renders alongside.
+    expect(await screen.findByTestId("signup-submit")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-frame-f5")).not.toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
+
+    // And when the user dismisses, the canvas drops back to the
+    // frame view (no lingering form). currentFrame is now f6 (the
+    // advance-to-f6 click moved it there), so the wrapper testid is
+    // f6 rather than the original f5.
+    await user.click(screen.getByTestId("gate-rail-dismiss"));
+    await waitFor(() => expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument());
+    expect(screen.getByTestId("onboarding-frame-f6")).toBeInTheDocument();
+  });
+
+  // ARCH-06B (2026-05-26): the F1 overlay has its own StepStrip
+  // embedded in the picker chrome; AppShell.header underneath has
+  // another (full-width version). Both render "Understand" — scope
+  // the query to the F1 overlay container so the pill assertions
+  // resolve unambiguously to the visible-on-F1 instance.
   it("disables the Understand pill on F1 when no scenario has been picked", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
-    // The Understand pill should be visually present but marked disabled
-    // — clicking it from F1 with no scenario would land on a blank canvas.
-    const understandPill = screen.getByText("Understand").closest('[role="button"]');
+    const f1 = within(screen.getByTestId("onboarding-frame-f1"));
+    const understandPill = f1.getByText("Understand").closest('[role="button"]');
     expect(understandPill).toHaveAttribute("aria-disabled", "true");
     expect(understandPill).toHaveAttribute("tabIndex", "-1");
   });
@@ -162,7 +201,8 @@ describe("OnboardingShell", () => {
       { initialFrame: "f1", initialScenario: null },
     );
 
-    await user.click(screen.getByText("Understand"));
+    const f1 = within(screen.getByTestId("onboarding-frame-f1"));
+    await user.click(f1.getByText("Understand"));
     // Frame must NOT change. Wait briefly to catch any async state flip.
     await new Promise((r) => setTimeout(r, 50));
     expect(snapshot.frame).toBe("f1");
@@ -177,126 +217,82 @@ describe("OnboardingShell", () => {
     expect(screen.getByTestId("onboarding-shell-canvas-pane")).toBeInTheDocument();
   });
 
-  it("does NOT render OnboardingNav on F1 — the picker gets the full width", () => {
-    // F1 is the demo landing; the wireframe deliberately hides the
-    // sidebar so the sample cards + BYO tiles have full bleed. Nav
-    // slides in during the F1 -> F2 transition.
+  it("F1 picker covers the always-mounted AppShell underneath (overlay model)", () => {
+    // ARCH-06B (2026-05-26): the F1 picker is an absolute-positioned
+    // overlay above a fully-mounted AppShell. The wireframe rule —
+    // "F1: nav HIDDEN entirely so the demo gets the full width" — is
+    // achieved visually (F1 overlay covers the nav) not structurally
+    // (nav remains in DOM under F1). Keeping the nav mounted prevents
+    // AppShell's internal AnimatePresence from re-animating nav/chat
+    // widths during the F1 dismiss; only the F1 overlay lift + the
+    // wrapper's F2 zoom should play. Assertions:
+    //   - F1 overlay testid present
+    //   - The AppShell root is in DOM (overlay model)
+    //   - Both Nav and chat-pane are also in DOM (covered by F1)
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
-    expect(screen.queryByTestId("onboarding-nav")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("onboarding-shell-chat-pane")).not.toBeInTheDocument();
     expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
+    expect(screen.getByTestId("appshell-root")).toBeInTheDocument();
+    // Nav AND chat exist in DOM; F1 overlay is on top z-index-wise.
+    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
   });
 
-  it("applies a CSS keyframe animation to each pane during the F1→F2 slide-in", async () => {
-    // Earlier attempts used framer-motion's `initial`/`animate` for the
-    // pane slides, but the JS-driven motion never visibly fired in the
-    // user's browser — possibly RAF-throttled, possibly hidden by
-    // dev-mode jank between the click and the first paint. CSS
-    // @keyframes animations run on the compositor thread regardless of
-    // JS state and always start playing on element mount. This test
-    // pins the implementation strategy: during the transitioning
-    // phase, each pane MUST carry an Emotion-generated CSS class with
-    // a non-empty `animation` style. (Idle-phase panes are plain Box
-    // wrappers without animation — the animation only exists in the
-    // SlideOverlay transition render path.)
+  // ARCH-06B (2026-05-26): closure test for the dual-shell unification.
+  // Before this refactor, F1 mounted a custom f1Layout and F2+ mounted
+  // a separate AppShell — two distinct React mounts bridged by a timed
+  // SlideOverlay. After the refactor, AppShell mounts ONCE and stays;
+  // F1 is an absolute-positioned overlay that animates over the top.
+  // The `data-shell-instance` attribute (per AppShell) is the forcing
+  // function: if anyone refactors back to dual-mount, this test fails.
+  it("ARCH-06B: same AppShell instance persists across F1 → F2 → F1", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
 
-    // Trigger the F1 → F2 transition to enter the animated phase.
-    // With URL-driven activation, the click navigates and the URL
-    // sync useEffect picks up the change asynchronously — wait until
-    // the transition's SlideOverlay panes appear.
-    await user.click(screen.getByTestId("sample-utility"));
-    await waitFor(() => expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument());
+    const before = screen.getByTestId("appshell-root").getAttribute("data-shell-instance");
+    expect(before).toBeTruthy();
 
-    const nav = screen.getByTestId("onboarding-shell-nav-pane");
-    const chat = screen.getByTestId("onboarding-shell-chat-pane");
-    const canvas = screen.getByTestId("onboarding-shell-canvas-pane");
-    // Emotion compiles the `animation:` sx prop into a class. We grep
-    // the document stylesheets for a rule on that class that mentions
-    // "animation" — jsdom's `getComputedStyle` doesn't resolve
-    // animation shorthand from generated stylesheets, so we have to
-    // walk the CSSOM ourselves.
-    const styleSheets = [...document.styleSheets];
-    const findAnimationRuleFor = (el: Element): string | null => {
-      for (const cls of el.classList) {
-        const selector = `.${cls}`;
-        for (const sheet of styleSheets) {
-          let rules: CSSRuleList;
-          try {
-            rules = sheet.cssRules;
-          } catch {
-            continue;
-          }
-          for (const rule of rules) {
-            if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
-              const anim = rule.style.animation || rule.style.getPropertyValue("animation");
-              if (anim && anim !== "none" && anim.trim() !== "") return anim;
-            }
-          }
-        }
-      }
-      return null;
-    };
-    for (const pane of [nav, chat, canvas]) {
-      const anim = findAnimationRuleFor(pane);
-      expect(anim).not.toBeNull();
-      // sanity-check the duration is present in the shorthand
-      expect(anim).toMatch(/0\.7s/);
-    }
+    // F1 → F2 (dismiss): click a sample, wait for F1 overlay to exit.
+    await user.click(screen.getByTestId("sample-utility"));
+    await waitFor(() => expect(screen.queryByTestId("onboarding-frame-f1")).not.toBeInTheDocument(), {
+      timeout: 1500,
+    });
+    const afterDismiss = screen.getByTestId("appshell-root").getAttribute("data-shell-instance");
+    expect(afterDismiss).toBe(before);
+
+    // F2 → F1 (return): click Ingest pill, wait for F1 overlay to enter.
+    // StepStrip pill renders "Ingest" with the "1" in a separate badge.
+    await user.click(screen.getByText("Ingest"));
+    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument(), {
+      timeout: 1500,
+    });
+    const afterReturn = screen.getByTestId("appshell-root").getAttribute("data-shell-instance");
+    expect(afterReturn).toBe(before);
   });
 
   it("clicking BYO from F1 advances to F2 and renders the gate in the chat column", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
 
-    // We're on F1's full-bleed picker — no chat column visible yet.
-    expect(screen.queryByLabelText("Chat column")).not.toBeInTheDocument();
+    // ARCH-06B (2026-05-26): the chat column IS in DOM on F1 too
+    // (AppShell underneath is always populated; F1 overlay covers it).
+    // The pre-condition we actually want to express is "user is on
+    // F1 (overlay visible)" — assert that instead of a chat-absent
+    // claim that no longer holds.
+    expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
 
     // Click any BYO Sign Up tile (header, Upload, Connect, Email all
     // route through handleByoClick).
     await user.click(screen.getByTestId("byo-pdf"));
 
-    // Frame advances to F2 and the chat + gate render — but only
-    // after the URL navigates to /onboarding/signup AND the slide-in
-    // finishes (~SWIPE_DURATION_MS). During the slide-in the chat
-    // slot is intentionally empty so the GateChatPanel composing
-    // animation doesn't kick off before the pane has finished
-    // sliding in.
+    // Frame advances to F2 and the chat + gate render. The F1 overlay
+    // exits via its A · Sheet dismiss animation; once it's gone the
+    // gate-rail-preamble in the always-mounted chat column becomes
+    // visible.
     await waitFor(() => expect(screen.getByTestId("onboarding-frame-f2")).toBeInTheDocument(), {
       timeout: 2000,
     });
     await waitFor(() => expect(screen.getByLabelText("Chat column")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByTestId("gate-card")).toBeInTheDocument(), {
-      timeout: 2000,
-    });
-  });
-
-  it("does not mount GateChatPanel content during the F1→F2 slide-in", async () => {
-    // Earlier the chat composing indicator started the moment
-    // GateChatPanel mounted with an open gate — and GateChatPanel was
-    // mounted as soon as the chat pane appeared, BEFORE the slide-in
-    // had finished. Visually the user saw the dots appear before the
-    // chat pane had arrived at its final position. This test pins the
-    // fix: during entering/leaving phases the chat slot renders an
-    // empty animated pane. GateChatPanel mounts only after the slide
-    // settles into idle phase.
-    const user = userEvent.setup();
-    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
-
-    await user.click(screen.getByTestId("byo-pdf"));
-
-    // Mid-slide: chat pane is mounted (so the slide animation can
-    // play) but its CONTENT (gate card or composing indicator) is
-    // not yet rendered. Wait for the slide overlay to appear first
-    // — with URL-driven activation, the click triggers a navigate
-    // which propagates to state via useEffect on the next tick.
-    await waitFor(() => expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument());
-    expect(screen.queryByTestId("gate-card")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
-
-    // After the slide-in completes, the gate card surfaces.
-    await waitFor(() => expect(screen.getByTestId("gate-card")).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument(), {
       timeout: 2000,
     });
   });
@@ -306,169 +302,6 @@ describe("OnboardingShell", () => {
     const understandPill = screen.getByText("Understand").closest('[role="button"]');
     // Active on F2; aria-disabled should be absent.
     expect(understandPill).not.toHaveAttribute("aria-disabled");
-  });
-
-  it("keeps the shell content visible inside the panes while they slide OUT (F2->F1)", async () => {
-    // Task #53. The original implementation rendered empty panes
-    // during the leaving phase too — content disappeared instantly
-    // and the panes slid in/out as blank rectangles. Visually the
-    // user saw their conversation "vanish" before the slide started.
-    // For the leaving direction we want the panes to carry their
-    // content out with them. (Entering still renders empty panes so
-    // animations like the composing dots and scan line do not pre-
-    // fire before the pane has arrived.)
-    const user = userEvent.setup();
-    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
-
-    // Establish baseline: F2 chrome is visible in the idle shell.
-    expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
-    expect(screen.getByTestId("understand-canvas")).toBeInTheDocument();
-
-    await user.click(screen.getByText("Ingest"));
-
-    // Now in the leaving phase. The SlideOverlay panes are mounted.
-    // The chat conversation + canvas content MUST still be visible —
-    // they are inside the sliding-out panes. The nav also slides
-    // out (back to the wireframe pre-rebuild behavior).
-    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument());
-    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
-    expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
-    expect(screen.getByTestId("understand-canvas")).toBeInTheDocument();
-  });
-
-  it("clicking the Ingest pill from F2 plays the reverse animation, then unmounts the shell", async () => {
-    // Mirror of the F1→F2 slide-in: when the user returns to F1 via
-    // the Ingest pill, the panes must slide OUT to their respective
-    // edges (nav+chat to the left, canvas to the right), revealing F1
-    // underneath. Then, after the slide-out completes, the shell
-    // unmounts so only F1 is left.
-    const user = userEvent.setup();
-
-    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
-
-    expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
-    expect(screen.queryByTestId("onboarding-frame-f1")).not.toBeInTheDocument();
-
-    await user.click(screen.getByText("Ingest"));
-
-    // Mid-slide-out: F1 is now mounted as the active layer AND all
-    // three panes (nav, chat, canvas) are still in the DOM (sliding
-    // out over F1). With URL-driven activation, the navigate happens
-    // immediately but the URL → state useEffect runs on the next tick
-    // — wait for the leaving transition's F1 underlay to appear.
-    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument());
-    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
-    expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
-
-    // The pane animation must point at a slide-OUT keyframe, not the
-    // slide-IN one — direction-reversed. The Emotion-generated names
-    // are unstable across builds, so we grep the CSS for the
-    // `translateX(-100%)` `to` keyframe.
-    const styleSheets = [...document.styleSheets];
-    const animationNameOf = (el: Element): string | null => {
-      for (const cls of el.classList) {
-        const selector = `.${cls}`;
-        for (const sheet of styleSheets) {
-          let rules: CSSRuleList;
-          try {
-            rules = sheet.cssRules;
-          } catch {
-            continue;
-          }
-          for (const rule of rules) {
-            if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
-              const shorthand = rule.style.animation;
-              if (shorthand && shorthand !== "none" && shorthand.trim() !== "") return shorthand;
-            }
-          }
-        }
-      }
-      return null;
-    };
-    // jsdom doesn't expose `CSSKeyframesRule` as a global, so we
-    // duck-type via the `type` constant (7 = CSSRule.KEYFRAMES_RULE)
-    // and the `name` / `cssRules` shape.
-    type KeyframesShape = { name: string; cssRules: CSSRuleList; type: number };
-    const findKeyframesByName = (name: string): KeyframesShape | null => {
-      for (const sheet of styleSheets) {
-        let rules: CSSRuleList;
-        try {
-          rules = sheet.cssRules;
-        } catch {
-          continue;
-        }
-        for (const rule of rules) {
-          if (rule.type === 7 && (rule as unknown as KeyframesShape).name === name) {
-            return rule as unknown as KeyframesShape;
-          }
-        }
-      }
-      return null;
-    };
-    const navAnim = animationNameOf(screen.getByTestId("onboarding-shell-nav-pane"));
-    expect(navAnim).not.toBeNull();
-    // The `animation` shorthand starts with the animation-name token.
-    const navAnimName = navAnim!.trim().split(/\s+/)[0];
-    const kf = findKeyframesByName(navAnimName);
-    expect(kf).not.toBeNull();
-    // For a slide-OUT animation, the final keyframe (100% / "to") must
-    // sit at translateX(-100vw) — fully past the LEFT page edge. Using
-    // a viewport-relative unit (not -100% of the pane's own width)
-    // ensures every pane travels the same distance and fully exits
-    // regardless of its slot position. Earlier versions used -100% on
-    // each pane, which left the chat half-on-screen behind the nav at
-    // the end of the slide-out — looked like a fade snap. A slide-IN
-    // keyframe would have translateX(0) at 100%.
-    const lastKeyframe = kf!.cssRules[kf!.cssRules.length - 1] as CSSKeyframeRule;
-    expect(lastKeyframe.style.transform).toMatch(/translateX\(-100vw\)/);
-
-    // After the slide-out completes, all three panes unmount.
-    // F1 is now the only thing on screen.
-    await waitFor(
-      () => expect(screen.queryByTestId("onboarding-shell-nav-pane")).not.toBeInTheDocument(),
-      { timeout: 1500 },
-    );
-    expect(screen.queryByTestId("onboarding-shell-chat-pane")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("onboarding-shell-canvas-pane")).not.toBeInTheDocument();
-    expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
-    // OnboardingNav is unmounted on F1 too.
-    expect(screen.queryByTestId("onboarding-nav")).not.toBeInTheDocument();
-  });
-
-  it("keeps F1 mounted underneath the shell during the slide-in window, then unmounts it", async () => {
-    // Per spec: F1 doesn't animate at all. It sits underneath while the
-    // nav + chat + canvas panes slide in over it, progressively covering
-    // it up. Once the panes finish their slide (~SWIPE_DURATION_MS), F1
-    // is fully occluded and can unmount safely. The previous
-    // AnimatePresence-driven implementation kept F1 in the DOM forever
-    // because its `animate=opacity:1, exit=opacity:1` no-op never fired
-    // onComplete — this test pins down that timing contract.
-    const user = userEvent.setup();
-
-    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
-
-    expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
-    // F1 has NO nav (matches wireframe; nav slides in on F1->F2).
-    expect(screen.queryByTestId("onboarding-nav")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("onboarding-shell-nav-pane")).not.toBeInTheDocument();
-
-    await user.click(screen.getByTestId("sample-utility"));
-
-    // Mid-slide: BOTH F1 (underneath) and the three sliding panes
-    // (nav, chat, canvas) are in the DOM. The nav animates in from
-    // the left along with the chat.
-    expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
-    expect(screen.getByTestId("onboarding-shell-nav-pane")).toBeInTheDocument();
-    expect(screen.getByTestId("onboarding-shell-chat-pane")).toBeInTheDocument();
-    expect(screen.getByTestId("onboarding-shell-canvas-pane")).toBeInTheDocument();
-
-    // After the slide completes, F1 unmounts and the idle shell
-    // (with the real OnboardingNav) takes over.
-    await waitFor(
-      () => expect(screen.queryByTestId("onboarding-frame-f1")).not.toBeInTheDocument(),
-      { timeout: 1500 },
-    );
-    expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
   });
 
   it("forwards Workspaces nav clicks to a hard page reload (steady-mode landing)", async () => {
@@ -640,7 +473,7 @@ describe("OnboardingShell", () => {
     await user.click(screen.getByTestId("byo-pdf"));
 
     // After clicking BYO: gate-card eventually appears in chat.
-    await waitFor(() => expect(screen.queryByTestId("gate-card")).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.queryByTestId("gate-rail-preamble")).toBeInTheDocument(), {
       timeout: 2000,
     });
 

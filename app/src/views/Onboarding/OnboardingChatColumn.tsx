@@ -368,9 +368,34 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
 
   return (
     <Box data-testid="onboarding-chat-conversation" sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      {/* Header: G avatar + Conversation label + sample switcher subline */}
+      {/* Header: clickable G + filename (was "Conversation" — replaced
+          2026-05-25 because the filename gives real context and frees
+          up the canvas pane from carrying a duplicate filename header).
+          Clicking either the G or the filename navigates to
+          /onboarding (the onboarding home / sample picker). */}
       <Box data-testid="onboarding-chat-header" sx={{ pb: 1, borderBottom: `1px solid ${BORDER}` }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Box
+          data-testid="onboarding-chat-home"
+          role="button"
+          tabIndex={0}
+          aria-label="Back to onboarding home"
+          onClick={() => navigate("/onboarding")}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              navigate("/onboarding");
+            }
+          }}
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            cursor: "pointer",
+            borderRadius: 1,
+            "&:hover": { opacity: 0.85 },
+            "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 2 },
+          }}
+        >
           <Box
             aria-hidden
             sx={{
@@ -384,16 +409,28 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
+              flexShrink: 0,
             }}
           >
             G
           </Box>
-          <Typography variant="subtitle2" sx={{ fontWeight: FONT_WEIGHT_HEADLINE, color: NAVY }}>
-            Conversation
+          <Typography
+            variant="subtitle2"
+            sx={{
+              fontWeight: FONT_WEIGHT_HEADLINE,
+              color: NAVY,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            }}
+            title={fileName}
+          >
+            {fileName}
           </Typography>
           <Box sx={{ flex: 1 }} />
           {!showDone && (
-            <Typography variant="caption" sx={{ color: MUTED_ON_LIGHT, fontStyle: "italic" }}>
+            <Typography variant="caption" sx={{ color: MUTED_ON_LIGHT, fontStyle: "italic", flexShrink: 0 }}>
               thinking…
             </Typography>
           )}
@@ -497,9 +534,17 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             <BotBubble testid="onboarding-chat-done">
               <Box component="span" sx={{ fontWeight: FONT_WEIGHT_HEADLINE }}>Done.</Box> Ready to analyze.
             </BotBubble>
-            <Box data-testid="onboarding-chat-pick-a-view" sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
+            {/* Pick-a-view block.
+                - Inner gap (1.25) matches the parent conversation
+                  Stack's gap so the pill row sits the same distance
+                  from "Pick a view:" as two consecutive chat bubbles
+                  do. Was 0.75 → looked too tight (user 2026-05-25).
+                - Pills row drops its prior `pl: 0.5` (4px) offset —
+                  it was pushing the row right of the bubble above
+                  for no design reason. */}
+            <Box data-testid="onboarding-chat-pick-a-view" sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
               <BotBubble>Pick a view:</BotBubble>
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, pl: 0.5 }}>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
                 {pickViews.map((view, idx) => (
                   <PickViewPill
                     key={view.key}
@@ -710,7 +755,11 @@ const LiveChatInputBar: FC<LiveChatInputBarProps> = ({ onSend, disabled }) => {
       <InputBase
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
-        placeholder="ask a question, ready when you are…"
+        // GroundX-equivalent of Claude's "Describe what you want to
+        // create…" — surface-agnostic prompt that fits both ask-the-
+        // document chat and "describe what to extract" extraction
+        // intents. Updated 2026-05-25.
+        placeholder="Ask about your documents…"
         disabled={disabled}
         sx={{ flex: 1, color: NAVY, fontSize: 13 }}
         inputProps={{ "aria-label": "Chat input" }}
@@ -721,9 +770,21 @@ const LiveChatInputBar: FC<LiveChatInputBarProps> = ({ onSend, disabled }) => {
         disabled={disabled}
         data-testid="onboarding-chat-send"
         aria-label="Send"
-        sx={{ backgroundColor: CYAN, color: NAVY, "&:hover": { backgroundColor: GREEN } }}
+        // Cyan circle (the prior color the user explicitly preferred
+        // over the brief 2026-05-25 GREEN experiment). The icon inside
+        // is hand-sized to 14px — `fontSize="small"` was 20px which
+        // made the glyph overflow the 28px button. Pairs cyan circle
+        // + navy arrow per the design system.
+        sx={{
+          backgroundColor: CYAN,
+          color: NAVY,
+          width: 28,
+          height: 28,
+          "&:hover": { backgroundColor: CYAN, filter: "brightness(0.95)" },
+          "&.Mui-disabled": { backgroundColor: BORDER, color: MUTED_ON_LIGHT },
+        }}
       >
-        <SendOutlinedIcon fontSize="small" />
+        <SendOutlinedIcon sx={{ fontSize: 14 }} />
       </IconButton>
     </Box>
   );

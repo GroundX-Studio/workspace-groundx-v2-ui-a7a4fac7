@@ -33,7 +33,7 @@ import {
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
-import { LoadingDots } from "@/shared/components/LoadingDots";
+import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
 
 /**
  * Persisted "the gate has already finished composing for this anon
@@ -67,7 +67,7 @@ function useGateComposedPersisted(ownerKey: string): [boolean, () => void] {
   return [composed, markComposed];
 }
 
-import { GateView } from "./GateView";
+import { GateChatRail } from "@/components/chat-widgets/GateChatRail/GateChatRail";
 
 /**
  * Composing-delay duration by trigger.
@@ -169,6 +169,12 @@ export const GateChatPanel: FC = () => {
     return <TypingIndicator trigger={trigger} />;
   }
 
+  // ARCH-05B (2026-05-26): mounts the new `GateChatRail` widget
+  // instead of the old `GateView` monolith. The form half of GateView
+  // now lives in `viewer-widgets/SignUpWidget`, which OnboardingShell
+  // mounts in the canvas slot whenever the gate is open. GateChatRail
+  // is the chat-side half (preamble, book-a-call CTA, dismiss,
+  // committed-state success card).
   return (
     <motion.div
       key="gate-fade-in"
@@ -176,7 +182,7 @@ export const GateChatPanel: FC = () => {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: "easeOut" }}
     >
-      <GateView />
+      <GateChatRail />
     </motion.div>
   );
 };

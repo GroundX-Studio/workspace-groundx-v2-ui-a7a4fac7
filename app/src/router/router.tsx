@@ -1,11 +1,9 @@
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { Outlet, createBrowserRouter, Navigate } from "react-router-dom";
 
 import { AppInitialization } from "@/AppInitialization";
-import { AppStatus } from "@/views/AppStatus/AppStatus";
 import { Banned } from "@/views/Banned/Banned";
 import { OnboardingProvider } from "@/contexts/OnboardingContext/OnboardingProvider";
-import { Dashboard } from "@/views/CoreLayouts/Dashboard";
-import { Health } from "@/views/Health/Health";
+import { Health } from "@/views/_scaffold/Health/Health";
 import { Home } from "@/views/Home/Home";
 import { Login } from "@/views/Auth/Login";
 import { Register } from "@/views/Auth/Register";
@@ -16,18 +14,35 @@ import { ROUTER_PATHS } from "@/router/routerPaths";
 
 export const router = createBrowserRouter([
   {
+    // ARCH-22 (2026-05-26): the scaffold-default `<Dashboard />`
+    // boxed-content + topbar layout was removed. The canonical
+    // layout for the product is `<AppShell />` mounted by each route
+    // that needs it (OnboardingShell, SteadyShell). The `/` route
+    // now just composes the always-on providers (AppInitialization
+    // + OnboardingProvider) and renders an Outlet for whichever
+    // child route matches.
+    //
+    // ARCH-21 (2026-05-26): `Home` is an auth-aware redirect, not a
+    // marketing page. Anonymous → /onboarding; signed-in →
+    // /c/<lastSessionId> from persisted ChatStore or /onboarding.
+    //
+    // ARCH-24 (2026-05-26): `/status` + the `AppStatus` stub were
+    // deleted (no real surface behind the route). `Banned` stayed —
+    // the route is load-bearing for axios 403-on-archived-customer
+    // and Login's banned-account branch. `Health` moved under
+    // `views/_scaffold/` to mark it explicitly as non-product
+    // scaffold infrastructure (k8s probe target only).
     path: "/",
     element: (
       <AppInitialization>
         <OnboardingProvider>
-          <Dashboard />
+          <Outlet />
         </OnboardingProvider>
       </AppInitialization>
     ),
     errorElement: <>Something went wrong</>,
     children: [
       { path: "", element: <Navigate to={ROUTER_PATHS.HOME} /> },
-      { path: ROUTER_PATHS.APP_STATUS, element: <AppStatus /> },
       { path: ROUTER_PATHS.HOME, element: <Home /> },
     ],
   },

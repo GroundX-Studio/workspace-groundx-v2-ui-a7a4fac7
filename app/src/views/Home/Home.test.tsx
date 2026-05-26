@@ -1,31 +1,102 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { AuthContext, type AuthContextI } from "@/contexts/AuthContext/AuthContext";
 
 import { Home } from "./Home";
 
-describe("Home", () => {
-  it("renders the starter dashboard sections and education", async () => {
-    const user = userEvent.setup();
+const CHAT_STORE_STORAGE_KEY = "groundx-onboarding.chat-store.v1";
 
-    render(<Home />);
+/**
+ * ARCH-21 (2026-05-26): Home is now an auth-aware redirect, not a
+ * marketing page. These tests pin the three branches:
+ *   - anonymous → /onboarding
+ *   - signed-in + persisted session → /c/<id>
+ *   - signed-in + no session (or unparseable snapshot) → /onboarding
+ *
+ * We inject AuthContext directly instead of going through AuthProvider
+ * so the tests don't have to mock the entire Partner API surface just
+ * to flip a single boolean.
+ */
 
-    expect(screen.getByRole("heading", { name: "Studio Workspace" })).toBeInTheDocument();
-    expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.getByText("Documents")).toBeInTheDocument();
-    expect(screen.getByText("Automations")).toBeInTheDocument();
-    expect(screen.getByText("Build the first customer workflow here")).toBeInTheDocument();
-    expect(screen.getByText("Customer onboarding guide indexed")).toBeInTheDocument();
+const makeAuth = (isLoggedIn: boolean): AuthContextI => ({
+  auth: {
+    userName: isLoggedIn ? "acct-1" : "",
+    token: "",
+    isLoggedIn,
+    xJwtToken: "",
+  },
+  user: null,
+  setAuth: () => undefined,
+  login: async () => ({ isLoggedIn: false, error: false, banned: false }),
+  register: async () => ({ isSuccess: false, error: false }),
+  logout: async () => undefined,
+  getUserData: async () => ({ response: null, error: false }),
+  updateAppMetadata: async () => ({ isSuccess: false, error: false }),
+  resetPassword: async () => ({ isSuccess: false, error: false }),
+  confirmChangingPassword: async () => ({ isSuccess: false, error: false }),
+});
 
-    const educationTrigger = screen.getByRole("button", { name: "About the workspace overview" });
-    expect(educationTrigger).toBeInTheDocument();
+const ChatRouteMarker = () => {
+  const { sessionId } = useParams();
+  return <div data-testid="chat-route">{sessionId}</div>;
+};
 
-    await user.hover(educationTrigger);
+const renderHome = (isLoggedIn: boolean) =>
+  render(
+    <AuthContext.Provider value={makeAuth(isLoggedIn)}>
+      <MemoryRouter initialEntries={["/home"]}>
+        <Routes>
+          <Route path="/home" element={<Home />} />
+          <Route path="/onboarding" element={<div>Onboarding route</div>} />
+          <Route path="/c/:sessionId" element={<ChatRouteMarker />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthContext.Provider>,
+  );
 
-    expect(
-      await screen.findByText(
-        "This protected starter view is the first place to shape the product workflow, dashboard metrics, and GroundX-powered actions.",
-      ),
-    ).toBeInTheDocument();
+describe("Home (auth-aware redirect)", () => {
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("redirects anonymous users to /onboarding", () => {
+    renderHome(false);
+    expect(screen.getByText("Onboarding route")).toBeInTheDocument();
+  });
+
+  it("redirects signed-in users with no persisted ChatStore snapshot to /onboarding", () => {
+    renderHome(true);
+    expect(screen.getByText("Onboarding route")).toBeInTheDocument();
+  });
+
+  it("redirects signed-in users with a persisted active session to /c/<sessionId>", () => {
+    window.localStorage.setItem(
+      CHAT_STORE_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        ownerKey: "anon-x",
+        activeSessionId: "sess-abc",
+        sessions: [],
+      }),
+    );
+    renderHome(true);
+    expect(screen.getByTestId("chat-route")).toHaveTextContent("sess-abc");
+  });
+
+  it("falls back to /onboarding when the persisted ChatStore snapshot is malformed", () => {
+    window.localStorage.setItem(CHAT_STORE_STORAGE_KEY, "{not valid json");
+    renderHome(true);
+    expect(screen.getByText("Onboarding route")).toBeInTheDocument();
+  });
+
+  it("falls back to /onboarding when the persisted snapshot has no activeSessionId", () => {
+    window.localStorage.setItem(
+      CHAT_STORE_STORAGE_KEY,
+      JSON.stringify({ version: 1, ownerKey: "anon-x", activeSessionId: null, sessions: [] }),
+    );
+    renderHome(true);
+    expect(screen.getByText("Onboarding route")).toBeInTheDocument();
   });
 });

@@ -46,7 +46,6 @@ vi.mock("@/appConfig", () => {
 import { Login, LOGIN_PAGE_TITLE } from "@/views/Auth/Login";
 import { Register } from "@/views/Auth/Register";
 import { ResetPassword } from "@/views/Auth/ResetPassword";
-import { Dashboard } from "@/views/CoreLayouts/Dashboard";
 import { renderWithAppProviders } from "@/test/renderWithAppProviders";
 
 const renderRoute = (route: string, element: JSX.Element) =>
@@ -86,18 +85,14 @@ describe("configured app identity", () => {
     expect(screen.getByAltText("Acme Password Reset")).toHaveAttribute("src", "/assets/acme-reset.svg");
   });
 
-  it("uses the configured app name in the protected app shell", () => {
-    renderWithAppProviders(
-      <Routes>
-        <Route path="/" element={<Dashboard />}>
-          <Route path="" element={<div>Dashboard content</div>} />
-        </Route>
-      </Routes>
-    );
-
-    expect(screen.getAllByText("Acme Console").length).toBeGreaterThan(0);
-    expect(screen.getByText("Dashboard content")).toBeInTheDocument();
-  });
+  // ARCH-22 (2026-05-26): removed the "configured app name in
+  // protected app shell" assertion. The scaffold-default
+  // `<Dashboard />` layout that this test exercised is gone (the
+  // product uses the canonical `<AppShell />` mounted by route-level
+  // surfaces instead). The configured app name is still asserted by
+  // the document-title test below for auth pages, and the steady-
+  // mode shell test will pick it up after ARCH-07 mounts AppShell
+  // with the configured name in its header.
 
   it.each([
     ["/auth/login", <Login />, `${LOGIN_PAGE_TITLE} | Acme Console`],

@@ -25,7 +25,7 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import type { ScenarioCitation, SampleChatTurn } from "@/types/scenarios";
-import { CiteChip } from "@/shared/components/CiteChip";
+import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 
 /**
  * F5 InteractView — grounded chat with citation chips.

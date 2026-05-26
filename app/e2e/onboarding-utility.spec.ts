@@ -83,9 +83,9 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
     await page.getByTestId("advance-to-f5").click();
     await page.getByTestId("advance-to-f6").click();
-    await expect(page.getByTestId("gate-card")).toBeVisible();
-    await page.getByTestId("gate-dismiss").click();
-    await expect(page.getByTestId("gate-card")).toBeHidden();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
+    await page.getByTestId("gate-rail-dismiss").click();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeHidden();
   });
 
   test("F6 → register → claim → F7 (full sign-up happy path with stubbed APIs)", async ({ page }) => {
@@ -110,22 +110,22 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
     await page.getByTestId("advance-to-f5").click();
     await page.getByTestId("advance-to-f6").click();
-    await expect(page.getByTestId("gate-card")).toBeVisible();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
 
     // Fill the real register form (first / last / email / password / confirm).
-    await page.getByTestId("gate-first-input").fill("Pat");
-    await page.getByTestId("gate-last-input").fill("Buyer");
-    await page.getByTestId("gate-email-input").fill("pat@example.com");
-    await page.getByTestId("gate-password-input").fill("secret12345");
-    await page.getByTestId("gate-confirm-input").fill("secret12345");
-    await page.getByTestId("gate-register-submit").click();
+    await page.getByTestId("signup-first-input").fill("Pat");
+    await page.getByTestId("signup-last-input").fill("Buyer");
+    await page.getByTestId("signup-email-input").fill("pat@example.com");
+    await page.getByTestId("signup-password-input").fill("secret12345");
+    await page.getByTestId("signup-confirm-input").fill("secret12345");
+    await page.getByTestId("signup-submit").click();
 
     // Committed card replaces the form on success.
-    await expect(page.getByTestId("gate-committed")).toBeVisible();
+    await expect(page.getByTestId("gate-rail-committed")).toBeVisible();
     await expect(page.getByText(/WELCOME/i)).toBeVisible();
 
     // Continue advances to F7 (IntegrateView).
-    await page.getByTestId("gate-continue-integrate").click();
+    await page.getByTestId("gate-rail-continue-integrate").click();
     // F7 is still a stub view — assert by URL/route stability rather
     // than by content. The frame transition is enough to confirm the
     // gate flipped state correctly.
@@ -145,25 +145,58 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
     await page.getByTestId("advance-to-f5").click();
     await page.getByTestId("advance-to-f6").click();
-    await page.getByTestId("gate-first-input").fill("Pat");
-    await page.getByTestId("gate-last-input").fill("Buyer");
-    await page.getByTestId("gate-email-input").fill("pat@example.com");
-    await page.getByTestId("gate-password-input").fill("secret12345");
-    await page.getByTestId("gate-confirm-input").fill("secret12345");
-    await page.getByTestId("gate-register-submit").click();
+    await page.getByTestId("signup-first-input").fill("Pat");
+    await page.getByTestId("signup-last-input").fill("Buyer");
+    await page.getByTestId("signup-email-input").fill("pat@example.com");
+    await page.getByTestId("signup-password-input").fill("secret12345");
+    await page.getByTestId("signup-confirm-input").fill("secret12345");
+    await page.getByTestId("signup-submit").click();
 
     // Inline error renders; gate stays open (not committed).
-    await expect(page.getByTestId("gate-error")).toContainText(/already registered/i);
-    await expect(page.getByTestId("gate-card")).toBeVisible();
-    await expect(page.getByTestId("gate-committed")).toBeHidden();
+    await expect(page.getByTestId("signup-error")).toContainText(/already registered/i);
+    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
+    await expect(page.getByTestId("gate-rail-committed")).toBeHidden();
   });
 
-  test("BYO tile in F1 renders the gate inline (still on the picker)", async ({ page }) => {
+  test("BYO tile in F1 mounts the gate surface (chat rail + canvas form)", async ({ page }) => {
+    // ARCH-05B (2026-05-26): clicking BYO no longer leaves the user
+    // on the F1 picker with the gate underneath. The BYO trigger
+    // navigates to /onboarding/signup, which opens the session-level
+    // gate. The shell derives frame=f2 (signup is a gate-driven
+    // surface) and mounts the AppShell with `SignUpWidget` in the
+    // canvas slot + `GateChatRail` in the chat slot. The picker is
+    // gone — the user is on the sign-up surface.
     await page.getByTestId("byo-pdf").click();
-    // The gate renders inline below the picker tiles; the picker stays
-    // interactive (the user can still click a sample to skip the gate).
-    await expect(page.getByTestId("onboarding-frame-f1")).toBeVisible();
-    await expect(page.getByTestId("gate-card")).toBeVisible();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
+    await expect(page.getByTestId("signup-submit")).toBeVisible();
+    await expect(page.getByTestId("onboarding-frame-f1")).toBeHidden();
+  });
+
+  test("ARCH-05B regression: canvas swaps to SignUpWidget while the gate is open, hiding the previous sample", async ({ page }) => {
+    // The motivating bug for the ARCH-05 split. Before the fix, the
+    // canvas kept rendering whatever frame view was previously active
+    // when the gate opened — so a user mid-sample-doc saw the PDF
+    // sitting behind a chat-side sign-up form. Now: gate opens →
+    // canvas swaps to SignUpWidget; dismiss → canvas restores the
+    // frame view.
+    await page.getByTestId("sample-utility").click();
+    await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
+    await page.getByTestId("advance-to-f5").click();
+    // Pre-condition: InteractView for the utility sample is on canvas.
+    await expect(page.getByTestId("onboarding-frame-f5")).toBeVisible();
+    await expect(page.getByTestId("signup-submit")).toBeHidden();
+
+    await page.getByTestId("advance-to-f6").click();
+    // During gate-open: canvas shows the form, NOT the InteractView.
+    await expect(page.getByTestId("signup-submit")).toBeVisible();
+    await expect(page.getByTestId("onboarding-frame-f5")).toBeHidden();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
+
+    // Dismiss: canvas restores the frame view (now f6 — advance-to-f6
+    // moved the frame forward before opening the gate).
+    await page.getByTestId("gate-rail-dismiss").click();
+    await expect(page.getByTestId("signup-submit")).toBeHidden();
+    await expect(page.getByTestId("onboarding-frame-f6")).toBeVisible();
   });
 
   test("F6 gate honors ESC keyboard dismiss (LC5 path #2)", async ({ page }) => {
@@ -171,9 +204,9 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
     await page.getByTestId("advance-to-f5").click();
     await page.getByTestId("advance-to-f6").click();
-    await expect(page.getByTestId("gate-card")).toBeVisible();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByTestId("gate-card")).toBeHidden();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeHidden();
   });
 
   test("F6 gate honors 'keep exploring' link dismiss (LC5 path #3)", async ({ page }) => {
@@ -181,9 +214,9 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
     await page.getByTestId("advance-to-f5").click();
     await page.getByTestId("advance-to-f6").click();
-    await expect(page.getByTestId("gate-card")).toBeVisible();
-    await page.getByTestId("gate-keep-exploring").click();
-    await expect(page.getByTestId("gate-card")).toBeHidden();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
+    await page.getByTestId("gate-rail-dismiss").click();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeHidden();
   });
 });
 
@@ -242,7 +275,7 @@ test.describe("F1–F7 axe a11y @desktop-only", () => {
     await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
     await page.getByTestId("advance-to-f5").click();
     await page.getByTestId("advance-to-f6").click();
-    await expect(page.getByTestId("gate-card")).toBeVisible();
+    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
     await expectAxeClean(page, "F6");
   });
 });

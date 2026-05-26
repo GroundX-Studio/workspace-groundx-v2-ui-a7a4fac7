@@ -32,9 +32,11 @@
 export const drawerWidth = 270;
 
 /**
- * Onboarding-shell nav (MiniNav) widths. The labeled rail is the default;
- * the chevron at the bottom of the rail collapses it to the icon rail.
- * Per spec-primitives.jsx · MiniNav full=180, minimal=48.
+ * Onboarding-shell nav (MiniNav) widths. Per spec-primitives.jsx ·
+ * MiniNav full=180, minimal=48. (Earlier slim experiments at 156 / 132
+ * / 112 were reverted 2026-05-26 once the StepStrip moved into a
+ * header slot spanning both chat + canvas — the cramped-canvas-pane
+ * pressure that motivated the shrinks no longer exists.)
  */
 export const ONBOARDING_NAV_WIDTH_FULL = 180;
 export const ONBOARDING_NAV_WIDTH_COLLAPSED = 48;
@@ -98,6 +100,18 @@ export const BYO_TILE_HEIGHT = 134;
 
 /** Step strip number badge size. */
 export const STEP_BADGE_SIZE = 20;
+
+/**
+ * Slim variants for the step strip. Were applied to the F2+ embedded
+ * surface to fight cramped canvas-pane widths; retained as tokens for
+ * future use even though the active layout (post-2026-05-26) hosts
+ * the strip in a header slot that spans both chat + canvas, where the
+ * regular full-size sizing is the right call.
+ */
+export const STEP_STRIP_BADGE_SIZE_SLIM = 15;
+export const STEP_STRIP_BADGE_FONT_SIZE_SLIM = 9;
+export const STEP_STRIP_PILL_FONT_SIZE_SLIM = 10;
+export const STEP_STRIP_ANALYZE_EYEBROW_FONT_SIZE_SLIM = 8;
 
 /** Capability badge (E / I / R) — default size used inside sample cards. */
 export const CAPABILITY_BADGE_SIZE = 20;

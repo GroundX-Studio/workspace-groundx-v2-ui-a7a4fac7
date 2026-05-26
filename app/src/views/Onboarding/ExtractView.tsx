@@ -27,7 +27,7 @@ import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { track } from "@/lib/analytics";
 import type { ExtractedFieldValue } from "@/types/scenarios";
-import { CiteChip } from "@/shared/components/CiteChip";
+import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 
 /**
  * F3 ExtractView — fields panel side-by-side with a citation peek panel.

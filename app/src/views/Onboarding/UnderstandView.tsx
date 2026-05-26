@@ -21,7 +21,7 @@ import {
   EYEBROW_ON_LIGHT,
   FONT_WEIGHT_LABEL,
 } from "@/constants";
-import { PdfViewerWidget } from "@/components/widgets/PdfViewer/PdfViewerWidget";
+import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";

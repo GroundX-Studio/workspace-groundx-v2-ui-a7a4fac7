@@ -16,7 +16,7 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { RegisterI } from "@/api/entities/customerEntity";
 import { APP_CONFIG } from "@/appConfig";
 import { BODY_TEXT, DARK_GREY, GRAY, NAVY, WHITE } from "@/constants";
-import { CommonSubmitButton } from "@/shared/components/CommonSubmitButton";
+import { Button } from "@/components/primitives/Button/Button";
 
 interface RegisterFormProps {
   values: RegisterI;
@@ -129,9 +129,9 @@ export const RegisterForm: FC<RegisterFormProps> = ({ values, onSubmit }) => {
         )}
       </FormGroup>
 
-      <CommonSubmitButton type="submit" id="register-submit" submitting={formik.isSubmitting} endIcon={<TaskAltIcon />} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
+      <Button variant="primary" type="submit" id="register-submit" submitting={formik.isSubmitting} endIcon={<TaskAltIcon />} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
         Register
-      </CommonSubmitButton>
+      </Button>
     </form>
   );
 };

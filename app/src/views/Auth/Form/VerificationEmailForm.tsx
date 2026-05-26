@@ -4,7 +4,7 @@ import { object as yupObject, ObjectSchema, string as yupString } from "yup";
 import TextField from "@mui/material/TextField";
 
 import { WHITE } from "@/constants";
-import { CommonSubmitButton } from "@/shared/components/CommonSubmitButton";
+import { Button } from "@/components/primitives/Button/Button";
 
 export interface VerificationEmailI {
   email: string;
@@ -29,9 +29,9 @@ export const VerificationEmailForm: FC<VerificationEmailFormProps> = ({ values, 
   return (
     <form style={{ width: "100%" }} onSubmit={(event) => { event.preventDefault(); formik.handleSubmit(); }}>
       <TextField fullWidth id="email" name="email" label="Email" value={formik.values.email} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.email && Boolean(formik.errors.email)} helperText={formik.touched.email && formik.errors.email} sx={{ mt: 3, input: { background: WHITE } }} />
-      <CommonSubmitButton type="submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
+      <Button variant="primary" type="submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
         Submit
-      </CommonSubmitButton>
+      </Button>
     </form>
   );
 };
