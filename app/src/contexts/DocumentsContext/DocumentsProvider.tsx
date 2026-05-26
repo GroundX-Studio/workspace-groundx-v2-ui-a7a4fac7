@@ -118,6 +118,35 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
     [run]
   );
 
+  const getDocumentXray = useCallback(
+    (documentId: string, options?: GroundXRequestOptions) =>
+      run(async () => {
+        // The entity wrapper currently types this as `{ xray: Metadata }`
+        // but the real API returns the response object at top level
+        // (verified 2026-05-25; see docs/agents/groundx-real-api-shapes.md).
+        // The entity type was updated; the cast guards the legacy shape
+        // through the SDK boundary.
+        const response = (await api.groundxDocuments.getGroundXDocumentXray(
+          documentId,
+          options,
+        )) as unknown as import("@/api/entities/groundxDocumentsEntity").DocumentXrayResponse;
+        return response;
+      }),
+    [run]
+  );
+
+  const getDocumentExtract = useCallback(
+    (documentId: string, options?: GroundXRequestOptions) =>
+      run(async () => {
+        const response = (await api.groundxDocuments.getGroundXDocumentExtract(
+          documentId,
+          options,
+        )) as unknown as import("@/api/entities/groundxDocumentsEntity").DocumentExtractResponse;
+        return response;
+      }),
+    [run]
+  );
+
   const getProcessingStatus = useCallback(
     (processId: string, options?: GroundXRequestOptions) =>
       run(async () => (await api.groundxDocuments.getGroundXProcessingStatus(processId, options)).ingest),
@@ -158,6 +187,8 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         getDocument,
         lookupDocument,
         deleteDocument,
+        getDocumentXray,
+        getDocumentExtract,
         getProcessingStatus,
         cancelProcess,
         listProcesses,

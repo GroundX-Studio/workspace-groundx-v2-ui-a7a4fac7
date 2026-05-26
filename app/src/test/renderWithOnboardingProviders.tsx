@@ -6,6 +6,9 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AgentToolBusProvider } from "@/contexts/AgentToolBusContext";
 import { AppModeProvider } from "@/contexts/AppModeContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
+import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
+import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
+import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarContext";
 import { OnboardingSessionProvider } from "@/contexts/OnboardingSessionContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
 import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
@@ -56,41 +59,50 @@ export const renderWithOnboardingProviders = (
     (initialScenario ? `/onboarding/${registryBucketId}/${initialScenario}` : "/onboarding");
   return render(
     <GxThemeProvider>
-      <AppModeProvider initialAuthState={initialAuthState} initialScenario={initialScenario}>
-        <ScenarioRegistryProvider
-          forcedDemoState={{
-            status: "ready",
-            scenarios: initialScenarios,
-            bucketId: registryBucketId,
-            error: null,
-          }}
-        >
-          <OnboardingSessionProvider initialFrame={initialFrame} initialScenario={initialScenario}>
-            <AgentToolBusProvider>
-              <CanvasOrchestratorProvider>
-                <OnboardingSkillProvider>
-                  <HelmetProvider>
-                    <MemoryRouter initialEntries={[resolvedUrl]}>
-                      <Routes>
-                        {/* Three onboarding route shapes — the
-                            OnboardingShell reads useParams() and
-                            useLocation() to decide what surface to
-                            mount. */}
-                        <Route path="/onboarding" element={ui} />
-                        <Route path="/onboarding/signup" element={ui} />
-                        <Route path="/onboarding/:bucketId/:scenarioId" element={ui} />
-                        {/* Catch-all so tests that don't care about
-                            routing still get their UI rendered. */}
-                        <Route path="*" element={ui} />
-                      </Routes>
-                    </MemoryRouter>
-                  </HelmetProvider>
-                </OnboardingSkillProvider>
-              </CanvasOrchestratorProvider>
-            </AgentToolBusProvider>
-          </OnboardingSessionProvider>
-        </ScenarioRegistryProvider>
-      </AppModeProvider>
+      <LoadingProvider>
+        <MessageBarProvider>
+          <AppModeProvider initialAuthState={initialAuthState} initialScenario={initialScenario}>
+            <ScenarioRegistryProvider
+              forcedDemoState={{
+                status: "ready",
+                scenarios: initialScenarios,
+                bucketId: registryBucketId,
+                error: null,
+              }}
+            >
+              {/* Production widgets (PdfViewerWidget etc.) consume
+                  DocumentsContext. The provider sits inside the loading
+                  + message bar wrappers because it dispatches to both. */}
+              <DocumentsProvider>
+                <OnboardingSessionProvider initialFrame={initialFrame} initialScenario={initialScenario}>
+                  <AgentToolBusProvider>
+                    <CanvasOrchestratorProvider>
+                      <OnboardingSkillProvider>
+                        <HelmetProvider>
+                          <MemoryRouter initialEntries={[resolvedUrl]}>
+                            <Routes>
+                              {/* Three onboarding route shapes — the
+                                  OnboardingShell reads useParams() and
+                                  useLocation() to decide what surface to
+                                  mount. */}
+                              <Route path="/onboarding" element={ui} />
+                              <Route path="/onboarding/signup" element={ui} />
+                              <Route path="/onboarding/:bucketId/:scenarioId" element={ui} />
+                              {/* Catch-all so tests that don't care about
+                                  routing still get their UI rendered. */}
+                              <Route path="*" element={ui} />
+                            </Routes>
+                          </MemoryRouter>
+                        </HelmetProvider>
+                      </OnboardingSkillProvider>
+                    </CanvasOrchestratorProvider>
+                  </AgentToolBusProvider>
+                </OnboardingSessionProvider>
+              </DocumentsProvider>
+            </ScenarioRegistryProvider>
+          </AppModeProvider>
+        </MessageBarProvider>
+      </LoadingProvider>
     </GxThemeProvider>,
   );
 };

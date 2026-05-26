@@ -5,6 +5,8 @@ import {
   CopyDocumentsInput,
   CrawlWebsiteInput,
   DeleteDocumentsInput,
+  DocumentExtractResponse,
+  DocumentXrayResponse,
   IngestDocumentsInput,
   UpdateDocumentsInput,
 } from "@/api/entities/groundxDocumentsEntity";
@@ -24,6 +26,18 @@ export interface DocumentsContextI {
   getDocument: (documentId: string, options?: GroundXRequestOptions) => Promise<SdkActionResult<GroundXDocument>>;
   lookupDocument: (id: string, options?: GroundXRequestOptions) => Promise<SdkActionResult<GroundXDocument>>;
   deleteDocument: (documentId: string, options?: GroundXRequestOptions) => Promise<SdkActionResult<void>>;
+  /**
+   * Fetch the xray (parsed pages + bounding boxes + binary URL) for
+   * a document. Used by the PdfViewer widget. The widget caches its
+   * own result; this method just exposes the call.
+   */
+  getDocumentXray: (documentId: string, options?: GroundXRequestOptions) => Promise<SdkActionResult<DocumentXrayResponse>>;
+  /**
+   * Fetch the raw extraction values for a document. Schema metadata
+   * (labels/descriptions/types) lives in the workflow, NOT in this
+   * response; the Extract widget combines this with the workflow.
+   */
+  getDocumentExtract: (documentId: string, options?: GroundXRequestOptions) => Promise<SdkActionResult<DocumentExtractResponse>>;
   getProcessingStatus: (processId: string, options?: GroundXRequestOptions) => Promise<SdkActionResult<IngestProcess>>;
   cancelProcess: (processId: string, options?: GroundXRequestOptions) => Promise<SdkActionResult<void>>;
   listProcesses: (options?: GroundXRequestOptions) => Promise<SdkActionResult<IngestProcess[]>>;

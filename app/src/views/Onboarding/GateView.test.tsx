@@ -16,7 +16,17 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/api/entities/customerEntity", () => ({
+  // The DocumentsProvider (added to the shared test renderer for the
+  // production-widget rewire) pulls in the `@/api` barrel, which
+  // re-exports every entity. Provide stubs for the other customer
+  // entity functions so the barrel re-export resolves.
   register: mocks.register,
+  login: vi.fn(),
+  logout: vi.fn(),
+  getUserData: vi.fn(),
+  updateAppMetadata: vi.fn(),
+  resetUserPassword: vi.fn(),
+  confirmUserChangingPassword: vi.fn(),
 }));
 vi.mock("@/api/claimAnonymousChat", () => ({
   claimAnonymousChat: mocks.claimAnonymousChat,

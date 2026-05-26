@@ -32,12 +32,60 @@ export interface DocumentResponse {
   document: GroundXDocument;
 }
 
-export interface DocumentExtractResponse {
-  extract: Metadata;
+/**
+ * The extract endpoint returns the raw extracted JSON at top level
+ * (verified 2026-05-25 against `/v1/ingest/document/extract/{id}`).
+ * Keys are snake_case field ids; values are scalars / nested
+ * objects / arrays. Currency fields come paired with a sibling
+ * `<id>_currency` field. Schema metadata (labels, descriptions,
+ * types) lives in the workflow, NOT in this response.
+ *
+ * Strict typing here would commit to a specific scenario's shape;
+ * stay generic.
+ */
+export type DocumentExtractResponse = Metadata;
+
+/**
+ * The xray endpoint returns this shape at top level (verified
+ * 2026-05-25 against `/v1/ingest/document/xray/{id}`). Documented
+ * in `docs/agents/groundx-real-api-shapes.md`.
+ */
+export interface XrayBoundingBox {
+  pageNumber: number;
+  topLeftX: number;
+  topLeftY: number;
+  bottomRightX: number;
+  bottomRightY: number;
+  corrected: boolean;
+}
+
+export interface XrayChunk {
+  chunk: string;
+  contentType: string[];
+  pageNumbers: number[];
+  text: string;
+  suggestedText: string;
+  boundingBoxes: XrayBoundingBox[];
+  json?: unknown[];
+}
+
+export interface XrayDocumentPage {
+  pageNumber: number;
+  pageUrl: string;
+  width: number;
+  height: number;
+  chunks: XrayChunk[];
 }
 
 export interface DocumentXrayResponse {
-  xray: Metadata;
+  fileName: string;
+  fileType: string;
+  fileKeywords?: string;
+  fileSummary?: string;
+  language?: string;
+  sourceUrl: string;
+  documentPages: XrayDocumentPage[];
+  chunks: XrayChunk[];
 }
 
 export interface IngestDocumentsInput {

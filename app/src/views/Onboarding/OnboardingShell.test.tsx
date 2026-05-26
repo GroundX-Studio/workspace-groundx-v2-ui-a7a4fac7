@@ -98,10 +98,11 @@ describe("OnboardingShell", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
 
     expect(await screen.findByTestId("onboarding-frame-f2")).toBeInTheDocument();
-    // The F2 canvas now reads as a LIVE PARSE label + scan animation;
-    // the prior "GroundX is parsing the document…" copy moved to the
-    // chat-side narrative (OnboardingChatColumn) per the wireframe.
-    expect(screen.getByTestId("understand-live-parse-label")).toBeInTheDocument();
+    // The F2 canvas now hosts the production PdfViewerWidget (the
+    // onboarding view is a thin layout wrapper). The widget exposes a
+    // stable testid; the underlying real-data wiring is covered by
+    // PdfViewerWidget.test.tsx + UnderstandView.test.tsx.
+    expect(await screen.findByTestId("pdf-viewer-widget")).toBeInTheDocument();
   });
 
   it("wires reachable step-strip pills to frames", async () => {
