@@ -355,33 +355,37 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
         >
           <span>sample:</span>
           <span style={{ fontWeight: FONT_WEIGHT_HEADLINE, color: NAVY }}>{scenarioName}</span>
-          <Box
-            component="span"
-            ref={switcherAnchorRef}
-            role={otherScenarios.length > 0 ? "button" : undefined}
-            tabIndex={otherScenarios.length > 0 ? 0 : -1}
-            aria-haspopup={otherScenarios.length > 0 ? "menu" : undefined}
-            aria-expanded={switcherOpen ? "true" : undefined}
-            data-testid="onboarding-chat-sample-switch-trigger"
-            onClick={() => {
-              if (otherScenarios.length > 0) setSwitcherOpen(true);
-            }}
-            onKeyDown={(event) => {
-              if (otherScenarios.length === 0) return;
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                setSwitcherOpen(true);
-              }
-            }}
-            sx={{
-              color: otherScenarios.length === 0 ? MUTED_ON_LIGHT : NAVY,
-              fontWeight: FONT_WEIGHT_LABEL,
-              cursor: otherScenarios.length === 0 ? "default" : "pointer",
-              "&:hover": { color: NAVY },
-            }}
-          >
-            switch ▾
-          </Box>
+          {/* "switch" affordance only renders when there's actually
+              something else to switch to. Previous behavior was to
+              render a muted-styled label that did nothing on click;
+              the screenshot 2026-05-25 showed this as user-confusing
+              (looks like a dropdown trigger, fires nothing). */}
+          {otherScenarios.length > 0 && (
+            <Box
+              component="span"
+              ref={switcherAnchorRef}
+              role="button"
+              tabIndex={0}
+              aria-haspopup="menu"
+              aria-expanded={switcherOpen ? "true" : undefined}
+              data-testid="onboarding-chat-sample-switch-trigger"
+              onClick={() => setSwitcherOpen(true)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setSwitcherOpen(true);
+                }
+              }}
+              sx={{
+                color: NAVY,
+                fontWeight: FONT_WEIGHT_LABEL,
+                cursor: "pointer",
+                "&:hover": { color: NAVY },
+              }}
+            >
+              switch ▾
+            </Box>
+          )}
           <Menu
             anchorEl={switcherAnchorRef.current}
             open={switcherOpen}

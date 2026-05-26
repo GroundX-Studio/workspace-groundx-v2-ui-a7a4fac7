@@ -86,7 +86,11 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({ documentId, mode, in
   const pages = xray?.documentPages ?? [];
   const activeImage =
     pages.find((p) => p.pageNumber === activePage)?.pageUrl ?? pages[0]?.pageUrl ?? null;
-  const fileName = xray?.fileName ?? "Loading…";
+  // Header label tracks the actual state: real fileName when xray
+  // resolved, "Could not load" when the call errored, "Loading…" only
+  // while the call is in flight. Avoids the pre-2026-05-25 bug where
+  // the header said "Loading…" forever after a fetch failure.
+  const fileName = xray?.fileName ?? (error ? "Could not load document" : "Loading…");
 
   return (
     <Box
@@ -171,14 +175,26 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({ documentId, mode, in
           {error ? (
             <Box
               data-testid="pdf-viewer-error"
-              sx={{ p: 3, display: "flex", flexDirection: "column", gap: 0.5 }}
+              sx={{ p: 3, display: "flex", flexDirection: "column", gap: 0.75 }}
             >
-              <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT }}>
+              <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
                 COULD NOT LOAD DOCUMENT
               </Typography>
               <Typography variant="body2" sx={{ color: NAVY }}>
-                The viewer couldn't fetch the parsed document. Try again, or open the source directly.
+                The viewer couldn't fetch the parsed document for{" "}
+                <Box component="span" sx={{ fontFamily: "monospace" }}>
+                  {documentId}
+                </Box>
+                .
               </Typography>
+              {error instanceof Error && error.message && (
+                <Typography
+                  variant="caption"
+                  sx={{ color: NAVY, fontFamily: "monospace", mt: 0.5, wordBreak: "break-word" }}
+                >
+                  {error.message}
+                </Typography>
+              )}
             </Box>
           ) : activeImage ? (
             <Box
