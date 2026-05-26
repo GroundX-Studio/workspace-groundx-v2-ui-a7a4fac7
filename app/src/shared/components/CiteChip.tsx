@@ -3,6 +3,7 @@ import { useCallback, type FC } from "react";
 
 import { CYAN, NAVY } from "@/constants";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
+import { track } from "@/lib/analytics";
 import type { Citation } from "@/types/onboarding";
 
 export interface CiteChipProps {
@@ -22,12 +23,19 @@ export interface CiteChipProps {
 export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate }) => {
   const { dispatch } = useCanvasOrchestrator();
   const handle = useCallback(() => {
+    // OB-02 — cite.peeked fires on every citation chip activation
+    // regardless of which view it sits in (F3 fields, F5 chat, etc.).
+    track("cite.peeked", {
+      documentId: citation.documentId,
+      page: citation.page,
+      index,
+    });
     if (onActivate) {
       onActivate(citation);
       return;
     }
     dispatch({ kind: "highlightCitation", documentId: citation.documentId, page: citation.page, bbox: citation.bbox }, "user");
-  }, [citation, dispatch, onActivate]);
+  }, [citation, dispatch, onActivate, index]);
 
   return (
     <Chip

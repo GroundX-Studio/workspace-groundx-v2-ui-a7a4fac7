@@ -109,4 +109,10 @@ export interface ScenarioDocument {
   fileName: string;
   pageCount?: number;
   order: number;
+  /**
+   * Optional same-origin URL for the document binary. When present the
+   * frontend F2 PdfViewer loads + renders it via pdfjs-dist. SCEN-06 will
+   * deliver the real Utility/Loan/Solar PDFs and surface URLs here.
+   */
+  previewUrl?: string;
 }

@@ -16,7 +16,13 @@
  * answer + a small RAG snippet block into a tour-style response.
  */
 
-import type { AppRepository, ChatSessionEntityRecord, ChatSessionRecord } from "../types.js";
+import type {
+  AppRepository,
+  ChatSessionEntityRecord,
+  ChatSessionRecord,
+  GroundXPartnerClient,
+  LlmClient,
+} from "../types.js";
 import type { ChatRouterRequest, ChatRouterResponse } from "./chatRouter.js";
 
 export type StructuredQueryKind =
@@ -59,6 +65,15 @@ export function classifyStructuredQuery(request: ChatRouterRequest): StructuredQ
 
 export interface StructuredHandlerDeps {
   repository: AppRepository;
+  /**
+   * CF-04: Partner API client used by the `my_projects` and `api_keys`
+   * sub-handlers. Optional so callers that only exercise the local-
+   * data sub-handlers (pages_remaining, onboarding_state, current_entity,
+   * saved_schemas) don't need to construct one. When a sub-handler
+   * needs the partner client and it's absent, the reader returns a
+   * frank "Partner API not configured" reply rather than crashing.
+   */
+  partnerClient?: GroundXPartnerClient;
   chatSessionId: string;
   // The user's signed-in groundxUsername if authed, else null.
   groundxUsername: string | null;
@@ -88,9 +103,11 @@ export async function runStructuredQuery(
     case "current_entity":
       return await answerCurrentEntity(deps);
     case "saved_schemas":
+      return await answerSavedSchemas(deps);
     case "my_projects":
+      return await answerMyProjects(deps);
     case "api_keys":
-      return answerUnimplementedSubkind(kind);
+      return await answerApiKeys(deps);
     case "unknown":
       return answerUnknownStructuredQuery(request.newUserMessage);
   }
@@ -162,24 +179,155 @@ async function answerCurrentEntity(deps: StructuredHandlerDeps): Promise<ChatRou
   };
 }
 
-// ── Sub-handlers — readers not yet built ────────────────────────────
+// ── CF-04 readers — saved_schemas / my_projects / api_keys ──────────
 
-function answerUnimplementedSubkind(kind: StructuredQueryKind): ChatRouterResponse {
-  // We deliberately do NOT fabricate a plausible answer here. The
-  // 501-for-modes-without-readers principle applies inside the
-  // structured mode too: be honest about what's not wired.
-  // TODO(CF-04): add per-subkind readers:
-  //   - saved_schemas: SELECT FROM extraction_schemas WHERE user=?
-  //   - my_projects:   SELECT FROM projects WHERE user=? (or Partner /project)
-  //   - api_keys:      Partner /apikey list
+async function answerSavedSchemas(deps: StructuredHandlerDeps): Promise<ChatRouterResponse> {
+  if (!deps.groundxUsername) {
+    return signInNudge("your saved schemas");
+  }
+  const rows = await deps.repository.listExtractionSchemasForUser(deps.groundxUsername);
+  if (rows.length === 0) {
+    return {
+      mode: "structured",
+      answer: "You haven't saved any extraction schemas yet. Build one in F4 and pin it.",
+      citations: [],
+      suggestedActions: [{ key: "open-schema-builder", label: "Open schema builder" }],
+      tools: [],
+    };
+  }
+  const lines = rows.map((s) => `• ${s.name} (id ${s.id})`);
   return {
     mode: "structured",
     answer:
-      `I can answer questions about "${prettyKind(kind)}" once the data readers ` +
-      `for that part of your account are wired. For now, you can find it in ` +
-      `the settings page.`,
+      `You have ${rows.length} saved schema${rows.length === 1 ? "" : "s"}:\n` +
+      lines.join("\n"),
     citations: [],
-    suggestedActions: [{ key: "open-settings", label: "Open settings" }],
+    suggestedActions: [{ key: "open-schema-builder", label: "Open schema builder" }],
+    tools: [],
+  };
+}
+
+interface PartnerProjectListItem {
+  projectId?: string;
+  id?: string;
+  name?: string;
+}
+
+async function answerMyProjects(deps: StructuredHandlerDeps): Promise<ChatRouterResponse> {
+  if (!deps.groundxUsername) {
+    return signInNudge("your projects");
+  }
+  if (!deps.partnerClient) {
+    return frank("My-projects reader needs the Partner API client and it's not wired.");
+  }
+  let response: Response;
+  try {
+    response = await deps.partnerClient.forward("/project", {
+      method: "GET",
+      customerKey: deps.groundxUsername,
+    });
+  } catch {
+    return upstreamErrorReply("your projects");
+  }
+  if (!response.ok) return upstreamErrorReply("your projects");
+  const payload = (await response.json().catch(() => null)) as
+    | { projects?: PartnerProjectListItem[] }
+    | null;
+  const projects = payload?.projects ?? [];
+  if (projects.length === 0) {
+    return {
+      mode: "structured",
+      answer: "You don't have any projects in your workspace yet.",
+      citations: [],
+      suggestedActions: [{ key: "open-workspace", label: "Open workspace" }],
+      tools: [],
+    };
+  }
+  const lines = projects.map((p) => `• ${p.name ?? "(unnamed)"} (id ${p.projectId ?? p.id ?? "?"})`);
+  return {
+    mode: "structured",
+    answer:
+      `You have ${projects.length} project${projects.length === 1 ? "" : "s"}:\n` +
+      lines.join("\n"),
+    citations: [],
+    suggestedActions: [{ key: "open-workspace", label: "Open workspace" }],
+    tools: [],
+  };
+}
+
+interface PartnerApiKeyListItem {
+  id?: string;
+  name?: string;
+  apiKey?: string;
+}
+
+async function answerApiKeys(deps: StructuredHandlerDeps): Promise<ChatRouterResponse> {
+  if (!deps.groundxUsername) {
+    return signInNudge("your API keys");
+  }
+  if (!deps.partnerClient) {
+    return frank("API-keys reader needs the Partner API client and it's not wired.");
+  }
+  let response: Response;
+  try {
+    response = await deps.partnerClient.forward("/apikey", {
+      method: "GET",
+      customerKey: deps.groundxUsername,
+    });
+  } catch {
+    return upstreamErrorReply("your API keys");
+  }
+  if (!response.ok) return upstreamErrorReply("your API keys");
+  const payload = (await response.json().catch(() => null)) as
+    | { apiKeys?: PartnerApiKeyListItem[] }
+    | null;
+  const keys = payload?.apiKeys ?? [];
+  if (keys.length === 0) {
+    return {
+      mode: "structured",
+      answer: "You don't have any API keys yet. Create one from the workspace settings.",
+      citations: [],
+      suggestedActions: [{ key: "open-api-keys", label: "Manage API keys" }],
+      tools: [],
+    };
+  }
+  // SECURITY: never show the full key value in a chat answer. Show
+  // name + last-4 chars only. This matches the "never commit
+  // *username fields" rule but for the live chat surface.
+  const lines = keys.map((k) => {
+    const tail = (k.apiKey ?? "").slice(-4);
+    return `• ${k.name ?? "(unnamed)"} (…${tail})`;
+  });
+  return {
+    mode: "structured",
+    answer:
+      `You have ${keys.length} API key${keys.length === 1 ? "" : "s"}:\n` +
+      lines.join("\n") +
+      `\n\nFull key values aren't shown here — manage them in workspace settings.`,
+    citations: [],
+    suggestedActions: [{ key: "open-api-keys", label: "Manage API keys" }],
+    tools: [],
+  };
+}
+
+function signInNudge(subject: string): ChatRouterResponse {
+  return {
+    mode: "structured",
+    answer: `Sign in to see ${subject}. I can show ${subject} once your session is authenticated.`,
+    citations: [],
+    suggestedActions: [{ key: "open-signin", label: "Sign in" }],
+    tools: [],
+  };
+}
+
+function upstreamErrorReply(subject: string): ChatRouterResponse {
+  return {
+    mode: "structured",
+    answer:
+      `I couldn't reach the workspace API to look up ${subject} — please try again in a moment. ` +
+      `(I don't make up an answer when the upstream is down.)`,
+    citations: [],
+    suggestedActions: [],
     tools: [],
   };
 }
@@ -207,14 +355,39 @@ export interface HybridHandlerDeps extends StructuredHandlerDeps {
    * pure / synchronous after the search step.
    */
   ragSnippets: Array<{ documentId: string; pageNumber?: number; text?: string }>;
+  /**
+   * CF-05: LLM client used to compose the tour-style answer. Optional
+   * — when missing OR when the call fails, the handler falls back to
+   * the deterministic hand-rolled answer (the previous behavior).
+   * Chat-side profile per CF-16: hybrid mode is user-facing and
+   * deserves the quality model, not the light one.
+   */
+  llmClient?: LlmClient;
+  /** Provider model id for the tour-prompt LLM call. */
+  llmModelId?: string;
 }
+
+const HYBRID_SNIPPET_CHARS = 400;
+const HYBRID_RECENT_VIEWER_EVENTS = 5;
+const HYBRID_SYSTEM_PROMPT =
+  "You are giving a tour-style answer to a GroundX user. Use the structured " +
+  "context (what they're looking at, where they are in onboarding, what " +
+  "they've saved) PLUS the document snippets below. Be concise (3–4 short " +
+  "sentences). Mention the active entity. Cite snippets by quoting short " +
+  "phrases verbatim. If neither the structured context nor the snippets " +
+  "answer the question, say so plainly — don't make anything up.";
 
 /**
  * Hybrid mode: combine structured app-state context with grounded
- * snippets to produce a tour-style answer. Today's implementation is
- * minimal — it formats a "here's what you're looking at + here's
- * what the document says" preamble. As the structured readers grow,
- * the hybrid answer naturally gets richer.
+ * snippets to produce a tour-style answer. CF-05 closure:
+ *
+ *   1. Read real structured context — active entity, recent viewer
+ *      trail, signed-in user's saved-schema count.
+ *   2. If an LLM client is wired, compose a tour-style answer via
+ *      a focused chat-completion call. Otherwise (or on failure)
+ *      fall back to the deterministic hand-rolled formatter.
+ *   3. Citations always come straight from the input snippets — the
+ *      LLM doesn't get to invent them.
  */
 export async function runHybridQuery(
   request: ChatRouterRequest,
@@ -222,7 +395,43 @@ export async function runHybridQuery(
 ): Promise<ChatRouterResponse> {
   const session = await deps.repository.getChatSession(deps.chatSessionId);
   const entities = session ? await deps.repository.listChatSessionEntities(deps.chatSessionId) : [];
-  const active = session ? entities.find((e) => e.entityKey === session.activeEntityKey) : null;
+  const active: ChatSessionEntityRecord | undefined = session
+    ? entities.find((e) => e.entityKey === session.activeEntityKey)
+    : undefined;
+
+  // Signed-in users: pull their saved-schema count so the tour can
+  // reference it ("you have 3 saved schemas — want me to apply one?").
+  let savedSchemaCount = 0;
+  if (deps.groundxUsername) {
+    const rows = await deps.repository.listExtractionSchemasForUser(deps.groundxUsername);
+    savedSchemaCount = rows.length;
+  }
+
+  // Recent viewer trail — tells the tour where the user has been.
+  const allEvents = await deps.repository.listViewerEvents(deps.chatSessionId);
+  const recentEvents = allEvents.slice(0, HYBRID_RECENT_VIEWER_EVENTS);
+
+  const citations = deps.ragSnippets.map((s) => ({
+    documentId: s.documentId,
+    page: s.pageNumber ?? 1,
+    snippet: s.text ? s.text.slice(0, 600) : undefined,
+  }));
+  const suggestedActions = [
+    { key: "show-extract", label: "Show me the extract" },
+    { key: "try-chat", label: "Try a question about the sample" },
+  ];
+
+  // Try the LLM-composed tour first; fall back on any failure.
+  if (deps.llmClient && deps.llmModelId) {
+    try {
+      const composed = await composeTourAnswer(request, deps, active, savedSchemaCount, recentEvents);
+      if (composed != null) {
+        return { mode: "hybrid", answer: composed, citations, suggestedActions, tools: [] };
+      }
+    } catch {
+      // Fall through to hand-rolled.
+    }
+  }
 
   const sample = active?.entityKey ?? "this sample";
   const snippetCount = deps.ragSnippets.length;
@@ -239,20 +448,73 @@ export async function runHybridQuery(
       : `I didn't find document snippets that match your question. ` +
         `Try asking about a specific value, page, or field on the canvas.`);
 
-  return {
-    mode: "hybrid",
-    answer,
-    citations: deps.ragSnippets.map((s) => ({
-      documentId: s.documentId,
-      page: s.pageNumber ?? 1,
-      snippet: s.text ? s.text.slice(0, 600) : undefined,
-    })),
-    suggestedActions: [
-      { key: "show-extract", label: "Show me the extract" },
-      { key: "try-chat", label: "Try a question about the sample" },
-    ],
-    tools: [],
-  };
+  return { mode: "hybrid", answer, citations, suggestedActions, tools: [] };
+}
+
+async function composeTourAnswer(
+  request: ChatRouterRequest,
+  deps: HybridHandlerDeps,
+  active: ChatSessionEntityRecord | undefined,
+  savedSchemaCount: number,
+  recentEvents: Array<{ action: string; entityKey: string | null }>,
+): Promise<string | null> {
+  if (!deps.llmClient || !deps.llmModelId) return null;
+
+  const contextLines: string[] = [];
+  if (active) {
+    contextLines.push(`Active entity: ${active.entityKey}`);
+    contextLines.push(`Last frame: ${active.lastFrame ?? "f1"}`);
+    const completed = safeCount(active.completedFramesJson);
+    contextLines.push(`Frames completed: ${completed}`);
+  } else {
+    contextLines.push("No active entity yet.");
+  }
+  if (deps.groundxUsername) {
+    contextLines.push(
+      `Signed-in user has ${savedSchemaCount} saved schema${savedSchemaCount === 1 ? "" : "s"}.`,
+    );
+  } else {
+    contextLines.push("User is anonymous.");
+  }
+  if (recentEvents.length > 0) {
+    const trail = recentEvents.map((e) => `${e.action}@${e.entityKey ?? "-"}`).join(" → ");
+    contextLines.push(`Recent viewer trail: ${trail}`);
+  }
+  const structuredBlock = contextLines.join("\n");
+
+  const snippetBlock =
+    deps.ragSnippets.length > 0
+      ? deps.ragSnippets
+          .map(
+            (s, i) =>
+              `[${i + 1}] doc=${s.documentId} page=${s.pageNumber ?? "?"}\n${(s.text ?? "").slice(0, HYBRID_SNIPPET_CHARS)}`,
+          )
+          .join("\n\n")
+      : "(no snippets found)";
+
+  const userBlock =
+    `Structured context:\n${structuredBlock}\n\n` +
+    `Document snippets:\n${snippetBlock}\n\n` +
+    `Question: ${request.newUserMessage}`;
+
+  const response = await deps.llmClient.forward("/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: deps.llmModelId,
+      messages: [
+        { role: "system", content: HYBRID_SYSTEM_PROMPT },
+        { role: "user", content: userBlock },
+      ],
+      temperature: 0.3,
+    }),
+  });
+  if (!response.ok) return null;
+  const payload = (await response.json().catch(() => null)) as
+    | { choices?: Array<{ message?: { content?: string } }> }
+    | null;
+  const answer = payload?.choices?.[0]?.message?.content?.trim();
+  return answer && answer.length > 0 ? answer : null;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -294,19 +556,6 @@ function safeCount(json: string | null): number {
     return Array.isArray(parsed) ? parsed.length : 0;
   } catch {
     return 0;
-  }
-}
-
-function prettyKind(kind: StructuredQueryKind): string {
-  switch (kind) {
-    case "saved_schemas":
-      return "saved schemas";
-    case "my_projects":
-      return "your projects";
-    case "api_keys":
-      return "API keys";
-    default:
-      return kind.replace(/_/g, " ");
   }
 }
 

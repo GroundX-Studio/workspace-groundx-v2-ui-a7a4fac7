@@ -5,6 +5,7 @@ import type {
   ChatSessionEntityRecord,
   ChatSessionRecord,
   ConversationSummaryRecord,
+  IntentLogRecord,
   ViewerEventRecord,
 } from "../types.js";
 
@@ -130,6 +131,92 @@ describe("MemoryAppRepository — chat-session methods", () => {
     const list = await repo.listChatSessionEntities("chat-1");
     expect(list).toHaveLength(2);
     expect(list.find((e) => e.entityKey === "sample:utility")?.lastFrame).toBe("f3");
+  });
+
+  // CF-15 — EntitySession carries optional scope refs that downstream
+  // RAG search reads to build the ContentScope.
+  it("upserts session entities with scope refs (bucketId / projectIdsJson / groupId / documentIdsJson) and round-trips them", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-1",
+      entityKey: "project:abc",
+      lastFrame: "f5",
+      completedFramesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: 7,
+      projectIdsJson: JSON.stringify(["P1", "P2"]),
+      groupId: null,
+      documentIdsJson: null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-1",
+      entityKey: "report:r-1",
+      lastFrame: "f7",
+      completedFramesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: null,
+      projectIdsJson: null,
+      groupId: 99,
+      documentIdsJson: JSON.stringify(["d1"]),
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+    const list = await repo.listChatSessionEntities("chat-1");
+    const byKey = Object.fromEntries(list.map((e) => [e.entityKey, e]));
+    expect(byKey["project:abc"].bucketId).toBe(7);
+    expect(byKey["project:abc"].projectIdsJson).toBe(JSON.stringify(["P1", "P2"]));
+    expect(byKey["project:abc"].groupId).toBeNull();
+    expect(byKey["project:abc"].documentIdsJson).toBeNull();
+    expect(byKey["report:r-1"].groupId).toBe(99);
+    expect(byKey["report:r-1"].documentIdsJson).toBe(JSON.stringify(["d1"]));
+  });
+
+  // UI-10b — intent_log table. Mirrors viewer_events shape but
+  // captures the canvas-orchestrator dispatch trail separately so the
+  // tour state machine (PLUG-05) can write source="tour" rows without
+  // mixing into the viewer trail.
+  it("appends intent log entries, round-trips them, and lists newest first", async () => {
+    const repo = new MemoryAppRepository();
+    const make = (
+      id: string,
+      ts: number,
+      source: IntentLogRecord["source"],
+    ): IntentLogRecord => ({
+      id,
+      chatSessionId: "chat-1",
+      timestamp: ts,
+      source,
+      intentKind: "openDocument",
+      intentJson: JSON.stringify({ kind: "openDocument", documentId: "d-1" }),
+    });
+    await repo.appendIntentLog(make("i1", 1000, "user"));
+    await repo.appendIntentLog(make("i2", 2000, "agent"));
+    await repo.appendIntentLog(make("i3", 3000, "tour"));
+    const all = await repo.listIntentLog("chat-1");
+    expect(all.map((e) => e.id)).toEqual(["i3", "i2", "i1"]);
+    expect(all[0].source).toBe("tour");
+    expect(all[0].intentKind).toBe("openDocument");
+  });
+
+  it("listIntentLog filters by sinceTimestamp", async () => {
+    const repo = new MemoryAppRepository();
+    const make = (id: string, ts: number): IntentLogRecord => ({
+      id,
+      chatSessionId: "chat-1",
+      timestamp: ts,
+      source: "user",
+      intentKind: "openDocument",
+      intentJson: "{}",
+    });
+    await repo.appendIntentLog(make("i1", 1000));
+    await repo.appendIntentLog(make("i2", 2000));
+    await repo.appendIntentLog(make("i3", 3000));
+    const recent = await repo.listIntentLog("chat-1", 2000);
+    expect(recent.map((e) => e.id)).toEqual(["i3", "i2"]);
   });
 
   it("appends viewer events, filters by sinceTimestamp, and lists newest first", async () => {

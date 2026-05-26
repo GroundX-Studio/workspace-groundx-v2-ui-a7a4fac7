@@ -1,4 +1,10 @@
-export { ChatStoreProvider, useChatStore, useChatStoreActions, useChatStoreState } from "./ChatStoreContext";
+export {
+  ChatStoreProvider,
+  useChatStore,
+  useChatStoreActions,
+  useChatStoreOptional,
+  useChatStoreState,
+} from "./ChatStoreContext";
 export type {
   CanvasIntent,
   ChatMessage,

@@ -86,8 +86,19 @@ export const SteadyShell: FC = () => {
           </Typography>
           <Typography variant="h4">{active?.title ?? "Untitled session"}</Typography>
           <Typography variant="body2" sx={{ color: BODY_TEXT }}>
-            Session id: <code data-testid="steady-shell-session-id">{sessionId ?? "(missing)"}</code>.
-            The real steady-mode UI (multi-session drawer, canvas, chat) is still being built.
+            Session id:{" "}
+            {/* POL-02: MUI Typography (mono-flavored) instead of bare
+                inline <code>. Picks up design tokens (font, color)
+                and gives a11y a real semantic anchor. */}
+            <Typography
+              component="span"
+              variant="body2"
+              data-testid="steady-shell-session-id"
+              sx={{ fontFamily: "monospace", color: NAVY }}
+            >
+              {sessionId ?? "(missing)"}
+            </Typography>
+            . The real steady-mode UI (multi-session drawer, canvas, chat) is still being built.
             Use the SessionSwitcher below to navigate; the URL stays in sync.
           </Typography>
           <Box
@@ -103,8 +114,16 @@ export const SteadyShell: FC = () => {
           </Box>
           {!active && sessionId && (
             <Typography variant="caption" sx={{ color: BODY_TEXT, fontStyle: "italic" }} data-testid="steady-shell-unknown-session">
-              Session <code style={{ color: NAVY }}>{sessionId}</code> is not in this browser's ChatStore. Once the BFF
-              fetch path lands, the middleware will hydrate it from MySQL.
+              Session{" "}
+              <Typography
+                component="span"
+                variant="caption"
+                sx={{ fontFamily: "monospace", color: NAVY, fontStyle: "normal" }}
+              >
+                {sessionId}
+              </Typography>{" "}
+              is not in this browser&apos;s ChatStore. Once the BFF fetch path lands, the
+              middleware will hydrate it from MySQL.
             </Typography>
           )}
         </Stack>

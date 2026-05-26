@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ChatStoreProvider,
@@ -412,5 +412,104 @@ describe("ChatStoreContext", () => {
     const sessB = result.current.state.sessions.get(idB)!;
     expect(sessA.entities.get("sample:utility" as never)!.lastFrame).toBe("f3");
     expect(sessB.entities.get("sample:utility" as never)!.lastFrame).toBe("f2");
+  });
+
+  describe("persistence failure modes (TS-03)", () => {
+    /**
+     * Three contracts:
+     *   1. localStorage.setItem throwing QuotaExceededError does NOT
+     *      crash the provider; in-memory state still mutates normally.
+     *   2. A malformed snapshot in localStorage (garbage JSON or
+     *      wrong-version payload) is treated as "no snapshot" — the
+     *      provider boots clean rather than crashing on rehydrate.
+     *   3. A cross-tab StorageEvent (another tab writes the same key)
+     *      does NOT silently mutate this tab's state. The contract
+     *      today is "no listener; tab B keeps its own state, next
+     *      persist from tab B wins." A future cross-tab sync feature
+     *      would tighten this — when it lands, update this test.
+     */
+
+    it("a QuotaExceededError on setItem does not crash; in-memory state still mutates", () => {
+      const setItemSpy = vi
+        .spyOn(window.localStorage.__proto__, "setItem")
+        .mockImplementation(() => {
+          const err = new Error("QuotaExceededError");
+          err.name = "QuotaExceededError";
+          throw err;
+        });
+      try {
+        const { result } = renderHook(() => useChatStore(), { wrapper });
+        let createdId = "";
+        act(() => {
+          createdId = result.current.newSession();
+          result.current.appendMessage({ role: "user", content: "hello under quota pressure" });
+        });
+        // In-memory state did the work even though every persist
+        // attempt threw under us.
+        const sess = result.current.state.sessions.get(createdId)!;
+        expect(sess.messages).toHaveLength(1);
+        expect(sess.messages[0]?.content).toBe("hello under quota pressure");
+        // setItem really was being called (proves the persist path
+        // ran and the catch swallowed the throw).
+        expect(setItemSpy).toHaveBeenCalled();
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+
+    it("a malformed snapshot in localStorage rehydrates as an empty store (no crash)", () => {
+      // Stuff the storage key with garbage before the provider mounts.
+      window.localStorage.setItem("groundx-onboarding.chat-store.v1", "{not even json,,,");
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      // Boots clean — no sessions, no active id — instead of throwing.
+      expect(result.current.state.sessions.size).toBe(0);
+      expect(result.current.state.activeSessionId).toBeNull();
+    });
+
+    it("a wrong-version snapshot is treated as no snapshot", () => {
+      window.localStorage.setItem(
+        "groundx-onboarding.chat-store.v1",
+        JSON.stringify({ version: 999, ownerKey: "anon-stale", activeSessionId: null, sessions: [] }),
+      );
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      expect(result.current.state.sessions.size).toBe(0);
+      expect(result.current.state.activeSessionId).toBeNull();
+    });
+
+    it("a cross-tab StorageEvent does not silently mutate this tab's state", () => {
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      let idA = "";
+      act(() => {
+        idA = result.current.newSession();
+        result.current.appendMessage({ role: "user", content: "this tab's message" });
+      });
+      const beforeMessages = result.current.state.sessions.get(idA)!.messages.length;
+
+      // Simulate another tab writing a completely different snapshot.
+      const otherTabPayload = JSON.stringify({
+        version: 1,
+        ownerKey: "anon-other",
+        activeSessionId: "c-other",
+        sessions: [],
+      });
+      window.localStorage.setItem("groundx-onboarding.chat-store.v1", otherTabPayload);
+      act(() => {
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key: "groundx-onboarding.chat-store.v1",
+            newValue: otherTabPayload,
+            storageArea: window.localStorage,
+          }),
+        );
+      });
+
+      // Contract today: no listener wired, so the in-memory state is
+      // unchanged. (When/if a cross-tab sync feature lands, update
+      // this to assert the new contract.)
+      const sess = result.current.state.sessions.get(idA);
+      expect(sess).toBeDefined();
+      expect(sess!.messages).toHaveLength(beforeMessages);
+      expect(sess!.messages[0]?.content).toBe("this tab's message");
+    });
   });
 });

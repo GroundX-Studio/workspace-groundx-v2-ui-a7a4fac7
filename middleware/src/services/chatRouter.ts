@@ -20,7 +20,7 @@
  * returns canned responses so the chat surface can boot today.
  */
 
-import type { AppRepository, GroundXClient, LlmClient } from "../types.js";
+import type { AppRepository, GroundXClient, GroundXPartnerClient, LlmClient } from "../types.js";
 
 import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
 
@@ -149,6 +149,20 @@ export interface ChatRouterDeps {
   groundxUsername?: string | null;
   /** BYO free-tier page budget for the "pages_remaining" structured answer. */
   byoPagesLimit?: number;
+  /**
+   * CF-04: Partner API client. Required for the structured my_projects
+   * + api_keys sub-handlers; optional for everything else (RAG path,
+   * MOCK_MODE, structured queries that read app DB only).
+   */
+  partnerClient?: GroundXPartnerClient;
+  /**
+   * CF-03: server-derived RBAC / tenant / region / etc. filter. Layered
+   * onto the scope filter via `$and` inside `searchGroundX`. The BFF
+   * derives it from the session (NEVER from client input); when no
+   * RBAC system is configured, callers leave this undefined and the
+   * scope filter dispatches unchanged.
+   */
+  rbacFilter?: Record<string, unknown>;
 }
 
 /**
@@ -186,7 +200,7 @@ export class ChatRouteNotImplementedError extends Error {
  * the caller is responsible for ensure-creating a group of those
  * buckets and passing `{kind:"group", groupId}`. Multi-workspace
  * scopes aren't produced by any upstream caller today; the ensure-
- * group helper is tracked as backlog item CF-15.
+ * group helper is tracked as backlog item CF-19.
  */
 export type RagContentScope =
   | { kind: "bucket"; bucketId: number; projectIds?: string[] }
@@ -241,6 +255,7 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
     chatSessionId: deps.chatSessionId,
     groundxUsername: deps.groundxUsername ?? null,
     byoPagesLimit: deps.byoPagesLimit ?? 100,
+    partnerClient: deps.partnerClient,
   };
   if (mode === "structured") {
     return runStructuredQuery(request, structuredDeps);
@@ -256,7 +271,13 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
         ? { kind: "bucket", bucketId: deps.samplesBucketId }
         : { kind: "unknown" });
     try {
-      snippets = await searchGroundX(request.newUserMessage, scope, deps.groundxClient, deps.groundxApiKey);
+      snippets = await searchGroundX(
+        request.newUserMessage,
+        scope,
+        deps.groundxClient,
+        deps.groundxApiKey,
+        { rbacFilter: deps.rbacFilter },
+      );
     } catch (err) {
       // Hybrid is best-effort on the RAG side — log + continue with
       // empty snippets rather than 502 the whole request.
@@ -264,7 +285,14 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
       console.warn("hybrid mode: RAG search failed, proceeding without snippets", err);
     }
   }
-  return runHybridQuery(request, { ...structuredDeps, ragSnippets: snippets });
+  return runHybridQuery(request, {
+    ...structuredDeps,
+    ragSnippets: snippets,
+    // CF-05: chat-profile LLM composes the tour-style answer. Hybrid
+    // is user-facing — quality matters more than cost.
+    llmClient: deps.llmClient,
+    llmModelId: deps.llmModelId,
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -273,6 +301,29 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
 
 const RAG_SEARCH_LIMIT = 6;
 const RAG_SNIPPET_CHARS = 600;
+/**
+ * CF-06 token-budget guard. Caps the assembled snippet block fed to
+ * the grounded LLM so a long document set can't blow past the context
+ * window. With `RAG_SEARCH_LIMIT = 6` snippets × `RAG_SNIPPET_CHARS =
+ * 600`, the natural worst case is ~3600 chars; this cap is set a hair
+ * above that as a hard ceiling. When snippets exceed the cap, trailing
+ * ones are dropped (the search ranking puts most-relevant first).
+ *
+ * Conservatively sized for ~1.2k tokens at 4 chars/token. Tune
+ * upward via deps when wiring smaller-context models if cost permits.
+ */
+export const MAX_SNIPPET_BLOCK_CHARS = 4800;
+
+/**
+ * CF-06 refusal calibration. When the snippets don't contain the
+ * answer, the grounded LLM is instructed to reply with this exact
+ * phrase rather than hedge or invent. Exporting the constant so client
+ * UIs can pattern-match the refusal and render a distinct UX (e.g. a
+ * "try another question" affordance) — and so tests can assert the
+ * round-trip.
+ */
+export const GROUNDED_REFUSAL_PHRASE =
+  "I can't answer that from the documents I have.";
 
 async function runRagPipeline(
   request: ChatRouterRequest,
@@ -297,21 +348,160 @@ async function runRagPipeline(
     scope,
     deps.groundxClient,
     deps.groundxApiKey,
+    { rbacFilter: deps.rbacFilter },
   );
 
   const llmResponse = await callGroundedLlm(request.newUserMessage, snippets, deps.llmClient, deps.llmModelId);
 
+  // Parse the LLM's optional JSON block (CF-06 citations + CF-07
+  // suggestedIntent live in the same fenced block). Cleaned answer is
+  // the user-facing text with that block stripped.
+  const parsed = parseGroundedAnswer(llmResponse.answer);
+  const suggestedActions: ChatRouterResponse["suggestedActions"] = [
+    { key: "show-source", label: "Show source" },
+  ];
+  if (parsed.suggestedIntent && parsed.suggestedIntent.confidence >= SUGGESTED_INTENT_THRESHOLD) {
+    suggestedActions.push({
+      key: "suggested-intent",
+      label: parsed.suggestedIntent.reason,
+      detail: {
+        intent: parsed.suggestedIntent.intent,
+        confidence: parsed.suggestedIntent.confidence,
+      },
+    });
+  }
+
+  // CF-06 structured citations. When the LLM emitted a citations
+  // block AND at least one entry references a documentId that's in
+  // our snippet set, use the validated subset as `reply.citations`.
+  // Otherwise fall back to the legacy "all snippets become cites"
+  // behavior. Cross-checking against the snippet set is the trust
+  // boundary — we don't let the LLM invent references.
+  const allowedDocIds = new Set(snippets.map((s) => s.documentId));
+  const validatedCitations =
+    parsed.structuredCitations?.filter((c) => allowedDocIds.has(c.documentId)) ?? [];
+  const citations =
+    validatedCitations.length > 0
+      ? validatedCitations.map((c) => ({
+          documentId: c.documentId,
+          page: c.page,
+          snippet: c.quote.slice(0, RAG_SNIPPET_CHARS),
+        }))
+      : snippets.map((s) => ({
+          documentId: s.documentId,
+          page: s.pageNumber ?? 1,
+          snippet: s.text ? s.text.slice(0, RAG_SNIPPET_CHARS) : undefined,
+        }));
+
   return {
     mode: "rag",
-    answer: llmResponse.answer,
-    citations: snippets.map((s) => ({
-      documentId: s.documentId,
-      page: s.pageNumber ?? 1,
-      snippet: s.text ? s.text.slice(0, RAG_SNIPPET_CHARS) : undefined,
-    })),
-    suggestedActions: [{ key: "show-source", label: "Show source" }],
+    answer: parsed.cleanedAnswer,
+    citations,
+    suggestedActions,
     tools: [],
   };
+}
+
+/**
+ * CF-07: confidence floor for surfacing a suggested-intent chip. Below
+ * this the chip is suppressed — a low-confidence guess is more
+ * disruptive than a missed suggestion. 0.85 matches the locked decision
+ * in `project_chat_session_model.md`.
+ */
+export const SUGGESTED_INTENT_THRESHOLD = 0.85;
+
+export interface SuggestedIntent {
+  intent: string;
+  confidence: number;
+  reason: string;
+}
+
+/**
+ * CF-06 — structured citation entry the LLM emits in its JSON block
+ * to declare exactly which snippet(s) it used. The chatRouter
+ * validates each entry's `documentId` against the snippet set it
+ * actually sent the LLM, so the model can't invent references.
+ */
+export interface StructuredCitation {
+  documentId: string;
+  page: number;
+  quote: string;
+}
+
+export interface ParsedRagAnswer {
+  /** The LLM's answer with any fenced JSON block removed. */
+  cleanedAnswer: string;
+  /** Parsed `suggestedIntent` if emitted + well-formed (CF-07). */
+  suggestedIntent: SuggestedIntent | null;
+  /** Parsed `citations` array if emitted + well-formed (CF-06). */
+  structuredCitations: StructuredCitation[] | null;
+}
+
+/**
+ * Extract the optional ```json fenced block the grounded LLM may
+ * append. Single block; may contain either or both of:
+ *
+ *   - `suggestedIntent` (CF-07): { intent, confidence, reason }
+ *   - `citations`      (CF-06): array of { documentId, page, quote }
+ *
+ * Robustness:
+ *   - No fenced block            → cleanedAnswer = trimmed input, both fields null.
+ *   - Block present + malformed  → cleanedAnswer = trimmed input, both fields null
+ *                                  (we DON'T strip a broken block since the cleanup
+ *                                  heuristic is fragile on partial JSON).
+ *   - Block parses but field shape wrong → that field stays null (the other
+ *                                  one is still considered independently).
+ *   - Citation entries with wrong types are silently filtered; if NO valid
+ *     entries remain, `structuredCitations` is null (not `[]`) so callers
+ *     can fall back to the GroundX-derived list.
+ */
+export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
+  const fenceMatch = rawAnswer.match(/```json\s*\n([\s\S]*?)\n```/);
+  if (!fenceMatch) {
+    return { cleanedAnswer: rawAnswer.trim(), suggestedIntent: null, structuredCitations: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fenceMatch[1]);
+  } catch {
+    // Malformed JSON — leave the body alone (don't strip the block,
+    // since the cleanup heuristic would be fragile on partial JSON).
+    return { cleanedAnswer: rawAnswer.trim(), suggestedIntent: null, structuredCitations: null };
+  }
+
+  // suggestedIntent — same shape check as CF-07.
+  const siCandidate = (parsed as { suggestedIntent?: unknown })?.suggestedIntent;
+  const suggestedIntent: SuggestedIntent | null =
+    siCandidate &&
+    typeof siCandidate === "object" &&
+    typeof (siCandidate as SuggestedIntent).intent === "string" &&
+    typeof (siCandidate as SuggestedIntent).confidence === "number" &&
+    typeof (siCandidate as SuggestedIntent).reason === "string"
+      ? (siCandidate as SuggestedIntent)
+      : null;
+
+  // citations — filter to well-formed entries (CF-06).
+  const citationsRaw = (parsed as { citations?: unknown })?.citations;
+  let structuredCitations: StructuredCitation[] | null = null;
+  if (Array.isArray(citationsRaw)) {
+    const valid = citationsRaw.filter(
+      (c): c is StructuredCitation =>
+        c != null &&
+        typeof c === "object" &&
+        typeof (c as StructuredCitation).documentId === "string" &&
+        typeof (c as StructuredCitation).page === "number" &&
+        typeof (c as StructuredCitation).quote === "string",
+    );
+    if (valid.length > 0) structuredCitations = valid;
+  }
+
+  // Strip the fenced block from the user-facing answer. Collapse any
+  // surrounding blank lines so the cleaned answer reads naturally.
+  const cleaned = rawAnswer
+    .replace(fenceMatch[0], "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { cleanedAnswer: cleaned, suggestedIntent, structuredCitations };
 }
 
 /**
@@ -327,30 +517,69 @@ async function runRagPipeline(
  *   documents               → POST /v1/search/documents +
  *                             {query, n, documentIds: [...]}
  *
- * TODO(CF-02 + CF-15): multi-bucket usage today
- * requires the caller to provide an existing groupId. The "ensure-
- * create group of buckets [B1, B2, …] if none exists" helper lives
- * outside this function and isn't built yet — when it lands, the
- * handler can pass `{kind:"group", groupId}` after the ensure call.
+ * TODO(CF-19): multi-bucket usage today requires the caller to
+ * provide an existing groupId. The "ensure-create group of buckets
+ * [B1, B2, …] if none exists" helper lives outside this function;
+ * when it lands, the handler can pass `{kind:"group", groupId}`
+ * after the ensure call. CF-02 + CF-15 closed 2026-05-25 — the
+ * 5-case dispatch + entity-driven scope derivation are live; only
+ * the multi-bucket→group helper remains.
  */
+/**
+ * CF-03: options for layering a server-derived metadata filter (RBAC,
+ * tenant, region, etc.) on top of the scope filter. The contract:
+ *
+ *   - If only the scope produces a filter → use it as-is.
+ *   - If only `rbacFilter` is set        → use it as-is.
+ *   - If both are present                → compose via `$and: [rbac, scope]`.
+ *
+ * The `rbacFilter` is ALWAYS server-derived (from session.groundx-
+ * Username → org → allowed visibility). It MUST NOT be accepted from
+ * the client. This function doesn't enforce that — the caller does, by
+ * never plumbing client input into this parameter.
+ */
+export interface SearchGroundXOptions {
+  rbacFilter?: Record<string, unknown>;
+}
+
+/**
+ * Compose two independent filters into one. Returns null when both
+ * are absent. Uses Mongo-style `$and` for composition rather than a
+ * shallow merge — shallow merge silently drops collisions and
+ * collapses any structured logic the caller already encoded.
+ */
+function composeFilters(
+  rbac: Record<string, unknown> | null,
+  scope: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!rbac && !scope) return null;
+  if (!rbac) return scope;
+  if (!scope) return rbac;
+  return { $and: [rbac, scope] };
+}
+
 export async function searchGroundX(
   query: string,
   scope: RagContentScope,
   client: GroundXClient,
   apiKey: string,
+  options: SearchGroundXOptions = {},
 ): Promise<GroundXSearchResult[]> {
   let path: string;
   // Body must always include {query, n}; some scopes add fields.
   const body: Record<string, unknown> = { query, n: RAG_SEARCH_LIMIT };
+  // Filter derived from the scope kind (e.g. projectId). May be unset
+  // for group / unknown / bucket-without-projectIds scopes.
+  let scopeFilter: Record<string, unknown> | null = null;
 
   switch (scope.kind) {
     case "bucket": {
       path = `/v1/search/${scope.bucketId}`;
       const ids = scope.projectIds ?? [];
       if (ids.length === 1) {
-        body.filter = { projectId: ids[0] };
+        scopeFilter = { projectId: ids[0] };
       } else if (ids.length > 1) {
-        body.filter = { projectId: { $in: ids } };
+        scopeFilter = { projectId: { $in: ids } };
       }
       break;
     }
@@ -380,6 +609,14 @@ export async function searchGroundX(
     }
   }
 
+  // CF-03: compose rbacFilter with scopeFilter via $and. The two are
+  // independent constraints from different sources — never collapse
+  // them naively (e.g. spread-merge would silently drop a key
+  // collision). $and is the contract GroundX search expects when two
+  // independent filters must both match.
+  const composed = composeFilters(options.rbacFilter ?? null, scopeFilter);
+  if (composed) body.filter = composed;
+
   const response = await client.forward(path, {
     method: "POST",
     apiKey,
@@ -405,26 +642,26 @@ export async function searchGroundX(
 }
 
 /**
- * TODO(CF-06): the grounded completion prompt is naïve.
- * Open items:
- *   - Token-budget guard so the LLM plans its answer length against
- *     snippet count + length (today it can blow past context if
- *     snippets are large).
- *   - Structured citation output (current "repeat short phrases
- *     verbatim" produces inconsistent citation extraction; a JSON
- *     citations field is more reliable).
- *   - "I don't know" calibration when snippets don't contain the
- *     answer — the LLM currently hedges; should refuse cleanly.
- *   - An eval set per scenario for regression testing once telemetry
- *     is live.
+ * CF-06: the grounded completion prompt now carries three constraints
+ * the earlier version lacked:
  *
- * TODO(CF-07): viewer intent inference. Ask the LLM to
- * optionally output a `suggestedIntent: {intent, confidence, reason}`
- * when the question implies the user should look at a different view
- * (source PDF, extraction table, specific citation). Dispatch logic
- * must surface as a suggestedActions chip (user opt-in) ONLY when
- * `confidence >= 0.85` — never auto-navigate. Auto-navigation on a
- * low-confidence guess is more disruptive than a missed suggestion.
+ *   1. Refusal contract — when snippets don't cover the question, the
+ *      LLM must reply with the exact `GROUNDED_REFUSAL_PHRASE` rather
+ *      than hedge or fill from general knowledge.
+ *   2. Structured citations — instead of "repeat short phrases
+ *      verbatim" (which produced inconsistent extraction), the LLM
+ *      emits a `citations` array inside the same fenced JSON block as
+ *      `suggestedIntent`. `runRagPipeline` validates each entry's
+ *      `documentId` against the snippet set before using it.
+ *   3. Token-budget guard — the assembled snippet block is truncated
+ *      to `MAX_SNIPPET_BLOCK_CHARS` before being sent. With the
+ *      search ranking putting most-relevant first, trailing snippets
+ *      are dropped when over budget.
+ *
+ * CF-07 (suggestedIntent) sits inside the same JSON block.
+ *
+ * CF-06a (the eval-in-CI follow-up) lives in a separate row. Closing
+ * THIS CF-06 covers the prompt code; the eval set scores it.
  */
 async function callGroundedLlm(
   userMessage: string,
@@ -434,18 +671,27 @@ async function callGroundedLlm(
 ): Promise<{ answer: string }> {
   const system =
     "You are a document Q&A assistant. Answer ONLY using the snippets " +
-    "provided below as context. If the snippets do not contain enough " +
-    "information to answer, say so plainly. Cite by repeating short " +
-    "phrases verbatim. Be concise.";
+    "provided below as context. Be concise.\n\n" +
+    "REFUSAL CONTRACT: If the snippets do NOT contain enough " +
+    "information to answer the question, reply with EXACTLY this " +
+    `phrase and nothing else: "${GROUNDED_REFUSAL_PHRASE}" Don't use ` +
+    "your general knowledge to fill in. Don't invent facts. A clean " +
+    "refusal is better than a confident guess.\n\n" +
+    "OPTIONAL FENCED JSON BLOCK: at the end of your answer you MAY " +
+    "append a single ```json fenced code block carrying either or " +
+    "both of these fields:\n\n" +
+    "```json\n" +
+    '{"citations":[{"documentId":"<id-from-the-snippet-header>","page":<int>,"quote":"<short verbatim phrase>"}],' +
+    '"suggestedIntent":{"intent":"<kebab-case-id>","confidence":<0-1 float>,"reason":"<short explanation>"}}\n' +
+    "```\n\n" +
+    "- `citations`: list ONLY the snippets you actually used. Use the " +
+    "exact `documentId` from each snippet's header. The client will " +
+    "drop any citation referencing a documentId you weren't given.\n" +
+    "- `suggestedIntent`: only emit when you're confident (>0.8) that " +
+    "the user should look at a different view. The client surfaces it " +
+    "as a clickable chip ONLY at confidence >= 0.85.";
 
-  const contextBlock = snippets.length
-    ? snippets
-        .map(
-          (s, i) =>
-            `[${i + 1}] doc=${s.documentId} page=${s.pageNumber ?? "?"}\n${(s.text ?? "").slice(0, RAG_SNIPPET_CHARS)}`,
-        )
-        .join("\n\n")
-    : "(no snippets found)";
+  const contextBlock = buildSnippetBlock(snippets);
 
   const response = await llmClient.forward("/chat/completions", {
     method: "POST",
@@ -471,17 +717,244 @@ async function callGroundedLlm(
   return { answer };
 }
 
+/**
+ * CF-06 token-budget guard. Assemble snippets into the context block
+ * the LLM sees, truncating from the end once the budget is hit so the
+ * highest-ranked snippets are preserved. The per-snippet cap
+ * (`RAG_SNIPPET_CHARS`) is applied first; this function then drops
+ * whole snippets if the budget would still be blown.
+ */
+export function buildSnippetBlock(snippets: GroundXSearchResult[]): string {
+  if (snippets.length === 0) return "(no snippets found)";
+  const entries: string[] = [];
+  let used = 0;
+  for (const [i, s] of snippets.entries()) {
+    const text = (s.text ?? "").slice(0, RAG_SNIPPET_CHARS);
+    const entry = `[${i + 1}] doc=${s.documentId} page=${s.pageNumber ?? "?"}\n${text}`;
+    // +2 for the "\n\n" join we'll add between entries.
+    const projected = used + entry.length + (entries.length > 0 ? 2 : 0);
+    if (projected > MAX_SNIPPET_BLOCK_CHARS) break;
+    entries.push(entry);
+    used = projected;
+  }
+  // Edge case: even the FIRST snippet exceeds the budget. Truncate it
+  // hard rather than send an empty block — a partial top result is
+  // more useful than nothing.
+  if (entries.length === 0) {
+    const s = snippets[0];
+    const truncated = (s.text ?? "").slice(0, MAX_SNIPPET_BLOCK_CHARS - 80);
+    return `[1] doc=${s.documentId} page=${s.pageNumber ?? "?"}\n${truncated}`;
+  }
+  return entries.join("\n\n");
+}
+
+/**
+ * CF-09 — per-scenario MOCK_MODE fixtures. The pre-CF-09 mock always
+ * returned generic "Mock RAG answer about X" copy, which made dev / QA
+ * useless for testing scenario-specific UX. Now each sample has a
+ * small library of canonical questions with realistic-shaped answers
+ * + the right citation docId so consumers can verify routing.
+ *
+ * Per locked decision: keep this map IN-CODE rather than reading from
+ * scenario manifests. Manifest authoring is on the product team's
+ * track; the mock-mode fixtures are a dev-quality concern that should
+ * be reviewable in PR + grep-friendly. When manifests grow a
+ * `mockChatScript` field (SCEN-* track), this map can become a
+ * fallback for scenarios without one — not a sole source of truth.
+ *
+ * Pattern matching is intentionally lenient (`/total/i`, `/dti/i`)
+ * rather than exact strings — the user types whatever; we just need
+ * to recognize the canonical intent.
+ */
+interface MockScenarioFixture {
+  match: RegExp;
+  answer: string;
+  citations: Array<{ documentId: string; page: number; snippet?: string }>;
+}
+
+interface MockScenarioBundle {
+  /** Friendly name baked into the fallback so it reads scenario-aware. */
+  sampleName: string;
+  /** Document id for the fallback citation (and tied to `sampleName`). */
+  fallbackDocId: string;
+  /** Question → answer fixtures, tried in order. */
+  fixtures: MockScenarioFixture[];
+}
+
+const MOCK_SCENARIO_FIXTURES: Record<string, MockScenarioBundle> = {
+  "sample:utility": {
+    sampleName: "utility bill",
+    fallbackDocId: "utility-bill-2026-04",
+    fixtures: [
+      {
+        match: /\btotal\b|\bamount\s+due\b/i,
+        answer: "The bill total is $214.07 (current charges + carryover).",
+        citations: [
+          {
+            documentId: "utility-bill-2026-04",
+            page: 1,
+            snippet: "Total amount due: $214.07",
+          },
+        ],
+      },
+      {
+        match: /\bdue\s*date\b|\bwhen\s+is\s+(it|this)\s+due\b/i,
+        answer: "The bill is due on May 15, 2026. Late fee kicks in after May 22.",
+        citations: [
+          {
+            documentId: "utility-bill-2026-04",
+            page: 1,
+            snippet: "Due date: 05/15/2026",
+          },
+        ],
+      },
+      {
+        match: /\bkwh\b|\busage\b|\bconsumption\b/i,
+        answer:
+          "Total usage this period: 642 kWh across two meters. That's up ~8% vs. the same month last year.",
+        citations: [
+          {
+            documentId: "utility-bill-2026-04",
+            page: 2,
+            snippet: "Meter A: 412 kWh; Meter B: 230 kWh",
+          },
+        ],
+      },
+    ],
+  },
+  "sample:loan": {
+    sampleName: "loan packet",
+    fallbackDocId: "loan-applicant-summary",
+    fixtures: [
+      {
+        match: /\bdti\b|\bdebt[- ]to[- ]income\b/i,
+        answer:
+          "Estimated DTI is 22% (gross), comfortably under the 35% threshold. Driven by $1,210/mo recurring debt against $5,500/mo gross income.",
+        citations: [
+          {
+            documentId: "loan-applicant-summary",
+            page: 3,
+            snippet: "Recurring monthly debt: $1,210",
+          },
+        ],
+      },
+      {
+        match: /\bcredit\s*score\b|\bfico\b/i,
+        answer:
+          "Applicant's reported FICO is 742 (mid-tier prime). Most recent pull is two months old; recommend a fresh pull before final commitment.",
+        citations: [
+          {
+            documentId: "loan-credit-report",
+            page: 1,
+            snippet: "FICO 8 score: 742",
+          },
+        ],
+      },
+      {
+        match: /\bincome\b|\bemployment\b|\bsalary\b/i,
+        answer:
+          "Gross monthly income $5,500 verified across 3 paystubs + 1 employment letter. Tenure 4.2 years at current employer.",
+        citations: [
+          {
+            documentId: "loan-employment-letter",
+            page: 1,
+            snippet: "Annual gross salary: $66,000",
+          },
+        ],
+      },
+    ],
+  },
+  "sample:solar": {
+    sampleName: "solar portfolio",
+    fallbackDocId: "solar-fund-overview",
+    fixtures: [
+      {
+        match: /\birr\b|\binternal\s+rate\b/i,
+        answer:
+          "Top project (Fund A · Project 11) projected IRR is 14.2% (base case). Fund-wide weighted IRR: 11.8%.",
+        citations: [
+          {
+            documentId: "solar-fund-A-project-11",
+            page: 4,
+            snippet: "Base-case IRR: 14.2%",
+          },
+        ],
+      },
+      {
+        match: /\brisk\b/i,
+        answer:
+          "Highest-risk project is Fund B · Project 03 — flagged for interconnection delay + degradation curve uncertainty. Risk score 7.4/10.",
+        citations: [
+          {
+            documentId: "solar-fund-B-project-03",
+            page: 2,
+            snippet: "Risk roll-up: 7.4/10",
+          },
+        ],
+      },
+      {
+        match: /\bdeal\s*size\b|\b(total|fund)\s*(value|size)\b/i,
+        answer:
+          "Combined deal size across the 142-project portfolio is $487M, with $312M committed and $175M in pipeline.",
+        citations: [
+          {
+            documentId: "solar-fund-overview",
+            page: 1,
+            snippet: "Total fund commitment: $487M",
+          },
+        ],
+      },
+    ],
+  },
+};
+
+function mockRagResponse(request: ChatRouterRequest): ChatRouterResponse {
+  const bundle = request.currentEntityKey ? MOCK_SCENARIO_FIXTURES[request.currentEntityKey] : null;
+  if (bundle) {
+    for (const fixture of bundle.fixtures) {
+      if (fixture.match.test(request.newUserMessage)) {
+        return {
+          mode: "rag",
+          answer: fixture.answer,
+          citations: fixture.citations,
+          suggestedActions: [{ key: "show-source", label: "Show source" }],
+          tools: [],
+        };
+      }
+    }
+    // Scenario-aware fallback: the entity matched a known bundle but
+    // no canonical question matched. Better to mention the sample
+    // than serve the fully-generic copy.
+    return {
+      mode: "rag",
+      answer:
+        `I can answer questions about the ${bundle.sampleName} — try asking about the ` +
+        `headline values or page-specific details. ` +
+        `(Mock-mode reply; live RAG would search the sample documents.)`,
+      citations: [
+        { documentId: bundle.fallbackDocId, page: 1, snippet: "Sample document." },
+      ],
+      suggestedActions: [{ key: "show-source", label: "Show source" }],
+      tools: [],
+    };
+  }
+  // Fully-generic fallback for pre-CF-09 callers that don't ship
+  // currentEntityKey OR scenarios we haven't authored yet.
+  const entityHint = request.currentEntityKey ? ` (about ${request.currentEntityKey})` : "";
+  return {
+    mode: "rag",
+    answer: `Mock RAG answer${entityHint}: I'd cite the sample document here once GroundX search is wired.`,
+    citations: [{ documentId: "mock-doc-1", page: 1, snippet: "Mock snippet for the cited page." }],
+    suggestedActions: [{ key: "show-source", label: "Show source" }],
+    tools: [],
+  };
+}
+
 function mockResponseFor(mode: ChatMode, request: ChatRouterRequest): ChatRouterResponse {
   const entityHint = request.currentEntityKey ? ` (about ${request.currentEntityKey})` : "";
   switch (mode) {
     case "rag":
-      return {
-        mode,
-        answer: `Mock RAG answer${entityHint}: I'd cite the sample document here once GroundX search is wired.`,
-        citations: [{ documentId: "mock-doc-1", page: 1, snippet: "Mock snippet for the cited page." }],
-        suggestedActions: [{ key: "show-source", label: "Show source" }],
-        tools: [],
-      };
+      return mockRagResponse(request);
     case "structured":
       return {
         mode,

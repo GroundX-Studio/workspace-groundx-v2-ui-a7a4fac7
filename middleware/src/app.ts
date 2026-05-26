@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express, { type Express, type Request, type Response } from "express";
@@ -9,6 +11,7 @@ import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
 import { encryptSecret } from "./lib/crypto.js";
 import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/metrics.js";
+import { CSRF_COOKIE, csrfMiddleware } from "./middleware/csrf.js";
 import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { ChatHandlerError, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
@@ -71,10 +74,24 @@ export interface AppDependencies {
   partnerClient: GroundXPartnerClient;
   groundxClient: GroundXClient;
   llmClient: LlmClient;
+  /**
+   * CF-16: light-side LLM client. Optional. When unset, the chat
+   * `llmClient` is reused for compression (single-LLM deployments).
+   * `index.ts` builds this from the `LLM_LIGHT_*` env block.
+   */
+  lightLlmClient?: LlmClient;
   scenarioRegistry: ScenarioRegistry;
 }
 
-export function createApp({ env, repository, partnerClient, groundxClient, llmClient, scenarioRegistry }: AppDependencies): Express {
+export function createApp({
+  env,
+  repository,
+  partnerClient,
+  groundxClient,
+  llmClient,
+  lightLlmClient,
+  scenarioRegistry,
+}: AppDependencies): Express {
   const app = express();
   app.set("etag", false);
   app.disable("x-powered-by");
@@ -153,6 +170,11 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
   app.use(sessionMiddleware(env, repository));
+  // SC-01 — CSRF defense, after cookieParser so we can read the
+  // csrf_token cookie, and after sessionMiddleware so the session
+  // cookie is established first (the order doesn't matter for
+  // correctness — they're independent — but matters for log clarity).
+  app.use(csrfMiddleware(env));
 
   // Rate-limit buckets. Key by session id when one is present, falling
   // back to client IP — this prevents one user behind a corporate NAT
@@ -188,6 +210,15 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
   });
 
   app.get("/api/healthz", (_req, res) => res.json({ status: "ok" }));
+
+  // SC-01 — explicit CSRF-token bootstrap endpoint. The middleware
+  // already issues the cookie on every response, but a client that
+  // wants to fetch the token without piggybacking on another GET can
+  // call this. Returns the same value that's in the `csrf_token`
+  // cookie so a client can verify before any state-changing POST.
+  app.get("/api/csrf/token", (req, res) => {
+    res.json({ token: req.cookies?.[CSRF_COOKIE] ?? null });
+  });
 
   if (env.METRICS_ENABLED) {
     app.get("/api/metrics", async (_req, res, next) => {
@@ -417,6 +448,72 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
     }
   });
 
+  // UI-10b — record a canvas-orchestrator dispatch into `intent_log`.
+  // Best-effort from the frontend (fire-and-forget); we still validate
+  // the payload shape so a malformed POST gets 400 rather than silent
+  // garbage in the table. Auth required so anon users can't fill the
+  // table from outside — anonymous sessions can dispatch but the
+  // server only records when there's a real chat_session_id.
+  app.post("/api/intent", apiLimiter, requireSession, async (req, res, next) => {
+    try {
+      const body = req.body as
+        | {
+            chatSessionId?: unknown;
+            source?: unknown;
+            intent?: unknown;
+          }
+        | null;
+      if (!body || typeof body !== "object") {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      const chatSessionId = typeof body.chatSessionId === "string" ? body.chatSessionId : null;
+      const source = typeof body.source === "string" ? body.source : null;
+      const intent =
+        body.intent && typeof body.intent === "object" && !Array.isArray(body.intent)
+          ? (body.intent as Record<string, unknown>)
+          : null;
+      const allowedSources = new Set(["user", "agent", "tour", "system"]);
+      if (!chatSessionId || !source || !allowedSources.has(source) || !intent) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      const intentKind = typeof intent.kind === "string" ? intent.kind : null;
+      if (!intentKind) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      // The row's chat_session_id is an FK to chat_sessions; verify the
+      // session exists AND that the caller actually owns it. Without
+      // this check anyone with a valid cookie could write to any
+      // session's intent_log.
+      const chatSession = await repository.getChatSession(chatSessionId);
+      if (!chatSession) {
+        res.status(404).json({ error: "chat_session_not_found" });
+        return;
+      }
+      const reqSession = req.session!;
+      const ownedByUser =
+        reqSession.groundxUsername && chatSession.ownerUserId === reqSession.groundxUsername;
+      const ownedByAnon = !reqSession.groundxUsername && chatSession.ownerAnonId === reqSession.id;
+      if (!ownedByUser && !ownedByAnon) {
+        res.status(403).json({ error: "not_session_owner" });
+        return;
+      }
+      await repository.appendIntentLog({
+        id: randomUUID(),
+        chatSessionId,
+        timestamp: Date.now(),
+        source: source as "user" | "agent" | "tour" | "system",
+        intentKind,
+        intentJson: JSON.stringify(intent),
+      });
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // The chat surface's single entry point. Routes through chatHandler,
   // which validates → persists the user message → builds the 3-axis
   // context bundle → optionally compresses → calls routeChat (mock or
@@ -440,10 +537,13 @@ export function createApp({ env, repository, partnerClient, groundxClient, llmCl
       const result = await handleChatMessage(payload, {
         repository,
         llmClient,
+        lightLlmClient,
         groundxClient,
+        partnerClient,
         groundxApiKey,
         samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
         llmModelId: env.LLM_MODEL_ID ?? "model",
+        lightLlmModelId: env.LLM_LIGHT_MODEL_ID,
         mockMode: env.MOCK_MODE,
         byoPagesLimit: env.BYO_PAGES_LIMIT,
         contextWindowTokens: env.LLM_CONTEXT_WINDOW_TOKENS,

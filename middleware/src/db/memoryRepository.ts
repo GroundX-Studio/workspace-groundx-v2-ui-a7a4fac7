@@ -5,6 +5,8 @@ import type {
   ChatSessionEntityRecord,
   ChatSessionRecord,
   ConversationSummaryRecord,
+  ExtractionSchemaRecord,
+  IntentLogRecord,
   SessionRecord,
   ViewerEventRecord,
 } from "../types.js";
@@ -24,6 +26,10 @@ export class MemoryAppRepository implements AppRepository {
   conversationSummaries = new Map<string, ConversationSummaryRecord[]>();
   chatSessionEntities = new Map<string, ChatSessionEntityRecord>(); // key: `${sessionId}|${entityKey}`
   viewerEvents = new Map<string, ViewerEventRecord[]>();
+  // CF-04 saved-schemas reader source. Keyed by schema id.
+  extractionSchemas = new Map<string, ExtractionSchemaRecord>();
+  // UI-10b — intent log (every canvas-orchestrator dispatch).
+  intentLog = new Map<string, IntentLogRecord[]>();
 
   async createSchema(): Promise<void> {}
 
@@ -132,6 +138,33 @@ export class MemoryAppRepository implements AppRepository {
     const all = this.viewerEvents.get(chatSessionId) ?? [];
     const filtered = sinceTimestamp != null ? all.filter((e) => e.timestamp >= sinceTimestamp) : all;
     return [...filtered].sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  // ── Intent log (UI-10b) ─────────────────────────────────────────
+
+  async appendIntentLog(record: IntentLogRecord): Promise<void> {
+    const list = this.intentLog.get(record.chatSessionId) ?? [];
+    list.push(record);
+    this.intentLog.set(record.chatSessionId, list);
+  }
+
+  async listIntentLog(chatSessionId: string, sinceTimestamp?: number): Promise<IntentLogRecord[]> {
+    const all = this.intentLog.get(chatSessionId) ?? [];
+    const filtered = sinceTimestamp != null ? all.filter((e) => e.timestamp >= sinceTimestamp) : all;
+    return [...filtered].sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  // ── Extraction schemas (CF-04) ──────────────────────────────────
+
+  async upsertExtractionSchema(record: ExtractionSchemaRecord): Promise<void> {
+    this.extractionSchemas.set(record.id, record);
+  }
+
+  async listExtractionSchemasForUser(groundxUsername: string): Promise<ExtractionSchemaRecord[]> {
+    const all = Array.from(this.extractionSchemas.values()).filter(
+      (s) => s.groundxUsername === groundxUsername,
+    );
+    return all.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
   }
 
   // ── Login-claim (re-key, not bulk-upload) ───────────────────────

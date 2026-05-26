@@ -12,6 +12,7 @@ import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProvid
 const mocks = vi.hoisted(() => ({
   register: vi.fn(),
   claimAnonymousChat: vi.fn(),
+  captureException: vi.fn(),
 }));
 
 vi.mock("@/api/entities/customerEntity", () => ({
@@ -20,6 +21,11 @@ vi.mock("@/api/entities/customerEntity", () => ({
 vi.mock("@/api/claimAnonymousChat", () => ({
   claimAnonymousChat: mocks.claimAnonymousChat,
 }));
+// CF-13: claim failures route to the Sentry wrapper.
+vi.mock("@/lib/sentry", () => ({
+  captureException: mocks.captureException,
+  initSentry: vi.fn(() => false),
+}));
 
 import { GateView } from "./GateView";
 
@@ -27,6 +33,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.register.mockReset();
   mocks.claimAnonymousChat.mockReset();
+  mocks.captureException.mockReset();
   mocks.register.mockResolvedValue({ username: "gx-user", token: "t", xJwtToken: "x", apiKeys: [] });
   mocks.claimAnonymousChat.mockResolvedValue({ rekeyedSessions: 1 });
 });
@@ -205,6 +212,47 @@ describe("GateView (F6)", () => {
       expect(snapshot.authState).toBe("signed-in");
       expect(snapshot.gateStatus).toBe("committed");
     });
+  });
+
+  // CF-13 — claim failures route to Sentry.captureException with
+  // enough context (route + stage) to triage in the dashboard. The
+  // commit still completes; capture is observability, not blocking UX.
+  it("claim failure after register → captures exception with route + stage extras", async () => {
+    const user = userEvent.setup();
+    const claimErr = new Error("claim 502");
+    mocks.claimAnonymousChat.mockRejectedValueOnce(claimErr);
+
+    renderWithOnboardingProviders(<OpenGateHarness />, {
+      initialScenario: "utility",
+      initialFrame: "f6",
+    });
+
+    await fillRegisterForm(user);
+    await user.click(screen.getByTestId("gate-register-submit"));
+
+    await waitFor(() => {
+      expect(mocks.captureException).toHaveBeenCalledTimes(1);
+    });
+    const [err, extras] = mocks.captureException.mock.calls[0];
+    expect(err).toBe(claimErr);
+    expect(extras).toMatchObject({
+      route: "/api/chat-sessions/claim",
+      stage: "after-register",
+    });
+  });
+
+  it("claim success → does NOT capture (no spurious Sentry events on the happy path)", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OpenGateHarness />, {
+      initialScenario: "utility",
+      initialFrame: "f6",
+    });
+
+    await fillRegisterForm(user);
+    await user.click(screen.getByTestId("gate-register-submit"));
+
+    expect(await screen.findByTestId("gate-committed")).toBeInTheDocument();
+    expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
   it("collapses the committed confirmation without reopening the gate", async () => {

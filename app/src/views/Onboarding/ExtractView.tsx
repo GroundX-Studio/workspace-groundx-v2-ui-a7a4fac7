@@ -25,6 +25,7 @@ import {
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import { track } from "@/lib/analytics";
 import type { ExtractedFieldValue } from "@/types/scenarios";
 import { CiteChip } from "@/shared/components/CiteChip";
 
@@ -207,6 +208,16 @@ export const ExtractView: FC = () => {
                     tabIndex={0}
                     aria-label={`Inspect field: ${field.name}`}
                     data-testid={`field-row-${field.id}`}
+                    onMouseEnter={() => {
+                      // OB-02 — extract.field_hovered fires on every
+                      // row hover. PostHog dedupes via session_id +
+                      // event_ts so spam isn't a concern; the funnel
+                      // wants total hover-count per field.
+                      track("extract.field_hovered", {
+                        fieldId: field.id,
+                        fieldName: field.name,
+                      });
+                    }}
                     onClick={() => setSelectedFieldId(field.id)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {

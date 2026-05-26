@@ -8,6 +8,8 @@ import type {
   ChatSessionEntityRecord,
   ChatSessionRecord,
   ConversationSummaryRecord,
+  ExtractionSchemaRecord,
+  IntentLogRecord,
   SessionRecord,
   ViewerEventRecord,
 } from "../types.js";
@@ -127,6 +129,13 @@ export class MySqlAppRepository implements AppRepository {
         completed_frames_json JSON NOT NULL,
         scan_progress_json JSON NULL,
         extracted_values_json JSON NULL,
+        -- CF-15: RAG scope refs. All nullable so existing rows + the
+        -- onboarding "no entity scope yet, just use the env samples
+        -- bucket" path keep working unchanged.
+        bucket_id INT NULL,
+        project_ids_json JSON NULL,
+        group_id INT NULL,
+        document_ids_json JSON NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         last_visited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (chat_session_id, entity_key),
@@ -145,6 +154,38 @@ export class MySqlAppRepository implements AppRepository {
         detail_json JSON NULL,
         INDEX viewer_events_session_idx (chat_session_id, ts_ms),
         FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    // UI-10b — intent_log. Separate from viewer_events so the tour
+    // state machine (PLUG-05) can write `source: "tour"` rows without
+    // polluting the viewer trail. Cascades on chat_sessions.
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS intent_log (
+        id VARCHAR(36) PRIMARY KEY,
+        chat_session_id VARCHAR(36) NOT NULL,
+        ts_ms BIGINT NOT NULL,
+        source VARCHAR(16) NOT NULL,
+        intent_kind VARCHAR(64) NOT NULL,
+        intent_json JSON NOT NULL,
+        INDEX intent_log_session_idx (chat_session_id, ts_ms),
+        FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    // CF-04: app-owned extraction schemas. Keyed by user so the saved-
+    // schemas reader scopes the list per `groundxUsername`. Cascade is
+    // intentionally NOT on the user — there's no user table; the
+    // username is the join key. App-level GC sweeps stale rows.
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS extraction_schemas (
+        id VARCHAR(64) PRIMARY KEY,
+        groundx_username VARCHAR(128) NOT NULL,
+        name VARCHAR(128) NOT NULL,
+        schema_json JSON NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX extraction_schemas_user_idx (groundx_username, updated_at)
       )
     `);
   }
@@ -391,13 +432,19 @@ export class MySqlAppRepository implements AppRepository {
     await this.pool.execute(
       `INSERT INTO chat_session_entities (
         chat_session_id, entity_key, last_frame, completed_frames_json,
-        scan_progress_json, extracted_values_json, created_at, last_visited_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        scan_progress_json, extracted_values_json,
+        bucket_id, project_ids_json, group_id, document_ids_json,
+        created_at, last_visited_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         last_frame = VALUES(last_frame),
         completed_frames_json = VALUES(completed_frames_json),
         scan_progress_json = VALUES(scan_progress_json),
         extracted_values_json = VALUES(extracted_values_json),
+        bucket_id = VALUES(bucket_id),
+        project_ids_json = VALUES(project_ids_json),
+        group_id = VALUES(group_id),
+        document_ids_json = VALUES(document_ids_json),
         last_visited_at = VALUES(last_visited_at)`,
       [
         record.chatSessionId,
@@ -406,6 +453,10 @@ export class MySqlAppRepository implements AppRepository {
         record.completedFramesJson,
         record.scanProgressJson,
         record.extractedValuesJson,
+        record.bucketId,
+        record.projectIdsJson,
+        record.groupId,
+        record.documentIdsJson,
         record.createdAt,
         record.lastVisitedAt,
       ],
@@ -415,7 +466,9 @@ export class MySqlAppRepository implements AppRepository {
   async listChatSessionEntities(chatSessionId: string): Promise<ChatSessionEntityRecord[]> {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
       `SELECT chat_session_id, entity_key, last_frame, completed_frames_json,
-        scan_progress_json, extracted_values_json, created_at, last_visited_at
+        scan_progress_json, extracted_values_json,
+        bucket_id, project_ids_json, group_id, document_ids_json,
+        created_at, last_visited_at
        FROM chat_session_entities
        WHERE chat_session_id = ?`,
       [chatSessionId],
@@ -461,6 +514,85 @@ export class MySqlAppRepository implements AppRepository {
       [chatSessionId],
     );
     return rows.map(rowToViewerEvent);
+  }
+
+  // ── Intent log (UI-10b) ─────────────────────────────────────────
+
+  async appendIntentLog(record: IntentLogRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO intent_log (
+        id, chat_session_id, ts_ms, source, intent_kind, intent_json
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.chatSessionId,
+        record.timestamp,
+        record.source,
+        record.intentKind,
+        record.intentJson,
+      ],
+    );
+  }
+
+  async listIntentLog(chatSessionId: string, sinceTimestamp?: number): Promise<IntentLogRecord[]> {
+    if (sinceTimestamp != null) {
+      const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+        `SELECT id, chat_session_id, ts_ms, source, intent_kind, intent_json
+         FROM intent_log
+         WHERE chat_session_id = ? AND ts_ms >= ?
+         ORDER BY ts_ms DESC`,
+        [chatSessionId, sinceTimestamp],
+      );
+      return rows.map(rowToIntentLog);
+    }
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, chat_session_id, ts_ms, source, intent_kind, intent_json
+       FROM intent_log
+       WHERE chat_session_id = ?
+       ORDER BY ts_ms DESC`,
+      [chatSessionId],
+    );
+    return rows.map(rowToIntentLog);
+  }
+
+  // ── Extraction schemas (CF-04) ──────────────────────────────────
+
+  async upsertExtractionSchema(record: ExtractionSchemaRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO extraction_schemas (id, groundx_username, name, schema_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+        groundx_username = VALUES(groundx_username),
+        name = VALUES(name),
+        schema_json = VALUES(schema_json),
+        updated_at = VALUES(updated_at)`,
+      [
+        record.id,
+        record.groundxUsername,
+        record.name,
+        record.schemaJson,
+        record.createdAt,
+        record.updatedAt,
+      ],
+    );
+  }
+
+  async listExtractionSchemasForUser(groundxUsername: string): Promise<ExtractionSchemaRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, groundx_username, name, schema_json, created_at, updated_at
+       FROM extraction_schemas
+       WHERE groundx_username = ?
+       ORDER BY updated_at DESC`,
+      [groundxUsername],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      groundxUsername: row.groundx_username,
+      name: row.name,
+      schemaJson: row.schema_json,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+    }));
   }
 
   // ── Login-claim (re-key, not bulk-upload) ───────────────────────
@@ -545,6 +677,10 @@ function rowToChatSessionEntity(row: mysql.RowDataPacket): ChatSessionEntityReco
     completedFramesJson: row.completed_frames_json,
     scanProgressJson: row.scan_progress_json,
     extractedValuesJson: row.extracted_values_json,
+    bucketId: row.bucket_id == null ? null : Number(row.bucket_id),
+    projectIdsJson: row.project_ids_json,
+    groupId: row.group_id == null ? null : Number(row.group_id),
+    documentIdsJson: row.document_ids_json,
     createdAt: new Date(row.created_at),
     lastVisitedAt: new Date(row.last_visited_at),
   };
@@ -559,5 +695,16 @@ function rowToViewerEvent(row: mysql.RowDataPacket): ViewerEventRecord {
     action: row.action,
     source: row.source,
     detailJson: row.detail_json,
+  };
+}
+
+function rowToIntentLog(row: mysql.RowDataPacket): IntentLogRecord {
+  return {
+    id: row.id,
+    chatSessionId: row.chat_session_id,
+    timestamp: Number(row.ts_ms),
+    source: row.source,
+    intentKind: row.intent_kind,
+    intentJson: row.intent_json,
   };
 }

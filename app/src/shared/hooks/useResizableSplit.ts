@@ -30,6 +30,39 @@ export interface UseResizableSplitOptions {
   max?: number;
   /** Toggle ultrawide live-band ceiling (720 vs 640). Default false. */
   ultrawide?: boolean;
+  /**
+   * If set, the chat-pane width is persisted to `localStorage` under this
+   * key so a page reload restores the user's preferred split. Closure scope
+   * of UR-02 — without this, drag-to-resize works for the session but the
+   * shell snaps back to `initial` after every refresh.
+   */
+  storageKey?: string;
+}
+
+function readStoredWidth(storageKey: string | undefined, fallback: number, min: number, max: number): number {
+  if (!storageKey) return fallback;
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (raw == null) return fallback;
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+  } catch {
+    // localStorage can throw (Safari private mode, quota, etc.). Treat any
+    // failure as "no stored value" — better to lose persistence than crash.
+    return fallback;
+  }
+}
+
+function writeStoredWidth(storageKey: string | undefined, value: number): void {
+  if (!storageKey) return;
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(storageKey, String(value));
+  } catch {
+    // Swallow — see readStoredWidth comment above.
+  }
 }
 
 export function snapZoneFor(width: number): SplitSnapZone {
@@ -55,18 +88,23 @@ export function useResizableSplit(options: UseResizableSplitOptions = {}): {
   /** Aria-friendly arrow-key resize (returns the new width). */
   bump: (deltaPx: number) => number;
 } {
-  const { initial = 360, min = 0, max = 1200 } = options;
+  const { initial = 360, min = 0, max = 1200, storageKey } = options;
   // `ultrawide` is destructured below only as part of the surface the W5
   // spec calls out; the current zone classifier is viewport-independent.
-  const [width, setWidthState] = useState<number>(initial);
+  // Stored-width hydration runs lazily inside useState's initializer so it
+  // happens exactly once per mount, before the first paint.
+  const [width, setWidthState] = useState<number>(() =>
+    readStoredWidth(storageKey, initial, min, max)
+  );
   const dragOriginRef = useRef<{ pointerX: number; widthAtStart: number } | null>(null);
 
   const setWidth = useCallback(
     (next: number) => {
       const clamped = Math.max(min, Math.min(max, next));
       setWidthState(clamped);
+      writeStoredWidth(storageKey, clamped);
     },
-    [min, max]
+    [min, max, storageKey]
   );
 
   const startDrag = useCallback(
@@ -98,9 +136,10 @@ export function useResizableSplit(options: UseResizableSplitOptions = {}): {
     (deltaPx: number) => {
       const next = Math.max(min, Math.min(max, width + deltaPx));
       setWidthState(next);
+      writeStoredWidth(storageKey, next);
       return next;
     },
-    [width, min, max]
+    [width, min, max, storageKey]
   );
 
   return { width, setWidth, zone: snapZoneFor(width), startDrag, bump };

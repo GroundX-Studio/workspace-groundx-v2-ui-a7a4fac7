@@ -78,6 +78,13 @@ export interface ScenarioDocument {
   fileName: string;
   pageCount?: number;
   order: number;
+  /**
+   * Optional same-origin URL for the document binary. When present, the
+   * F2 PdfViewer (UR-01) loads + renders it via pdfjs-dist. When absent,
+   * UnderstandView falls back to the silhouette placeholder. SCEN-06 will
+   * deliver the real Utility/Loan/Solar PDFs and surface URLs here.
+   */
+  previewUrl?: string;
 }
 
 export interface ScenarioConfig {

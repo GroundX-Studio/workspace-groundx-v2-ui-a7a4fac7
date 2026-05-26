@@ -1,4 +1,5 @@
-import { act, screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // jsdom has no matchMedia, so framer-motion's useReducedMotion() returns
@@ -9,6 +10,18 @@ vi.mock("framer-motion", async () => {
   return { ...actual, useReducedMotion: () => false };
 });
 
+// CF-18: F2 chat input wires through the same sendChatMessage path
+// InteractView (F5) uses. Mock the API module so we can sniff the call
+// + control the assistant reply.
+vi.mock("@/api/chatSessions", async () => {
+  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
+  return {
+    ...actual,
+    sendChatMessage: vi.fn(),
+  };
+});
+import { ChatApiError, sendChatMessage } from "@/api/chatSessions";
+
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -16,6 +29,7 @@ import { OnboardingChatColumn } from "./OnboardingChatColumn";
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.mocked(sendChatMessage).mockReset();
 });
 
 afterEach(() => {
@@ -154,6 +168,152 @@ describe("OnboardingChatColumn", () => {
     expect(screen.getByTestId("onboarding-chat-sample-switch-item-loan")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-chat-sample-switch-item-solar")).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-sample-switch-item-utility")).not.toBeInTheDocument();
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // CF-18: F2 chat input wire-up. Replaces the visual stub with a real
+  // form that posts via sendChatMessage and renders the assistant turn
+  // in the conversation body. Mirrors InteractView (F5).
+  // ────────────────────────────────────────────────────────────────────
+  describe("F2 chat input (CF-18)", () => {
+    it("renders a real input + send button (not the visual stub copy)", () => {
+      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      // The stub displayed bare placeholder text. The real bar exposes
+      // an input element + a Send action.
+      expect(screen.getByTestId("onboarding-chat-input")).toBeInTheDocument();
+      expect(screen.queryByText(/ready when you are/i)).not.toBeInTheDocument();
+    });
+
+    it("submitting a question posts via sendChatMessage and renders the assistant reply", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-1",
+        assistantMessageId: "a-1",
+        reply: {
+          mode: "rag",
+          answer: "The bill total is $214.07.",
+          citations: [],
+          suggestedActions: [],
+          tools: [],
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "What is the bill total?");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      // The optimistic user turn renders immediately.
+      expect(screen.getByTestId("onboarding-chat-live-user")).toHaveTextContent(
+        "What is the bill total?",
+      );
+
+      // Wait for the assistant reply to land.
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+          "The bill total is $214.07.",
+        );
+      });
+
+      // And the call carried the right payload.
+      expect(sendChatMessage).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(sendChatMessage).mock.calls[0][0]).toMatchObject({
+        newUserMessage: "What is the bill total?",
+      });
+    });
+
+    it("on a network failure, renders the 'couldn't reach' copy", async () => {
+      vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Failed to fetch"));
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "anything");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+          /couldn't reach the chat service/i,
+        );
+      });
+    });
+
+    // CF-08 — per-status copy in F2 catch site.
+    it("504 → renders 'took too long' copy (CF-08)", async () => {
+      vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("timeout", 504, null));
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "Q");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+          /took too long/i,
+        );
+      });
+    });
+
+    it("401 → renders 'sign in to continue' copy (CF-08)", async () => {
+      vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("unauth", 401, null));
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "Q");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+          /sign in/i,
+        );
+      });
+    });
+
+    it("501 → renders 'can't answer that yet' copy (CF-08)", async () => {
+      vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("nyi", 501, null));
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "Q");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+          /can't answer that yet/i,
+        );
+      });
+    });
+
+    it("empty / whitespace input does not post", async () => {
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "   ");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+      expect(sendChatMessage).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("onboarding-chat-live-user")).not.toBeInTheDocument();
+    });
   });
 
   it("on F6 (gate open), the chat dispatches to GateChatPanel", () => {

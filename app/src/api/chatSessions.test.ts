@@ -1,7 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// CF-13: mock the Sentry wrapper so we can assert captureException
+// fires on chat-send failures. Hoist-safe — vi.mock is moved above
+// the module imports by the runtime.
+vi.mock("@/lib/sentry", () => ({
+  captureException: vi.fn(),
+  initSentry: vi.fn(() => false),
+}));
+import { captureException } from "@/lib/sentry";
+
 import {
   __resetEnsuredChatSessions,
+  chatErrorToUserCopy,
+  ChatApiError,
   createChatSession,
   sendChatMessage,
 } from "./chatSessions";
@@ -11,6 +22,12 @@ const originalFetch = global.fetch;
 beforeEach(() => {
   global.fetch = vi.fn();
   __resetEnsuredChatSessions();
+  vi.mocked(captureException).mockReset();
+  // SC-01: pre-set the csrf_token cookie so `csrfFetch` skips its
+  // bootstrap GET and tests can count fetch calls as before.
+  if (typeof document !== "undefined") {
+    document.cookie = "csrf_token=test-csrf-token; path=/";
+  }
 });
 
 afterEach(() => {
@@ -30,14 +47,15 @@ describe("createChatSession", () => {
       title: "Onboarding",
       isOnboarding: true,
     });
-    expect(global.fetch).toHaveBeenCalledWith(
-      "/api/chat-sessions",
-      expect.objectContaining({
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+    // csrfFetch wraps headers in a Headers instance — assert on the
+    // (path, init) shape without pinning the headers type.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [path, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(path).toBe("/api/chat-sessions");
+    expect((init as RequestInit).method).toBe("POST");
+    expect((init as RequestInit).credentials).toBe("include");
+    const headers = new Headers((init as RequestInit).headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
     expect(result).toMatchObject({ chatSessionId: "chat-1", ownerAnonId: "anon-abc" });
   });
 
@@ -240,5 +258,130 @@ describe("sendChatMessage", () => {
     expect(sendCall).toBeDefined();
     const body = JSON.parse((sendCall![1] as RequestInit).body as string);
     expect(body.intent).toBe("extract.field-hovered");
+  });
+
+  // CF-13 — chat-send failures route to Sentry.captureException with
+  // route + chatSessionId + status as extras. The wrapper is a no-op
+  // when DSN is unset, but we still want every catch site to call
+  // through so production observability "just works" once DSN is wired.
+  describe("CF-13 chat-send Sentry wiring", () => {
+    it("captures exception on 5xx with route + chatSessionId + status extras", async () => {
+      const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
+      (global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) }) // ensure-create
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 502,
+          json: async () => ({ error: "bad gateway" }),
+        });
+      await expect(
+        sendChatMessage({ chatSessionId: "chat-1", newUserMessage: "Q", sessionMeta: meta }),
+      ).rejects.toThrow();
+      expect(captureException).toHaveBeenCalledTimes(1);
+      const [err, extras] = vi.mocked(captureException).mock.calls[0];
+      expect(err).toBeInstanceOf(Error);
+      expect(extras).toEqual({
+        route: "/api/chat/messages",
+        chatSessionId: "chat-1",
+        status: 502,
+      });
+    });
+
+    it("still captures on 404 (after invalidating the cache)", async () => {
+      const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
+      (global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          json: async () => ({ error: "not found" }),
+        });
+      await expect(
+        sendChatMessage({ chatSessionId: "chat-2", newUserMessage: "Q", sessionMeta: meta }),
+      ).rejects.toThrow();
+      expect(captureException).toHaveBeenCalledTimes(1);
+      const [, extras] = vi.mocked(captureException).mock.calls[0];
+      expect(extras).toMatchObject({ status: 404 });
+    });
+
+    // CF-08 — per-status client error mapping. The mapping is what
+    // F2 / F5 consume to render the right UX in catch sites.
+    describe("CF-08 chatErrorToUserCopy", () => {
+      it("401 → reauth kind + 'sign in to continue' copy", () => {
+        const result = chatErrorToUserCopy(new ChatApiError("x", 401, null));
+        expect(result.kind).toBe("reauth");
+        expect(result.message).toMatch(/sign in/i);
+        expect(result.retryable).toBe(false);
+      });
+
+      it("501 → not-yet kind + 'can't answer that yet' copy", () => {
+        const result = chatErrorToUserCopy(new ChatApiError("x", 501, null));
+        expect(result.kind).toBe("not-yet");
+        expect(result.message).toMatch(/can't answer that yet|not available yet/i);
+        expect(result.retryable).toBe(false);
+      });
+
+      it("504 → timeout kind + retry copy + retryable=true", () => {
+        const result = chatErrorToUserCopy(new ChatApiError("x", 504, null));
+        expect(result.kind).toBe("timeout");
+        expect(result.message).toMatch(/took too long|timed out/i);
+        expect(result.retryable).toBe(true);
+      });
+
+      it("502/503/5xx → upstream kind + generic 'try again' copy", () => {
+        for (const status of [500, 502, 503]) {
+          const result = chatErrorToUserCopy(new ChatApiError("x", status, null));
+          expect(result.kind).toBe("upstream");
+          expect(result.message).toMatch(/try again|something went wrong/i);
+          expect(result.retryable).toBe(true);
+        }
+      });
+
+      it("400 → developer-visible 'bug' kind + technical copy", () => {
+        const result = chatErrorToUserCopy(new ChatApiError("x", 400, null));
+        expect(result.kind).toBe("bug");
+        expect(result.message).toMatch(/programming error|invalid request/i);
+        expect(result.retryable).toBe(false);
+      });
+
+      it("404 → not-found kind (session row gone) with 'refresh' hint", () => {
+        const result = chatErrorToUserCopy(new ChatApiError("x", 404, null));
+        expect(result.kind).toBe("not-found");
+        expect(result.message).toMatch(/refresh|session/i);
+        expect(result.retryable).toBe(false);
+      });
+
+      it("non-ChatApiError (network throw) → network kind", () => {
+        const result = chatErrorToUserCopy(new Error("Failed to fetch"));
+        expect(result.kind).toBe("network");
+        expect(result.message).toMatch(/couldn't reach|connection|network/i);
+        expect(result.retryable).toBe(true);
+      });
+
+      it("unknown thrown value → fallback generic 'something went wrong'", () => {
+        const result = chatErrorToUserCopy("just a string");
+        expect(result.kind).toBe("unknown");
+        expect(result.message).toMatch(/something went wrong/i);
+        expect(result.retryable).toBe(false);
+      });
+    });
+
+    it("does NOT capture on a successful send", async () => {
+      const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
+      (global.fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            userMessageId: "u1",
+            assistantMessageId: "a1",
+            reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [] },
+            compressionRan: false,
+          }),
+        });
+      await sendChatMessage({ chatSessionId: "chat-3", newUserMessage: "Q", sessionMeta: meta });
+      expect(captureException).not.toHaveBeenCalled();
+    });
   });
 });

@@ -4,6 +4,7 @@ import { api } from "@/api";
 import { LoginI, RegisterI, UpdateAppMetadataInput, User } from "@/api/entities/customerEntity";
 import { useIsLoading } from "@/contexts/LoadingContext";
 import { useMessageContext } from "@/contexts/MessageBarContext";
+import { captureException } from "@/lib/sentry";
 
 import { Auth, AuthContext, LoginReqCallback } from "./AuthContext";
 
@@ -41,7 +42,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
           result.response = customer;
         }
       } catch (error) {
-        console.error(error);
+        captureException(error, { context: "AuthProvider.getUserData", userName });
         setErrorMessage("Could not get user data");
         result.error = true;
       } finally {
@@ -69,7 +70,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
           return { isLoggedIn: true, error: false, banned: false };
         }
       } catch (error) {
-        console.error(error);
+        captureException(error, { context: "AuthProvider.login" });
         return { isLoggedIn: false, error, banned: false };
       }
 
@@ -150,7 +151,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
     try {
       await api.logout();
     } catch (error) {
-      console.error(error);
+      captureException(error, { context: "AuthProvider.logout" });
     } finally {
       setUser(null);
       setAuth(emptyAuth);
@@ -175,7 +176,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
         });
         result.isSuccess = true;
       } catch (error: unknown) {
-        console.error(error);
+        captureException(error, { context: "AuthProvider.updateAppMetadata" });
         setErrorMessage("Could not update app metadata.");
         result.error = true;
       } finally {

@@ -4,6 +4,7 @@ import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } fr
 import type { FFrame } from "@/types/onboarding";
 
 import type {
+  CanvasIntent,
   ChatMessage,
   ChatSession,
   ChatStoreApi,
@@ -565,6 +566,24 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
   }, []);
 
+  const setCurrentIntent = useCallback((intent: CanvasIntent) => {
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      // Reference equality short-circuit so re-dispatching the same
+      // intent doesn't churn subscribers.
+      if (current.currentIntent === intent) return prev;
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        currentIntent: intent,
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+  }, []);
+
   const updateActiveEntity = useCallback((updater: (session: EntitySession) => EntitySession) => {
     setState((prev) => {
       if (!prev.activeSessionId) return prev;
@@ -596,8 +615,18 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       upsertEntityAndActivate,
       updateActiveEntity,
       appendViewerEvent,
+      setCurrentIntent,
     }),
-    [newSession, switchTo, appendMessage, activateEntity, upsertEntityAndActivate, updateActiveEntity, appendViewerEvent],
+    [
+      newSession,
+      switchTo,
+      appendMessage,
+      activateEntity,
+      upsertEntityAndActivate,
+      updateActiveEntity,
+      appendViewerEvent,
+      setCurrentIntent,
+    ],
   );
 
   // Backward-compat combined value. Existing useChatStore() callers
@@ -621,6 +650,18 @@ export const useChatStore = (): ChatStoreApi => {
   const ctx = useContext(ChatStoreContext);
   if (!ctx) throw new Error("useChatStore must be used inside ChatStoreProvider");
   return ctx;
+};
+
+/**
+ * UI-10 — non-throwing variant of `useChatStore`. Returns `null` when
+ * no `ChatStoreProvider` is mounted, so callers like
+ * `CanvasOrchestratorProvider` can opt INTO chat-store side effects
+ * without making ChatStore a hard mount-order dependency. Use the
+ * throwing `useChatStore` for everything that actually needs the
+ * store — this hook is for plumbing.
+ */
+export const useChatStoreOptional = (): ChatStoreApi | null => {
+  return useContext(ChatStoreContext);
 };
 
 /**

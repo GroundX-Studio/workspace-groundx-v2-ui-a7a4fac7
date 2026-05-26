@@ -52,6 +52,15 @@ export interface AppShellProps {
 const DEFAULT_NAV_WIDTH = 180;
 const RAIL_HEIGHT = "100vh";
 const MOTION = { type: "tween", duration: 0.2, ease: "easeOut" } as const;
+// When the OS reports `prefers-reduced-motion: reduce`, swap MOTION for
+// a zero-duration transition so the layout still settles into its new
+// dimensions without animating.
+const MOTION_REDUCED = { type: "tween", duration: 0, ease: "easeOut" } as const;
+/**
+ * localStorage key for the drag-resize width. Versioned so we can
+ * invalidate stored values cleanly if the layout band ever changes.
+ */
+const CHAT_WIDTH_STORAGE_KEY = "appshell.chatWidth.v1";
 
 /**
  * AppShell — the three-column shell for the onboarding + steady experience.
@@ -69,11 +78,13 @@ const MOTION = { type: "tween", duration: 0.2, ease: "easeOut" } as const;
  *     at a time, drops the nav into a drawer, and gives the user
  *     hamburger + chat/canvas swap controls in a top bar.
  *
- * Reduced-motion respect: Framer Motion reads
- * `prefers-reduced-motion: reduce` from the OS and skips transitions
- * automatically. We keep the same `layout` prop so structure animates when
- * allowed; the only non-motion thing we set is the `MOTION.duration` which
- * the user agent already overrides.
+ * Reduced-motion respect: we read `prefers-reduced-motion: reduce`
+ * directly via `useMediaQuery` and swap the per-element `transition`
+ * prop for a zero-duration variant when the user has the OS preference
+ * set. Framer Motion does NOT automatically respect the OS pref when
+ * an explicit `transition` is provided, so the gate lives here, not in
+ * a `<MotionConfig>` wrapper (which would also conflict with the test
+ * harness's `<MotionConfig reducedMotion="always">` outer wrapper).
  */
 export function AppShell({
   nav,
@@ -91,13 +102,28 @@ export function AppShell({
   // an SSR path; the false-first-render only confuses tests.
   const autoCompact = useMediaQuery(theme.breakpoints.down("md"), { noSsr: true });
   const compact = compactProp ?? autoCompact;
+  // UR-02 reduced-motion gate. We can't rely on `<MotionConfig
+  // reducedMotion="user">` because the test harness already wraps the
+  // tree in `<MotionConfig reducedMotion="always">` to keep transitions
+  // instant under jsdom; nesting MotionConfig would silently override
+  // that. Instead we read the OS preference here and gate the
+  // `transition` prop on each motion element. The flag is surfaced as a
+  // data attribute on the root so the contract is testable without
+  // depending on framer-motion internals.
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)", { noSsr: true });
+  const motionTransition = reducedMotion ? MOTION_REDUCED : MOTION;
 
   // Compact mode forces focus-chat as the initial mode so the chat
   // pane fills the viewport. Desktop mode honors whatever the consumer
   // asked for.
   const effectiveInitialFocus = compact ? "focus-chat" : initialFocus;
   const { mode, setMode } = useFocusMode({ initial: effectiveInitialFocus });
-  const { width, zone, startDrag, bump } = useResizableSplit({ initial: initialChatWidth, min: 0, max: 1200 });
+  const { width, zone, startDrag, bump } = useResizableSplit({
+    initial: initialChatWidth,
+    min: 0,
+    max: 1200,
+    storageKey: CHAT_WIDTH_STORAGE_KEY,
+  });
 
   // Mirror the drag-snap zone into the focus mode (per spec W5: dragging to
   // either extreme is itself a request to enter the corresponding focus mode).
@@ -140,6 +166,7 @@ export function AppShell({
     const showCanvas = mode === "focus-canvas";
     return (
       <Box
+        data-app-shell-reduced-motion={String(reducedMotion)}
         sx={{
           display: "flex",
           flexDirection: "column",
@@ -310,6 +337,7 @@ export function AppShell({
   return (
     <LayoutGroup>
       <Box
+        data-app-shell-reduced-motion={String(reducedMotion)}
         sx={{
           display: "flex",
           flexDirection: "row",
@@ -325,7 +353,7 @@ export function AppShell({
               initial={{ width: 0 }}
               animate={{ width: navWidth }}
               exit={{ width: 0 }}
-              transition={MOTION}
+              transition={motionTransition}
               style={{ flexShrink: 0, height: "100%", overflow: "hidden" }}
               aria-label="Primary navigation"
               // Test-only contract: framer-motion under jsdom doesn't
@@ -348,7 +376,7 @@ export function AppShell({
               initial={{ width: typeof chatWidth === "number" ? chatWidth : "100%" }}
               animate={{ width: chatWidth }}
               exit={{ width: 0 }}
-              transition={MOTION}
+              transition={motionTransition}
               style={{ flexShrink: 0, height: "100%", overflow: "hidden", display: "flex" }}
               aria-label="Chat pane"
               data-testid="appshell-chat"
@@ -370,7 +398,7 @@ export function AppShell({
               initial={{ flex: 0 }}
               animate={{ flex: 1 }}
               exit={{ flex: 0 }}
-              transition={MOTION}
+              transition={motionTransition}
               style={{ height: "100%", overflow: "hidden", display: "flex" }}
               aria-label="Canvas"
               data-testid="appshell-canvas"

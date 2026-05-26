@@ -26,7 +26,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { keyframes } from "@mui/material/styles";
 import { motion, useReducedMotion } from "framer-motion";
-import type { FC } from "react";
+import { useState, type FC } from "react";
 
 import {
   BODY_TEXT,
@@ -46,6 +46,7 @@ import {
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import { PdfViewer } from "@/shared/components/PdfViewer";
 
 export interface UnderstandViewProps {
   /**
@@ -66,6 +67,10 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
       : appMode.scenario ?? session.scenario;
   const { byId } = useScenarioRegistry();
   const scenario = scenarioId ? byId(scenarioId) : undefined;
+  // If pdfjs fails (bad URL, blocked worker, malformed PDF), we fall
+  // back to the silhouette so the scan animation still reads as a
+  // page. Resets when the scenario changes.
+  const [pdfFailed, setPdfFailed] = useState(false);
 
   // BYO branch — no scenario picked yet. The chat column carries the
   // gate / sign-in flow; the canvas just shows orientation copy.
@@ -100,6 +105,7 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
   const docTitle = scenario.documents[0]?.fileName ?? "Sample";
   const pageCount = scenario.documents[0]?.pageCount ?? 3;
   const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
+  const previewUrl = scenario.documents[0]?.previewUrl;
 
   return (
     <Box
@@ -176,9 +182,17 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
           }}
           aria-label="Document preview"
         >
-          {/* Page silhouette content lines — visual filler for the
-              flat-WHITE PDF placeholder until pdfjs-dist plugs in. */}
-          <SilhouetteContent />
+          {/* UR-01: real PdfViewer when the scenario surfaces a
+              previewUrl. Until SCEN-06 lands the real Utility/Loan/Solar
+              PDFs, scenarios ship without a URL and we render the
+              silhouette placeholder so the scan-line animation still
+              has a page-shaped target. pdfjs load failures route back
+              through the same fallback. */}
+          {previewUrl && !pdfFailed ? (
+            <PdfViewer url={previewUrl} onLoadError={() => setPdfFailed(true)} />
+          ) : (
+            <SilhouetteContent />
+          )}
           {/* Parsed-region wash above the scan line */}
           <motion.div
             aria-hidden

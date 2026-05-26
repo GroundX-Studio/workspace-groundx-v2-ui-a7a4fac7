@@ -49,6 +49,18 @@ const envSchema = z.object({
   LLM_AUTH_HEADER_NAME: z.string().default("Authorization"),
   LLM_AUTH_SCHEME: z.string().default("Bearer"),
   LLM_MODEL_ID: z.string().optional(),
+  // CF-16: light-side LLM profile. Used for tasks where a smaller /
+  // cheaper / faster model is fine — today: leaf summarization +
+  // meta-compaction. All six are optional: when any of base_url /
+  // api_key / model_id is unset, the chat-side LLM is reused (back-
+  // compat — existing single-LLM deployments keep working). Auth
+  // header + scheme fall back to the chat-side equivalents.
+  LLM_LIGHT_SERVICE: z.string().optional(),
+  LLM_LIGHT_BASE_URL: z.string().url().optional(),
+  LLM_LIGHT_API_KEY: z.string().optional(),
+  LLM_LIGHT_AUTH_HEADER_NAME: z.string().optional(),
+  LLM_LIGHT_AUTH_SCHEME: z.string().optional(),
+  LLM_LIGHT_MODEL_ID: z.string().optional(),
   // LLM context window in tokens. Compression triggers at 70% of this.
   // Different models have wildly different windows (Claude Sonnet=200k,
   // GPT-4o=128k, GPT-3.5=16k) so the default is the conservative lower
@@ -95,6 +107,11 @@ const envSchema = z.object({
   // Feature flags decided at deploy time. Defaults keep us safe.
   SSO_ENABLED: z.preprocess(parseBoolean, z.boolean()).default(false),
   DISABLE_AGENT_TURN_LOG: z.preprocess(parseBoolean, z.boolean()).default(false),
+  // SC-01 — CSRF enforcement. Default `true` (production-safe). Tests
+  // flip to `false` so route-business-logic suites don't have to
+  // bootstrap a CSRF token on every supertest agent; SC-01-specific
+  // tests opt back into `true` to exercise the defense.
+  CSRF_ENABLED: z.preprocess(parseBoolean, z.boolean()).default(true),
 }).superRefine((env, ctx) => {
   const requiresMysql = env.NODE_ENV === "production" || env.APP_REPOSITORY_MODE === "mysql";
   for (const key of ["MYSQL_HOST", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD"] as const) {

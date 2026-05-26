@@ -89,7 +89,9 @@ describe("middleware scaffold", () => {
       .send({ customer: { first: "Pat", company: "Acme" } })
       .expect(200);
 
-    expect(response.headers["set-cookie"]?.[0]).toContain(SESSION_COOKIE);
+    expect(
+      response.headers["set-cookie"]?.some((c) => c.includes(SESSION_COOKIE)),
+    ).toBe(true);
     expect(response.body).toMatchObject({ success: true, username: "gx-user", token: "token-register" });
     expect(partnerClient.calls.map((call) => call.name)).toEqual(["registerCustomer", "createApiKey"]);
     expect(repository.sessions.size).toBe(1);
@@ -440,6 +442,106 @@ describe("middleware scaffold", () => {
     await request(app).post("/api/auth/login").send({ email: "pat@example.com", password: "bad" }).expect(401, {
       error: "GroundX login failed: Invalid customer credentials",
       upstreamStatus: 401,
+    });
+  });
+
+  // UI-10b — intent_log POST route.
+  describe("POST /api/intent (UI-10b)", () => {
+    async function setupOwnedSession() {
+      const { app, repository } = setup();
+      const agent = request.agent(app);
+      // Anonymous bootstrap mints a server-side session row.
+      const anon = await agent.post("/api/onboarding/session").expect(200);
+      const anonSessionId = anon.body.sessionId;
+      // Create the chat_session row owned by this anon session.
+      await agent
+        .post("/api/chat-sessions")
+        .send({ id: "chat-1", title: "Onboarding", isOnboarding: true })
+        .expect(200);
+      return { app, agent, repository, anonSessionId };
+    }
+
+    it("appends a row when the caller owns the chat session (anon, then list reads back)", async () => {
+      const { agent, repository } = await setupOwnedSession();
+      await agent
+        .post("/api/intent")
+        .send({
+          chatSessionId: "chat-1",
+          source: "agent",
+          intent: { kind: "openDocument", documentId: "d-1", page: 3 },
+        })
+        .expect(201, { ok: true });
+      const rows = await repository.listIntentLog("chat-1");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        chatSessionId: "chat-1",
+        source: "agent",
+        intentKind: "openDocument",
+      });
+      const parsed = JSON.parse(rows[0].intentJson);
+      expect(parsed).toEqual({ kind: "openDocument", documentId: "d-1", page: 3 });
+    });
+
+    it("rejects invalid payload shapes with 400", async () => {
+      const { agent } = await setupOwnedSession();
+      // missing intent
+      await agent
+        .post("/api/intent")
+        .send({ chatSessionId: "chat-1", source: "user" })
+        .expect(400, { error: "invalid_payload" });
+      // bad source
+      await agent
+        .post("/api/intent")
+        .send({ chatSessionId: "chat-1", source: "alien", intent: { kind: "openDocument" } })
+        .expect(400, { error: "invalid_payload" });
+      // intent without kind
+      await agent
+        .post("/api/intent")
+        .send({ chatSessionId: "chat-1", source: "user", intent: { foo: "bar" } })
+        .expect(400, { error: "invalid_payload" });
+    });
+
+    it("404 when chat_session_id doesn't exist", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/intent")
+        .send({ chatSessionId: "missing", source: "user", intent: { kind: "openDocument" } })
+        .expect(404, { error: "chat_session_not_found" });
+    });
+
+    it("403 when caller doesn't own the chat session", async () => {
+      const { app, repository } = setup();
+      // Plant a chat_session owned by a DIFFERENT anon id.
+      const now = new Date();
+      await repository.upsertChatSession({
+        id: "chat-other",
+        onboardingSessionId: "chat-other",
+        ownerUserId: null,
+        ownerAnonId: "anon-OTHER",
+        title: "Someone else's",
+        isOnboarding: true,
+        activeEntityKey: null,
+        currentIntent: null,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+      });
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200); // mints a different session
+      await agent
+        .post("/api/intent")
+        .send({ chatSessionId: "chat-other", source: "user", intent: { kind: "openDocument" } })
+        .expect(403, { error: "not_session_owner" });
+    });
+
+    it("requires a session (401 when no cookie)", async () => {
+      const { app } = setup();
+      await request(app)
+        .post("/api/intent")
+        .send({ chatSessionId: "chat-1", source: "user", intent: { kind: "openDocument" } })
+        .expect(401);
     });
   });
 });

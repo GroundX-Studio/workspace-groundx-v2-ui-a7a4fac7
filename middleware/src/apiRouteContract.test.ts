@@ -160,7 +160,9 @@ describe("middleware API route contract", () => {
     expect(typeof response.body.sessionId).toBe("string");
     expect(response.body.sessionId.length).toBeGreaterThan(0);
     // Cookie is set so subsequent requests resolve as the same anon session.
-    expect(response.headers["set-cookie"]?.[0]).toMatch(/gx_app_session=/);
+    // Set-Cookie may carry the csrf_token cookie too (SC-01), so search
+    // the whole array rather than asserting on index 0.
+    expect(response.headers["set-cookie"]?.some((c) => /gx_app_session=/.test(c))).toBe(true);
   });
 
   it("idempotent: a second call within the same cookie returns the same session id (no duplicate row)", async () => {

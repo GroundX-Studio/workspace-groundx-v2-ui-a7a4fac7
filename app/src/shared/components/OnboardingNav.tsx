@@ -27,6 +27,8 @@
  * `onItemClick`.
  */
 
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import { useEffect, useState, type FC, type ReactNode } from "react";
@@ -244,16 +246,24 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
             mt: 0.5,
             px: 0.75,
             py: 0.5,
-            fontSize: 14,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: collapsed ? "center" : "flex-end",
             color: MUTED_ON_LIGHT,
-            textAlign: collapsed ? "center" : "right",
             cursor: "pointer",
             borderRadius: BORDER_RADIUS_SM,
-            "&:hover": { backgroundColor: CYAN },
+            "&:hover": { backgroundColor: CYAN, color: NAVY },
             "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
           }}
         >
-          {collapsed ? "»" : "«"}
+          {/* POL-01: MUI chevron icon replaces the previous `«`/`»`
+              Unicode characters. Single-arrow form reads more
+              intentionally than the double-angle quotation marks. */}
+          {collapsed ? (
+            <ChevronRightIcon fontSize="small" aria-hidden />
+          ) : (
+            <ChevronLeftIcon fontSize="small" aria-hidden />
+          )}
         </Box>
       </Box>
     </Box>

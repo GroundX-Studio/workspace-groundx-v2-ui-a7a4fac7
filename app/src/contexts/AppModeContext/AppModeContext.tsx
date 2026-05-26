@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, useState, type FC, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 
+import { gaSetDefaults } from "@/lib/ga";
 import type { AppMode, AuthState, Scenario } from "@/types/onboarding";
 
 import type { AppModeApi, AppModeState } from "./types";
@@ -52,6 +53,14 @@ export const AppModeProvider: FC<AppModeProviderProps> = ({
       usage: { ...previous.usage, byoPages: previous.usage.byoPages + pages },
     }));
   }, []);
+
+  // OB-03 — keep the GA4 `appMode` dimension in sync with our state.
+  // Effect fires on every mode flip (onboarding ↔ steady) so the
+  // dimension is sticky on subsequent events without each caller
+  // having to remember.
+  useEffect(() => {
+    gaSetDefaults({ appMode: state.mode });
+  }, [state.mode]);
 
   const value = useMemo<AppModeApi>(
     () => ({ state, setScenario, promoteToSignedIn, flipToSteady, incrementByoPages }),

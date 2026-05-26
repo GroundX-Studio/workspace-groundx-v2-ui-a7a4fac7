@@ -429,6 +429,438 @@ describe("handleChatMessage — typed error mapping", () => {
   });
 });
 
+// ────────────────────────────────────────────────────────────────────
+// CF-15: EntitySession scope refs propagate into the RAG search call.
+// Verifies the closure test from docs/agents/backlog.md:
+//   "Post a chat with entity having projectIds:[P1, P2] → search call
+//    body has filter: {projectId: {$in: [P1, P2]}}."
+// Plus parallel cases for groupId, documentIds, and single-projectId.
+// ────────────────────────────────────────────────────────────────────
+describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", () => {
+  let repo: MemoryAppRepository;
+  let llmClient: LlmClient;
+  let groundxClient: GroundXClient;
+  let groundxForward: ReturnType<typeof vi.fn>;
+
+  async function seedSessionWithEntity(scopeRefs: {
+    bucketId?: number | null;
+    projectIdsJson?: string | null;
+    groupId?: number | null;
+    documentIdsJson?: string | null;
+  }): Promise<void> {
+    await repo.upsertChatSession(makeSession({ activeEntityKey: "sample:utility" }));
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-1",
+      entityKey: "sample:utility",
+      lastFrame: "f2",
+      completedFramesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: scopeRefs.bucketId ?? null,
+      projectIdsJson: scopeRefs.projectIdsJson ?? null,
+      groupId: scopeRefs.groupId ?? null,
+      documentIdsJson: scopeRefs.documentIdsJson ?? null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+  }
+
+  beforeEach(() => {
+    repo = new MemoryAppRepository();
+    // Real chat-completion mock so callGroundedLlm doesn't blow up.
+    llmClient = {
+      forward: vi.fn(async () =>
+        jsonResponse({ choices: [{ message: { content: "grounded answer" } }] }),
+      ),
+    };
+    groundxForward = vi.fn(async () => jsonResponse({ search: { results: [] } }));
+    groundxClient = { forward: groundxForward };
+  });
+
+  function lastSearchBody(): Record<string, unknown> {
+    expect(groundxForward).toHaveBeenCalled();
+    const lastCall = groundxForward.mock.calls.at(-1)!;
+    const init = lastCall[1] as { body: string };
+    return JSON.parse(init.body);
+  }
+
+  function lastSearchPath(): string {
+    expect(groundxForward).toHaveBeenCalled();
+    const lastCall = groundxForward.mock.calls.at(-1)!;
+    return lastCall[0] as string;
+  }
+
+  it("EntitySession with projectIds:[P1,P2] → search body has filter: {projectId: {$in: [P1,P2]}}", async () => {
+    await seedSessionWithEntity({
+      bucketId: 42,
+      projectIdsJson: JSON.stringify(["P1", "P2"]),
+    });
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "What is the total?" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: null,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(lastSearchPath()).toBe("/v1/search/42");
+    expect(lastSearchBody()).toMatchObject({
+      filter: { projectId: { $in: ["P1", "P2"] } },
+    });
+  });
+
+  it("EntitySession with single projectId → search body has filter: {projectId: P1}", async () => {
+    await seedSessionWithEntity({
+      bucketId: 42,
+      projectIdsJson: JSON.stringify(["solo"]),
+    });
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "Q" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: null,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(lastSearchBody()).toMatchObject({ filter: { projectId: "solo" } });
+  });
+
+  it("EntitySession with bucketId override (no env bucket) → uses entity bucketId in path", async () => {
+    await seedSessionWithEntity({ bucketId: 7 });
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "Q" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: 999, // env default — entity should win
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(lastSearchPath()).toBe("/v1/search/7");
+  });
+
+  it("EntitySession with groupId → search path /v1/search/{groupId}, no filter", async () => {
+    await seedSessionWithEntity({ groupId: 99 });
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "Q" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: null,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(lastSearchPath()).toBe("/v1/search/99");
+    const body = lastSearchBody();
+    expect(body.filter).toBeUndefined();
+  });
+
+  it("EntitySession with documentIds → search path /v1/search/documents + documentIds in body", async () => {
+    await seedSessionWithEntity({
+      documentIdsJson: JSON.stringify(["doc-A", "doc-B"]),
+    });
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "Q" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: null,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(lastSearchPath()).toBe("/v1/search/documents");
+    expect(lastSearchBody()).toMatchObject({ documentIds: ["doc-A", "doc-B"] });
+  });
+
+  it("No EntitySession scope refs + samplesBucketId fallback → uses env bucket (legacy onboarding path)", async () => {
+    // No entity scope refs at all — the env-provided samples bucket
+    // should still drive the search. This is the unchanged onboarding
+    // behavior; CF-15 must not regress it.
+    await seedSessionWithEntity({});
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "Q" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: 100,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(lastSearchPath()).toBe("/v1/search/100");
+  });
+
+  it("Malformed projectIdsJson (not JSON) → falls back to bucket scope without filter", async () => {
+    await seedSessionWithEntity({
+      bucketId: 5,
+      projectIdsJson: "not-json-at-all",
+    });
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "Q" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: null,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(lastSearchPath()).toBe("/v1/search/5");
+    const body = lastSearchBody();
+    expect(body.filter).toBeUndefined();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// CF-03: rbacFilter end-to-end through chatHandler → routeChat → search.
+// The closure test from the backlog:
+//   "Post a chat with a session carrying a fake RBAC seam returns
+//    search bodies with `$and: [rbacFilter, scopeFilter]`."
+// ────────────────────────────────────────────────────────────────────
+describe("handleChatMessage — CF-03 rbacFilter end-to-end", () => {
+  let repo: MemoryAppRepository;
+  let llmClient: LlmClient;
+  let groundxClient: GroundXClient;
+  let groundxForward: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    repo = new MemoryAppRepository();
+    llmClient = {
+      forward: vi.fn(async () =>
+        jsonResponse({ choices: [{ message: { content: "grounded answer" } }] }),
+      ),
+    };
+    groundxForward = vi.fn(async () => jsonResponse({ search: { results: [] } }));
+    groundxClient = { forward: groundxForward };
+  });
+
+  it("rbacFilter passed via deps composes with the entity-derived scope filter via $and", async () => {
+    await repo.upsertChatSession(makeSession({ activeEntityKey: "sample:utility" }));
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-1",
+      entityKey: "sample:utility",
+      lastFrame: "f2",
+      completedFramesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: 42,
+      projectIdsJson: JSON.stringify(["P1", "P2"]),
+      groupId: null,
+      documentIdsJson: null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "Q" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: null,
+        llmModelId: "test-model",
+        mockMode: false,
+        // The BFF-derived RBAC filter. Real production callers will
+        // build this from session.groundxUsername → org/role; the
+        // seam is the same.
+        rbacFilter: { orgId: "org-X", clearance: { $in: ["public", "internal"] } },
+      },
+    );
+
+    expect(groundxForward).toHaveBeenCalled();
+    const init = groundxForward.mock.calls.at(-1)![1] as { body: string };
+    const body = JSON.parse(init.body);
+    expect(body.filter).toEqual({
+      $and: [
+        { orgId: "org-X", clearance: { $in: ["public", "internal"] } },
+        { projectId: { $in: ["P1", "P2"] } },
+      ],
+    });
+  });
+
+  it("no rbacFilter in deps → search body has only the scope filter (back-compat)", async () => {
+    await repo.upsertChatSession(makeSession({ activeEntityKey: "sample:utility" }));
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-1",
+      entityKey: "sample:utility",
+      lastFrame: "f2",
+      completedFramesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: 42,
+      projectIdsJson: JSON.stringify(["P1"]),
+      groupId: null,
+      documentIdsJson: null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "Q" },
+      {
+        repository: repo,
+        llmClient,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: null,
+        llmModelId: "test-model",
+        mockMode: false,
+        // no rbacFilter
+      },
+    );
+
+    const body = JSON.parse((groundxForward.mock.calls.at(-1)![1] as { body: string }).body);
+    expect(body.filter).toEqual({ projectId: "P1" });
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// CF-16: light LLM vs chat LLM split.
+//   - Leaf summarization (compression) hits the LIGHT client.
+//   - RAG grounded completion hits the CHAT client.
+// Back-compat: when `lightLlmClient` is omitted, the chat client is
+// used for both (existing single-LLM deployments).
+// ────────────────────────────────────────────────────────────────────
+describe("handleChatMessage — CF-16 light LLM vs chat LLM split", () => {
+  let repo: MemoryAppRepository;
+  let chatLlmForward: ReturnType<typeof vi.fn>;
+  let lightLlmForward: ReturnType<typeof vi.fn>;
+  let chatLlm: LlmClient;
+  let lightLlm: LlmClient;
+  let groundxClient: GroundXClient;
+
+  beforeEach(async () => {
+    repo = new MemoryAppRepository();
+    await repo.upsertChatSession(makeSession());
+    chatLlmForward = vi.fn(async () =>
+      jsonResponse({ choices: [{ message: { content: "chat-side completion" } }] }),
+    );
+    lightLlmForward = vi.fn(async () =>
+      jsonResponse({ choices: [{ message: { content: "light-side summary" } }] }),
+    );
+    chatLlm = { forward: chatLlmForward };
+    lightLlm = { forward: lightLlmForward };
+    groundxClient = { forward: vi.fn(async () => jsonResponse({ search: { results: [] } })) };
+  });
+
+  async function seedLongLiveTail(): Promise<void> {
+    // Seed enough live-tail content to clear the 70% trigger ratio.
+    // Compression target tokens are 1000 by default; with a 16k context
+    // window and trigger 0.7 (≈11.2k tokens budget), we need a tail
+    // that bundleChatContext estimates above that. The crude estimator
+    // counts ~4 chars per token, so 50k chars ≈ 12.5k tokens.
+    const big = "x".repeat(2_500); // ~625 tokens per message
+    for (let i = 0; i < 20; i += 1) {
+      await repo.appendChatMessage(makeMessage(`m-${i}`, "chat-1", i + 1, "user", big));
+    }
+  }
+
+  it("when lightLlmClient is provided, compression uses light; RAG uses chat", async () => {
+    await seedLongLiveTail();
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "follow-up" },
+      {
+        repository: repo,
+        llmClient: chatLlm,
+        lightLlmClient: lightLlm,
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: 42,
+        llmModelId: "chat-model",
+        lightLlmModelId: "light-model",
+        mockMode: false,
+      },
+    );
+    // Compression fired against the LIGHT client.
+    expect(lightLlmForward).toHaveBeenCalled();
+    const lightCall = lightLlmForward.mock.calls[0];
+    const lightBody = JSON.parse((lightCall[1] as { body: string }).body);
+    expect(lightBody.model).toBe("light-model");
+
+    // RAG grounded completion fired against the CHAT client.
+    expect(chatLlmForward).toHaveBeenCalled();
+    const chatCall = chatLlmForward.mock.calls[0];
+    const chatBody = JSON.parse((chatCall[1] as { body: string }).body);
+    expect(chatBody.model).toBe("chat-model");
+
+    // The light client never saw the chat-side model id, and vice versa.
+    for (const call of lightLlmForward.mock.calls) {
+      const body = JSON.parse((call[1] as { body: string }).body);
+      expect(body.model).not.toBe("chat-model");
+    }
+    for (const call of chatLlmForward.mock.calls) {
+      const body = JSON.parse((call[1] as { body: string }).body);
+      expect(body.model).not.toBe("light-model");
+    }
+  });
+
+  it("back-compat: when lightLlmClient is omitted, compression falls back to chat client", async () => {
+    await seedLongLiveTail();
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "follow-up" },
+      {
+        repository: repo,
+        llmClient: chatLlm,
+        // no lightLlmClient
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: 42,
+        llmModelId: "chat-model",
+        mockMode: false,
+      },
+    );
+    // Light client was never created; chat client serves both compression + RAG.
+    expect(lightLlmForward).not.toHaveBeenCalled();
+    expect(chatLlmForward.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // At least one call carries the chat-model id.
+    const models = chatLlmForward.mock.calls.map((c) => JSON.parse((c[1] as { body: string }).body).model);
+    expect(models).toContain("chat-model");
+  });
+
+  it("lightLlmModelId defaults to llmModelId when omitted", async () => {
+    await seedLongLiveTail();
+    await handleChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "follow-up" },
+      {
+        repository: repo,
+        llmClient: chatLlm,
+        lightLlmClient: lightLlm,
+        // no lightLlmModelId
+        groundxClient,
+        groundxApiKey: "test-key",
+        samplesBucketId: 42,
+        llmModelId: "chat-model",
+        mockMode: false,
+      },
+    );
+    expect(lightLlmForward).toHaveBeenCalled();
+    const body = JSON.parse((lightLlmForward.mock.calls[0][1] as { body: string }).body);
+    expect(body.model).toBe("chat-model");
+  });
+});
+
 describe("handleChatMessage — CF-17 compression tunables", () => {
   let repo: MemoryAppRepository;
   let llmClient: LlmClient;

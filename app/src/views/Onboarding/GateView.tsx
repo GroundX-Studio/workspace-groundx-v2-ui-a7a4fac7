@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState, type FC, type FormEvent } from "react
 
 import { register } from "@/api/entities/customerEntity";
 import { claimAnonymousChat } from "@/api/claimAnonymousChat";
+import { captureException } from "@/lib/sentry";
 import {
   BODY_TEXT,
   BORDER,
@@ -92,8 +93,15 @@ export const GateView: FC = () => {
         try {
           await claimAnonymousChat();
         } catch (claimErr) {
-          // eslint-disable-next-line no-console
-          console.error("claimAnonymousChat failed after register", claimErr);
+          // CF-13: ship claim failures to Sentry (no-op when DSN
+          // unset). The claim is best-effort — the user is still
+          // signed up; they only lose their pre-signup chat history.
+          // Capture so we can size how often this leg fails in
+          // production without surfacing it to the user.
+          captureException(claimErr, {
+            route: "/api/chat-sessions/claim",
+            stage: "after-register",
+          });
         }
         promoteToSignedIn();
         commitGate("register");

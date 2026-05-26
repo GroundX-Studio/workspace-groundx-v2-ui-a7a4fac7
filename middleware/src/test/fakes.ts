@@ -48,6 +48,11 @@ export const testEnv: AppEnv = {
   OTEL_SERVICE_NAME: "groundx-v2-ui-middleware",
   SSO_ENABLED: false,
   DISABLE_AGENT_TURN_LOG: false,
+  // SC-01 — route-business-logic tests don't bootstrap a CSRF token.
+  // Default-off in test keeps those suites green. SC-01-specific
+  // tests pass `{ ...testEnv, CSRF_ENABLED: true }` to exercise the
+  // defense end-to-end.
+  CSRF_ENABLED: false,
 };
 
 export class FakePartnerClient implements GroundXPartnerClient {
@@ -125,4 +130,29 @@ export class FakeScenarioRegistry extends ScenarioRegistry {
   async list(): Promise<ScenarioConfig[]> {
     return this.data;
   }
+}
+
+/**
+ * SC-01 test helper. CSRF middleware blocks every state-changing
+ * request that lacks `X-CSRF-Token`. Tests bootstrap a supertest agent
+ * by calling `GET /api/csrf/token`, then set the returned token as a
+ * default header on the agent so every subsequent POST/PUT/DELETE/PATCH
+ * carries it without per-test boilerplate.
+ *
+ * Usage:
+ *   import request from "supertest";
+ *   import { bootstrapCsrf } from "./test/fakes.js";
+ *
+ *   const agent = await bootstrapCsrf(request.agent(app));
+ *   await agent.post("/...").send(body); // CSRF header auto-included
+ */
+export async function bootstrapCsrf<T extends { get: (path: string) => Promise<unknown>; set: (header: string, value: string) => unknown }>(
+  agent: T,
+): Promise<T> {
+  // `request.agent(app).get(...)` returns a Test (thenable). Awaiting
+  // it triggers the HTTP round-trip and persists Set-Cookie on the
+  // agent's jar so the cookie is available for subsequent requests.
+  const res = (await agent.get("/api/csrf/token")) as { body: { token: string } };
+  agent.set("X-CSRF-Token", res.body.token);
+  return agent;
 }

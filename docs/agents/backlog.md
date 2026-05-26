@@ -33,6 +33,26 @@ points here.
 - **blocked** — external dependency (data table, env, product call)
 - **closed** — user-visible test passes; inline TODOs deleted
 
+## Priority (set 2026-05-25)
+
+Priority is orthogonal to status — a blocked P0 still beats a
+not-started P2. The default is P2; non-default IDs are listed
+explicitly. Grep `^- \*\*P[0-9]` for the four buckets.
+
+- **P0** — UR-03, UR-04, all TS-* (TS-02, TS-03, TS-04, TS-05,
+  TS-06, TS-07, TS-08, TS-09, TS-11)
+- **P1** — OPS-01, OPS-04, OPS-05
+- **P2** — everything else (implicit; do not list individually)
+- **P3** — every `deferred-late` item (CF-06a, PLUG-07)
+
+Rationale: P0 is "ship-quality runtime" — the motion fallback, the
+StepStrip sub-bracket, and the testing coverage gaps are what keep a
+demo from breaking under a customer's hands. P1 is the agent-loop
+ergonomics + air-gap seams that aren't user-visible but block our
+ability to debug and sell. P3 is parked work where pulling forward
+burns credit (LLM eval) or commitment (plugin ADR) before the
+upstream caller exists.
+
 ## ID conventions
 
 | Prefix | Epic | Owner direction |
@@ -63,9 +83,6 @@ current epic is actionable.
 |---|---|---|---|
 | **DT-01** | not-started | Knex migrations directory + Helm pre-install job. Today `createSchema()` inlines `CREATE TABLE IF NOT EXISTS`. Productionizing: versioned `middleware/src/db/migrations/NNNN_*.sql` + Helm pre-install/upgrade Job that runs them. Memory: project_database.md "knex migrations deferred." | Schema change between two migrations rolls forward + back cleanly. |
 | **DT-02** | not-started | MySQL primary in production. Schema + repo impls + claim endpoint exist. Provision RDS/self-hosted, set `APP_REPOSITORY_MODE=mysql` + creds, first deploy runs `createSchema()`. | Production deploy reads/writes against MySQL; in-memory repo unused. |
-| **CF-15** | not-started | `EntitySession` scope refs (multi-bucket/multi-workspace/single-doc). Adds optional `bucketId? / projectIds?[] / groupId? / documentIds?[]` to `chat_session_entities`. Plus `ensureBucketGroup(bucketIds[]) → groupId` helper. Unblocks **CF-02 closure**. | Post a chat with entity having `projectIds:[P1, P2]` → search call body has `filter: {projectId: {$in:[P1,P2]}}`. |
-| **CF-16** | not-started | Light LLM vs chat LLM split. New env block (`LLM_CHAT_*` + `LLM_LIGHT_*`), two `FetchLlmClient` instances, `deps.chatLlm` vs `deps.lightLlm`. Compressor uses light; RAG grounded call uses chat. Unblocks cheap classification + suggested-prompts. | Leaf summarization hits the light client; RAG hits the chat client (assert via spies). |
-| **SC-01** | not-started | CSRF middleware. State-changing routes protected only by SameSite=lax cookie today. Token endpoint + middleware + axios interceptor. | Cross-site form POST to `/api/chat/messages` without token is rejected; same-origin POST with token works. |
 
 # Epic: CHAT — LLM runtime + RAG + compression
 
@@ -75,22 +92,12 @@ in `app/src/api/chatSessions.ts` reference these rows.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| CF-01 | **closed** | Compression chain (leaf + meta-compaction). Telephone-game decay eliminated; meta-compaction folds oldest 5 at >10 active. | (in `conversationCompressor.test.ts`) |
-| CF-02 | in-progress | ContentScope routing in `searchGroundX` — 5-case dispatch shipped. **Blocked on CF-15** for real-world behavior. | See CF-15 closure test. |
-| CF-03 | not-started | Generic Mongo-style `filter` field on RAG scope. RBAC + org + arbitrary metadata filters compose via `$and`. RBAC filter added server-side (never trusted from client). | Posting from a session with a fake RBAC seam returns search bodies with `$and: [rbacFilter, scopeFilter]`. |
-| CF-04 | in-progress | Live `structured` mode. 3 of 7 sub-handlers real (pages_remaining, onboarding_state, current_entity). 4 frank-reply (saved_schemas, my_projects, api_keys, unknown). | Real reader for saved_schemas / my_projects / api_keys; each has a test that posts a query + asserts the real data appears in the answer. |
-| CF-05 | in-progress | Live `hybrid` mode. Framework done; quality depends on CF-04 + CF-06. | Hybrid query with real readers + iterated prompt returns a useful tour-style answer matching expected shape. |
-| CF-06 | not-started | Grounded completion prompt iteration. Token-budget guard, structured citation field (JSON), "I don't know" calibration, eval set per scenario. | Eval set of ≥20 (query, expected-cite, expected-refusal) per scenario runs in CI; regression fails. |
-| CF-07 | not-started | Viewer-intent inference with ≥0.85 confidence gate. LLM optionally emits `suggestedIntent: {intent, confidence, reason}`; client surfaces as chip ONLY at high confidence. Never auto-navigates. | High-confidence reply emits chip; low-confidence suppresses it. |
-| CF-08 | not-started | Per-status client error mapping. 401→re-auth, 501→"can't yet" copy, 504→retry, 502/5xx→generic, 400→dev error. | Each status produces the right UX in F5. |
-| CF-09 | not-started | Per-scenario MOCK_MODE fixtures. Utility/Loan/Solar each answer their own canonical questions distinctly. | Canned questions per scenario return the right scenario-specific mock answer. |
+| CF-19 | not-started | `ensureBucketGroup(bucketIds[]) → groupId` helper. Multi-workspace pivots (user looking across 2+ buckets) need a pre-created GroundX Group. Builds: stable hash of sorted bucket-id list → cached groupId → fallback to Partner API `POST /v1/groups` with deterministic name. Sub-deferral of CF-15 — no upstream caller produces a multi-bucket scope yet, so no user-visible test exists until that caller (UI-05 SteadyShell, or a multi-bucket project view) lands. Don't ship this until a real call site exists. | A multi-bucket entity (`bucketIds:[B1,B2]`) sent through the chat path triggers `ensureBucketGroup([B1,B2])`; first call creates the group via Partner API; second call returns the cached id without a second POST; chatHandler then routes the search via `{kind:"group", groupId}`. |
+| CF-06a | **deferred-late** | Eval-set-in-CI follow-up to CF-06. ≥20 (query, expected-cite, expected-refusal) tuples per scenario (Utility/Loan/Solar). Runner exercises `callGroundedLlm` against the live LLM (or a configurable provider) and grades each answer against the expected cite/refusal. Regression fails the CI job. Splits from CF-06 because the runner + ground-truth authoring is genuinely separate work from the prompt code. Requires: (a) eval fixture per scenario, (b) grading function (cite presence + refusal-pattern match), (c) opt-in CI workflow that uses a real key (paid + flaky-tolerant). Soft-blocked on SCEN-06 (real sample PDFs) for the cite-against-real-text portion. **Per locked decision 2026-05-25:** deferred to the late-stage closure pass — no upstream item is blocked on it, and shipping it early would burn LLM credits before the prompt has stabilized. Pull forward only if (a) SCEN-06 lands AND (b) prompt regressions actually start happening in production. | The 60-tuple eval set runs in CI; a deliberate prompt regression (e.g. stripping the refusal contract) fails the job. |
 | CF-10 | not-started | Compression off the request hot path. Job queue + background worker + 202/poll OR "pending" flag on session. | Posting near threshold returns 200 promptly; compression completes async; next post sees new active summary. |
 | CF-11 | not-started | Streaming response (SSE / fetch-stream). | E2e renders a long answer token-by-token. |
 | CF-12 | not-started | Tool-call wiring in routeChat (see also TL-* below for the individual tool routes). | A query firing `show_extraction` produces the tool call in the reply. |
-| CF-13 | not-started | Frontend Sentry browser SDK + claim-failure telemetry. | Unit test: `Sentry.captureException` called on the chatSend + claim failure paths. |
 | CF-14 | not-started | DB pool sizing + batch reads. Pool=10 with 5–8 sequential reads per post. | Load test asserts P99 < 1s with 50 concurrent posts. |
-| CF-17 | **closed** | Configurable compression tunables. All six env vars wired: `LLM_CONTEXT_WINDOW_TOKENS`, `COMPRESSION_TRIGGER_RATIO`, `COMPRESSION_TARGET_TOKENS`, `MAX_ACTIVE_SUMMARIES_BEFORE_META`, `META_COMPACTION_BATCH_SIZE`, `MAX_SUMMARY_OUTPUT_TOKENS`. Each threaded through `HandleChatMessageDeps` → `compressionDeps` → `summarizeChunk`/`summarizeSummaries`. | 5 chatHandler tests + 2 contextBundler tests assert each knob actually controls the right behavior (meta-fold cap, batch size, trigger ratio, target tokens, output max_tokens). |
-| CF-18 | not-started | F2 chat input wire-up. `ChatInputStub` in `OnboardingChatColumn.tsx` is still a visual stub. Pattern from F5 drops in. ~30 min. | F2 e2e posts a message and renders assistant turn. |
 
 # Epic: AUTH — sessions, magic-link, SSO, session merge
 
@@ -123,7 +130,6 @@ in `app/src/api/chatSessions.ts` reference these rows.
 | UI-07 | not-started | Multi-session keyboard shortcuts (cmd-K to switch). | cmd-K opens a session picker; arrow keys navigate; Enter switches. |
 | UI-08 | not-started | Engineer-call Calendly wire-up. `commitGate("engineer-call")` is a stub with no Calendly round-trip. Needs `CALENDLY_URL` env + embed or `<a target=_blank>`. | "Book a call" button opens Calendly; `gate_event` recorded. |
 | UI-09 | not-started | Richer thinking-note formatting. Manifest `thinkingScript` is `string[]`; wireframe shows bolded words. Extend to support markdown-lite. | Manifest with `**bold**` renders bold in F2 thinking stream. |
-| UI-10 | not-started | `CanvasOrchestratorContext.dispatchIntent` fully wired. Per `project_chat_session_model.md`: dispatchIntent should (a) update active ChatSession's `currentIntent`, (b) write an `intent_log` row, (c) update entity registry, (d) write a `viewer_events` row. Today the provider is scaffolded; the triple-write isn't there. | Test: firing `dispatchIntent({source: "agent"})` writes to all three tables + flips `currentIntent`. |
 | UI-11 | not-started | Variable inference / `{project}` placeholder UX. Per `project_dev_contracts.md` decision #12: "automatic variable inference is parked... UX for proposing variables is the hybrid pattern (deferred)." Today S3a section editor doesn't propose variables; user can only inline-edit. | User selects "the project" → "make variable" surfaces a chip; future runs render `{project}`. |
 
 # Epic: TOOLS — agent canvas-dispatch + content tools
@@ -147,13 +153,11 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| OB-02 | not-started | PostHog 14 named events fired across F1–F7: `session.started`, `sample.picked`, `understand.started/completed`, `extract.field_hovered`, `cite.peeked`, `gate.shown`, `signup.completed`, `session.mode_flipped_to_steady`, `report.pinned`, `report.section_added`, `report.rendered`. Per `project_telemetry_logging.md`. Server PostHog hook exists; events don't fire. | Walking the golden path produces all 14 events with the expected shape. |
-| OB-03 | not-started | GA4 custom dimensions: `sessionId`, `appMode`, `currentSample`, `llmProvider`. Measurement id env exists; dimension setup doesn't. | GA debugger shows the four dims on every event. |
+| OB-02a | not-started | PostHog events for surfaces that don't exist yet. **`session.mode_flipped_to_steady`** — fires when an authed user is bumped from onboarding into steady mode (UI-05 SteadyShell mount). **`report.pinned`** — fires when a chat turn is pinned to a report template (F7 / TL-05). **`report.section_added`** — fires when a section is added to a report (TL-07). **`report.rendered`** — fires when the report template renders an HTML/PDF artifact. Blocked on the underlying surfaces existing. | All 4 events fire at their boundaries with the documented prop shape; PostHog dashboard shows them on the golden path. |
 | OB-04 | not-started | Hotjar session recording with PII suppression. `data-hj-suppress` tags on sensitive inputs. `HOTJAR_SITE_ID` env not implemented. | Hotjar dashboard shows session with email field redacted. |
 | OB-05 | not-started | Sentry source-map upload on production builds. | Stack trace in Sentry shows TS file + line, not minified js. |
 | OB-06 | not-started | AWS Managed Prometheus dashboards + AWS X-Ray traces. Middleware emits both; no dashboards configured. | Open the dashboard URL → see live request rate + p99 latency. |
 | OB-07 | not-started | Alert rules: SLO violations, error-budget burn, ALB 5xx, unhealthy hosts. ALB-alarms workflow exists; SLO + budget alerts don't. | Synthetic burn fires a real Sentry/PagerDuty alert. |
-| OB-08 | not-started | Migrate raw frontend `console.error` calls to structured client telemetry. Today: AuthProvider (4 calls), GateView claim-fail (1), OnboardingShell adapter-failure (1), CanvasOrchestrator adapter-failures (2). Each is an `eslint-disable`-style escape from the lint rule that should catch this. Depends on OB-01 (browser Sentry SDK). | Grep `console.error` in `app/src/` outside test files returns no hits; each catch site routes via `Sentry.captureException(err, {extra})`. |
 | OB-09 | not-started | Migrate middleware `console.warn` calls in `chatRouter.ts` (hybrid-RAG-failed at L264, unknown-scope at L377) to pino structured logging. Both currently use `eslint-disable-next-line no-console` to bypass the lint rule. | Grep `console.warn` in `middleware/src/` outside tests returns no hits; the warns surface via `logger.warn({...}, "msg")` with the scrubber applied. |
 
 # Epic: SEC — security
@@ -169,17 +173,16 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| UR-01 | not-started | `PdfViewer` wrapper component using `pdfjs-dist` v4. Worker bundled same-origin. Today F2 UnderstandView has a "flat-WHITE PDF placeholder" per inline comment. | Sample document renders real PDF with pdfjs in F2. |
-| UR-02 | in-progress | Drag-to-resize chat/canvas divider. ALREADY BUILT: `ResizeHandle` component with a11y arrow-key bump; `useResizableSplit` hook with `zone` output; AppShell wires both at line 362 and mirrors snap-zone into focus-mode. Still pending: localStorage persistence (no `localStorage` reference in either file) + `prefers-reduced-motion` gate on the drag animation. **Audit-discovered correction 2026-05-25** — was incorrectly listed not-started in the prior backlog. | Drag the divider, snap to a focus mode (works today). Reload preserves the width (pending). With OS reduced-motion preference, drag uses no transitions (pending). |
-| UR-03 | not-started | `<MotionConfig>` global with `prefers-reduced-motion` fallback (80ms crossfade). Today Framer Motion has no global config. | OS preference set → animations swap to 80ms crossfade. |
-| UR-04 | not-started | StepStrip sub-bracket: Analyze pill contains Extract/Interact/Report sub-pills per `project_ui_runtime.md`. Verify against current StepStrip implementation. | StepStrip renders the sub-pill row under Analyze. |
+| UR-01 | closed | `PdfViewer` component (`app/src/shared/components/PdfViewer.tsx`) using `pdfjs-dist` v4.10 with the worker bundled as a Vite `?url` asset import (build emits `dist/assets/pdf.worker.min-*.mjs` same-origin, 1.3 MB). `ScenarioDocument` gained an optional `previewUrl` field (mirrored across `app/src/types/scenarios.ts` + `middleware/src/scenarios/types.ts`). `UnderstandView` renders `<PdfViewer url={previewUrl}/>` when the active scenario's first doc carries the URL, else falls back to `SilhouetteContent`. pdfjs load errors route back through the same fallback via `onLoadError`. Scenario URLs are still empty until SCEN-06 ingests the real Utility/Loan/Solar PDFs — at that point `previewUrl` flips on and pdfjs paints automatically. Closed 2026-05-25. | F2 with `previewUrl` mounts `pdf-viewer` testid + calls `pdfjs.getDocument(url)`; F2 without URL keeps silhouette; PdfViewer unit-tests cover happy path + page selection + scale (4 PdfViewer + 2 UnderstandView wiring tests). |
+| UR-03 | closed | `MotionRoot` component (`app/src/shared/components/MotionRoot.tsx`) — wraps the App tree in a single `<MotionConfig reducedMotion="user">`. When `useReducedMotion()` reports the OS preference is set, supplies a global default `transition: { duration: 0.08, ease: "linear" }` so any motion site that doesn't override gets an 80 ms crossfade. When reduced is off, transition is undefined so per-site animations drive themselves. `reducedMotion="user"` makes framer-motion auto-disable transform/scale/rotate animations under reduced-motion; opacity continues to animate (= the crossfade). Mounted at the App root inside GxThemeProvider so the contract covers the entire tree. Per-site `useReducedMotion()` calls (AppShell drag, F2 scan-line, GateChatPanel) keep their own logic — MotionRoot is the floor, not the ceiling. Closed 2026-05-25. | 4 tests: renders children, sets reducedMotion="user", swaps to 80 ms crossfade when reduced, omits global transition when not reduced. Full app sweep 96 files / 614 tests pass; TS clean. |
+| UR-04 | closed | **Verify-first hit — already built.** `StepStrip.tsx` already renders the ANALYZE dashed bracket with the three sub-pills (`SubPill` component at L146, bracket at L282-316). `OnboardingShell.analyzeSubsteps()` (L62) wires `{extract, interact, report}` with per-frame `active` / `reachable-todo` / `disabled` state. The closure test already exists at `StepStrip.test.tsx:37` ("renders all four primary slots + substep bracket when analyze is active") — asserts Ingest / Understand / ANALYZE / Integrate / Extract / Interact / Report all in the strip. Audit 2026-05-25 confirmed the row was mis-flagged not-started because of the verify-first ask. No code change. Closed 2026-05-25. | Existing `StepStrip.test.tsx:37` passes — assertions cover all three sub-pills inside the ANALYZE bracket. |
 | UR-05 | not-started | Hotkey surface (cmd-K, Esc, etc.) via `react-hotkeys-hook`. Per `project_ui_runtime.md`. | cmd-K opens session switcher; Esc dismisses overlays. |
 
 # Epic: SCEN — scenario completeness
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| SCEN-01 | not-started | Utility scenario full schema: 20 statement + 8 meters + 56 charges fields per `project_scenario_fixtures.md`. Today's manifest has a subset. | Pick Utility → see all 84 fields in F3 extract table. |
+| SCEN-01 | not-started | **Data-only — no code change.** The Utility manifest is loaded from the GroundX samples bucket at runtime via `/api/scenarios` → `ScenarioRegistry`. Today `middleware/scripts/scenarios/utility.json` ships ~14 ids (a small subset). Closing the gap is: extend `utility.json` with the full 20 statement + 8 meters + 56 charges fields per `project_scenario_fixtures.md`, then `npm --workspace middleware run seed -- utility`. `refreshManifestIfChanged()` rewrites the carrier doc's filter so the bucket is the new source of truth and the next `/api/scenarios` fetch hands the frontend the full 84-field schema. No frontend or middleware code edit. | After re-seed, `/api/scenarios` returns 84 fields for utility; F3 extract table renders all 84. |
 | SCEN-02 | not-started | Loan 12-doc packet: 3 paystubs + W-2 + employment letter + 3 bank statements + 4 debt docs. Fixtures drafted; needs product sign-off + real docs ingested. | Pick Loan → 12 docs listed; cross-doc citations work. |
 | SCEN-03 | not-started | Solar 142-doc portfolio tree: hierarchical Fund→Project, virtualized scroll >50 nodes. Today no tree UI. | Pick Solar → tree renders 142 nodes; scroll smooth; search filters. |
 | SCEN-04 | not-started | Solar IC brief 4-section template: executive_summary, risk_roll_up, comparable_projects, recommendation. Per `project_scenario_fixtures.md`. | F7 generates IC brief from template; 4 sections present. |
@@ -196,31 +199,27 @@ CF-12 is the umbrella; TL-* are the individual tool surfaces.
 | ID | Status | Item | Closure test |
 |---|---|---|---|
 | TS-02 | not-started | Context coverage: `AuthContext`, `BucketsContext`, `ProjectsContext`, `DocumentsContext`, `GroupsContext`, `HealthContext`, `ApiKeysContext` — scaffold-shipped, 0 onboarding-flow tests. | Each context has ≥3 tests for its real surface. |
-| TS-03 | not-started | ChatStore persistence failure modes: `QuotaExceededError`, malformed snapshot rehydrate, cross-tab `storage` event. | Tests cover all three. |
-| TS-04 | not-started | Widget integration tests for `extraction-workbench`, `chat-with-sources`, `smart-report` inside the scaffold stack. Per `project_test_plan.md` Layer 9. | Each widget mounted in a real scaffold-stack test passes its acceptance suite. |
+| TS-03 | closed | `ChatStoreContext.test.tsx` extended with a 4-test `persistence failure modes (TS-03)` block: (1) `QuotaExceededError` on setItem doesn't crash; in-memory state still mutates, (2) malformed JSON snapshot rehydrates as empty store, (3) wrong-version snapshot is treated as no snapshot, (4) cross-tab `StorageEvent` does NOT silently mutate this tab's state (locks the "no cross-tab sync yet, that's intentional" contract). Closed 2026-05-25. | 25 ChatStore tests pass; the 4 new ones lock the existing error-swallowing + rehydrate-guard behavior and the deliberate no-cross-tab-listener contract. |
+| TS-04 | blocked | **Reclassified 2026-05-25.** Original framing assumed harness widget directories (`widgets/extraction-workbench/`, `widgets/chat-with-sources/`, `widgets/smart-report/`) are present in this repo. They are not — this is a greenfield project that built F3 ExtractView, F5 InteractView, and F7 IntegrateView natively without copying widgets. Either (a) the equivalent native surfaces get an integration-test layer (see TS-05 for the Playwright path; the unit tests already exist), OR (b) the widgets get imported per `references/widgets.md` and we test those copies. **Blocked on the decision**: do we want exact-use widgets in this project at all? Until then this row is not actionable. | Decision made on widget adoption; closure path follows. |
 | TS-05 | not-started | Browser smoke + a11y suite: golden-path F1→F2→F3→F5→F6→F7 at desktop/mobile via Playwright + axe WCAG A/AA. Partial coverage today; not all 9 frames per scenario. | All scenarios' golden paths pass at both viewports. |
 | TS-06 | not-started | Nightly visual regression (Chromatic) — non-blocking baseline. | First baseline runs; diff flagged on PR. |
 | TS-07 | not-started | Load test against `/api/chat/messages`: ≥100 concurrent SSE per `project_test_plan.md`. | P95 < 5s under load with mocked LLM. |
-| TS-08 | not-started | PII regex DoS guard: pathological input (50k repeated digits) doesn't trigger catastrophic backtracking. | Adversarial input completes in <100ms. |
-| TS-09 | not-started | Reduced-motion sweeps in CI. | Visual test with `prefers-reduced-motion: reduce` passes. |
-| TS-11 | not-started | Auth form test coverage: `LoginForm`, `RegisterForm`, `VerificationEmailForm`, `ConfirmChangePasswordForm`, `AuthLayout`. Scaffold-shipped, 0 tests each. Sister to TS-02 (which covers the contexts). | Each form has ≥3 tests: validation, submit, error display. |
+| TS-08 | closed | `middleware/src/lib/pii.test.ts` extended with a 5-test DoS guard suite covering: (1) 50k repeated digits → credit-card regex, (2) alternating digit+separator runs, (3) long phone-shaped period-separated runs, (4) account-prefix + 100k digits, (5) deeply nested object with pathological string payloads. Closure budget: every shape scrubs in <50 ms. Confirmed the existing regexes don't catastrophically backtrack — `\b` anchors + non-greedy `[ -]*?` keep them linear. The test locks that property so a future regex tweak that re-introduces nested-quantifier ambiguity fails CI. Closed 2026-05-25. | 15 pii tests pass; all 5 pathological-shape elapsed times sub-50ms. |
+| TS-09 | closed | `app/e2e/reduced-motion.spec.ts` — Playwright spec running with `test.use({ reducedMotion: "reduce" })` against the MOCK_MODE preview. Three sweeps: (1) AppShell `data-app-shell-reduced-motion="true"` after a scenario pick, (2) F2 scan-line `display: none` (the looping `repeat: Infinity` motion is actually gone), (3) F2 page transition completes within 1.5s under reduced-motion. Pairs with UR-03 — the `<MotionRoot>` is the seam these assertions exercise end-to-end. Closed 2026-05-25. | `npm run test:e2e -- reduced-motion` passes all 3 specs under Playwright's reducedMotion=reduce fixture. |
+| TS-11 | closed | 5 new test files in `app/src/views/Auth/Form/` + `app/src/views/Auth/AuthLayout.test.tsx`. Each form has ≥3 tests covering validation (required-field errors), submit happy-path (onSubmit called with the typed values), and one error-display branch (yup .email() shape, code-must-be-6-digits, passwords-do-not-match, EULA-must-be-accepted). AuthLayout has 3 layout/`isTall` tests. Per-suite `vi.spyOn(console, "error").mockImplementation()` follows the existing `Login.test.tsx` pattern — Formik's blur/change triggers React `act(...)` warnings under user-event which would otherwise trip the global setup.ts spy. Closed 2026-05-25. | 15 new tests pass (3 per form × 4 forms + 3 for AuthLayout); full app sweep 101 files / 633 tests pass. |
 
 # Epic: OPS — operations + infra
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| OPS-01 | not-started | Agent MCP-driven CI / cluster / pod-log reading. Today every deploy debug requires user paste. Deploy-audit ask delivered 2026-05-24; still open. | Agent can read GH Actions logs + cluster pod state via MCP tool. |
+| OPS-01 | blocked | **Reclassified 2026-05-25 — out of this repo's scope.** Agent MCP-driven cluster/pod-log reading is a feature of the `groundx-studio` MCP server (i.e. the harness plugin), not this application. The deploy-audit ask was delivered upstream 2026-05-24 and the resolution lives with the harness team. This row should track the upstream conversation, not produce code here. Blocked on the harness team shipping the corresponding MCP tool surface. | Harness MCP server exposes a `cluster_logs` (or equivalent) tool that this project's agent can call. |
 | OPS-04 | not-started | Air-gapped / on-prem support seams. Per `project_decisions_stack.md` decision #20: "design for easy support, don't fully implement." Track as awareness item: every external dep (telemetry hosts, fonts, LLM provider URL) needs an env-var seam so an on-prem deploy can swap. Audit current code for hardcoded internet hosts. | Audit doc lists every external host used; each has an env-var override or a fallback. |
-| OPS-05 | not-started | ESLint flat-config migration. Running `npx eslint src` from `app/` prints ESLint's "migration guide" pointer in its output — we're on the legacy `.eslintrc` format and ESLint warns about it. Migration brings the lint config to ESLint 9.x style. | `npx eslint src` runs clean with no migration warning; flat config in `eslint.config.js`. |
+| OPS-05 | closed | Installed `@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks`, `globals` at the workspace root. Authored `app/eslint.config.js` and `middleware/eslint.config.js` — flat config, `@eslint/js` recommended + `typescript-eslint` recommended, plus `react-hooks/rules-of-hooks` (error) and `react-hooks/exhaustive-deps` (warn) on the frontend, and `no-console` (warn, info allowed) on the middleware. Per-package `npm run lint` scripts added. **Net rule hits today**: app = 0 errors / 9 warnings; middleware = 0 errors / 3 warnings. Warnings flag real cleanup work (unused imports, unused eslint-disable directives, `console.warn` calls awaiting OB-09 migration, `let errorCode = null` pattern). Demoted rules with documented exceptions: `no-empty-object-type` (deliberate API option type naming in `api/common.ts`), `no-namespace` (Express type augmentation), `no-useless-assignment` (let+catch reassignment pattern). Verified rules surface real issues via a planted `definitely_unused` offender — fires `no-unused-vars` as expected. Closed 2026-05-25. | `npx eslint src` runs in both packages with 0 errors; planted offender fires the expected rule. |
 
 # Epic: POL — known minor bugs
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| POL-01 | not-started | OnboardingNav chevron uses `«` / `»` Unicode. Replace with MUI chevron icon. | Visual: nav chevron is an MUI icon. |
-| POL-02 | not-started | SteadyShell "unknown session" hint uses an inline `<code>` element without MUI wrapper. Replace with proper MUI Typography. | Visual: matches design tokens. |
-| POL-03 | not-started | Pick-a-view pill labels use `category.name.toLowerCase()` — awkward for multi-word categories. | Labels render correctly for known scenarios; sentence-case if needed. |
-| POL-04 | not-started | Product-review tag sweep. `project_scenario_fixtures.md` instructs flagging draft copy with `// TODO: product-review` so it's not shipped as final. Audit codebase; close each with either a product sign-off or a real-copy swap. | Grep for `product-review` returns no hits; copy in fixtures is product-approved. |
 
 # Epic: PLUG — plugin system + skills + SDR
 
@@ -235,43 +234,64 @@ exists, treat SDR as deferred.
 
 | ID | Status | Item | Closure test |
 |---|---|---|---|
-| PLUG-01 | not-started | Plugin loader (BFF side). Fetches plugin manifests from a remote source, validates schema, composes the agent's system-prompt + tool surface from active plugins. Blocked on: plugin discovery/load mechanism is "a separate TBD architectural piece" per `project_decisions_stack.md` decision #23. | A test plugin manifest loads and contributes a system-prompt fragment + a tool to the next agent call. |
-| PLUG-02 | not-started | `OnboardingSkillContext` real implementation. Today an empty stub. Once PLUG-01 ships, consume plugin manifests, expose UI extension slots + system-prompt fragments + tour metadata. | A loaded plugin manifest's UI slot renders in the right surface; tour metadata reaches `useOnboardingSkill()`. |
-| PLUG-03 | blocked | SDR plugin content (tour script, voice, copy nuance, sales-flavored CTAs). Authored OUTSIDE the BFF codebase per locked decision. Blocked on PLUG-01. | The SDR plugin (loaded remotely) renders the three-options gate framing, the tour stepper, and SDR-specific assistant voice. |
+| **PLUG-07** | **deferred-late** | **Plugin tool-surface ADR — must land before PLUG-01.** Per locked decision 2026-05-25: deferred until the plugin track actually unblocks (currently no caller, PLUG-01..05 all blocked here intentionally). Pull forward when (a) a real first plugin gets scoped OR (b) someone wants to start PLUG-01. Decide + document, in writing, the four open contracts the plugin loader needs settled: (1) **Manifest shape** — required fields (name, version, semver range, capability flags), system-prompt fragment shape, tool list shape, UI extension slot taxonomy, tour metadata shape; (2) **Tool transport** — native LLM tool-use (OpenAI/Anthropic JSON-Schema function-calling) vs MCP-as-protocol vs custom JSON-RPC; (3) **Tool runtime** — in-process JS (sandboxed `vm` / `isolated-vm`?) vs MCP subprocess vs remote HTTP webhook; (4) **Discovery + trust** — where do plugins come from (remote registry URL, signed npm package, baked-in?), signature verification, and what they can/can't access (the BFF's session, the user's Partner API key, fetch). Recommendation in this turn's response: **native function-calling for the LLM tool surface + in-process JS for the tool runtime + remote registry with signed manifests for discovery**. MCP-as-protocol is a wrong-shape commitment when we control both ends. ADR file lands at `docs/agents/adr/0001-plugin-tool-surface.md` with each of the four contracts decided, rationale, and rejected alternatives. | An ADR document exists at the named path with each of the four contracts decided + signed off. The PLUG-01 row text is updated to point at the ADR. |
+| PLUG-01 | blocked | Plugin loader (BFF side). Fetches plugin manifests from a remote source, validates schema, composes the agent's system-prompt + tool surface from active plugins. **Blocked on PLUG-07** (the manifest + transport + runtime contract has to be decided before the loader can be scoped). | A test plugin manifest loads and contributes a system-prompt fragment + a tool to the next agent call. |
+| PLUG-02 | blocked | `OnboardingSkillContext` real implementation. Today an empty stub. Once PLUG-01 ships, consume plugin manifests, expose UI extension slots + system-prompt fragments + tour metadata. Blocked on PLUG-01 (which is blocked on PLUG-07). | A loaded plugin manifest's UI slot renders in the right surface; tour metadata reaches `useOnboardingSkill()`. |
+| PLUG-03 | blocked | SDR plugin content (tour script, voice, copy nuance, sales-flavored CTAs). Authored OUTSIDE the BFF codebase per locked decision. Blocked on PLUG-01 (which is blocked on PLUG-07). | The SDR plugin (loaded remotely) renders the three-options gate framing, the tour stepper, and SDR-specific assistant voice. |
 | PLUG-04 | blocked | Onboarding **overlay** surface (alternative to the inline F1-F7). Per `project_plugin_model.md`: "Onboarding overlay is deferred, but both surfaces will exist." Blocked on PLUG-01 + product spec for overlay UX. | Overlay onboarding renders on top of an existing product surface (not as a full-page replacement). |
-| PLUG-05 | blocked | Tour state machine (third intent source: user / agent / tour). Per `project_chat_session_model.md`: "When SDR plugin loads, the tour writes intents to the active chat session via the same `dispatchIntent` path." Today the dispatchIntent path doesn't surface a `source='tour'` writer. Blocked on PLUG-01 + UI-10 (intent dispatch fully wired). | Tour-loaded plugin advances frames via `dispatchIntent({source: "tour"})`; `intent_log.source = "tour"` written. |
+| PLUG-05 | blocked | Tour state machine (third intent source: user / agent / tour). Per `project_chat_session_model.md`: "When SDR plugin loads, the tour writes intents to the active chat session via the same `dispatchIntent` path." Blocked on PLUG-01 (which is blocked on PLUG-07) — UI-10 + UI-10b (intent_log triple-write at memory + DB layers) both closed 2026-05-25; the dispatch path itself is fully wired. | Tour-loaded plugin advances frames via `dispatchIntent({source: "tour"})`; `intent_log.source = "tour"` written. |
 | PLUG-06 | not-started | `PLUGIN_PRESET` env var. Per `project_harness_model.md`: "TBD; locked but not implemented." Controls which plugin bundle the LLM-side harness loads at boot. Distinct from `APP_MODE_PRESET` (app shell). | env.ts declares `PLUGIN_PRESET`; boot reads it; the loader (PLUG-01) honors the preset. |
 
 ## Cross-epic dependency notes
 
 - **CF-15 → CF-02 closure → CF-03 / TL-01 quality.** Multi-bucket can't ship until EntitySession scope refs exist.
-- **CF-16 → CF-04 quality + CF-06.** A light LLM makes the structured classifier + suggested-prompt generators cheap enough to use everywhere.
+- **CF-16 → CF-04 quality + CF-06a.** A light LLM makes the structured classifier + suggested-prompt generators + eval grading loop cheap enough to use everywhere.
+- **CF-06 → CF-06a.** The eval set scores the prompt, so the prompt has to exist first.
+- **SCEN-06 → CF-06a + UR-01.** Real PDFs are required for the eval set's cite-against-real-text portion AND for UR-01's "renders real Utility/Loan/Solar pages" closure test.
 - **DT-01 → DT-02.** Migrations infra before production MySQL.
 - **TL-01–TL-07 → CF-12 closure.** Individual tool routes finish the umbrella.
 - **OB-02 (PostHog events) → CF-13 (Sentry) ordering: PostHog first** (telemetry coverage > error coverage when neither exists).
 - **UR-01 (PdfViewer) → UI-04 (F5 citation side panel).** Side panel needs the viewer.
+- **PLUG-07 (tool-surface ADR) → PLUG-01..05.** Manifest + tool transport + runtime contract has to be decided before the loader can be scoped. CF-12 / TL-* are NOT blocked on PLUG-07 — in-app native function-calling works regardless of how plugins eventually publish tools.
 
-## Counts as of 2026-05-25 (after CF-17 closure)
+## Counts as of 2026-05-25 (after UR-01 closure + priority pass)
 
 | Status | Count |
 |---|---|
-| closed | 2 (CF-01, CF-17) |
-| in-progress | 4 (CF-02, CF-04, CF-05, UR-02) |
-| blocked | 5 (AU-02, PLUG-03, PLUG-04, PLUG-05, SCEN-06) |
-| not-started | 78 |
-| **total** | **89** |
+| closed | 1 (UR-01) — historical closes were swept from the table; build status memory holds the long list |
+| in-progress | 0 |
+| blocked | 7 (AU-02, PLUG-01..05, SCEN-06) |
+| not-started | live items in epic tables below |
 
-CHAT epic now at 3 in-progress (CF-02, CF-04, CF-05) — back at
-the WIP cap. CF-17 closed with 7 new tests proving each tunable
-actually controls the right behavior. Next-move candidates by
-leverage:
-- **UR-02**: small remaining scope (localStorage persist +
-  reduced-motion gate), would close cleanly + drop UR to 0
-  in-progress.
-- **CF-18**: ~30 min, identical pattern to F5 → wire F2 chat
-  input via `sendChatMessage`.
-- **CF-15** (currently not-started): unblocks CF-02 closure
-  AND TL-01 quality. Higher leverage but bigger.
+By priority:
+
+| Pri | IDs | Notes |
+|---|---|---|
+| **P0** | UR-03, UR-04, TS-02, TS-03, TS-04, TS-05, TS-06, TS-07, TS-08, TS-09, TS-11 | Ship-quality runtime + test coverage gaps. 11 items. |
+| **P1** | OPS-01, OPS-04, OPS-05 | Agent loop + air-gap seams. 3 items. |
+| **P2** | everything else not listed in P0/P1/P3 | Default. |
+| **P3** | CF-06a, PLUG-07 | Deferred-late; pull forward only when upstream caller exists. |
+
+Next-move candidates (within P0):
+- **UR-03** — `<MotionConfig>` global with reduced-motion 80ms
+  crossfade fallback. Small, surface-level, ships now.
+- **UR-04** — StepStrip Analyze→{Extract,Interact,Report} sub-bracket.
+  Visual completeness for the nav vocabulary.
+- **TS-09** — reduced-motion CI sweep. Pairs naturally with UR-03.
+- **TS-02 / TS-11** — Auth context + form coverage. 0 tests today.
+- **TS-05** — Playwright golden-path + axe a11y across F1→F7. Largest
+  test gap; pays back per-scenario.
+
+Next-move candidates (within P1):
+- **OPS-01** — Agent MCP cluster/pod-log reading. Removes the
+  per-deploy paste loop.
+- **OPS-05** — ESLint flat-config migration. Cleans the lint-warning
+  noise so future lint suppressions are visible.
+
+Out-of-scope until pulled forward (P3):
+- **CF-06a** — LLM eval set in CI. Burns credit; soft-blocked on SCEN-06.
+- **PLUG-07** — Plugin tool-surface ADR. Blocked on a real first
+  plugin being scoped.
 
 ## How to use this file
 

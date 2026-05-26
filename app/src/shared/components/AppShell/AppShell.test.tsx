@@ -106,6 +106,73 @@ describe("AppShell", () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
+  // UR-02 closure: reload-survives-width + reduced-motion gate
+  // ────────────────────────────────────────────────────────────────────────
+  describe("UR-02 closure (persistence + reduced-motion)", () => {
+    const STORAGE_KEY = "appshell.chatWidth.v1";
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("restores chat-pane width from localStorage on mount (drag-then-reload)", () => {
+      // Simulate a prior session: user dragged the separator to 480.
+      localStorage.setItem(STORAGE_KEY, "480");
+      renderShell();
+      const separator = screen.getByRole("separator");
+      // Without persistence the value snaps back to the 360 design
+      // default; with persistence it picks up the stored width.
+      expect(separator).toHaveAttribute("aria-valuenow", "480");
+    });
+
+    it("persists chat-pane width on keyboard bump so the next reload restores it", async () => {
+      const user = userEvent.setup();
+      renderShell();
+      const separator = screen.getByRole("separator");
+      separator.focus();
+      await user.keyboard("{ArrowRight}");
+      expect(localStorage.getItem(STORAGE_KEY)).toBe("376");
+    });
+
+    it("exposes data-app-shell-reduced-motion=true when OS prefers reduced motion", () => {
+      // The global test setup (src/test/setup.ts) stubs matchMedia to
+      // return matches=true for any query containing "prefers-reduced-
+      // motion" — done to skip framer-motion's looping animations during
+      // tests. So the default render path already produces the
+      // positive-case attribute; we exercise it here to lock in the
+      // contract.
+      renderShell();
+      const root = document.querySelector("[data-app-shell-reduced-motion]");
+      expect(root?.getAttribute("data-app-shell-reduced-motion")).toBe("true");
+    });
+
+    it("reports data-app-shell-reduced-motion=false when matchMedia returns false", () => {
+      // Override the global stub so this single test exercises the
+      // negative case. Without the gate, drag animations would run on
+      // users who explicitly disabled them in the OS — that's the
+      // accessibility regression UR-02 closes.
+      const origMatchMedia = window.matchMedia;
+      window.matchMedia = ((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      })) as typeof window.matchMedia;
+      try {
+        renderShell();
+        const root = document.querySelector("[data-app-shell-reduced-motion]");
+        expect(root?.getAttribute("data-app-shell-reduced-motion")).toBe("false");
+      } finally {
+        window.matchMedia = origMatchMedia;
+      }
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
   // Compact mode — applies below md (900px) on mobile + tablet portrait.
   //
   // Below md, the three-column split breaks: chat is pinned 360px and

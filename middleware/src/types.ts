@@ -82,6 +82,32 @@ export interface ChatSessionEntityRecord {
   completedFramesJson: string;
   scanProgressJson: string | null;
   extractedValuesJson: string | null;
+  /**
+   * CF-15 — RAG scope refs. The active EntitySession carries enough
+   * routing info for the chat handler to build a `RagContentScope`
+   * without hardcoding the env samples bucket.
+   *
+   *   bucketId         — primary bucket the entity lives in (steady mode:
+   *                      customer's bucket; onboarding: samples bucket).
+   *   projectIdsJson   — JSON array of GroundX projectIds to scope the
+   *                      search to. 0 → whole bucket. 1 → single-project
+   *                      filter. N → $in filter.
+   *   groupId          — pre-created group of buckets (multi-workspace).
+   *                      Built lazily via `ensureBucketGroup` when the
+   *                      user pivots across more than one bucket.
+   *   documentIdsJson  — JSON array of explicit documentIds (single-doc
+   *                      "look at this PDF" flows). Dispatches to the
+   *                      doc-search endpoint.
+   *
+   * All four are nullable: a fresh anon onboarding entity has none of
+   * them and falls through to the env samples bucket. A first-time
+   * steady-mode user has bucketId set; a multi-bucket pivot adds
+   * groupId; a single-doc viewer flow uses documentIdsJson.
+   */
+  bucketId: number | null;
+  projectIdsJson: string | null;
+  groupId: number | null;
+  documentIdsJson: string | null;
   createdAt: Date;
   lastVisitedAt: Date;
 }
@@ -107,6 +133,48 @@ export interface ViewerEventRecord {
   detailJson: string | null;
 }
 
+/**
+ * UI-10b — `intent_log` table. The canvas-orchestrator dispatch trail
+ * lives here, separate from `viewer_events`:
+ *
+ *   - viewer_events records every UI-visible action (frame-advanced,
+ *     citation-clicked, scan-completed). Reads light, writes many.
+ *   - intent_log records every dispatched CanvasIntent regardless of
+ *     whether it produced a UI-visible action. Smaller volume but
+ *     critical for the PLUG-05 tour state machine (`source: "tour"`).
+ *
+ * Both tables share `chat_session_id` so the conversation/viewer/intent
+ * axes can be cross-joined when building LLM context.
+ */
+export type IntentLogSource = "user" | "agent" | "tour" | "system";
+
+export interface IntentLogRecord {
+  id: string;
+  chatSessionId: string;
+  timestamp: number;
+  source: IntentLogSource;
+  /** Discriminator from the CanvasIntent union (e.g. "openDocument"). */
+  intentKind: string;
+  /** Full intent payload, JSON-serialized. Replayed for audit / debug. */
+  intentJson: string;
+}
+
+/**
+ * CF-04: app-owned extraction schemas. A saved schema is the user's
+ * pinned-and-named version of an F3a extraction shape (categories +
+ * fields + prompts). Lives in app DB (not Partner API) because the
+ * schema knowledge is product-owned, not GroundX-owned.
+ */
+export interface ExtractionSchemaRecord {
+  id: string;
+  groundxUsername: string;
+  name: string;
+  /** Full schema serialized as JSON — shape mirrors `ExtractionSchema` on the frontend. */
+  schemaJson: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface AppRepository {
   createSchema(): Promise<void>;
   createSession(session: SessionRecord): Promise<void>;
@@ -114,6 +182,10 @@ export interface AppRepository {
   deleteSession(id: string): Promise<void>;
   upsertMetadata(metadata: AppUserMetadata): Promise<void>;
   getMetadata(groundxUsername: string): Promise<AppUserMetadata | null>;
+
+  // Extraction schemas (CF-04 — saved_schemas reader)
+  upsertExtractionSchema(record: ExtractionSchemaRecord): Promise<void>;
+  listExtractionSchemasForUser(groundxUsername: string): Promise<ExtractionSchemaRecord[]>;
 
   // Chat sessions
   upsertChatSession(record: ChatSessionRecord): Promise<void>;
@@ -143,6 +215,10 @@ export interface AppRepository {
   // Viewer events (telemetry-class; DB for ALL users)
   appendViewerEvent(record: ViewerEventRecord): Promise<void>;
   listViewerEvents(chatSessionId: string, sinceTimestamp?: number): Promise<ViewerEventRecord[]>;
+
+  // Intent log (UI-10b — every canvas-orchestrator dispatch)
+  appendIntentLog(record: IntentLogRecord): Promise<void>;
+  listIntentLog(chatSessionId: string, sinceTimestamp?: number): Promise<IntentLogRecord[]>;
 
   /**
    * Login-claim: re-key every chat_sessions row whose ownerAnonId

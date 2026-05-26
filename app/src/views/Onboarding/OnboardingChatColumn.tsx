@@ -23,13 +23,19 @@
  * UnderstandView). Chunk 4 cleans the canvas accordingly.
  */
 
+import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 import Box from "@mui/material/Box";
+import IconButton from "@mui/material/IconButton";
+import InputBase from "@mui/material/InputBase";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { useEffect, useMemo, useRef, useState, type FC } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+
+import { chatErrorToUserCopy, sendChatMessage } from "@/api/chatSessions";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 
 import {
   BODY_TEXT,
@@ -176,18 +182,28 @@ interface F2ConversationFlowProps {
 
 /**
  * Derive the Pick-a-view pill set from the scenario's extraction
- * schema. Each category becomes one pill (label = category.name
- * lowercased, key = category.id). Plus an "edit schema" pill.
- * Scenarios without an extraction schema (e.g. Solar — Interact +
- * Report only) get a single "show me chat" pill that jumps to F5.
+ * schema. Each category becomes one pill (label = `category.name`
+ * verbatim from the manifest, key = `category.id`). POL-03: we
+ * previously `.toLowerCase()`'d the label, which read awkwardly for
+ * multi-word categories ("Bill Statement" → "bill statement"). The
+ * manifest already authors category names in the right case, so we
+ * trust it. Scenarios without an extraction schema (e.g. Solar —
+ * Interact + Report only) get a single "Show me chat" pill that
+ * jumps to F5.
  */
 function derivePickViews(scenario: NonNullable<ReturnType<ReturnType<typeof useScenarioRegistry>["byId"]>>): PickViewOption[] {
   const schema = scenario.manifest.extractionSchema;
-  if (!schema) return [{ key: "interact", label: "show me chat" }];
+  if (!schema) return [{ key: "interact", label: "Show me chat" }];
   return [
-    ...schema.categories.map((c) => ({ key: c.id, label: c.name.toLowerCase() })),
-    { key: "edit-schema", label: "edit schema" },
+    ...schema.categories.map((c) => ({ key: c.id, label: c.name })),
+    { key: "edit-schema", label: "Edit schema" },
   ];
+}
+
+interface LiveTurn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
 }
 
 const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
@@ -199,7 +215,77 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
 }) => {
   const { advanceFrame } = useOnboardingSession();
   const { state: registryState } = useScenarioRegistry();
+  const { state: chatState } = useChatStore();
+  const chatSessionId = chatState.activeSessionId;
+  const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
   const navigate = useNavigate();
+
+  // CF-18: live ad-hoc chat turns that follow the scripted thinking flow.
+  // Owned here (not by ChatInputBar) so they render in the conversation
+  // scroll body alongside thinking notes + Pick-a-view.
+  const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
+  const [sending, setSending] = useState(false);
+
+  const handleSend = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || sending) return;
+      const userTurn: LiveTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
+      setLiveTurns((cur) => [...cur, userTurn]);
+
+      if (!chatSessionId) {
+        // EntityRegistry seeds a chat session on mount; if we got here
+        // without one something has broken upstream. Fall back to a
+        // polite assistant turn rather than crashing.
+        setLiveTurns((cur) => [
+          ...cur,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: "No active chat session — please refresh and try again.",
+          },
+        ]);
+        return;
+      }
+
+      setSending(true);
+      try {
+        const result = await sendChatMessage({
+          chatSessionId,
+          newUserMessage: trimmed,
+          sessionMeta: {
+            title: activeChatSession?.title ?? "Onboarding",
+            isOnboarding: activeChatSession?.isOnboardingSession ?? true,
+            onboardingSessionId: chatSessionId,
+            activeEntityKey: activeChatSession?.activeEntityKey ?? null,
+          },
+        });
+        setLiveTurns((cur) => [
+          ...cur,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: result.reply.answer,
+          },
+        ]);
+      } catch (err) {
+        // CF-08: branch the user-facing copy on the upstream status
+        // so 401 / 501 / 504 / 5xx / 400 each say the right thing.
+        const mapped = chatErrorToUserCopy(err);
+        setLiveTurns((cur) => [
+          ...cur,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: mapped.message,
+          },
+        ]);
+      } finally {
+        setSending(false);
+      }
+    },
+    [sending, chatSessionId, activeChatSession],
+  );
 
   // Sample switcher dropdown anchor + state.
   const switcherAnchorRef = useRef<HTMLSpanElement | null>(null);
@@ -397,12 +483,30 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             </Box>
           </>
         )}
+
+        {/* CF-18 live ad-hoc turns: appended after the scripted flow.
+            User bubbles right-aligned, assistant bubbles left-aligned. */}
+        {liveTurns.length > 0 && (
+          <Stack spacing={1} sx={{ mt: 0.5 }}>
+            {liveTurns.map((turn) =>
+              turn.role === "user" ? (
+                <UserBubble key={turn.id} testid="onboarding-chat-live-user">
+                  {turn.content}
+                </UserBubble>
+              ) : (
+                <BotBubble key={turn.id} testid="onboarding-chat-live-assistant">
+                  {turn.content}
+                </BotBubble>
+              ),
+            )}
+          </Stack>
+        )}
       </Box>
 
-      {/* Bottom: chat input placeholder. Phase-7 wires this to the real
-          chat router; for now it's a visual anchor matching the wireframe. */}
+      {/* Bottom: real chat input (CF-18). Posts via sendChatMessage and
+          appends the assistant reply as a live turn above. */}
       <Box sx={{ pt: 1, borderTop: `1px solid ${BORDER}` }}>
-        <ChatInputStub />
+        <LiveChatInputBar onSend={handleSend} disabled={sending} />
       </Box>
     </Box>
   );
@@ -511,19 +615,60 @@ const PickViewPill: FC<PickViewPillProps> = (props) => {
   return <PickViewPillInner {...props} />;
 };
 
-const ChatInputStub: FC = () => (
-  <Box
-    sx={{
-      borderRadius: BORDER_RADIUS_SM,
-      border: `1px solid ${BORDER}`,
-      px: 1.25,
-      py: 1,
-      fontSize: 12,
-      color: MUTED_ON_LIGHT,
-      backgroundColor: WHITE,
-      cursor: "text",
-    }}
-  >
-    ask a question, ready when you are…
-  </Box>
-);
+interface LiveChatInputBarProps {
+  onSend: (text: string) => void | Promise<void>;
+  disabled?: boolean;
+}
+
+/**
+ * CF-18 — F2 chat input. Mirrors InteractView (F5) so anything we
+ * change here we also change there until the two surfaces merge into a
+ * shared `chat-with-sources` widget mount.
+ */
+const LiveChatInputBar: FC<LiveChatInputBarProps> = ({ onSend, disabled }) => {
+  const [draft, setDraft] = useState("");
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = draft.trim();
+    if (!trimmed || disabled) return;
+    setDraft("");
+    void onSend(trimmed);
+  };
+  return (
+    <Box
+      component="form"
+      onSubmit={handleSubmit}
+      data-testid="onboarding-chat-input"
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        gap: 1,
+        backgroundColor: WHITE,
+        border: `1px solid ${BORDER}`,
+        borderRadius: BORDER_RADIUS_PILL,
+        px: 1.5,
+        py: 0.5,
+      }}
+    >
+      <InputBase
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder="ask a question, ready when you are…"
+        disabled={disabled}
+        sx={{ flex: 1, color: NAVY, fontSize: 13 }}
+        inputProps={{ "aria-label": "Chat input" }}
+      />
+      <IconButton
+        type="submit"
+        size="small"
+        disabled={disabled}
+        data-testid="onboarding-chat-send"
+        aria-label="Send"
+        sx={{ backgroundColor: CYAN, color: NAVY, "&:hover": { backgroundColor: GREEN } }}
+      >
+        <SendOutlinedIcon fontSize="small" />
+      </IconButton>
+    </Box>
+  );
+};
+

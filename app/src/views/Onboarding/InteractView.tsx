@@ -7,7 +7,7 @@ import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useState, type FC, type FormEvent } from "react";
 
-import { sendChatMessage } from "@/api/chatSessions";
+import { chatErrorToUserCopy, sendChatMessage } from "@/api/chatSessions";
 import {
   BODY_TEXT,
   BORDER,
@@ -108,13 +108,15 @@ export const InteractView: FC = () => {
             citations: replyCitations,
           },
         ]);
-      } catch {
+      } catch (err) {
+        // CF-08: branch the user-facing copy on the upstream status.
+        const mapped = chatErrorToUserCopy(err);
         setTurns((current) => [
           ...current,
           {
             id: `a-${Date.now()}`,
             role: "assistant",
-            content: "Couldn't reach the chat service — please try again in a moment.",
+            content: mapped.message,
           },
         ]);
       } finally {

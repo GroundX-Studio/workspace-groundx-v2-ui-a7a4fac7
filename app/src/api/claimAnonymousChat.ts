@@ -12,6 +12,8 @@
  * ownership.
  */
 
+import { csrfFetch } from "./csrfFetch";
+
 export interface ClaimResult {
   /** How many chat_sessions rows had their owner flipped to the signed-in user. */
   rekeyedSessions: number;
@@ -19,7 +21,7 @@ export interface ClaimResult {
 
 /** POST the claim trigger to the BFF. Throws on non-2xx. */
 export async function claimAnonymousChat(): Promise<ClaimResult> {
-  const res = await fetch("/api/chat-sessions/claim", {
+  const res = await csrfFetch("/api/chat-sessions/claim", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

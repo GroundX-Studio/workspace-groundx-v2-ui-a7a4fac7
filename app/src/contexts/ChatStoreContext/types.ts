@@ -160,6 +160,15 @@ export interface ChatStoreApi {
    * `viewer_events` table.
    */
   appendViewerEvent: (input: NewViewerEventInput) => void;
+
+  /**
+   * UI-10 — flip the active ChatSession's `currentIntent`. Wired by
+   * `CanvasOrchestratorContext.dispatch` on every dispatch so the
+   * LLM-context bundler can see "the user/agent just dispatched X"
+   * on the conversation axis. Pass `null` to clear. No-op when no
+   * session is active.
+   */
+  setCurrentIntent: (intent: CanvasIntent) => void;
 }
 
 export interface NewViewerEventInput {

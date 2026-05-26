@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { track } from "@/lib/analytics";
+import { gaSetDefaults } from "@/lib/ga";
 import {
   EntityRegistryProvider,
   makeEntityKey,
@@ -94,6 +96,11 @@ function useSessionFacade(): OnboardingSessionApi {
 
   const bootstrapSession = useCallback((id: string) => {
     setSessionId(id);
+    // OB-02 — session.started fires once per onboarding bootstrap.
+    track("session.started", { sessionId: id, mode: "onboarding" });
+    // OB-03 — sessionId becomes a sticky GA4 dimension on every
+    // subsequent event from this user's session.
+    gaSetDefaults({ sessionId: id });
   }, []);
 
   const pickScenario = useCallback(
@@ -111,6 +118,12 @@ function useSessionFacade(): OnboardingSessionApi {
         source: "user",
         detail: { scenario },
       });
+      // OB-02 — the user picked a sample. understand.started fires
+      // immediately too since pickScenario lands the user on F2.
+      track("sample.picked", { scenario });
+      track("understand.started", { scenario });
+      // OB-03 — currentSample sticks to GA4 events from this point.
+      gaSetDefaults({ currentSample: scenario });
     },
     [upsertAndActivate, appendViewerEvent],
   );
@@ -146,6 +159,11 @@ function useSessionFacade(): OnboardingSessionApi {
         source: "user",
         detail: { frame },
       });
+      // OB-02 — understand.completed when leaving F2 (the scan
+      // animation finished and the user advanced).
+      if (frame === "f3" || frame === "f3a") {
+        track("understand.completed", { fromFrame: "f2", toFrame: frame });
+      }
     },
     [activate, updateActive, appendViewerEvent],
   );
@@ -176,6 +194,9 @@ function useSessionFacade(): OnboardingSessionApi {
           source: "user",
           detail: { intent: "gate-open", trigger },
         });
+        // OB-02 — gate.shown is the user-visible "the gate appeared"
+        // event, distinct from the viewer-event intent log.
+        track("gate.shown", { trigger });
       }
     },
     [appendViewerEvent],
@@ -208,6 +229,11 @@ function useSessionFacade(): OnboardingSessionApi {
         source: "user",
         detail: { intent: "gate-commit", method },
       });
+      // OB-02 — signup.completed fires on a real register / sso
+      // commit. engineer-call is technically not a signup but the
+      // funnel still benefits from one canonical "the gate closed
+      // with a commit" event — distinguish via the `method` prop.
+      track("signup.completed", { method });
     },
     [appendViewerEvent],
   );

@@ -26,7 +26,9 @@ import { randomUUID } from "node:crypto";
 import type {
   AppRepository,
   ChatMessageRecord,
+  ChatSessionEntityRecord,
   GroundXClient,
+  GroundXPartnerClient,
   LlmClient,
 } from "../types.js";
 
@@ -66,8 +68,36 @@ export interface HandleChatMessageResponse {
 
 export interface HandleChatMessageDeps {
   repository: AppRepository;
+  /**
+   * Chat-side LLM client. Used for the RAG grounded completion and for
+   * everything that needs the high-quality / large-context model.
+   * Configured from the `LLM_*` env block.
+   */
   llmClient: LlmClient;
+  /**
+   * Optional light-side LLM client (CF-16). Used for tasks where a
+   * smaller / cheaper / faster model is fine — today: leaf
+   * summarization + meta-compaction. When omitted, the chat client is
+   * used for both (single-LLM deployments still work).
+   * Configured from the `LLM_LIGHT_*` env block.
+   */
+  lightLlmClient?: LlmClient;
   groundxClient: GroundXClient;
+  /**
+   * CF-04: Partner API client. Required for the structured-mode
+   * my_projects + api_keys sub-handlers; optional for RAG-only / MOCK
+   * / anon-only deployments. Threaded through `routeChat` →
+   * `runStructuredQuery`.
+   */
+  partnerClient?: GroundXPartnerClient;
+  /**
+   * CF-03: server-derived RBAC / tenant / region filter. Composed
+   * with the scope filter via `$and` inside `searchGroundX`. The
+   * BFF derives this from the authed session — NEVER from client
+   * input. Optional: deployments without an RBAC system leave it
+   * undefined and the scope filter dispatches unchanged.
+   */
+  rbacFilter?: Record<string, unknown>;
   /** GroundX API key for the live RAG path. */
   groundxApiKey: string | null;
   /**
@@ -82,7 +112,17 @@ export interface HandleChatMessageDeps {
   samplesBucketId: number | null;
   /** Provider model id, e.g. "gpt-4o" or "claude-3-haiku". */
   llmModelId: string;
-  /** Model id used specifically for compression summaries. Defaults to llmModelId. */
+  /**
+   * Model id for the light-side LLM (CF-16). Used with `lightLlmClient`
+   * for compression. Defaults to `llmModelId` so single-LLM deployments
+   * keep their existing behavior.
+   */
+  lightLlmModelId?: string;
+  /**
+   * Legacy name for `lightLlmModelId`. Kept for back-compat callers
+   * that wired `compressionModelId` before CF-16 introduced the
+   * light/chat split; `lightLlmModelId` wins when both are set.
+   */
   compressionModelId?: string;
   /** When true, skip GroundX/LLM and return canned router responses. */
   mockMode: boolean;
@@ -257,10 +297,16 @@ export async function handleChatMessage(
   //    latency. Background-job migration is on the deferred list.
   let compressionRan = false;
   const maxSummaryOutputTokens = deps.maxSummaryOutputTokens ?? DEFAULT_MAX_SUMMARY_OUTPUT_TOKENS;
+  // CF-16: route compression through the LIGHT client when wired.
+  // Falls back to the chat client when no light client is configured —
+  // single-LLM deployments keep their existing single-call behavior.
+  const compressionLlmClient = deps.lightLlmClient ?? deps.llmClient;
+  const compressionLlmModelId =
+    deps.lightLlmModelId ?? deps.compressionModelId ?? deps.llmModelId;
   const compressionDeps = {
     repo: deps.repository,
-    llmClient: deps.llmClient,
-    modelId: deps.compressionModelId ?? deps.llmModelId,
+    llmClient: compressionLlmClient,
+    modelId: compressionLlmModelId,
     maxOutputTokens: maxSummaryOutputTokens,
     idGen,
   };
@@ -327,6 +373,8 @@ export async function handleChatMessage(
       repository: deps.repository,
       chatSessionId: request.chatSessionId,
       groundxUsername: session.ownerUserId,
+      partnerClient: deps.partnerClient,
+      rbacFilter: deps.rbacFilter,
       byoPagesLimit: deps.byoPagesLimit,
       llmModelId: deps.llmModelId,
       mockMode: deps.mockMode,
@@ -393,30 +441,50 @@ export async function handleChatMessage(
 
 /**
  * Derive the RAG ContentScope from the active entity + the env-
- * provided fallback bucket. This is the single seam where future
- * scope refinements land:
+ * provided fallback bucket. CF-15 wires this end-to-end so the active
+ * EntitySession's scope refs win over the env samples-bucket fallback.
  *
- *   - entity carries a `documentIds` extension      → `{kind:"documents"}`
- *   - entity carries a `projectIds` + `bucketId`    → `{kind:"bucket", projectIds:[...]}`
- *   - entity carries a `groupId`                    → `{kind:"group"}`
- *   - fallback: env samples bucket                  → `{kind:"bucket"}`
- *   - else                                          → `{kind:"unknown"}`
+ * Precedence (first match wins):
  *
- * EntitySession in `chat_session_entities` doesn't yet have project /
- * group / doc references. When those fields land, this function picks
- * them up automatically — the only change needed.
+ *   1. entity.documentIds (non-empty)             → `{kind:"documents"}`
+ *   2. entity.groupId (set)                       → `{kind:"group"}`
+ *   3. entity.bucketId (set)                      → `{kind:"bucket",
+ *                                                     projectIds?: [...]}`
+ *   4. fallback env samples bucketId              → `{kind:"bucket"}`
+ *   5. else                                       → `{kind:"unknown"}`
  *
- * TODO(CF-02 + CF-15): wire EntitySession scope refs.
+ * Onboarding's anon seed entity has none of the four scope refs so
+ * the env fallback still drives the search — the legacy behavior is
+ * intact.
  */
-function deriveRagContentScope(
-  _activeEntity: { entityKey: string } | null | undefined,
+export function deriveRagContentScope(
+  activeEntity: ChatSessionEntityRecord | null | undefined,
   fallbackBucketId: number | null | undefined,
 ): RagContentScope {
-  // No active entity OR no scope fields on it yet — fall through to
-  // the env bucket.
+  if (activeEntity) {
+    // 1. Document-level scope wins (single-PDF viewer flows).
+    const docIds = safeParseStringArray(activeEntity.documentIdsJson ?? "[]");
+    if (docIds.length > 0) {
+      return { kind: "documents", documentIds: docIds };
+    }
+    // 2. Multi-workspace group.
+    if (activeEntity.groupId != null) {
+      return { kind: "group", groupId: activeEntity.groupId };
+    }
+    // 3. Bucket — optionally narrowed by projectIds.
+    if (activeEntity.bucketId != null) {
+      const projectIds = safeParseStringArray(activeEntity.projectIdsJson ?? "[]");
+      return projectIds.length > 0
+        ? { kind: "bucket", bucketId: activeEntity.bucketId, projectIds }
+        : { kind: "bucket", bucketId: activeEntity.bucketId };
+    }
+  }
+  // 4. Legacy env-bucket fallback for the onboarding samples flow.
   if (fallbackBucketId != null) {
     return { kind: "bucket", bucketId: fallbackBucketId };
   }
+  // 5. Last resort. Logged downstream in searchGroundX so the gap shows
+  //    in telemetry.
   return { kind: "unknown" };
 }
 

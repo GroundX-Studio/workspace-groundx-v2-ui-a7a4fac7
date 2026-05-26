@@ -13,6 +13,10 @@ const originalFetch = global.fetch;
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   __resetEnsuredChatSessions();
+  // SC-01: pre-set csrf_token cookie so csrfFetch skips bootstrap GET.
+  if (typeof document !== "undefined") {
+    document.cookie = "csrf_token=test-csrf-token; path=/";
+  }
 });
 
 afterEach(() => {
@@ -84,8 +88,8 @@ describe("InteractView (F5)", () => {
     expect(body.newUserMessage).toBe("Which page proves this?");
   });
 
-  it("falls back to a polite error message when the chat endpoint fails", async () => {
-    // ensure-create succeeds; send returns 502.
+  // CF-08 — per-status mapping renders the right copy in F5.
+  function mockChatFailWith(status: number) {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce({
@@ -95,18 +99,52 @@ describe("InteractView (F5)", () => {
       })
       .mockResolvedValueOnce({
         ok: false,
-        status: 502,
-        json: async () => ({ error: "router_failed:upstream" }),
+        status,
+        json: async () => ({ error: `mock_${status}` }),
       });
+  }
 
+  it("502 → upstream copy ('try again in a moment')", async () => {
+    mockChatFailWith(502);
     const user = userEvent.setup();
     renderWithOnboardingProviders(<InteractView />, { initialFrame: "f5", initialScenario: "utility" });
-
     await user.type(screen.getByLabelText("Chat input"), "Will this fail?");
     await user.click(screen.getByLabelText("Send"));
-
     await waitFor(() => {
-      expect(screen.getByText(/couldn'?t reach the chat service/i)).toBeInTheDocument();
+      expect(screen.getByText(/try again|something went wrong/i)).toBeInTheDocument();
+    });
+  });
+
+  it("504 → timeout copy ('took too long')", async () => {
+    mockChatFailWith(504);
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<InteractView />, { initialFrame: "f5", initialScenario: "utility" });
+    await user.type(screen.getByLabelText("Chat input"), "Q");
+    await user.click(screen.getByLabelText("Send"));
+    await waitFor(() => {
+      expect(screen.getByText(/took too long/i)).toBeInTheDocument();
+    });
+  });
+
+  it("401 → reauth copy ('sign in')", async () => {
+    mockChatFailWith(401);
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<InteractView />, { initialFrame: "f5", initialScenario: "utility" });
+    await user.type(screen.getByLabelText("Chat input"), "Q");
+    await user.click(screen.getByLabelText("Send"));
+    await waitFor(() => {
+      expect(screen.getByText(/sign in/i)).toBeInTheDocument();
+    });
+  });
+
+  it("501 → 'can't answer that yet' copy", async () => {
+    mockChatFailWith(501);
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<InteractView />, { initialFrame: "f5", initialScenario: "utility" });
+    await user.type(screen.getByLabelText("Chat input"), "Q");
+    await user.click(screen.getByLabelText("Send"));
+    await waitFor(() => {
+      expect(screen.getByText(/can't answer that yet|not available yet/i)).toBeInTheDocument();
     });
   });
 

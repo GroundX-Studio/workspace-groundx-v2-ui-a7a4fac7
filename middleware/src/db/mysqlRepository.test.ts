@@ -27,7 +27,7 @@ describe("MySqlAppRepository", () => {
     await repository.createSchema();
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
-    expect(statements).toHaveLength(7);
+    expect(statements).toHaveLength(9);
     const joined = statements.join("\n");
     // Auth + metadata.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS sessions");
@@ -38,6 +38,10 @@ describe("MySqlAppRepository", () => {
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS conversation_summaries");
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS chat_session_entities");
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS viewer_events");
+    // UI-10b — intent_log table (canvas-orchestrator dispatch trail).
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS intent_log");
+    // CF-04 — app-owned saved-schemas table.
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS extraction_schemas");
     // App-owned only — no GroundX/Partner duplicates.
     const lower = joined.toLowerCase();
     expect(lower).not.toContain("stripe");

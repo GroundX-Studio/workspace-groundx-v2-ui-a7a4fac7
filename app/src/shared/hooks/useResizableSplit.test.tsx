@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clampToLiveBand, snapZoneFor, useResizableSplit } from "./useResizableSplit";
 
@@ -78,5 +78,73 @@ describe("useResizableSplit", () => {
       next = result.current.bump(500);
     });
     expect(next).toBe(800);
+  });
+});
+
+// UR-02 closure scope: surviving a reload. The hook is the only place
+// chat-pane width lives, so persistence belongs here (not in AppShell).
+describe("useResizableSplit storageKey persistence (UR-02)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("reads initial width from localStorage when storageKey provided", () => {
+    localStorage.setItem("appshell.chatWidth.v1", "455");
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "appshell.chatWidth.v1", initial: 360 })
+    );
+    expect(result.current.width).toBe(455);
+  });
+
+  it("falls back to initial when storageKey present but no stored value", () => {
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "missing-key", initial: 360 })
+    );
+    expect(result.current.width).toBe(360);
+  });
+
+  it("falls back to initial when stored value is non-numeric", () => {
+    localStorage.setItem("bad-key", "not-a-number");
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "bad-key", initial: 360 })
+    );
+    expect(result.current.width).toBe(360);
+  });
+
+  it("clamps stored value to [min, max] (defends against bad reloads)", () => {
+    localStorage.setItem("oversize", "9999");
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "oversize", initial: 360, min: 0, max: 1200 })
+    );
+    expect(result.current.width).toBe(1200);
+  });
+
+  it("setWidth persists to localStorage", () => {
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "persist-key", initial: 360 })
+    );
+    act(() => result.current.setWidth(500));
+    expect(localStorage.getItem("persist-key")).toBe("500");
+  });
+
+  it("bump persists the new width to localStorage", () => {
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "bump-key", initial: 360 })
+    );
+    act(() => {
+      result.current.bump(40);
+    });
+    expect(localStorage.getItem("bump-key")).toBe("400");
+  });
+
+  it("does NOT touch localStorage when storageKey is unset", () => {
+    const spy = vi.spyOn(Storage.prototype, "setItem");
+    const { result } = renderHook(() => useResizableSplit({ initial: 360 }));
+    act(() => result.current.setWidth(500));
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

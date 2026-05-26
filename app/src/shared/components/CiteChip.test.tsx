@@ -3,6 +3,15 @@ import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// OB-02 — citation peek fires cite.peeked. Mock the wrapper to assert.
+vi.mock("@/lib/analytics", () => ({
+  track: vi.fn(),
+  identify: vi.fn(),
+  initAnalytics: vi.fn(() => false),
+  resetAnalytics: vi.fn(),
+}));
+import { track } from "@/lib/analytics";
+
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import type { CanvasAdapter } from "@/contexts/CanvasOrchestratorContext/types";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
@@ -12,6 +21,7 @@ import { CiteChip } from "./CiteChip";
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.mocked(track).mockReset();
 });
 
 const citation: Citation = {
@@ -81,5 +91,28 @@ describe("CiteChip", () => {
     await user.click(screen.getByTestId("cite-chip-1"));
 
     expect(onActivate).toHaveBeenCalledWith(citation);
+  });
+
+  it("OB-02: click fires cite.peeked with documentId + page + index", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<CiteChip citation={citation} index={2} />);
+    await user.click(screen.getByTestId("cite-chip-2"));
+    expect(track).toHaveBeenCalledWith("cite.peeked", {
+      documentId: "utility-bill-2026-04",
+      page: 3,
+      index: 2,
+    });
+  });
+
+  it("OB-02: cite.peeked fires even when onActivate override is used (the chip was still peeked)", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(
+      <CiteChip citation={citation} index={1} onActivate={() => {}} />,
+    );
+    await user.click(screen.getByTestId("cite-chip-1"));
+    expect(track).toHaveBeenCalledWith(
+      "cite.peeked",
+      expect.objectContaining({ documentId: "utility-bill-2026-04" }),
+    );
   });
 });

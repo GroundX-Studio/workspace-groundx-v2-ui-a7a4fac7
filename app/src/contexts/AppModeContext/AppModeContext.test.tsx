@@ -1,6 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+// OB-03 — AppModeContext now keeps GA's `appMode` dimension in sync.
+vi.mock("@/lib/ga", () => ({
+  gaSetDefaults: vi.fn(),
+  initGa: vi.fn(() => false),
+  gaTrack: vi.fn(),
+}));
+import { gaSetDefaults } from "@/lib/ga";
+
 import { AppModeProvider, useAppMode } from "./AppModeContext";
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -54,5 +62,19 @@ describe("AppModeContext", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  // OB-03 — provider keeps GA's `appMode` dimension synced.
+  it("OB-03: mounting the provider fires gaSetDefaults with the initial appMode", () => {
+    vi.mocked(gaSetDefaults).mockReset();
+    renderHook(() => useAppMode(), { wrapper });
+    expect(gaSetDefaults).toHaveBeenCalledWith({ appMode: "onboarding" });
+  });
+
+  it("OB-03: flipToSteady → gaSetDefaults updates appMode to 'steady'", () => {
+    const { result } = renderHook(() => useAppMode(), { wrapper });
+    vi.mocked(gaSetDefaults).mockReset();
+    act(() => result.current.flipToSteady());
+    expect(gaSetDefaults).toHaveBeenCalledWith({ appMode: "steady" });
   });
 });

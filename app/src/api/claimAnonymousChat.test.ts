@@ -6,6 +6,10 @@ describe("claimAnonymousChat", () => {
   const originalFetch = global.fetch;
   beforeEach(() => {
     global.fetch = vi.fn();
+    // SC-01: pre-set csrf cookie so csrfFetch skips bootstrap GET.
+    if (typeof document !== "undefined") {
+      document.cookie = "csrf_token=test-csrf-token; path=/";
+    }
   });
   afterEach(() => {
     global.fetch = originalFetch;
@@ -18,15 +22,16 @@ describe("claimAnonymousChat", () => {
       json: async () => ({ rekeyedSessions: 3 }),
     });
     const result = await claimAnonymousChat();
-    expect(global.fetch).toHaveBeenCalledWith(
-      "/api/chat-sessions/claim",
-      expect.objectContaining({
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      }),
-    );
+    // csrfFetch wraps headers in a Headers instance — assert on shape
+    // without pinning the headers type.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [path, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(path).toBe("/api/chat-sessions/claim");
+    expect((init as RequestInit).method).toBe("POST");
+    expect((init as RequestInit).credentials).toBe("include");
+    expect((init as RequestInit).body).toBe("{}");
+    const headers = new Headers((init as RequestInit).headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
     expect(result).toEqual({ rekeyedSessions: 3 });
   });
 

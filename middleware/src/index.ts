@@ -6,7 +6,7 @@ import { ScenarioRegistry } from "./scenarios/registry.js";
 import { DevGroundXClient, DevGroundXPartnerClient, DevLlmClient } from "./services/devClients.js";
 import { FetchGroundXClient } from "./services/groundxClient.js";
 import { FetchGroundXPartnerClient } from "./services/groundxPartnerClient.js";
-import { FetchLlmClient } from "./services/llmClient.js";
+import { FetchLlmClient, isLightLlmConfigured } from "./services/llmClient.js";
 import { logger } from "./lib/logger.js";
 import { initTelemetry, shutdownTelemetry } from "./lib/telemetry.js";
 
@@ -21,12 +21,22 @@ await initTelemetry(env);
 const repository = useMemoryRepository ? new MemoryAppRepository() : new MySqlAppRepository(env);
 await repository.createSchema();
 
+// CF-16: build a separate light-side client only when LLM_LIGHT_* is
+// fully wired in env. Otherwise leave it undefined — chatHandler reuses
+// the chat client for compression (single-LLM back-compat).
+const lightLlmClient = useDevClients
+  ? undefined
+  : isLightLlmConfigured(env)
+    ? new FetchLlmClient(env, "light")
+    : undefined;
+
 const app = createApp({
   env,
   repository,
   partnerClient: useDevClients ? new DevGroundXPartnerClient() : new FetchGroundXPartnerClient(env),
   groundxClient: useDevClients ? new DevGroundXClient() : new FetchGroundXClient(env),
   llmClient: useDevClients ? new DevLlmClient() : new FetchLlmClient(env),
+  lightLlmClient,
   scenarioRegistry: new ScenarioRegistry(env),
 });
 
@@ -54,6 +64,8 @@ function summarizeEnvForLog(env: Record<string, unknown>) {
     "GROUNDX_BASE_URL", "GROUNDX_SAMPLES_BUCKET_ID",
     "GROUNDX_PARTNER_API_KEY", "GROUNDX_ANON_API_KEY",
     "LLM_SERVICE", "LLM_BASE_URL", "LLM_MODEL_ID", "LLM_AUTH_HEADER_NAME", "LLM_AUTH_SCHEME", "LLM_API_KEY",
+    "LLM_LIGHT_SERVICE", "LLM_LIGHT_BASE_URL", "LLM_LIGHT_MODEL_ID",
+    "LLM_LIGHT_AUTH_HEADER_NAME", "LLM_LIGHT_AUTH_SCHEME", "LLM_LIGHT_API_KEY",
     "BYO_PAGES_LIMIT",
     "RATE_LIMIT_AUTH_PER_MIN", "RATE_LIMIT_API_PER_MIN", "RATE_LIMIT_LLM_PER_MIN",
     "METRICS_ENABLED",

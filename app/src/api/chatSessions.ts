@@ -21,6 +21,9 @@
  * cache between test cases.
  */
 
+import { csrfFetch } from "@/api/csrfFetch";
+import { captureException } from "@/lib/sentry";
+
 interface CreateChatSessionInput {
   id: string;
   onboardingSessionId?: string;
@@ -90,6 +93,115 @@ export class ChatApiError extends Error {
   }
 }
 
+/**
+ * CF-08 — per-status error → user-facing UX mapping. The chat surface
+ * (F2, F5, future steady-mode chat) consumes this in catch sites to
+ * render the right copy without leaking raw status codes or stack
+ * traces. Status branches:
+ *
+ *   401   → "sign in to continue" — re-auth flow surface (UI decides
+ *           whether to open the gate or redirect to /auth/login).
+ *   501   → "I can't answer that yet" — mode-not-wired surface
+ *           (structured/hybrid in some deployments).
+ *   504   → "took too long" — retryable, retry chip recommended.
+ *   400   → "programming error" — developer-visible; the request
+ *           should not have shipped.
+ *   404   → "session row missing" — recommend refresh (the chatHandler
+ *           cache invalidation already happens; this is the user copy).
+ *   5xx   → "try again in a moment" — retryable.
+ *   network (no status, e.g. fetch threw) → "couldn't reach the chat".
+ *   anything else → generic.
+ *
+ * `retryable: true` is a hint, not an instruction — UIs decide whether
+ * to show a retry chip, auto-retry, or just surface the message.
+ */
+export type ChatErrorKind =
+  | "reauth"
+  | "not-yet"
+  | "timeout"
+  | "upstream"
+  | "bug"
+  | "not-found"
+  | "network"
+  | "unknown";
+
+export interface ChatErrorMapping {
+  kind: ChatErrorKind;
+  message: string;
+  retryable: boolean;
+}
+
+export function chatErrorToUserCopy(err: unknown): ChatErrorMapping {
+  if (err instanceof ChatApiError) {
+    const status = err.status;
+    if (status === 401) {
+      return {
+        kind: "reauth",
+        message: "Please sign in to continue this conversation.",
+        retryable: false,
+      };
+    }
+    if (status === 501) {
+      return {
+        kind: "not-yet",
+        message: "I can't answer that yet — that mode isn't available yet in this deployment.",
+        retryable: false,
+      };
+    }
+    if (status === 504) {
+      return {
+        kind: "timeout",
+        message: "That took too long — want to try again?",
+        retryable: true,
+      };
+    }
+    if (status === 400) {
+      return {
+        kind: "bug",
+        message: "Invalid request (programming error). Please report this if it keeps happening.",
+        retryable: false,
+      };
+    }
+    if (status === 404) {
+      return {
+        kind: "not-found",
+        message: "This chat session is no longer on the server — please refresh to start a new one.",
+        retryable: false,
+      };
+    }
+    if (status >= 500) {
+      return {
+        kind: "upstream",
+        message: "Something went wrong on our side — try again in a moment.",
+        retryable: true,
+      };
+    }
+  }
+  // Network-layer throws (fetch rejected before getting a status) come
+  // through as plain Errors. Distinguish from "really unknown" by
+  // matching the common runtime messages.
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    if (
+      msg.includes("failed to fetch") ||
+      msg.includes("networkerror") ||
+      msg.includes("network request failed") ||
+      msg.includes("load failed")
+    ) {
+      return {
+        kind: "network",
+        message: "Couldn't reach the chat service — check your connection and try again.",
+        retryable: true,
+      };
+    }
+  }
+  return {
+    kind: "unknown",
+    message: "Something went wrong — please try again in a moment.",
+    retryable: false,
+  };
+}
+
 const ensuredSessionIds = new Set<string>();
 
 /** Test-only: forget which sessions have been ensured. */
@@ -98,7 +210,7 @@ export function __resetEnsuredChatSessions(): void {
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await csrfFetch(path, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -164,14 +276,18 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
       // next send re-creates it.
       ensuredSessionIds.delete(input.chatSessionId);
     }
-    // TODO(CF-08): per-status mapping. Today the caller
-    // gets a generic "couldn't reach" message for everything except
-    // 404. Should branch:
-    //   401 -> re-auth flow (anon bootstrap OR /auth/login redirect)
-    //   501 -> user-facing "I can't answer that yet"
-    //   504 -> "took too long — retry?" + one auto-retry
-    //   502/5xx -> "something went wrong — retry in a moment"
-    //   400 -> developer-visible error (this is a programming bug)
+    // CF-13: ship every chat-send failure to Sentry. The wrapper is a
+    // no-op when DSN is unset, so this is safe in dev/test. Extras
+    // give the Sentry event enough context to triage without leaking
+    // user content.
+    captureException(err, {
+      route: "/api/chat/messages",
+      chatSessionId: input.chatSessionId,
+      status: err instanceof ChatApiError ? err.status : null,
+    });
+    // CF-08: per-status user copy lives in `chatErrorToUserCopy`.
+    // Catch sites (F2, F5, future steady chat) call that helper to
+    // render the right copy without re-implementing the status branch.
     throw err;
   }
 }
