@@ -138,6 +138,43 @@ export interface ProposedSchemaField {
   provenance: ProposalEnvelopeProvenance;
 }
 
+/**
+ * Dev-only diagnostic payload attached to chat replies in non-prod
+ * environments. Surfaces what the chat router actually asked GroundX
+ * and what came back, so the user can see (in browser DevTools) why
+ * the LLM said "no snippets" — without context-switching to the
+ * middleware terminal. NEVER set in production.
+ */
+export interface ChatRouterDebug {
+  mode: ChatMode;
+  scope: { kind: "bucket" | "group" | "documents"; bucketId?: number; groupId?: number; documentIds?: string[]; projectIds?: string[] };
+  groundx: {
+    /** Full URL path of the GroundX search call (e.g. /v1/search/...) */
+    path: string;
+    /** The raw query string that was sent — what the model would search for. */
+    query: string;
+    /** Top-N requested. */
+    n: number;
+    /** Filter object passed to GroundX (RBAC + scope). */
+    filter: unknown;
+    /** Number of snippets returned. */
+    resultCount: number;
+    /** Top-3 snippets (truncated) so the user can verify what came back. */
+    topSnippets: Array<{ documentId: string; fileName?: string; score?: number; text?: string }>;
+  } | null;
+  llm: {
+    model: string;
+    /** Snippet block char count actually passed to the model. */
+    snippetBlockChars: number;
+    /** Total user-content chars (snippet block + question + scope hint). */
+    userContentChars: number;
+    /** System prompt char count. */
+    systemChars: number;
+    /** Final answer char count. */
+    answerChars: number;
+  } | null;
+}
+
 export interface ChatRouterResponse {
   mode: ChatMode;
   answer: string;
@@ -153,6 +190,13 @@ export interface ChatRouterResponse {
    * the ChatStore `addSchemaField` action.
    */
   proposedSchemaField: ProposedSchemaField | null;
+  /**
+   * Dev-only diagnostic payload. Present when `NODE_ENV !== "production"`.
+   * Lets the browser DevTools console + Network tab show exactly what
+   * the chat router asked GroundX and what came back, so users don't
+   * need terminal access to debug "why did the LLM say no snippets."
+   */
+  _debug?: ChatRouterDebug;
 }
 
 /**
@@ -435,12 +479,19 @@ async function runRagPipeline(
     deps.contentScope ??
     (deps.samplesBucketId != null ? { kind: "bucket", bucketId: deps.samplesBucketId } : { kind: "unknown" });
 
+  // Dev-only diagnostic accumulator — populated by searchGroundX +
+  // callGroundedLlm, surfaced on the chat reply's `_debug` field so
+  // the browser DevTools console can show exactly what we asked
+  // GroundX + the LLM. NEVER populated in production.
+  const debugCapture: { groundx?: ChatRouterDebug["groundx"]; llm?: ChatRouterDebug["llm"] } = {};
+  const debugEnabled = process.env.NODE_ENV !== "production";
+
   const snippets = await searchGroundX(
     request.newUserMessage,
     scope,
     deps.groundxClient,
     deps.groundxApiKey,
-    { rbacFilter: deps.rbacFilter },
+    { rbacFilter: deps.rbacFilter, ...(debugEnabled ? { debug: debugCapture } : {}) },
   );
 
   const llmResponse = await callGroundedLlm(
@@ -449,6 +500,7 @@ async function runRagPipeline(
     deps.llmClient,
     deps.llmModelId,
     request.scopeHint,
+    debugEnabled ? debugCapture : undefined,
   );
 
   // Parse the LLM's optional JSON block (CF-06 citations + CF-07
@@ -498,6 +550,22 @@ async function runRagPipeline(
     suggestedActions,
     tools: [],
     proposedSchemaField: parsed.proposedSchemaField,
+    ...(debugEnabled
+      ? {
+          _debug: {
+            mode: "rag" as const,
+            scope: {
+              kind: scope.kind === "unknown" ? "documents" : scope.kind,
+              ...("bucketId" in scope ? { bucketId: scope.bucketId } : {}),
+              ...("groupId" in scope ? { groupId: scope.groupId } : {}),
+              ...("documentIds" in scope ? { documentIds: scope.documentIds } : {}),
+              ...("projectIds" in scope ? { projectIds: scope.projectIds } : {}),
+            } as ChatRouterDebug["scope"],
+            groundx: debugCapture.groundx ?? null,
+            llm: debugCapture.llm ?? null,
+          },
+        }
+      : {}),
   };
 }
 
@@ -683,6 +751,13 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
  */
 export interface SearchGroundXOptions {
   rbacFilter?: Record<string, unknown>;
+  /**
+   * Optional dev-only diagnostic accumulator. When passed, searchGroundX
+   * populates `debug.groundx` with the final request shape + result
+   * summary so callers (chatRouter → chatHandler → /api/chat) can
+   * surface it to the browser. Never set in production.
+   */
+  debug?: { groundx?: ChatRouterDebug["groundx"] };
 }
 
 /**
@@ -815,6 +890,25 @@ export async function searchGroundX(
     },
     "groundx search result",
   );
+  // Capture dev-side debug snapshot (browser surfaces this via _debug
+  // on the chat reply). Only populated when the caller passes
+  // `options.debug` — `searchGroundX` doesn't know whether the caller
+  // wants diagnostics or not.
+  if (options.debug) {
+    options.debug.groundx = {
+      path,
+      query,
+      n: typeof body.n === "number" ? body.n : RAG_SEARCH_LIMIT,
+      filter: body.filter ?? null,
+      resultCount: mapped.length,
+      topSnippets: mapped.slice(0, 3).map((r) => ({
+        documentId: r.documentId,
+        fileName: r.fileName,
+        score: r.score,
+        text: (r.text ?? "").slice(0, 240),
+      })),
+    };
+  }
   return mapped;
 }
 
@@ -847,6 +941,7 @@ async function callGroundedLlm(
   llmClient: LlmClient,
   modelId: string,
   scopeHint?: { fileName?: string | null; scenarioTitle?: string | null },
+  debug?: { llm?: ChatRouterDebug["llm"] },
 ): Promise<{ answer: string }> {
   const system =
     "You are the user's analyst for the documents in the snippets " +
@@ -934,6 +1029,17 @@ async function callGroundedLlm(
   };
   const answer = payload.choices?.[0]?.message?.content?.trim();
   if (!answer) throw new Error("grounded llm call returned no content");
+  // Capture dev-side debug snapshot (browser surfaces this via _debug
+  // on the chat reply). Only populated when the caller passed `debug`.
+  if (debug) {
+    debug.llm = {
+      model: modelId,
+      snippetBlockChars: contextBlock.length,
+      userContentChars: userContent.length,
+      systemChars: system.length,
+      answerChars: answer.length,
+    };
+  }
   // Log the actual LLM response so the user can compare what was
   // sent (logged above) with what came back. Counterpart to the
   // "grounded LLM dispatch" log line.

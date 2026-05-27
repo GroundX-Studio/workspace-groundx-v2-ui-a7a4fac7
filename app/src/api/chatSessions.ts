@@ -83,6 +83,32 @@ export interface ProposedSchemaField {
   provenance?: ProposalEnvelopeProvenance;
 }
 
+/**
+ * Dev-only diagnostic payload mirroring the middleware's `ChatRouterDebug`.
+ * Present on `ChatReply` when `NODE_ENV !== "production"`. Lets the
+ * browser DevTools console show exactly what the chat router asked
+ * GroundX and what came back, without needing terminal access.
+ */
+export interface ChatReplyDebug {
+  mode: "rag" | "structured" | "hybrid";
+  scope: { kind: "bucket" | "group" | "documents"; bucketId?: number; groupId?: number; documentIds?: string[]; projectIds?: string[] };
+  groundx: {
+    path: string;
+    query: string;
+    n: number;
+    filter: unknown;
+    resultCount: number;
+    topSnippets: Array<{ documentId: string; fileName?: string; score?: number; text?: string }>;
+  } | null;
+  llm: {
+    model: string;
+    snippetBlockChars: number;
+    userContentChars: number;
+    systemChars: number;
+    answerChars: number;
+  } | null;
+}
+
 export interface ChatReply {
   mode: "rag" | "structured" | "hybrid";
   answer: string;
@@ -96,6 +122,13 @@ export interface ChatReply {
    * Accept handler calls the ChatStore `addSchemaField` action.
    */
   proposedSchemaField: ProposedSchemaField | null;
+  /**
+   * Dev-only diagnostic payload. Present iff `NODE_ENV !== production`.
+   * `sendChatMessage` logs it to the browser console so the user can
+   * see the raw GroundX request + result + LLM dispatch char counts
+   * for each chat turn.
+   */
+  _debug?: ChatReplyDebug;
 }
 
 export interface SendChatMessageResult {
@@ -385,12 +418,33 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
   }
 
   try {
-    return await postJson<SendChatMessageResult>("/api/chat/messages", {
+    const result = await postJson<SendChatMessageResult>("/api/chat/messages", {
       chatSessionId: input.chatSessionId,
       newUserMessage: input.newUserMessage,
       intent: input.intent ?? null,
       scopeHint: input.scopeHint,
     });
+    // Dev-only: log the raw chat-pipeline diagnostics so the user can
+    // see what was actually asked of GroundX + the LLM without
+    // context-switching to the middleware terminal. Gated on
+    // import.meta.env.DEV so prod builds strip the call entirely.
+    if (import.meta.env.DEV && result.reply?._debug) {
+      // eslint-disable-next-line no-console
+      console.groupCollapsed(
+        `[chat] ${result.reply._debug.mode} · "${input.newUserMessage.slice(0, 60)}${input.newUserMessage.length > 60 ? "…" : ""}"`,
+      );
+      // eslint-disable-next-line no-console
+      console.log("scope", result.reply._debug.scope);
+      // eslint-disable-next-line no-console
+      console.log("groundx", result.reply._debug.groundx);
+      // eslint-disable-next-line no-console
+      console.log("llm", result.reply._debug.llm);
+      // eslint-disable-next-line no-console
+      console.log("answer", result.reply.answer);
+      // eslint-disable-next-line no-console
+      console.groupEnd();
+    }
+    return result;
   } catch (err) {
     if (err instanceof ChatApiError && err.status === 404) {
       // Server no longer has this row — invalidate the cache so the

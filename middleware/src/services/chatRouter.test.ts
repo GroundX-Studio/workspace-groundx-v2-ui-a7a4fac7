@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GroundXClient, LlmClient } from "../types.js";
 
@@ -1230,5 +1230,166 @@ describe("UI-01 Phase 2a — proposedSchemaField threading in runRagPipeline", (
       },
     );
     expect(reply.proposedSchemaField).toBeNull();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// _debug payload — dev-only diagnostic plumbing.
+//
+// Regression class: the "I don't have any snippets" bug was invisible
+// to the user because the only place the GroundX request shape and
+// the LLM dispatch lived was the middleware terminal logs. The
+// `_debug` payload moves that into the chat reply itself so browser
+// DevTools sees what was sent + what came back. These tests pin the
+// contract so a future refactor can't silently drop the payload (the
+// kind of "wired but disconnected" gap Rule 9 closure exists to
+// catch).
+//
+// The payload is gated on `NODE_ENV !== "production"`. In prod the
+// `_debug` field must be absent so the bytes don't ship to customers.
+// ────────────────────────────────────────────────────────────────────
+describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
+  function jsonOk(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  function mkClients(): { groundxClient: GroundXClient; llmClient: LlmClient } {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: {
+            results: [
+              { documentId: "d-1", pageNumber: 3, text: "the bill total is $214.07", fileName: "utility.pdf", score: 0.92 },
+              { documentId: "d-2", pageNumber: 7, text: "due date is March 15", fileName: "utility.pdf", score: 0.81 },
+            ],
+          },
+        }),
+      ),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () =>
+        jsonOk({ choices: [{ message: { content: "The total is $214.07." } }] }),
+      ),
+    };
+    return { groundxClient, llmClient };
+  }
+
+  // Save/restore NODE_ENV around the "production omits _debug" test
+  // so other test files don't see a deleted/changed value (vitest
+  // shares process.env across files in the same worker).
+  let savedNodeEnv: string | undefined;
+  beforeEach(() => {
+    savedNodeEnv = process.env.NODE_ENV;
+  });
+  afterEach(() => {
+    if (savedNodeEnv === undefined) {
+      delete (process.env as Record<string, string | undefined>).NODE_ENV;
+    } else {
+      process.env.NODE_ENV = savedNodeEnv;
+    }
+  });
+
+  it("attaches _debug.groundx (query, path, n, filter, resultCount, topSnippets) on a live RAG reply", async () => {
+    const { groundxClient, llmClient } = mkClients();
+    const reply = await routeChat(makeRequest({ newUserMessage: "what is the bill total?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply._debug).toBeDefined();
+    expect(reply._debug?.mode).toBe("rag");
+    expect(reply._debug?.groundx).not.toBeNull();
+    expect(reply._debug?.groundx?.path).toBe("/search/42");
+    expect(reply._debug?.groundx?.query).toBe("what is the bill total?");
+    expect(reply._debug?.groundx?.n).toBe(6);
+    expect(reply._debug?.groundx?.resultCount).toBe(2);
+    // topSnippets is capped at 3 and truncates text — verify shape.
+    expect(reply._debug?.groundx?.topSnippets).toHaveLength(2);
+    expect(reply._debug?.groundx?.topSnippets[0]).toMatchObject({
+      documentId: "d-1",
+      fileName: "utility.pdf",
+      score: 0.92,
+    });
+    expect(reply._debug?.groundx?.topSnippets[0].text).toContain("$214.07");
+  });
+
+  it("attaches _debug.llm (model, char counts) on a live RAG reply", async () => {
+    const { groundxClient, llmClient } = mkClients();
+    const reply = await routeChat(makeRequest({ newUserMessage: "what is the bill total?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "claude-test-model",
+      mockMode: false,
+    });
+    expect(reply._debug?.llm).not.toBeNull();
+    expect(reply._debug?.llm?.model).toBe("claude-test-model");
+    // snippetBlockChars > 0 → confirms snippets actually reached the
+    // LLM. resultCount > 0 with snippetBlockChars === 0 would be a
+    // canary for the upstream "lost in transit" bug class.
+    expect(reply._debug?.llm?.snippetBlockChars).toBeGreaterThan(0);
+    expect(reply._debug?.llm?.userContentChars).toBeGreaterThan(0);
+    expect(reply._debug?.llm?.systemChars).toBeGreaterThan(0);
+    expect(reply._debug?.llm?.answerChars).toBe("The total is $214.07.".length);
+  });
+
+  it("propagates scope.kind + bucketId into _debug.scope (bucket scope)", async () => {
+    const { groundxClient, llmClient } = mkClients();
+    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 28454,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply._debug?.scope).toMatchObject({ kind: "bucket", bucketId: 28454 });
+  });
+
+  it("_debug.groundx.resultCount === 0 surfaces the 'GroundX returned nothing' failure mode", async () => {
+    // This is the exact failure the user hit live: chat says "I
+    // don't have any snippets" → `_debug.groundx.resultCount === 0`
+    // → user sees in browser DevTools that the GroundX call returned
+    // empty, not that the LLM hallucinated a refusal.
+    const emptyGroundx: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "No snippets." } }] })),
+    };
+    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient: emptyGroundx,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply._debug?.groundx?.resultCount).toBe(0);
+    expect(reply._debug?.groundx?.topSnippets).toHaveLength(0);
+    // snippetBlockChars MUST stay populated (it's the "what reached
+    // the LLM" measurement) — an empty block is still a measurable
+    // event, not a missing field.
+    expect(typeof reply._debug?.llm?.snippetBlockChars).toBe("number");
+  });
+
+  it("omits _debug entirely in production (NODE_ENV === 'production')", async () => {
+    process.env.NODE_ENV = "production";
+    const { groundxClient, llmClient } = mkClients();
+    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply._debug).toBeUndefined();
   });
 });
