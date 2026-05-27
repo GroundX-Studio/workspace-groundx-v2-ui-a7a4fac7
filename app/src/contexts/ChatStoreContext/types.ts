@@ -243,7 +243,24 @@ export const EMPTY_PENDING_SCHEMA_OVERLAY: PendingSchemaOverlay = {
  */
 export type ViewerStep =
   | { kind: "ingest-picker"; attachedSchema?: { schemaId: string; name: string } }
-  | { kind: "doc-viewer"; documentId: string; page?: number }
+  | {
+      kind: "doc-viewer";
+      documentId: string;
+      page?: number;
+      /**
+       * clickable-citations Phase 3 — region annotation produced by a
+       * citation click. The viewer pane reads `highlight.page` for the
+       * page to surface and renders a bbox overlay when
+       * `highlight.bbox` is present. Optional `sourceCitationIndex`
+       * is the 1-based chip index that produced the highlight, used
+       * for `cite.peeked` correlation telemetry.
+       */
+      highlight?: {
+        page: number;
+        bbox?: { x: number; y: number; w: number; h: number };
+        sourceCitationIndex?: number;
+      };
+    }
   | { kind: "extract-workbench"; scenarioId: string; focusedCategoryId?: string }
   | { kind: "interact-chat"; scenarioId: string }
   | { kind: "report" }
@@ -549,6 +566,25 @@ export interface ChatStoreApi {
    * active session.
    */
   pushStep: (step: ViewerStep) => void;
+
+  /**
+   * clickable-citations Phase 3 — citation-click target. Push-or-mutate
+   * a `doc-viewer` step:
+   *   - If the active step is `doc-viewer` for the SAME documentId,
+   *     mutate its `highlight` slot in place (no new history entry).
+   *   - Otherwise push a new `doc-viewer` step with the given
+   *     documentId + page + highlight.
+   *
+   * This is the canonical sink for `CanvasIntent.highlightCitation`
+   * — the orchestrator wires it directly. No-op when no active
+   * session.
+   */
+  gotoDocViewer: (input: {
+    documentId: string;
+    page: number;
+    bbox?: { x: number; y: number; w: number; h: number };
+    sourceCitationIndex?: number;
+  }) => void;
 }
 
 export interface NewViewerEventInput {

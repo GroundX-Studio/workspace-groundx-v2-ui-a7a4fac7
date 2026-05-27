@@ -13,6 +13,7 @@ import type { FC } from "react";
 
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { UnderstandPlaceholder } from "./UnderstandPlaceholder";
@@ -26,8 +27,35 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
   const { byId } = useScenarioRegistry();
+  // clickable-citations Phase 5 — when the active viewer step is a
+  // `doc-viewer` (pushed by a citation click), prefer ITS documentId
+  // + page + highlight. The scenario's first doc is the fallback for
+  // initial F2 mount (no step in history yet).
+  const { state: chatState } = useChatStore();
+  const activeChat =
+    chatState.activeSessionId != null ? chatState.sessions.get(chatState.activeSessionId) ?? null : null;
+  const activeStep =
+    activeChat && activeChat.viewer.currentStep.stepIndex >= 0
+      ? activeChat.viewer.history[activeChat.viewer.currentStep.stepIndex]
+      : null;
+  const stepDocViewer = activeStep && activeStep.kind === "doc-viewer" ? activeStep : null;
+
   const scenarioId = overrideScenarioId !== undefined ? overrideScenarioId : appMode.scenario ?? session.scenario;
   const scenario = scenarioId ? byId(scenarioId) : undefined;
+  // Citation-click case: a doc-viewer step exists → use it directly,
+  // even if no scenario is active (steady-mode reuse).
+  if (stepDocViewer) {
+    return (
+      <Box data-testid="understand-canvas" sx={{ height: "100%", width: "100%" }}>
+        <PdfViewerWidget
+          documentId={stepDocViewer.documentId}
+          mode="onboarding"
+          targetPage={stepDocViewer.highlight?.page ?? stepDocViewer.page ?? null}
+          highlightBbox={stepDocViewer.highlight?.bbox ?? null}
+        />
+      </Box>
+    );
+  }
   if (!scenario) return <UnderstandPlaceholder kind="byo" />;
   const documentId = scenario.documents[0]?.documentId;
   if (!documentId) return <UnderstandPlaceholder kind="no-doc" />;

@@ -42,6 +42,13 @@ export interface ChatCitation {
   documentId: string;
   page: number;
   snippet?: string;
+  /**
+   * Optional bbox in 0–1 page-relative coords. Threaded end-to-end
+   * so `CiteChip`'s viewer-jump dispatch can scroll to + highlight
+   * the cited region. Absent for snippets without source-region
+   * info (page-level highlight is the fallback).
+   */
+  bbox?: { x: number; y: number; w: number; h: number };
 }
 
 export interface ChatSuggestedAction {
@@ -480,6 +487,13 @@ export interface PersistedChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   errorCode: string | null;
+  /**
+   * clickable-citations Phase 1 — assistant turns carry the parsed
+   * `citations_json` payload as a typed Citation array. Empty for
+   * user turns (and for assistant turns that returned no snippets).
+   * Surfaces in the rendered chat thread so chips survive a refresh.
+   */
+  citations: ChatCitation[];
 }
 
 interface ListChatMessagesResponse {
@@ -530,5 +544,11 @@ export async function listChatMessages(chatSessionId: string): Promise<Persisted
     throw new ChatApiError(`/api/chat-sessions/${chatSessionId}/messages failed: ${res.status}`, res.status, detail);
   }
   const payload = (await res.json()) as ListChatMessagesResponse;
-  return payload.messages ?? [];
+  // clickable-citations Phase 1 — older middleware deployments may
+  // not yet project `citations` onto each row. Normalize to `[]` so
+  // callers can render `turn.citations.map(...)` unconditionally.
+  return (payload.messages ?? []).map((m) => ({
+    ...m,
+    citations: Array.isArray(m.citations) ? m.citations : [],
+  }));
 }

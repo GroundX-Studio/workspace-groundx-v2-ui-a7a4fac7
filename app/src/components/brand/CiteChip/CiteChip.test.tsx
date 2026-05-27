@@ -116,36 +116,33 @@ describe("CiteChip", () => {
     );
   });
 
-  describe("peek popover (pre-UI-04)", () => {
+  describe("viewer-jump behavior (clickable-citations Phase 5)", () => {
     /**
-     * Until UI-04 lands the F5 side panel, clicking a CiteChip was
-     * effectively silent — the dispatch went through but no adapter
-     * is registered in production. The peek popover gives the click
-     * a visible response: a small panel anchored to the chip showing
-     * the source page + snippet, with a "coming soon" footer for the
-     * full source viewer. When the explicit `onActivate` override is
-     * supplied (e.g. by F5's eventual side-panel wiring) the popover
-     * does NOT open — the override takes over the click.
+     * Phase 5 retired the pre-UI-04 Popover fallback. Clicking a
+     * CiteChip now dispatches `highlightCitation` to the orchestrator
+     * (which routes to ChatStore.gotoDocViewer → doc-viewer ViewerStep)
+     * and that's the only visible side effect. Hover tooltip is the
+     * native `title=` attribute. The onActivate override still
+     * suppresses the orchestrator dispatch when supplied.
      */
-    it("opens a popover with the page number after a default click", async () => {
-      const user = userEvent.setup();
-      renderWithOnboardingProviders(<CiteChip citation={citation} index={2} />);
-      await user.click(screen.getByTestId("cite-chip-2"));
-      const peek = await screen.findByTestId("cite-peek");
-      expect(peek).toBeInTheDocument();
-      expect(peek).toHaveTextContent(/page 3/i);
+    it("the chip's hover tooltip names the source page + snippet (native title attr)", async () => {
+      renderWithOnboardingProviders(
+        <CiteChip citation={{ ...citation, snippet: "Total amount due: $234.56" }} index={2} />,
+      );
+      const chip = screen.getByTestId("cite-chip-2");
+      expect(chip.getAttribute("title")).toMatch(/page 3/i);
+      expect(chip.getAttribute("title")).toContain("Total amount due: $234.56");
     });
 
-    it("renders the snippet text inside the popover when the citation has one", async () => {
+    it("no popover renders after click — the chip is silent on its own surface (viewer pane owns the response)", async () => {
       const user = userEvent.setup();
-      const withSnippet: Citation = { ...citation, snippet: "Total amount due: $234.56" };
-      renderWithOnboardingProviders(<CiteChip citation={withSnippet} index={2} />);
-      await user.click(screen.getByTestId("cite-chip-2"));
-      const peek = await screen.findByTestId("cite-peek");
-      expect(peek).toHaveTextContent("Total amount due: $234.56");
+      renderWithOnboardingProviders(<CiteChip citation={citation} index={1} />);
+      await user.click(screen.getByTestId("cite-chip-1"));
+      // The retired Popover testid must not appear post-click.
+      expect(screen.queryByTestId("cite-peek")).not.toBeInTheDocument();
     });
 
-    it("does NOT open the popover when an onActivate override is provided", async () => {
+    it("onActivate override still suppresses the orchestrator dispatch", async () => {
       const user = userEvent.setup();
       const onActivate = vi.fn();
       renderWithOnboardingProviders(
@@ -153,7 +150,6 @@ describe("CiteChip", () => {
       );
       await user.click(screen.getByTestId("cite-chip-1"));
       expect(onActivate).toHaveBeenCalledTimes(1);
-      expect(screen.queryByTestId("cite-peek")).not.toBeInTheDocument();
     });
   });
 });

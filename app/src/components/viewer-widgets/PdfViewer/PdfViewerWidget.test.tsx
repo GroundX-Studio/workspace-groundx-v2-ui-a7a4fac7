@@ -183,4 +183,84 @@ describe("PdfViewerWidget", () => {
       expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-mode", "steady"),
     );
   });
+
+  // ── clickable-citations Phase 4 — controlled targetPage + bbox overlay
+  describe("controlled targetPage + highlightBbox (clickable-citations Phase 4)", () => {
+    it("mounts at targetPage when supplied (overrides default initialPage)", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      render(<PdfViewerWidget documentId="doc-1" mode="steady" targetPage={3} />, { wrapper });
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[2]?.pageUrl),
+      );
+    });
+
+    it("re-renders with a new targetPage jumps the page image", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      const { rerender } = render(<PdfViewerWidget documentId="doc-1" mode="steady" targetPage={1} />, { wrapper });
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[0]?.pageUrl),
+      );
+
+      rerender(<PdfViewerWidget documentId="doc-1" mode="steady" targetPage={2} />);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[1]?.pageUrl),
+      );
+    });
+
+    it("renders a highlight overlay positioned proportionally when highlightBbox is supplied", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      render(
+        <PdfViewerWidget
+          documentId="doc-1"
+          mode="steady"
+          targetPage={1}
+          highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
+        />,
+        { wrapper },
+      );
+      const overlay = await screen.findByTestId("pdf-viewer-highlight");
+      const style = overlay.getAttribute("style") ?? "";
+      // The overlay uses percent-based positioning derived from the
+      // bbox values; assert the four key clauses are present.
+      expect(style).toMatch(/left:\s*10%/);
+      expect(style).toMatch(/top:\s*20%/);
+      expect(style).toMatch(/width:\s*50%/);
+      expect(style).toMatch(/height:\s*5%/);
+    });
+
+    it("does NOT render the highlight overlay when highlightBbox is absent or null", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      const { rerender } = render(
+        <PdfViewerWidget documentId="doc-1" mode="steady" targetPage={1} />,
+        { wrapper },
+      );
+      await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
+      expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
+
+      rerender(
+        <PdfViewerWidget documentId="doc-1" mode="steady" targetPage={1} highlightBbox={null} />,
+      );
+      expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
+    });
+
+    it("thumb clicks still update activePage after a controlled targetPage mount (no lock-out)", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      const user = (await import("@testing-library/user-event")).default.setup();
+
+      render(<PdfViewerWidget documentId="doc-1" mode="steady" targetPage={1} />, { wrapper });
+
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[0]?.pageUrl),
+      );
+      const thumb3 = await screen.findByTestId("pdf-viewer-thumb-3");
+      await user.click(thumb3);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[2]?.pageUrl),
+      );
+    });
+  });
 });

@@ -457,7 +457,24 @@ export function createApp({
         return;
       }
       const messages = await repository.listChatMessages(chatSessionId);
-      res.json({ messages });
+      // clickable-citations Phase 1 — project the persisted
+      // `citations_json` blob into a parsed `citations: Citation[]`
+      // array so the client doesn't have to JSON.parse every row.
+      // Null/absent JSON maps to []; parse failures soft-fail to []
+      // so a corrupt row doesn't 500 the whole hydrate.
+      const projected = messages.map((m) => {
+        let parsed: unknown[] = [];
+        if (m.citationsJson) {
+          try {
+            const j = JSON.parse(m.citationsJson);
+            if (Array.isArray(j)) parsed = j;
+          } catch {
+            // soft-fail — corrupt row degrades to no chips
+          }
+        }
+        return { ...m, citations: parsed };
+      });
+      res.json({ messages: projected });
     } catch (error) {
       next(error);
     }

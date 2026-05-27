@@ -423,6 +423,7 @@ describe("ChatColumn", () => {
           role: "user",
           content: "what is the bill total?",
           errorCode: null,
+          citations: [],
         },
         {
           id: "m2",
@@ -431,6 +432,7 @@ describe("ChatColumn", () => {
           role: "assistant",
           content: "The bill total is $7,613.20.",
           errorCode: null,
+          citations: [],
         },
       ]);
 
@@ -454,8 +456,8 @@ describe("ChatColumn", () => {
 
     it("filters out system-role rows (UI only renders user + assistant)", async () => {
       vi.mocked(listChatMessages).mockResolvedValueOnce([
-        { id: "s1", chatSessionId: "rt-sys", turnIndex: 0, role: "system", content: "system bootstrap", errorCode: null },
-        { id: "u1", chatSessionId: "rt-sys", turnIndex: 1, role: "user", content: "hi there", errorCode: null },
+        { id: "s1", chatSessionId: "rt-sys", turnIndex: 0, role: "system", content: "system bootstrap", errorCode: null, citations: [] },
+        { id: "u1", chatSessionId: "rt-sys", turnIndex: 1, role: "user", content: "hi there", errorCode: null, citations: [] },
       ]);
 
       renderWithOnboardingProviders(<ChatColumn />, {
@@ -556,6 +558,115 @@ describe("ChatColumn", () => {
     });
   });
 
+  // clickable-citations Phase 2 — until this lands, F2 chat replies
+  // arrive with citations but render bubble-only (chips invisible).
+  // The viewer can never react to a citation click because there's
+  // no chip to click. Three failing tests pin the contract:
+  describe("citation chips render on assistant bubbles (clickable-citations Phase 2)", () => {
+    it("onboarding chat: assistant reply carrying citations renders [1] [2] chips with documentId + page data attrs", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-cite-1",
+        assistantMessageId: "a-cite-1",
+        reply: {
+          mode: "rag",
+          answer: "The total is $214.07.",
+          citations: [
+            { documentId: "doc-A", page: 7, snippet: "the total is $214.07" },
+            { documentId: "doc-A", page: 12, snippet: "due date March 15" },
+          ],
+          suggestedActions: [],
+          tools: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "what is the total?");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("cite-chip-1")).toBeInTheDocument();
+        expect(screen.getByTestId("cite-chip-2")).toBeInTheDocument();
+      });
+      const c1 = screen.getByTestId("cite-chip-1");
+      const c2 = screen.getByTestId("cite-chip-2");
+      expect(c1).toHaveAttribute("data-citation-doc", "doc-A");
+      expect(c1).toHaveAttribute("data-citation-page", "7");
+      expect(c2).toHaveAttribute("data-citation-doc", "doc-A");
+      expect(c2).toHaveAttribute("data-citation-page", "12");
+    });
+
+    it("steady chat: assistant reply carrying citations renders [1] chip beneath the bubble", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-cite-s",
+        assistantMessageId: "a-cite-s",
+        reply: {
+          mode: "rag",
+          answer: "Tax is $42.",
+          citations: [{ documentId: "doc-B", page: 3, snippet: "tax 42" }],
+          suggestedActions: [],
+          tools: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "tax?");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("cite-chip-1")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("cite-chip-1")).toHaveAttribute("data-citation-doc", "doc-B");
+      expect(screen.getByTestId("cite-chip-1")).toHaveAttribute("data-citation-page", "3");
+    });
+
+    it("RT-01 rehydrate: citations on persisted assistant turns survive a remount", async () => {
+      vi.mocked(listChatMessages).mockResolvedValueOnce([
+        {
+          id: "m1",
+          chatSessionId: "rt-cite",
+          turnIndex: 1,
+          role: "user",
+          content: "total?",
+          errorCode: null,
+          citations: [],
+        },
+        {
+          id: "m2",
+          chatSessionId: "rt-cite",
+          turnIndex: 2,
+          role: "assistant",
+          content: "The total is $214.07.",
+          errorCode: null,
+          citations: [{ documentId: "doc-A", page: 7, snippet: "the total" }],
+        },
+      ]);
+
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("cite-chip-1")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("cite-chip-1")).toHaveAttribute("data-citation-doc", "doc-A");
+      expect(screen.getByTestId("cite-chip-1")).toHaveAttribute("data-citation-page", "7");
+    });
+  });
+
   it("on F6 (gate open), the chat dispatches to GateChatPanel", () => {
     // Defensive: when the gate is active the chat column hands off to
     // GateChatPanel. Same flow that drives the F1 BYO -> signup
@@ -629,6 +740,7 @@ describe("ChatColumn", () => {
           role: "user",
           content: "what is the total?",
           errorCode: null,
+          citations: [],
         },
         {
           id: "m2",
@@ -637,6 +749,7 @@ describe("ChatColumn", () => {
           role: "assistant",
           content: "The total is $42.00.",
           errorCode: null,
+          citations: [],
         },
       ]);
 

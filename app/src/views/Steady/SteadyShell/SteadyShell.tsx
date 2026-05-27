@@ -30,6 +30,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Heading } from "@/components/primitives/Heading/Heading";
 import { OnboardingNav, useOnboardingNavCollapsed } from "@/components/layout/OnboardingNav/OnboardingNav";
+import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import {
   BODY_TEXT,
   BORDER_RADIUS_CARD,
@@ -118,37 +119,56 @@ export const SteadyShell: FC = () => {
     </Box>
   );
 
-  // Canvas slot — "select a document" placeholder until the steady-
-  // mode PdfViewer wire-up lands. Mirrors the F1 picker's "ready for
-  // input" affordance but at steady-mode altitude (the user is signed
-  // in; the session is loaded; we're waiting on a doc selection or
-  // upload).
-  const canvasPane = (
-    <Box
-      sx={{
-        height: "100%",
-        width: "100%",
-        backgroundColor: WHITE,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        p: 3,
-      }}
-      data-testid="steady-shell-canvas-placeholder"
-      aria-label="Canvas"
-    >
-      <Card sx={{ p: 4, borderRadius: BORDER_RADIUS_CARD, maxWidth: 480, textAlign: "center" }}>
-        <Heading level="h5" sx={{ color: NAVY, mb: 1 }}>
-          Pick a document to view
-        </Heading>
-        <BodyText>
-          The steady-mode document viewer + extraction surface lands in
-          UI-05. For now the chat side stays interactive and the canvas
-          waits for a doc selection.
-        </BodyText>
-      </Card>
-    </Box>
-  );
+  // Canvas slot — read the active session's viewer step and surface
+  // the matching widget. clickable-citations Phase 5: when the active
+  // step is `doc-viewer` (pushed by a citation click via
+  // `gotoDocViewer`), mount `PdfViewerWidget` with the cited
+  // documentId + targetPage + highlightBbox. Without an active
+  // doc-viewer step (steady mode starts empty), fall back to the
+  // "pick a document" placeholder.
+  const activeStep =
+    active && active.viewer.currentStep.stepIndex >= 0
+      ? active.viewer.history[active.viewer.currentStep.stepIndex]
+      : null;
+  const canvasPane =
+    activeStep && activeStep.kind === "doc-viewer" ? (
+      <Box
+        sx={{ height: "100%", width: "100%", backgroundColor: WHITE }}
+        data-testid="steady-shell-canvas-doc-viewer"
+        aria-label="Canvas"
+      >
+        <PdfViewerWidget
+          documentId={activeStep.documentId}
+          mode="steady"
+          targetPage={activeStep.highlight?.page ?? activeStep.page ?? null}
+          highlightBbox={activeStep.highlight?.bbox ?? null}
+        />
+      </Box>
+    ) : (
+      <Box
+        sx={{
+          height: "100%",
+          width: "100%",
+          backgroundColor: WHITE,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          p: 3,
+        }}
+        data-testid="steady-shell-canvas-placeholder"
+        aria-label="Canvas"
+      >
+        <Card sx={{ p: 4, borderRadius: BORDER_RADIUS_CARD, maxWidth: 480, textAlign: "center" }}>
+          <Heading level="h5" sx={{ color: NAVY, mb: 1 }}>
+            Pick a document to view
+          </Heading>
+          <BodyText>
+            Click a citation chip in the chat, or open a document from
+            your session, to surface it here.
+          </BodyText>
+        </Card>
+      </Box>
+    );
 
   return (
     <Box

@@ -43,6 +43,7 @@ import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity
 import {
   BORDER,
   BORDER_RADIUS_SM,
+  CYAN,
   EYEBROW_ON_LIGHT,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
@@ -62,13 +63,48 @@ export interface PdfViewerWidgetProps {
   mode: PdfViewerMode;
   /** 1-indexed initial page. Defaults to 1. User clicks on thumbs after that. */
   initialPage?: number;
+  /**
+   * clickable-citations Phase 4 — controlled page targeting. When set,
+   * the widget navigates to this page on mount AND whenever the prop
+   * changes (overrides `initialPage`). Thumb clicks still update the
+   * internal `activePage` (so the user can browse freely after a
+   * programmatic jump); a subsequent change to `targetPage`
+   * re-overrides. Pass `null`/`undefined` to fall back to the
+   * uncontrolled default.
+   */
+  targetPage?: number | null;
+  /**
+   * clickable-citations Phase 4 — region annotation overlay.
+   * Coordinates are 0–1 page-relative (top-left origin). The overlay
+   * renders as an absolutely-positioned tinted box atop the active
+   * page image. Pass `null` / `undefined` to hide the overlay.
+   */
+  highlightBbox?: { x: number; y: number; w: number; h: number } | null;
 }
 
-export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({ documentId, mode, initialPage = 1 }) => {
+export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
+  documentId,
+  mode,
+  initialPage = 1,
+  targetPage,
+  highlightBbox,
+}) => {
   const { getDocumentXray } = useDocumentsContext();
   const [xray, setXray] = useState<DocumentXrayResponse | null>(null);
   const [error, setError] = useState<unknown | null>(null);
-  const [activePage, setActivePage] = useState<number>(initialPage);
+  const [activePage, setActivePage] = useState<number>(targetPage ?? initialPage);
+
+  // clickable-citations Phase 4 — when the caller updates `targetPage`,
+  // re-sync the internal `activePage`. This is the controlled-page
+  // path used by the citation-click handler in the shell: dispatch
+  // `highlightCitation` → ChatStore updates viewer step → shell
+  // re-renders the widget with the new `targetPage`. Without this
+  // effect the widget would stay on whatever page it mounted at.
+  useEffect(() => {
+    if (typeof targetPage === "number" && targetPage > 0) {
+      setActivePage(targetPage);
+    }
+  }, [targetPage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,25 +200,54 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({ documentId, mode, in
             )}
           </Box>
         ) : activeImage ? (
-          <Box
-            component="img"
-            data-testid="pdf-viewer-page-image"
-            src={activeImage}
-            alt={`${fileName || "document"} · page ${activePage}`}
-            sx={{
-              display: "block",
-              // Fit-contain semantics: the image scales to the smaller
-              // of the available width / height while preserving its
-              // aspect ratio. No scroll, no overflow, no pan/zoom.
-              maxWidth: "100%",
-              maxHeight: "100%",
-              width: "auto",
-              height: "auto",
-              objectFit: "contain",
-              border: `1px solid ${BORDER}`,
-              backgroundColor: WHITE,
-            }}
-          />
+          // clickable-citations Phase 4 — wrap the page image in a
+          // position:relative container so the bbox highlight overlay
+          // (absolute child) renders proportionally over the image.
+          // The container hugs the image's intrinsic fit-contain size,
+          // not the available pane area, so the overlay's percentages
+          // align with the visible page region.
+          <Box sx={{ position: "relative", display: "inline-block", maxWidth: "100%", maxHeight: "100%" }}>
+            <Box
+              component="img"
+              data-testid="pdf-viewer-page-image"
+              src={activeImage}
+              alt={`${fileName || "document"} · page ${activePage}`}
+              sx={{
+                display: "block",
+                // Fit-contain semantics: the image scales to the smaller
+                // of the available width / height while preserving its
+                // aspect ratio. No scroll, no overflow, no pan/zoom.
+                maxWidth: "100%",
+                maxHeight: "100%",
+                width: "auto",
+                height: "auto",
+                objectFit: "contain",
+                border: `1px solid ${BORDER}`,
+                backgroundColor: WHITE,
+              }}
+            />
+            {highlightBbox && (
+              // Cite overlay — absolute-positioned tint atop the page
+              // image at the bbox-percent coords. Rendered via inline
+              // `style` (not `sx`) so the test can assert the four
+              // computed percentages directly against the style attr.
+              <Box
+                data-testid="pdf-viewer-highlight"
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  left: `${highlightBbox.x * 100}%`,
+                  top: `${highlightBbox.y * 100}%`,
+                  width: `${highlightBbox.w * 100}%`,
+                  height: `${highlightBbox.h * 100}%`,
+                  backgroundColor: `${CYAN}55`,
+                  border: `2px solid ${CYAN}`,
+                  borderRadius: BORDER_RADIUS_SM,
+                  pointerEvents: "none",
+                }}
+              />
+            )}
+          </Box>
         ) : (
           // Loading state placeholder — neither error nor a real image
           // yet. The data-loading="true" attribute on the root carries

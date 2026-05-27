@@ -1,10 +1,49 @@
-import { act, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
 import { ROUTER_PATHS } from "@/router/routerPaths";
 import { GxThemeProvider } from "@/ThemeProvider";
+
+// clickable-citations Phase 5 — mock PdfViewerWidget so the e2e test
+// can assert what props the shell passes to it without standing up
+// the full DocumentsProvider + api mock chain. The Phase 4 unit
+// tests in PdfViewerWidget.test.tsx separately prove the widget
+// itself responds to those props.
+vi.mock("@/components/viewer-widgets/PdfViewer/PdfViewerWidget", () => ({
+  PdfViewerWidget: (props: {
+    documentId: string;
+    mode: string;
+    targetPage?: number | null;
+    highlightBbox?: { x: number; y: number; w: number; h: number } | null;
+  }) => (
+    <div
+      data-testid="pdf-viewer-widget-stub"
+      data-document-id={props.documentId}
+      data-mode={props.mode}
+      data-target-page={props.targetPage ?? ""}
+      data-highlight-bbox={props.highlightBbox ? JSON.stringify(props.highlightBbox) : ""}
+    />
+  ),
+}));
+
+// Also mock listChatMessages / sendChatMessage so ChatColumn doesn't
+// reach out to fetch on mount — same pattern the other ChatColumn
+// tests use.
+vi.mock("@/api/chatSessions", async () => {
+  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
+  return {
+    ...actual,
+    listChatMessages: vi.fn(async () => []),
+    sendChatMessage: vi.fn(),
+    ensureServerChatSession: vi.fn(async () => undefined),
+  };
+});
+
+import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 
 import { SteadyShell } from "./SteadyShell";
 
@@ -107,6 +146,90 @@ describe("SteadyShell (/c/:sessionId)", () => {
     expect(api!.state.activeSessionId).toBe(createdId);
     // Title from the seeded session shows in the shell heading.
     expect(screen.getByText("Alpha")).toBeInTheDocument();
+  });
+
+  // ── clickable-citations Phase 5 — end-to-end: clicking a citation
+  //    chip routes the viewer pane to the cited document with the
+  //    correct page + highlight bbox surfaced. Closes the Rule 9
+  //    round-trip on the full chip→orchestrator→ChatStore→shell→
+  //    PdfViewerWidget chain.
+  describe("clickable-citations: click chip → PdfViewerWidget surfaces document + page + highlight (Phase 5 e2e)", () => {
+    function E2EHarness({ initialUrl, children }: { initialUrl: string; children: React.ReactNode }) {
+      return (
+        <GxThemeProvider>
+          <ChatStoreProvider initialOwnerKey="anon-cite-e2e" autoSeedDefaultSession>
+            <CanvasOrchestratorProvider>
+              <MemoryRouter initialEntries={[initialUrl]}>
+                <Routes>
+                  <Route path={ROUTER_PATHS.STEADY_SESSION} element={children} />
+                </Routes>
+              </MemoryRouter>
+            </CanvasOrchestratorProvider>
+          </ChatStoreProvider>
+        </GxThemeProvider>
+      );
+    }
+
+    it("clicking a CiteChip mounts PdfViewerWidget in the canvas pane with the citation's documentId, page, and bbox", async () => {
+      // Mount once. Inside the same router instance, seed a session
+      // with `newSession`, then `useNavigate` to its `/c/{id}` URL.
+      // The rerender-with-new-Harness pattern doesn't work here:
+      // MemoryRouter's initialEntries only apply at mount, so a
+      // remount would reset ChatStoreProvider too and lose the seed.
+      let api: ReturnType<typeof useChatStore> | null = null;
+      let createdId = "";
+      let navigateFn: ReturnType<typeof useNavigate> | null = null;
+      function SeedAndRender() {
+        api = useChatStore();
+        navigateFn = useNavigate();
+        return null;
+      }
+      render(
+        <E2EHarness initialUrl="/c/seed-placeholder">
+          <SeedAndRender />
+          <CiteChip
+            citation={{
+              documentId: "doc-citing",
+              page: 4,
+              snippet: "the total is $214.07",
+              bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 },
+            }}
+            index={1}
+          />
+          <SteadyShell />
+        </E2EHarness>,
+      );
+      expect(api).not.toBeNull();
+      expect(navigateFn).not.toBeNull();
+      // Seed the session AND navigate to it inside one act so the
+      // router URL update + store mutation commit together.
+      act(() => {
+        createdId = api!.newSession({ title: "Citation e2e" });
+        navigateFn!(`/c/${createdId}`);
+      });
+
+      // Pre-click: placeholder visible, no PdfViewer.
+      await waitFor(() => {
+        expect(screen.getByTestId("steady-shell-canvas-placeholder")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("pdf-viewer-widget-stub")).not.toBeInTheDocument();
+
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId("cite-chip-1"));
+
+      // After the click, PdfViewerWidget is mounted with the citation
+      // documentId + page + bbox; placeholder gone.
+      await waitFor(() => {
+        expect(screen.getByTestId("pdf-viewer-widget-stub")).toBeInTheDocument();
+      });
+      const stub = screen.getByTestId("pdf-viewer-widget-stub");
+      expect(stub.getAttribute("data-document-id")).toBe("doc-citing");
+      expect(stub.getAttribute("data-target-page")).toBe("4");
+      expect(stub.getAttribute("data-mode")).toBe("steady");
+      const bbox = JSON.parse(stub.getAttribute("data-highlight-bbox") ?? "{}");
+      expect(bbox).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.05 });
+      expect(screen.queryByTestId("steady-shell-canvas-placeholder")).not.toBeInTheDocument();
+    });
   });
 
   it("surfaces an unknown-session hint when the URL points at a session not in the store", () => {

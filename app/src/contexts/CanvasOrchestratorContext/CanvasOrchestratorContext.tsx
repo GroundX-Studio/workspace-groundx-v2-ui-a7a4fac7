@@ -76,6 +76,20 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             intent: intent as unknown as Record<string, unknown>,
           });
         }
+        // clickable-citations Phase 3 — built-in side effect for the
+        // citation-jump flow. CiteChip dispatches `highlightCitation`
+        // (currently the only sink); this routes the click to a
+        // push-or-mutate doc-viewer step so the viewer pane reliably
+        // surfaces the cited document + page + bbox. No registered
+        // adapter is required — the orchestrator is the canonical
+        // handler.
+        if (intent.kind === "highlightCitation") {
+          chatStore.gotoDocViewer({
+            documentId: intent.documentId,
+            page: intent.page,
+            ...(intent.bbox ? { bbox: intent.bbox } : {}),
+          });
+        }
       }
 
       const adapter = adaptersRef.current.get(intent.kind);

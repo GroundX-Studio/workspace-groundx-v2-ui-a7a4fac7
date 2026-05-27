@@ -1315,6 +1315,72 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
   }, []);
 
+  // clickable-citations Phase 3 — push-or-mutate a doc-viewer step
+  // based on whether the current step already targets the same
+  // documentId. The orchestrator calls this on every
+  // `highlightCitation` dispatch so chip clicks reliably route the
+  // viewer pane to the cited region without polluting viewer-history
+  // with duplicate doc-viewer entries.
+  const gotoDocViewer = useCallback(
+    (input: {
+      documentId: string;
+      page: number;
+      bbox?: { x: number; y: number; w: number; h: number };
+      sourceCitationIndex?: number;
+    }) => {
+      setState((prev) => {
+        if (!prev.activeSessionId) return prev;
+        const current = prev.sessions.get(prev.activeSessionId);
+        if (!current) return prev;
+        const cur = current.viewer.currentStep.stepIndex;
+        const top = cur >= 0 ? current.viewer.history[cur] : null;
+        const highlight = {
+          page: input.page,
+          ...(input.bbox ? { bbox: input.bbox } : {}),
+          ...(input.sourceCitationIndex != null ? { sourceCitationIndex: input.sourceCitationIndex } : {}),
+        };
+        // Same-document case → mutate the active step in place.
+        if (top != null && top.kind === "doc-viewer" && top.documentId === input.documentId) {
+          // Reference-equality short-circuit when the highlight slot
+          // would be identical (prevents render churn from rapid
+          // re-clicks on the same chip).
+          if (JSON.stringify(top.highlight) === JSON.stringify(highlight) && top.page === input.page) {
+            return prev;
+          }
+          const nextHistory = current.viewer.history.slice();
+          nextHistory[cur] = { ...top, page: input.page, highlight };
+          const sessions = new Map(prev.sessions);
+          sessions.set(prev.activeSessionId, {
+            ...current,
+            viewer: { ...current.viewer, history: nextHistory },
+            updatedAt: Date.now(),
+          });
+          return { ...prev, sessions };
+        }
+        // Different-document case (or no step yet) → push a new step.
+        const newStep: import("./types").ViewerStep = {
+          kind: "doc-viewer",
+          documentId: input.documentId,
+          page: input.page,
+          highlight,
+        };
+        const nextHistory = [...current.viewer.history, newStep];
+        const sessions = new Map(prev.sessions);
+        sessions.set(prev.activeSessionId, {
+          ...current,
+          viewer: {
+            ...current.viewer,
+            history: nextHistory,
+            currentStep: { stepIndex: nextHistory.length - 1 },
+          },
+          updatedAt: Date.now(),
+        });
+        return { ...prev, sessions };
+      });
+    },
+    [],
+  );
+
   const setSchemaFieldExtraction = useCallback(
     (fieldId: string, result: import("./types").SchemaFieldExtractionResult) => {
       setState((prev) => {
@@ -1390,6 +1456,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       mutateOverlay,
       popOverlay,
       pushStep,
+      gotoDocViewer,
     }),
     [
       newSession,
@@ -1417,6 +1484,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       mutateOverlay,
       popOverlay,
       pushStep,
+      gotoDocViewer,
     ],
   );
 

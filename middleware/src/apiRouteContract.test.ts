@@ -633,6 +633,59 @@ describe("middleware API route contract", () => {
       const { app } = setup();
       await request(app).get("/api/chat-sessions/whatever/messages").expect(401);
     });
+
+    // clickable-citations Phase 1 — Rule 9 closure gate. The chat
+    // handler writes `citations_json` for every RAG/hybrid assistant
+    // turn, but the hydrate path was returning the raw `citationsJson`
+    // string (a no-op for the UI). Without this contract, citation
+    // chips silently disappear on refresh. Round-trip insert →
+    // hydrate → assert parsed citations[] survives.
+    it("returns parsed citations[] per assistant turn (round-trip with citations_json)", async () => {
+      const { app, repository } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/chat-sessions")
+        .send({ id: "cit-rt", onboardingSessionId: "cit-rt", title: "Onboarding", isOnboarding: true })
+        .expect(200);
+      const now = new Date();
+      const citations = [
+        { documentId: "doc-A", page: 7, snippet: "the total is $214.07", bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 } },
+        { documentId: "doc-A", page: 12, snippet: "due date March 15" },
+      ];
+      await repository.appendChatMessage({
+        id: "c1", chatSessionId: "cit-rt", turnIndex: 1, role: "user",
+        content: "what is the total?", citationsJson: null, toolCallsJson: null, attachmentsJson: null,
+        compressedIntoSummaryId: null, llmProvider: null, llmModelId: null,
+        latencyMs: null, promptTokens: null, completionTokens: null, errorCode: null, createdAt: now,
+      });
+      await repository.appendChatMessage({
+        id: "c2", chatSessionId: "cit-rt", turnIndex: 2, role: "assistant",
+        content: "The total is $214.07.",
+        citationsJson: JSON.stringify(citations),
+        toolCallsJson: null, attachmentsJson: null, compressedIntoSummaryId: null,
+        llmProvider: null, llmModelId: null, latencyMs: null, promptTokens: null,
+        completionTokens: null, errorCode: null, createdAt: now,
+      });
+      const response = await agent.get("/api/chat-sessions/cit-rt/messages").expect(200);
+      // The assistant turn carries a parsed `citations` array
+      // (Citation[] shape), not the raw JSON string.
+      const assistant = response.body.messages.find((m: { id: string }) => m.id === "c2");
+      expect(assistant.citations).toBeDefined();
+      expect(Array.isArray(assistant.citations)).toBe(true);
+      expect(assistant.citations).toHaveLength(2);
+      expect(assistant.citations[0]).toEqual({
+        documentId: "doc-A",
+        page: 7,
+        snippet: "the total is $214.07",
+        bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 },
+      });
+      expect(assistant.citations[1]).toMatchObject({ documentId: "doc-A", page: 12 });
+      // Null `citations_json` projects to an empty array, not null,
+      // so callers don't have to null-check on every render.
+      const user = response.body.messages.find((m: { id: string }) => m.id === "c1");
+      expect(user.citations).toEqual([]);
+    });
   });
 
   // RT-02 — server side of "viewer_events table is actually written

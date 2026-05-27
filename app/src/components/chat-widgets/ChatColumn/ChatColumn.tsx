@@ -35,7 +35,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEv
 import { useNavigate } from "react-router-dom";
 
 import { chatErrorToUserCopy, listChatMessages, sendChatMessage } from "@/api/chatSessions";
-import type { ProposedSchemaField } from "@/api/chatSessions";
+import type { ChatCitation, ProposedSchemaField } from "@/api/chatSessions";
+import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
@@ -265,6 +266,10 @@ const SteadyConversationFlow: FC = () => {
             id: m.id,
             role: m.role as "user" | "assistant",
             content: m.content,
+            // clickable-citations Phase 2 — RT-01 hydrate carries
+            // `citations` per row; project onto LiveTurn so chips
+            // re-render after a refresh.
+            citations: m.citations ?? [],
           }));
         setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
       } catch (err) {
@@ -311,6 +316,10 @@ const SteadyConversationFlow: FC = () => {
             role: "assistant",
             content: result.reply.answer,
             proposedSchemaField: result.reply.proposedSchemaField,
+            // clickable-citations Phase 2 — thread reply citations
+            // onto the LiveTurn so CiteChips render alongside the
+            // bubble.
+            citations: result.reply.citations ?? [],
           },
         ]);
         // F3a wireframe-fix: also enqueue the proposal onto the
@@ -372,6 +381,13 @@ const SteadyConversationFlow: FC = () => {
                   <BotBubble testid="steady-chat-live-assistant">
                     {turn.content}
                   </BotBubble>
+                  {turn.citations && turn.citations.length > 0 && (
+                    <Stack direction="row" spacing={0.5} sx={{ pl: 0.25, flexWrap: "wrap" }}>
+                      {turn.citations.map((c, idx) => (
+                        <CiteChip key={`${turn.id}-cite-${idx}`} citation={c} index={idx + 1} />
+                      ))}
+                    </Stack>
+                  )}
                   {turn.proposedSchemaField && (
                     <ProposeSchemaFieldCard
                       proposedField={turn.proposedSchemaField}
@@ -439,6 +455,13 @@ interface LiveTurn {
    * the conversation.
    */
   proposedSchemaField?: ProposedSchemaField | null;
+  /**
+   * clickable-citations Phase 2 — the citations array returned by the
+   * chat router (RAG/hybrid replies). Rendered as `<CiteChip>` rows
+   * beneath the assistant bubble. Empty array = no chips, never
+   * undefined so callers can map unconditionally.
+   */
+  citations?: ChatCitation[];
 }
 
 const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
@@ -502,6 +525,10 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             id: m.id,
             role: m.role as "user" | "assistant",
             content: m.content,
+            // clickable-citations Phase 2 — RT-01 hydrate carries
+            // `citations` per row; project onto LiveTurn so chips
+            // re-render after a refresh.
+            citations: m.citations ?? [],
           }));
         setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
       } catch (err) {
@@ -593,6 +620,10 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             role: "assistant",
             content: result.reply.answer,
             proposedSchemaField: result.reply.proposedSchemaField,
+            // clickable-citations Phase 2 — thread reply citations
+            // onto the LiveTurn so CiteChips render alongside the
+            // bubble.
+            citations: result.reply.citations ?? [],
           },
         ]);
         // F3a wireframe-fix: also enqueue the proposal onto the
@@ -944,6 +975,13 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
                   <BotBubble testid="onboarding-chat-live-assistant">
                     {turn.content}
                   </BotBubble>
+                  {turn.citations && turn.citations.length > 0 && (
+                    <Stack direction="row" spacing={0.5} sx={{ pl: 0.25, flexWrap: "wrap" }}>
+                      {turn.citations.map((c, idx) => (
+                        <CiteChip key={`${turn.id}-cite-${idx}`} citation={c} index={idx + 1} />
+                      ))}
+                    </Stack>
+                  )}
                   {turn.proposedSchemaField && (
                     <ProposeSchemaFieldCard
                       proposedField={turn.proposedSchemaField}

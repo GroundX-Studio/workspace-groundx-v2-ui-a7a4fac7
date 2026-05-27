@@ -343,4 +343,111 @@ describe("CanvasOrchestratorContext", () => {
       }).not.toThrow();
     });
   });
+
+  // ── clickable-citations Phase 3 — highlightCitation routes to a
+  //    doc-viewer step transition + highlight slot, not a transient
+  //    overlay. The user-visible contract: clicking a chip jumps the
+  //    viewer pane to the cited doc + page with the bbox highlighted.
+  describe("highlightCitation → doc-viewer step transition (clickable-citations Phase 3)", () => {
+    const busWrapper = ({ children }: { children: React.ReactNode }) => (
+      <ChatStoreProvider ephemeral>
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      </ChatStoreProvider>
+    );
+
+    it("dispatching highlightCitation while no doc-viewer step exists PUSHES a new doc-viewer step with page + highlight", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      act(() => {
+        result.current.bus.dispatch({
+          kind: "highlightCitation",
+          documentId: "doc-A",
+          page: 7,
+          bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 },
+        }, "user");
+      });
+      const session = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      expect(session?.viewer.history.length).toBeGreaterThan(0);
+      const current = session?.viewer.history[session.viewer.currentStep.stepIndex];
+      expect(current?.kind).toBe("doc-viewer");
+      if (current?.kind === "doc-viewer") {
+        expect(current.documentId).toBe("doc-A");
+        expect(current.highlight?.page).toBe(7);
+        expect(current.highlight?.bbox).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.05 });
+      }
+    });
+
+    it("dispatching highlightCitation while a doc-viewer step for the SAME documentId is active MUTATES the highlight in place (no new step)", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      // First click — push.
+      act(() => {
+        result.current.bus.dispatch(
+          { kind: "highlightCitation", documentId: "doc-A", page: 1 },
+          "user",
+        );
+      });
+      const after1 = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const lenAfter1 = after1?.viewer.history.length ?? 0;
+      // Second click — mutate, same document.
+      act(() => {
+        result.current.bus.dispatch(
+          { kind: "highlightCitation", documentId: "doc-A", page: 7, bbox: { x: 0, y: 0, w: 1, h: 0.1 } },
+          "user",
+        );
+      });
+      const after2 = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      // History length unchanged — step was mutated, not pushed.
+      expect(after2?.viewer.history.length).toBe(lenAfter1);
+      const current = after2?.viewer.history[after2.viewer.currentStep.stepIndex];
+      expect(current?.kind).toBe("doc-viewer");
+      if (current?.kind === "doc-viewer") {
+        expect(current.documentId).toBe("doc-A");
+        expect(current.highlight?.page).toBe(7);
+        expect(current.highlight?.bbox).toEqual({ x: 0, y: 0, w: 1, h: 0.1 });
+      }
+    });
+
+    it("dispatching highlightCitation for a DIFFERENT documentId PUSHES a new step (doesn't mutate the prior one)", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      act(() => {
+        result.current.bus.dispatch({ kind: "highlightCitation", documentId: "doc-A", page: 3 }, "user");
+      });
+      act(() => {
+        result.current.bus.dispatch({ kind: "highlightCitation", documentId: "doc-B", page: 5 }, "user");
+      });
+      const session = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      // Two doc-viewer steps now — different docs ≠ in-place mutation.
+      const docViewerSteps = (session?.viewer.history ?? []).filter((s) => s.kind === "doc-viewer");
+      expect(docViewerSteps.length).toBe(2);
+      const last = session?.viewer.history[session.viewer.currentStep.stepIndex];
+      expect(last?.kind).toBe("doc-viewer");
+      if (last?.kind === "doc-viewer") {
+        expect(last.documentId).toBe("doc-B");
+        expect(last.highlight?.page).toBe(5);
+      }
+    });
+
+    it("dispatching highlightCitation without a ChatStoreProvider is a no-op (back-compat)", () => {
+      const plainWrapper = ({ children }: { children: React.ReactNode }) => (
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      );
+      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
+      expect(() => {
+        act(() => {
+          result.current.dispatch({ kind: "highlightCitation", documentId: "d-1", page: 1 }, "user");
+        });
+      }).not.toThrow();
+    });
+  });
 });

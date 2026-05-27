@@ -1,22 +1,11 @@
-import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
-import Popover from "@mui/material/Popover";
-import Typography from "@mui/material/Typography";
-import { useCallback, useRef, useState, type FC } from "react";
+import { useCallback, type FC } from "react";
 
 import {
-  BODY_TEXT,
-  BORDER,
-  BORDER_RADIUS,
-  BORDER_RADIUS_SM,
   CYAN,
-  EYEBROW_ON_LIGHT,
   FONT_SIZE_LABEL,
   FONT_WEIGHT_LABEL,
-  LETTER_SPACING_LABEL,
-  MUTED_ON_LIGHT,
   NAVY,
-  WHITE,
 } from "@/constants";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { track } from "@/lib/analytics";
@@ -31,33 +20,30 @@ export interface CiteChipProps {
 }
 
 /**
- * The shared citation chip. Used wherever the spec calls for `[N]` — chat
- * bubbles, schema rows, report sections, risk roll-up rows.
+ * The shared citation chip. Used wherever the spec calls for `[N]` —
+ * chat bubbles, schema rows, report sections, risk roll-up rows.
  *
- * Default click behavior (no `onActivate`):
- *   1. Fires the OB-02 `cite.peeked` telemetry event.
- *   2. Dispatches a `highlightCitation` canvas intent — when UI-04 ships
- *      a side panel adapter, the side panel will react. Until then no
- *      adapter is registered, so the dispatch is silent at the canvas
- *      level.
- *   3. Opens a per-chip peek popover anchored to the chip — gives the
- *      click an immediate visible response with the source page +
- *      snippet so the chip never feels dead. This is the pre-UI-04
- *      visual fallback; once the F5 side panel renders the highlighted
- *      source, this popover can be retired.
+ * clickable-citations Phase 5: the chip's default click behavior is
+ * now "jump the viewer to the cited region." Phase 3 wired the
+ * orchestrator to handle `highlightCitation` end-to-end (push/swap a
+ * `doc-viewer` ViewerStep + highlight slot). Phase 4 made
+ * `PdfViewerWidget` controlled-page + bbox-overlay aware. This
+ * component drops the pre-UI-04 Popover fallback — the chip now does
+ * the single thing the wireframes asked for: opens the source.
  *
- * When `onActivate` is supplied (callers wiring their own side-panel
- * UX), the popover is suppressed — the caller's affordance owns the
- * click.
+ * Hover tooltip is the native `title` attribute, so users still get
+ * a "source · page N" hint without a JS-rendered floating peek.
+ *
+ * When `onActivate` is supplied (callers wiring their own surface),
+ * the orchestrator dispatch is suppressed — the caller's affordance
+ * owns the click.
  */
 export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate }) => {
   const { dispatch } = useCanvasOrchestrator();
-  const chipRef = useRef<HTMLDivElement | null>(null);
-  const [peekOpen, setPeekOpen] = useState(false);
 
   const handle = useCallback(() => {
     // OB-02 — cite.peeked fires on every citation chip activation
-    // regardless of which view it sits in (F3 fields, F5 chat, etc.).
+    // regardless of which surface it sits in (F3 fields, F5 chat, etc.).
     track("cite.peeked", {
       documentId: citation.documentId,
       page: citation.page,
@@ -67,89 +53,45 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate }) => 
       onActivate(citation);
       return;
     }
-    dispatch({ kind: "highlightCitation", documentId: citation.documentId, page: citation.page, bbox: citation.bbox }, "user");
-    setPeekOpen(true);
+    // The orchestrator's built-in handler picks this up (no adapter
+    // registration required) and calls ChatStore.gotoDocViewer to
+    // push/swap a doc-viewer step. Shells re-render with the new
+    // step → PdfViewerWidget mounts with targetPage + highlightBbox.
+    dispatch(
+      {
+        kind: "highlightCitation",
+        documentId: citation.documentId,
+        page: citation.page,
+        ...(citation.bbox ? { bbox: citation.bbox } : {}),
+      },
+      "user",
+    );
   }, [citation, dispatch, onActivate, index]);
 
+  const tooltip = citation.snippet
+    ? `Source · page ${citation.page} — ${citation.snippet}`
+    : `Source · page ${citation.page}`;
+
   return (
-    <>
-      <Chip
-        ref={chipRef as unknown as React.Ref<HTMLDivElement>}
-        label={`[${index}]`}
-        size="small"
-        onClick={handle}
-        clickable
-        aria-label={`Citation ${index} — page ${citation.page}`}
-        data-testid={`cite-chip-${index}`}
-        data-citation-doc={citation.documentId}
-        data-citation-page={citation.page}
-        sx={{
-          height: 20,
-          fontSize: FONT_SIZE_LABEL,
-          backgroundColor: CYAN,
-          color: NAVY,
-          fontWeight: FONT_WEIGHT_LABEL,
-          cursor: "pointer",
-          "&:hover": { filter: "brightness(0.95)" },
-        }}
-      />
-      <Popover
-        open={peekOpen}
-        anchorEl={chipRef.current}
-        onClose={() => setPeekOpen(false)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
-        transformOrigin={{ vertical: "top", horizontal: "left" }}
-        slotProps={{
-          paper: {
-            sx: {
-              maxWidth: 320,
-              border: `1px solid ${BORDER}`,
-              borderRadius: BORDER_RADIUS,
-              backgroundColor: WHITE,
-              p: 1.5,
-            },
-          },
-        }}
-      >
-        <Box data-testid="cite-peek">
-        <Typography
-          variant="overline"
-          sx={{
-            color: EYEBROW_ON_LIGHT,
-            letterSpacing: LETTER_SPACING_LABEL,
-            fontWeight: FONT_WEIGHT_LABEL,
-          }}
-        >
-          SOURCE · PAGE {citation.page}
-        </Typography>
-        <Typography
-          variant="caption"
-          component="div"
-          sx={{ color: MUTED_ON_LIGHT, fontFamily: "monospace", mt: 0.25, mb: 0.5, wordBreak: "break-all" }}
-        >
-          {citation.documentId}
-        </Typography>
-        {citation.snippet ? (
-          <Box
-            sx={{
-              borderLeft: `3px solid ${CYAN}`,
-              pl: 1,
-              py: 0.5,
-              backgroundColor: `${CYAN}1a`,
-              borderRadius: BORDER_RADIUS_SM,
-            }}
-          >
-            <Typography variant="body2" sx={{ color: NAVY }}>
-              {citation.snippet}
-            </Typography>
-          </Box>
-        ) : (
-          <Typography variant="body2" sx={{ color: BODY_TEXT, fontStyle: "italic" }}>
-            No snippet provided. Full source viewer ships with the F5 side panel (UI-04).
-          </Typography>
-        )}
-        </Box>
-      </Popover>
-    </>
+    <Chip
+      label={`[${index}]`}
+      size="small"
+      onClick={handle}
+      clickable
+      title={tooltip}
+      aria-label={`Citation ${index} — page ${citation.page}`}
+      data-testid={`cite-chip-${index}`}
+      data-citation-doc={citation.documentId}
+      data-citation-page={citation.page}
+      sx={{
+        height: 20,
+        fontSize: FONT_SIZE_LABEL,
+        backgroundColor: CYAN,
+        color: NAVY,
+        fontWeight: FONT_WEIGHT_LABEL,
+        cursor: "pointer",
+        "&:hover": { filter: "brightness(0.95)" },
+      }}
+    />
   );
 };
