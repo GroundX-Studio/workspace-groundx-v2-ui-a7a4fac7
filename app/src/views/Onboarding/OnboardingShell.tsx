@@ -327,11 +327,46 @@ export const OnboardingShell: FC = () => {
     session.gate.status === "open" || session.gate.status === "committed";
   const signupSurfaceActive = signupOverlay != null || legacyGateOpenOrCommitted;
 
+  // post-mvs-cleanup Phase B — canvas switches on `viewer.currentStep.kind`
+  // (driven by the viewer session) instead of the legacy `currentFrame`
+  // slot. Frame-only navigations (StepStrip pill clicks) still call
+  // `advanceFrame(...)` which pushes the corresponding ViewerStep onto
+  // viewer.history; the projection here picks up the latest step.
+  //
+  // currentFrame remains a derived getter for backwards compat with
+  // StepStrip / pill state computation, but isn't on the render hot path.
+  const latestViewerStep =
+    activeChatSession && activeChatSession.viewer.currentStep.stepIndex >= 0
+      ? activeChatSession.viewer.history[activeChatSession.viewer.currentStep.stepIndex]
+      : null;
+  // Fallback to currentFrame projection if no step is in history yet
+  // (initial mount before any advanceFrame / pickScenario fires).
+  const stepKindFallback: import("@/contexts/ChatStoreContext").ViewerStep["kind"] | null = (() => {
+    switch (session.currentFrame) {
+      case "f1":
+        return "ingest-picker";
+      case "f2":
+        return "doc-viewer";
+      case "f3":
+      case "f3a":
+      case "f4":
+        return "extract-workbench";
+      case "f5":
+      case "f6":
+        return "interact-chat";
+      case "f7":
+        return "integrate";
+      default:
+        return null;
+    }
+  })();
+  const effectiveStepKind = latestViewerStep?.kind ?? stepKindFallback;
+
   const canvasContent = useMemo(() => {
     if (bookCallActive) return <BookCallView />;
     if (signupSurfaceActive) return <SignUpWidget />;
-    switch (session.currentFrame) {
-      case "f1":
+    switch (effectiveStepKind) {
+      case "ingest-picker":
         // ARCH-06B (2026-05-26): IngestView is rendered ONLY inside
         // the F1 overlay (see render below). The canvas underneath
         // stays blank so the user doesn't see IngestView duplicated
@@ -339,29 +374,21 @@ export const OnboardingShell: FC = () => {
         // finishes covering. The brief blank moment is masked by the
         // overlay sliding into place.
         return null;
-      case "f2":
+      case "doc-viewer":
         return <UnderstandView />;
-      case "f3":
-      case "f3a":
-      case "f4":
+      case "extract-workbench":
         // Per spec (`project_spec_frames.md`), F3 / F3a / F4 are three
         // surfaces of the same extraction-workbench widget. ExtractView
-        // is the workbench shell — it owns the topbar (export · ↻
-        // rerun · ✎ edit schema · 💾 Save) and switches its body
-        // between Results (F3) / Design (F3a / SchemaView) / Source
-        // peek (F4 — deferred; falls back to Results). Routing all
-        // three frames to ExtractView keeps the shell stable when the
-        // user toggles surfaces via the topbar.
+        // is the workbench shell.
         return <ExtractView />;
-      case "f5":
-      case "f6":
+      case "interact-chat":
         return <InteractView />;
-      case "f7":
+      case "integrate":
         return <IntegrateView />;
       default:
         return null;
     }
-  }, [bookCallActive, signupSurfaceActive, session.currentFrame]);
+  }, [bookCallActive, signupSurfaceActive, effectiveStepKind]);
 
   // Theme-driven breakpoint detection. Compact step strip activates below
   // md (900 = MUI default; iPad-portrait-to-landscape divide). Phones +

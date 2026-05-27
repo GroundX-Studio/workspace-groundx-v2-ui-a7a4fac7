@@ -16,6 +16,36 @@ import type { GateCause, GateStatus, OnboardingSessionApi, OnboardingSessionStat
 
 const OnboardingSessionContext = createContext<OnboardingSessionApi | null>(null);
 
+/**
+ * `master-viewer-session` Phase 3 / post-mvs-cleanup Phase B — map an
+ * F-series frame to its canonical `ViewerStep` projection. Hoisted out
+ * of the hook so it can be called from `pickScenario` and `advanceFrame`
+ * regardless of declaration order. The scenario id rides along on step
+ * kinds that need it.
+ */
+function frameToStepStandalone(
+  frame: FFrame,
+  scenario: Scenario | null,
+): import("@/contexts/ChatStoreContext").ViewerStep {
+  switch (frame) {
+    case "f1":
+      return { kind: "ingest-picker" };
+    case "f2":
+      return { kind: "doc-viewer", documentId: scenario ? `scenario:${scenario}` : "scenario:unknown" };
+    case "f3":
+    case "f3a":
+    case "f4":
+      return { kind: "extract-workbench", scenarioId: scenario ?? "unknown" };
+    case "f5":
+    case "f6":
+      return { kind: "interact-chat", scenarioId: scenario ?? "unknown" };
+    case "f7":
+      return { kind: "integrate" };
+    default:
+      return { kind: "ingest-picker" };
+  }
+}
+
 interface OnboardingSessionProviderProps {
   children: ReactNode;
   initialFrame?: FFrame;
@@ -49,7 +79,7 @@ function useSessionFacade(): OnboardingSessionApi {
   // EntityRegistry is a facade over ChatStore; viewer events are
   // session-level (not entity-level), so we reach for ChatStore
   // here instead of routing through EntityRegistry.
-  const { appendViewerEvent, pushStep } = useChatStore();
+  const { appendViewerEvent, pushStep, pushOverlay, mutateOverlay, popOverlay } = useChatStore();
   const [sessionId, setSessionId] = useState<string | null>(null);
   // Gate is SESSION-LEVEL state, not per-entity. It represents the
   // user's auth-pending status, which is global across whatever
@@ -113,17 +143,19 @@ function useSessionFacade(): OnboardingSessionApi {
       // UnderstandView. `committed` (signed-in) and `dismissed` are
       // preserved — only the pending-open state resets.
       setGate((prev) => (prev.status === "open" ? { status: "idle" } : prev));
+      // post-mvs-cleanup Phase B fix — push the viewer step matching the
+      // entity's RESOLVED frame, not the assumed F2 default. Existing
+      // entities preserve their lastFrame across upsertAndActivate; if we
+      // unconditionally pushed `doc-viewer` we'd render UnderstandView
+      // when the entity was previously at F5/F6.
+      const targetKey = makeEntityKey("sample", scenario);
+      const existingEntity = registry.state.entities.get(targetKey);
+      const resolvedFrame: FFrame = existingEntity?.lastFrame ?? "f2";
       upsertAndActivate("sample", scenario, {
         lastFrame: "f2",
         completedFrames: new Set<FFrame>(["f1"]),
       });
-      // `master-viewer-session` Phase 3 — accumulate the viewer step.
-      // Picking a sample lands on F2 (Understand), which is the
-      // doc-viewer surface. The documentId is the scenario's primary
-      // doc; downstream surfaces (PdfViewer etc.) read it from the
-      // scenario registry, so we record the scenario tag here and
-      // let consumers resolve the doc later.
-      pushStep({ kind: "doc-viewer", documentId: `scenario:${scenario}` });
+      pushStep(frameToStepStandalone(resolvedFrame, scenario));
       // Phase E: record the entity-open ViewerEvent. Last ~10
       // viewer events feed the LLM context bundling.
       appendViewerEvent({
@@ -142,34 +174,8 @@ function useSessionFacade(): OnboardingSessionApi {
     [upsertAndActivate, appendViewerEvent, pushStep],
   );
 
-  /**
-   * `master-viewer-session` Phase 3 — map an F-series frame to its
-   * canonical `ViewerStep` projection. The scenario id rides along on
-   * step kinds that need it (`extract-workbench`, `interact-chat`,
-   * `doc-viewer`).
-   */
-  const frameToStep = useCallback(
-    (frame: FFrame, scenario: Scenario | null): import("@/contexts/ChatStoreContext").ViewerStep => {
-      switch (frame) {
-        case "f1":
-          return { kind: "ingest-picker" };
-        case "f2":
-          return { kind: "doc-viewer", documentId: scenario ? `scenario:${scenario}` : "scenario:unknown" };
-        case "f3":
-        case "f3a":
-        case "f4":
-          return { kind: "extract-workbench", scenarioId: scenario ?? "unknown" };
-        case "f5":
-        case "f6":
-          return { kind: "interact-chat", scenarioId: scenario ?? "unknown" };
-        case "f7":
-          return { kind: "integrate" };
-        default:
-          return { kind: "ingest-picker" };
-      }
-    },
-    [],
-  );
+  // post-mvs-cleanup Phase B — `frameToStepStandalone` is now a module-
+  // level function (hoisted above the hook); see top of file.
 
   const advanceFrame = useCallback(
     (frame: FFrame) => {
@@ -197,7 +203,7 @@ function useSessionFacade(): OnboardingSessionApi {
           source: "user",
         });
         // `master-viewer-session` Phase 3 — accumulate the viewer step.
-        pushStep(frameToStep("f1", null));
+        pushStep(frameToStepStandalone("f1", null));
         return;
       }
       if (!activeKeyRef.current) {
@@ -234,14 +240,14 @@ function useSessionFacade(): OnboardingSessionApi {
       const scenarioFromKey = entityKeyAtAdvance?.startsWith("sample:")
         ? (entityKeyAtAdvance.slice("sample:".length) as Scenario)
         : null;
-      pushStep(frameToStep(frame, scenarioFromKey));
+      pushStep(frameToStepStandalone(frame, scenarioFromKey));
       // OB-02 — understand.completed when leaving F2 (the scan
       // animation finished and the user advanced).
       if (frame === "f3" || frame === "f3a") {
         track("understand.completed", { fromFrame: "f2", toFrame: frame });
       }
     },
-    [activate, updateActive, appendViewerEvent, pushStep, frameToStep],
+    [activate, updateActive, appendViewerEvent, pushStep],
   );
 
   const openGate = useCallback(
@@ -266,6 +272,13 @@ function useSessionFacade(): OnboardingSessionApi {
         return { status: "open", trigger, openedAt: Date.now(), cause };
       });
       if (shouldRecord) {
+        // post-mvs-cleanup Phase C — openGate also pushes a viewer
+        // overlay so the architecture is internally consistent. The
+        // legacy gate.status === "open" slot is kept (transitional)
+        // but the overlay is the authoritative source. `pushOverlay`
+        // is idempotent on (kind, cause) so a re-fire doesn't
+        // duplicate.
+        pushOverlay({ kind: "sign-up", state: "pending", ...(cause ? { cause } : {}) });
         appendViewerEvent({
           action: "intent-dispatched",
           entityKey: activeKeyRef.current,
@@ -277,7 +290,7 @@ function useSessionFacade(): OnboardingSessionApi {
         track("gate.shown", { trigger });
       }
     },
-    [appendViewerEvent],
+    [appendViewerEvent, pushOverlay],
   );
 
   const dismissGate = useCallback(() => {
@@ -291,6 +304,10 @@ function useSessionFacade(): OnboardingSessionApi {
       return { status: "dismissed", trigger: prev.trigger, dismissedAt: Date.now(), cause: prev.cause };
     });
     setSignupOpen(false);
+    // post-mvs-cleanup Phase C — pop the sign-up overlay so the
+    // canvas-side overlay disappears in lockstep with the legacy
+    // gate.status flip.
+    popOverlay("sign-up");
     if (shouldRecord) {
       appendViewerEvent({
         action: "intent-dispatched",
@@ -299,7 +316,7 @@ function useSessionFacade(): OnboardingSessionApi {
         detail: { intent: "gate-dismiss" },
       });
     }
-  }, [appendViewerEvent]);
+  }, [appendViewerEvent, popOverlay]);
 
   const commitGate = useCallback(
     (method: "register" | "sso" | "engineer-call") => {
@@ -310,6 +327,12 @@ function useSessionFacade(): OnboardingSessionApi {
         const cause = prev.status === "open" || prev.status === "dismissed" ? prev.cause : undefined;
         return { status: "committed", method, cause };
       });
+      // post-mvs-cleanup Phase C — mutate the overlay to "done" so
+      // consumers reading the overlay state see the commit. Auto-pop
+      // is the post-commit effect's job (ExtractView post-Save retry
+      // handles the handoff and then the overlay is popped via the
+      // next URL navigation or dismissGate).
+      mutateOverlay("sign-up", { state: "done" });
       appendViewerEvent({
         action: "intent-dispatched",
         entityKey: activeKeyRef.current,
@@ -322,7 +345,7 @@ function useSessionFacade(): OnboardingSessionApi {
       // with a commit" event — distinguish via the `method` prop.
       track("signup.completed", { method });
     },
-    [appendViewerEvent],
+    [appendViewerEvent, mutateOverlay],
   );
 
   return useMemo<OnboardingSessionApi>(

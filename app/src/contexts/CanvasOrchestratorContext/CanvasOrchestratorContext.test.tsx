@@ -291,4 +291,56 @@ describe("CanvasOrchestratorContext", () => {
       expect(result.current.lastAppliedIntentId).toBe(1);
     });
   });
+
+  // ── post-mvs-cleanup Phase A — chat↔viewer bus ────────────────────
+  describe("chat↔viewer bus", () => {
+    const busWrapper = ({ children }: { children: React.ReactNode }) => (
+      <ChatStoreProvider ephemeral>
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      </ChatStoreProvider>
+    );
+
+    it("openCitation pushes a citation-peek overlay onto the active session's viewer", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      act(() => result.current.bus.openCitation("util-1", 3, { x: 0, y: 0, w: 100, h: 50 }));
+      const session = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const peek = session?.viewer.overlays.find((o) => o.kind === "citation-peek");
+      expect(peek).toBeDefined();
+      if (peek && peek.kind === "citation-peek") {
+        expect(peek.documentId).toBe("util-1");
+        expect(peek.page).toBe(3);
+      }
+    });
+
+    it("docOpened appends an assistant chat message announcing the open", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      act(() => result.current.bus.docOpened({ documentId: "util-1", fileName: "utility-bill.pdf" }));
+      const session = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const lastMessage = session?.messages[session.messages.length - 1];
+      expect(lastMessage?.role).toBe("assistant");
+      expect(lastMessage?.content).toMatch(/utility-bill\.pdf/);
+      // The message uses the `agent-` id prefix so ChatColumn projects it
+      // into liveTurns the same way Schema-Agent narration does.
+      expect(lastMessage?.id.startsWith("agent-")).toBe(true);
+    });
+
+    it("openCitation and docOpened are no-ops without ChatStoreProvider in the tree (back-compat)", () => {
+      const plainWrapper = ({ children }: { children: React.ReactNode }) => (
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      );
+      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
+      expect(() => {
+        act(() => result.current.openCitation("d-1", 1));
+        act(() => result.current.docOpened({ documentId: "d-1", fileName: "doc.pdf" }));
+      }).not.toThrow();
+    });
+  });
 });

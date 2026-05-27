@@ -108,9 +108,31 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
     [now, chatStore]
   );
 
+  // ── post-mvs-cleanup Phase A — chat↔viewer bus convenience channels ──
+  //
+  // Curated cross-side methods that formalize the seams previously
+  // wired pointwise. Both close over `chatStore` (optional — the bus
+  // is a no-op in test trees that don't mount ChatStore).
+
+  const openCitation = useCallback(
+    (documentId: string, page: number, bbox?: { x: number; y: number; w: number; h: number }) => {
+      if (!chatStore) return;
+      chatStore.pushOverlay({ kind: "citation-peek", documentId, page, ...(bbox ? { bbox } : {}) });
+    },
+    [chatStore],
+  );
+
+  const docOpened = useCallback(
+    (input: { documentId: string; fileName: string }) => {
+      if (!chatStore) return;
+      chatStore.appendAgentMessage(`Opened ${input.fileName}.`);
+    },
+    [chatStore],
+  );
+
   const value = useMemo<CanvasOrchestratorApi>(
-    () => ({ lastAppliedIntentId, dispatch, registerAdapter }),
-    [lastAppliedIntentId, dispatch, registerAdapter]
+    () => ({ lastAppliedIntentId, dispatch, registerAdapter, openCitation, docOpened }),
+    [lastAppliedIntentId, dispatch, registerAdapter, openCitation, docOpened]
   );
 
   return <CanvasOrchestratorContext.Provider value={value}>{children}</CanvasOrchestratorContext.Provider>;

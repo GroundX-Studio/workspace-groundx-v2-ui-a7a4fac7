@@ -48,4 +48,30 @@ export interface CanvasOrchestratorApi {
    * register on mount and unregister on unmount).
    */
   registerAdapter: <K extends CanvasIntent["kind"]>(adapter: CanvasAdapter<K>) => () => void;
+
+  // ── post-mvs-cleanup Phase A — chat↔viewer bus ──────────────────────
+  //
+  // Named convenience channels for cross-side dispatch. They formalize
+  // the chat→viewer + viewer→chat seams that previously happened via
+  // pointwise wires (component callbacks, ad-hoc store mutations).
+  //
+  // The legacy `dispatch(intent)` + adapter registry stays — it's the
+  // generic surface. These named methods are the curated subset that
+  // most cross-side flows go through.
+
+  /**
+   * **chat→viewer**: open a citation peek over the current viewer step.
+   * Pushes a `{ kind: "citation-peek", documentId, page, bbox? }`
+   * overlay onto `viewer.overlays`. The viewer surface renders the
+   * peek on top of whatever step is active.
+   */
+  openCitation: (documentId: string, page: number, bbox?: { x: number; y: number; w: number; h: number }) => void;
+
+  /**
+   * **viewer→chat**: announce that a document was just opened in the
+   * viewer. Appends an assistant chat message describing the open so
+   * the conversation thread carries the user's viewer-side activity
+   * (separate from the LLM-context telemetry trail).
+   */
+  docOpened: (input: { documentId: string; fileName: string }) => void;
 }
