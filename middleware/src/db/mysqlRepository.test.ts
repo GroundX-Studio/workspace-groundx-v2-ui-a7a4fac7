@@ -27,7 +27,11 @@ describe("MySqlAppRepository", () => {
     await repository.createSchema();
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
-    expect(statements).toHaveLength(9);
+    // 9 CREATE TABLE statements + 1 information_schema probe + the
+    // ALTER TABLE migration only fires when columns are missing. The
+    // mock returns [] (no rows) → all three viewer columns reported
+    // missing → 1 ALTER fires. Total = 11.
+    expect(statements).toHaveLength(11);
     const joined = statements.join("\n");
     // Auth + metadata.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS sessions");
@@ -42,6 +46,10 @@ describe("MySqlAppRepository", () => {
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS intent_log");
     // CF-04 — app-owned saved-schemas table.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS extraction_schemas");
+    // master-viewer-session Phase 1 — idempotent migration probe + ALTER
+    // when the viewer JSON columns are missing.
+    expect(joined).toContain("information_schema.COLUMNS");
+    expect(joined).toContain("ALTER TABLE chat_sessions ADD COLUMN viewer_history_json JSON NULL");
     // App-owned only — no GroundX/Partner duplicates.
     const lower = joined.toLowerCase();
     expect(lower).not.toContain("stripe");

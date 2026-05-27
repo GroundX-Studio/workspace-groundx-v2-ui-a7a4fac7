@@ -201,6 +201,45 @@ export class MySqlAppRepository implements AppRepository {
         INDEX extraction_schemas_user_idx (groundx_username, updated_at)
       )
     `);
+
+    // master-viewer-session Phase 1 — idempotent column-add migration.
+    // The chat_sessions CREATE TABLE IF NOT EXISTS above includes the
+    // viewer_* columns by definition, but existing databases that
+    // pre-date Phase 1 already have the table created without those
+    // columns. `IF NOT EXISTS` short-circuits, so the new columns
+    // never land. This per-column ALTER TABLE catches that gap.
+    //
+    // We don't use `ADD COLUMN IF NOT EXISTS` (MySQL 8.0.29+) because
+    // the deploy may target older MySQL/MariaDB. The information_schema
+    // probe + conditional ALTER works on every supported version.
+    await this.ensureChatSessionsViewerColumns();
+  }
+
+  /**
+   * Idempotent: add the three Phase-1 viewer JSON columns to
+   * `chat_sessions` if they don't already exist. Skipped silently if
+   * the columns are already present.
+   */
+  private async ensureChatSessionsViewerColumns(): Promise<void> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT COLUMN_NAME
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'chat_sessions'
+         AND COLUMN_NAME IN ('viewer_history_json', 'viewer_overlays_json', 'viewer_workspace_json')`,
+    );
+    const present = new Set(rows.map((r) => String(r.COLUMN_NAME)));
+    const wanted: Array<{ name: string; ddl: string }> = [
+      { name: "viewer_history_json", ddl: "ADD COLUMN viewer_history_json JSON NULL AFTER current_intent_json" },
+      { name: "viewer_overlays_json", ddl: "ADD COLUMN viewer_overlays_json JSON NULL AFTER viewer_history_json" },
+      { name: "viewer_workspace_json", ddl: "ADD COLUMN viewer_workspace_json JSON NULL AFTER viewer_overlays_json" },
+    ];
+    const missing = wanted.filter((w) => !present.has(w.name));
+    if (missing.length === 0) return;
+    // One ALTER statement adds all missing columns in a single rewrite —
+    // cheaper than three separate ALTERs for large tables.
+    const clauses = missing.map((m) => m.ddl).join(", ");
+    await this.pool.execute(`ALTER TABLE chat_sessions ${clauses}`);
   }
 
   async createSession(session: SessionRecord): Promise<void> {
