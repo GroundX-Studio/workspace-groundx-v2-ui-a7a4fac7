@@ -60,16 +60,29 @@ export class MySqlAppRepository implements AppRepository {
     // login-claim BFF endpoint ingests an anon payload, and for
     // signed-in writes thereafter. viewer_events is the exception —
     // it's telemetry-class and writes for both anon and signed-in users.
+    //
+    // Width note (2026-05-26): all ID columns are VARCHAR(64), not 36.
+    // The frontend mints session ids of the form `c-<uuid>` (38 chars),
+    // not bare UUIDs. The original VARCHAR(36) silently truncated on
+    // insert, then read-by-id missed the truncated row → 404 on every
+    // chat/messages POST after the first chat-session create.
+    // VARCHAR(64) leaves headroom for future prefix changes.
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS chat_sessions (
-        id VARCHAR(36) PRIMARY KEY,
-        onboarding_session_id CHAR(36) NOT NULL,
+        id VARCHAR(64) PRIMARY KEY,
+        onboarding_session_id VARCHAR(64) NOT NULL,
         owner_user_id VARCHAR(128) NULL,
-        owner_anon_id VARCHAR(36) NULL,
+        owner_anon_id VARCHAR(64) NULL,
         title VARCHAR(255) NOT NULL,
         is_onboarding BOOLEAN NOT NULL DEFAULT FALSE,
         active_entity_key VARCHAR(64) NULL,
         current_intent_json JSON NULL,
+        -- master-viewer-session Phase 1: paired ViewerSession slots.
+        -- All three default to NULL; PATCH /api/chat-sessions/:id
+        -- populates them as the user accumulates viewer state.
+        viewer_history_json JSON NULL,
+        viewer_overlays_json JSON NULL,
+        viewer_workspace_json JSON NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         archived_at DATETIME NULL,
@@ -81,21 +94,21 @@ export class MySqlAppRepository implements AppRepository {
 
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS chat_messages (
-        id VARCHAR(36) PRIMARY KEY,
-        chat_session_id VARCHAR(36) NOT NULL,
+        id VARCHAR(64) PRIMARY KEY,
+        chat_session_id VARCHAR(64) NOT NULL,
         turn_index INT NOT NULL,
         role VARCHAR(16) NOT NULL,
         content TEXT NOT NULL,
         citations_json JSON NULL,
         tool_calls_json JSON NULL,
         attachments_json JSON NULL,
-        compressed_into_summary_id VARCHAR(36) NULL,
+        compressed_into_summary_id VARCHAR(64) NULL,
         llm_provider VARCHAR(64) NULL,
         llm_model_id VARCHAR(64) NULL,
         latency_ms INT NULL,
         prompt_tokens INT NULL,
         completion_tokens INT NULL,
-        error_code VARCHAR(64) NULL,
+        error_code VARCHAR(255) NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         INDEX chat_messages_session_idx (chat_session_id, turn_index),
         INDEX chat_messages_session_live_idx (chat_session_id, compressed_into_summary_id),
@@ -105,10 +118,10 @@ export class MySqlAppRepository implements AppRepository {
 
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS conversation_summaries (
-        id VARCHAR(36) PRIMARY KEY,
-        chat_session_id VARCHAR(36) NOT NULL,
-        from_message_id VARCHAR(36) NOT NULL,
-        to_message_id VARCHAR(36) NOT NULL,
+        id VARCHAR(64) PRIMARY KEY,
+        chat_session_id VARCHAR(64) NOT NULL,
+        from_message_id VARCHAR(64) NOT NULL,
+        to_message_id VARCHAR(64) NOT NULL,
         generation INT NOT NULL DEFAULT 0,
         absorbed_summary_ids_json JSON NOT NULL,
         content TEXT NOT NULL,
@@ -123,7 +136,7 @@ export class MySqlAppRepository implements AppRepository {
 
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS chat_session_entities (
-        chat_session_id VARCHAR(36) NOT NULL,
+        chat_session_id VARCHAR(64) NOT NULL,
         entity_key VARCHAR(64) NOT NULL,
         last_frame VARCHAR(16) NULL,
         completed_frames_json JSON NOT NULL,
@@ -145,8 +158,8 @@ export class MySqlAppRepository implements AppRepository {
 
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS viewer_events (
-        id VARCHAR(36) PRIMARY KEY,
-        chat_session_id VARCHAR(36) NOT NULL,
+        id VARCHAR(64) PRIMARY KEY,
+        chat_session_id VARCHAR(64) NOT NULL,
         ts_ms BIGINT NOT NULL,
         entity_key VARCHAR(64) NULL,
         action VARCHAR(32) NOT NULL,
@@ -162,8 +175,8 @@ export class MySqlAppRepository implements AppRepository {
     // polluting the viewer trail. Cascades on chat_sessions.
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS intent_log (
-        id VARCHAR(36) PRIMARY KEY,
-        chat_session_id VARCHAR(36) NOT NULL,
+        id VARCHAR(64) PRIMARY KEY,
+        chat_session_id VARCHAR(64) NOT NULL,
         ts_ms BIGINT NOT NULL,
         source VARCHAR(16) NOT NULL,
         intent_kind VARCHAR(64) NOT NULL,
@@ -279,8 +292,9 @@ export class MySqlAppRepository implements AppRepository {
       `INSERT INTO chat_sessions (
         id, onboarding_session_id, owner_user_id, owner_anon_id, title,
         is_onboarding, active_entity_key, current_intent_json,
+        viewer_history_json, viewer_overlays_json, viewer_workspace_json,
         created_at, updated_at, archived_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         owner_user_id = VALUES(owner_user_id),
         owner_anon_id = VALUES(owner_anon_id),
@@ -288,6 +302,9 @@ export class MySqlAppRepository implements AppRepository {
         is_onboarding = VALUES(is_onboarding),
         active_entity_key = VALUES(active_entity_key),
         current_intent_json = VALUES(current_intent_json),
+        viewer_history_json = VALUES(viewer_history_json),
+        viewer_overlays_json = VALUES(viewer_overlays_json),
+        viewer_workspace_json = VALUES(viewer_workspace_json),
         updated_at = VALUES(updated_at),
         archived_at = VALUES(archived_at)`,
       [
@@ -299,6 +316,9 @@ export class MySqlAppRepository implements AppRepository {
         record.isOnboarding ? 1 : 0,
         record.activeEntityKey,
         record.currentIntent != null ? JSON.stringify(record.currentIntent) : null,
+        record.viewerHistory != null ? JSON.stringify(record.viewerHistory) : null,
+        record.viewerOverlays != null ? JSON.stringify(record.viewerOverlays) : null,
+        record.viewerWorkspace != null ? JSON.stringify(record.viewerWorkspace) : null,
         record.createdAt,
         record.updatedAt,
         record.archivedAt,
@@ -310,6 +330,7 @@ export class MySqlAppRepository implements AppRepository {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
       `SELECT id, onboarding_session_id, owner_user_id, owner_anon_id, title,
         is_onboarding, active_entity_key, current_intent_json,
+        viewer_history_json, viewer_overlays_json, viewer_workspace_json,
         created_at, updated_at, archived_at
        FROM chat_sessions WHERE id = ? LIMIT 1`,
       [id],
@@ -322,6 +343,7 @@ export class MySqlAppRepository implements AppRepository {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
       `SELECT id, onboarding_session_id, owner_user_id, owner_anon_id, title,
         is_onboarding, active_entity_key, current_intent_json,
+        viewer_history_json, viewer_overlays_json, viewer_workspace_json,
         created_at, updated_at, archived_at
        FROM chat_sessions
        WHERE owner_user_id = ?
@@ -626,6 +648,9 @@ function rowToChatSession(row: mysql.RowDataPacket): ChatSessionRecord {
     isOnboarding: Boolean(row.is_onboarding),
     activeEntityKey: row.active_entity_key,
     currentIntent: row.current_intent_json ? JSON.parse(row.current_intent_json) : null,
+    viewerHistory: row.viewer_history_json ? JSON.parse(row.viewer_history_json) : null,
+    viewerOverlays: row.viewer_overlays_json ? JSON.parse(row.viewer_overlays_json) : null,
+    viewerWorkspace: row.viewer_workspace_json ? JSON.parse(row.viewer_workspace_json) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     archivedAt: row.archived_at ? new Date(row.archived_at) : null,

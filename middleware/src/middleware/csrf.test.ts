@@ -39,9 +39,9 @@ describe("csrfMiddleware (SC-01) — CSRF_ENABLED=true", () => {
   });
 
   it("rejects POST /api/chat/messages without an X-CSRF-Token header (403)", async () => {
-    // Closure test from the backlog: cross-site form POST without the
-    // token is rejected. Use a bare request (no cookie agent) so the
-    // server sees no csrf header.
+    // Closure gate: cross-site form POST without the token is
+    // rejected. Use a bare request (no cookie agent) so the server
+    // sees no csrf header.
     const { app } = setupEnforced();
     const agent = request.agent(app);
     // First bootstrap the cookie via GET (so the cookie exists) but

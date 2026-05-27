@@ -10,10 +10,12 @@ vi.mock("@/lib/sentry", () => ({
 import { captureException } from "@/lib/sentry";
 
 import {
+  __markChatSessionEnsured,
   __resetEnsuredChatSessions,
   chatErrorToUserCopy,
   ChatApiError,
   createChatSession,
+  listChatMessages,
   sendChatMessage,
 } from "./chatSessions";
 
@@ -383,5 +385,84 @@ describe("sendChatMessage", () => {
       await sendChatMessage({ chatSessionId: "chat-3", newUserMessage: "Q", sessionMeta: meta });
       expect(captureException).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("listChatMessages (RT-01)", () => {
+  // Pre-mark each test session id as ensured so the helper's
+  // self-trigger ensure POST is a no-op. Per-test fetch counts then
+  // reflect only the helper's GET.
+  beforeEach(() => {
+    __markChatSessionEnsured("chat-r");
+    __markChatSessionEnsured("c-abc/def?x=1");
+    __markChatSessionEnsured("chat-missing");
+    __markChatSessionEnsured("chat-other");
+    __markChatSessionEnsured("chat-noauth");
+  });
+
+  it("GETs /api/chat-sessions/:id/messages and returns the array", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        messages: [
+          { id: "m1", chatSessionId: "chat-r", turnIndex: 1, role: "user", content: "hi", errorCode: null },
+          { id: "m2", chatSessionId: "chat-r", turnIndex: 2, role: "assistant", content: "hello", errorCode: null },
+        ],
+      }),
+    });
+
+    const messages = await listChatMessages("chat-r");
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [path, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(path).toBe("/api/chat-sessions/chat-r/messages");
+    expect((init as RequestInit).method).toBe("GET");
+    expect((init as RequestInit).credentials).toBe("include");
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ id: "m1", role: "user", content: "hi" });
+    expect(messages[1]).toMatchObject({ id: "m2", role: "assistant", content: "hello" });
+  });
+
+  it("URL-encodes the session id so prefixed ids (e.g. c-<uuid>) round-trip safely", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ messages: [] }),
+    });
+    await listChatMessages("c-abc/def?x=1");
+    const [path] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    // Slash + ? + = are all encoded so the route param resolves to the
+    // intended literal id instead of being split across path segments.
+    expect(path).toBe("/api/chat-sessions/c-abc%2Fdef%3Fx%3D1/messages");
+  });
+
+  it("resolves 404 to an empty array (no row yet ≠ error)", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: "chat_session_not_found" }),
+    });
+    const messages = await listChatMessages("chat-missing");
+    expect(messages).toEqual([]);
+  });
+
+  it("throws ChatApiError with the status on other non-2xx (403 forbidden)", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "chat_session_forbidden" }),
+    });
+    await expect(listChatMessages("chat-other")).rejects.toMatchObject({
+      status: 403,
+    });
+  });
+
+  it("throws ChatApiError on 401 (no session cookie)", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "no_session" }),
+    });
+    await expect(listChatMessages("chat-noauth")).rejects.toBeInstanceOf(ChatApiError);
   });
 });

@@ -1,5 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChatStore } from "@/contexts/ChatStoreContext";
@@ -41,6 +43,20 @@ const SessionProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { sessionId: stri
 const SessionActionsProbe = ({ onReady }: { onReady: (api: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void }) => void }) => {
   const { advanceFrame } = useOnboardingSession();
   onReady({ advanceFrame });
+  return null;
+};
+
+/**
+ * Navigation probe — captures react-router-dom's `navigate` so tests
+ * can simulate a URL-driven transition (e.g. browser back button,
+ * deep-link, or `<Link>` click) without relying on a specific UI
+ * affordance to fire the navigation.
+ */
+const NavigateProbe = ({ onReady }: { onReady: (navigate: (to: string) => void) => void }) => {
+  // useNavigate is the react-router-dom hook; we wrap it so tests can
+  // call `nav("/onboarding")` from outside the component tree.
+  const nav = useNavigate();
+  onReady((to) => nav(to));
   return null;
 };
 
@@ -404,6 +420,177 @@ describe("OnboardingShell", () => {
     });
     // Registry stays empty — signup is not an entity.
     expect(registrySnap.entityKeys).toEqual([]);
+  });
+
+  // ── master-viewer-session Phase 2 — gate-as-overlay ──────────────
+
+  it("master-viewer-session Phase 2: visiting /onboarding/signup pushes a sign-up overlay onto viewer.overlays", async () => {
+    let observedOverlayKinds: string[] = [];
+    const OverlayProbe = () => {
+      const { state } = useChatStore();
+      const session = state.activeSessionId ? state.sessions.get(state.activeSessionId) : null;
+      observedOverlayKinds = session?.viewer.overlays.map((o) => o.kind) ?? [];
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <OverlayProbe />
+      </>,
+      { initialFrame: "f1", initialScenario: null, initialUrl: "/onboarding/signup" },
+    );
+    // URL→state effect pushes the sign-up overlay onto the active
+    // session's viewer slot. The overlay is the source of truth for
+    // "is the sign-up surface visible"; the canvas-swap path becomes
+    // a thin reader of this state.
+    await waitFor(() => {
+      expect(observedOverlayKinds).toContain("sign-up");
+    });
+  });
+
+  it("master-viewer-session Phase 2: navigating away from /onboarding/signup pops the sign-up overlay", async () => {
+    let nav: ((to: string) => void) | null = null;
+    let observedOverlayKinds: string[] = [];
+    const OverlayProbe = () => {
+      const { state } = useChatStore();
+      const session = state.activeSessionId ? state.sessions.get(state.activeSessionId) : null;
+      observedOverlayKinds = session?.viewer.overlays.map((o) => o.kind) ?? [];
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <NavigateProbe onReady={(n) => (nav = n)} />
+        <OverlayProbe />
+      </>,
+      { initialFrame: "f1", initialScenario: null, initialUrl: "/onboarding/signup" },
+    );
+    // Wait for the overlay to land.
+    await waitFor(() => expect(observedOverlayKinds).toContain("sign-up"));
+    // Navigate to /onboarding (browser back / Ingest pill).
+    act(() => nav!("/onboarding"));
+    // The overlay pops; the F1 picker mounts under it.
+    await waitFor(() => {
+      expect(observedOverlayKinds).not.toContain("sign-up");
+    });
+  });
+
+  // ── master-viewer-session Phase 4 — schemaOverlay on viewer ───────
+
+  it("master-viewer-session Phase 4: schema overlay edits land on viewer.workspace.schemaOverlay (mirrors pendingSchemaOverlay)", async () => {
+    let observedAddedIds: string[] = [];
+    let observedLegacyAddedIds: string[] = [];
+    const SchemaProbe = () => {
+      const { state, addSchemaField } = useChatStore();
+      const session = state.activeSessionId ? state.sessions.get(state.activeSessionId) : null;
+      observedAddedIds = session?.viewer.workspace.schemaOverlay.addedFields.map((f) => f.id) ?? [];
+      observedLegacyAddedIds = session?.pendingSchemaOverlay.addedFields.map((f) => f.id) ?? [];
+      // Side-effecty render to dispatch addSchemaField once on first probe.
+      const ref = useRef(false);
+      useEffect(() => {
+        if (ref.current) return;
+        ref.current = true;
+        addSchemaField({
+          id: "phase4-added",
+          categoryId: "statement",
+          name: "Phase4 added",
+          type: "STRING",
+          description: "Phase 4 forcing test",
+        });
+      }, [addSchemaField]);
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SchemaProbe />
+      </>,
+      { initialFrame: "f2", initialScenario: "utility" },
+    );
+    // The mutation lands on BOTH slots — the legacy pendingSchemaOverlay
+    // AND the new viewer.workspace.schemaOverlay slot. Once the chat-side
+    // migration completes (Phase 7), the legacy slot goes away; for now
+    // both being kept in lockstep is the migration contract.
+    await waitFor(() => {
+      expect(observedLegacyAddedIds).toContain("phase4-added");
+      expect(observedAddedIds).toContain("phase4-added");
+    });
+  });
+
+  // ── master-viewer-session Phase 3 — step accumulation ────────────
+
+  it("master-viewer-session Phase 3: advanceFrame pushes ViewerSteps onto viewer.history (never erased)", async () => {
+    let observedHistoryKinds: string[] = [];
+    let observedStepIndex = -1;
+    const HistoryProbe = () => {
+      const { state } = useChatStore();
+      const session = state.activeSessionId ? state.sessions.get(state.activeSessionId) : null;
+      observedHistoryKinds = session?.viewer.history.map((s) => s.kind) ?? [];
+      observedStepIndex = session?.viewer.currentStep.stepIndex ?? -1;
+      return null;
+    };
+    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void } | null = null;
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SessionActionsProbe onReady={(api) => (actions = api)} />
+        <HistoryProbe />
+      </>,
+      { initialFrame: "f1", initialScenario: null },
+    );
+    const user = userEvent.setup();
+    // F1 → F2: pick utility sample.
+    await user.click(screen.getByTestId("sample-utility"));
+    await waitFor(() => expect(observedHistoryKinds.length).toBeGreaterThanOrEqual(1));
+    // Drive forward via the session API (more deterministic than UI clicks).
+    act(() => actions!.advanceFrame("f3"));
+    act(() => actions!.advanceFrame("f3a"));
+    act(() => actions!.advanceFrame("f1"));
+    // Viewer history accumulates — at minimum the f3 + f3a + f1
+    // transitions land as steps. Their kinds match the frame
+    // projection (extract-workbench for F3/F3a; ingest-picker for F1).
+    await waitFor(() => {
+      expect(observedHistoryKinds).toContain("extract-workbench");
+      expect(observedHistoryKinds).toContain("ingest-picker");
+    });
+    // currentStep.stepIndex points at the LAST pushed entry.
+    expect(observedStepIndex).toBe(observedHistoryKinds.length - 1);
+  });
+
+  it("F1 → signup → back to F1 → pick sample clears the signup overlay and loads the sample", async () => {
+    // Regression repro: user clicks Sign Up on F1 (URL→/onboarding/signup),
+    // then navigates back to /onboarding, then picks a sample. The
+    // SignUpWidget previously stayed mounted because advanceFrame("f1")
+    // didn't clear the open gate — gateActive remained true and the
+    // canvas swap continued to render <SignUpWidget />.
+    const user = userEvent.setup();
+    let nav: ((to: string) => void) | null = null;
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <NavigateProbe onReady={(n) => (nav = n)} />
+      </>,
+      { initialFrame: "f1", initialScenario: null, initialUrl: "/onboarding/signup" },
+    );
+    // Gate-open canvas swap is showing the signup widget on /onboarding/signup.
+    await waitFor(() => expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument(), {
+      timeout: 2000,
+    });
+    // User backs out — simulate the URL→state path the browser back
+    // button (or the Ingest step pill) would take.
+    act(() => nav!("/onboarding"));
+    // F1 picker is back, the gate-driven signup overlay is gone.
+    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument(), {
+      timeout: 2000,
+    });
+    await waitFor(() => expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument());
+    // Now pick a sample.
+    await user.click(screen.getByTestId("sample-utility"));
+    // The sample's F2 canvas mounts AND the gate overlay is not blocking it.
+    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f2")).toBeInTheDocument(), {
+      timeout: 2000,
+    });
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
   });
 
   it("records ViewerEvents at pickScenario / advanceFrame / openGate / dismissGate / commitGate (Phase E)", async () => {

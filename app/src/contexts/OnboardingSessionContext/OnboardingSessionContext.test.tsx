@@ -101,8 +101,8 @@ describe("OnboardingSessionContext", () => {
 
   // OB-02 — PostHog event-firing at each funnel boundary. The wrapper
   // is mocked at the top of this file; each test asserts the right
-  // (event, props) reached `track()`. Event names come from the OB-02
-  // backlog row.
+  // (event, props) reached `track()`. Event names come from the
+  // `observability` capability spec at `openspec/specs/observability/spec.md`.
   describe("OB-02 PostHog telemetry boundaries", () => {
     function findTrack(event: string): unknown[] | undefined {
       return vi.mocked(track).mock.calls.find((c) => c[0] === event);

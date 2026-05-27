@@ -51,6 +51,15 @@ const PREAMBLE: Record<GateTrigger, string> = {
   threshold: "You've reached the free-tier ceiling — pages stay free after sign-in.",
 };
 
+/**
+ * `f3a-save-signin-gate-handoff`: when the gate carries a `cause`,
+ * override the generic per-trigger preamble with cause-specific copy.
+ * The cause is set by callers like `openGate("save", { cause: "save-schema" })`.
+ */
+const PREAMBLE_BY_CAUSE: Record<"save-schema", string> = {
+  "save-schema": "Sign in to save this schema",
+};
+
 export type GateChatRailMode = "onboarding" | "steady";
 
 export interface GateChatRailProps {
@@ -128,6 +137,8 @@ export const GateChatRail: FC<GateChatRailProps> = ({ mode = "onboarding" }) => 
   if (state.gate.status !== "open") return null;
 
   const trigger = state.gate.trigger;
+  // `f3a-save-signin-gate-handoff`: cause-specific preamble override.
+  const preamble = state.gate.cause ? PREAMBLE_BY_CAUSE[state.gate.cause] : PREAMBLE[trigger];
 
   return (
     <Card
@@ -140,7 +151,7 @@ export const GateChatRail: FC<GateChatRailProps> = ({ mode = "onboarding" }) => 
         <Label sx={{ color: EYEBROW_ON_LIGHT }}>SIGN UP</Label>
 
         <BodyText data-testid="gate-rail-preamble" sx={{ color: NAVY }}>
-          {PREAMBLE[trigger]}
+          {preamble}
         </BodyText>
 
         {/* Book-a-call CTA — secondary affordance for users who don't

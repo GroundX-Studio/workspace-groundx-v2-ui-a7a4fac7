@@ -20,9 +20,32 @@
  * returns canned responses so the chat surface can boot today.
  */
 
+import { z } from "zod";
+
 import type { AppRepository, GroundXClient, GroundXPartnerClient, LlmClient } from "../types.js";
 
+import { logger } from "../lib/logger.js";
 import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
+
+/**
+ * `proposal-envelope-provenance`: Zod schema for the LLM's
+ * `proposedSchemaField` envelope. The frontend renders a `proposal_v1
+ * · envelope verified` label that's only valid when the server-side
+ * parser successfully accepted the structured output via this schema.
+ *
+ * `version` is optional with a v1 default for backwards-compat with
+ * pre-envelope fixtures; an explicit non-v1 version is REJECTED so a
+ * future v2 envelope can't accidentally be processed by a v1 parser.
+ */
+export const proposalEnvelopeV1Schema = z
+  .object({
+    version: z.literal("v1").optional(),
+    categoryId: z.string().min(1),
+    name: z.string().min(1),
+    type: z.enum(["STRING", "NUMBER", "DATE", "BOOLEAN"]),
+    description: z.string().min(1),
+  })
+  .strict();
 
 export type ChatMode = "rag" | "structured" | "hybrid";
 
@@ -37,6 +60,32 @@ export interface ChatRouterRequest {
    */
   conversationTail: { messageCount: number; lastTurnContent: string | null };
   recentViewerEvents: { action: string; entityKey: string | null }[];
+  /**
+   * Optional friendly hint about what the user is currently looking
+   * at. Threaded from the frontend (it has the scenario manifest +
+   * filename in hand) so the grounded LLM prompt can name the doc
+   * even when GroundX search returns zero snippets. Without this,
+   * the model only sees "no snippets" and can't suggest alternative
+   * questions tied to the active doc.
+   */
+  scopeHint?: {
+    fileName?: string | null;
+    scenarioTitle?: string | null;
+  };
+  /**
+   * RT-04 — the persisted canvas-orchestrator intent for THIS chat
+   * session (from `chat_sessions.current_intent_json`). Updated via
+   * PATCH /api/chat-sessions/:id whenever the user navigates the
+   * canvas. Routing classifiers can read this to short-circuit
+   * intent inference; LLM prompt assembly can include it as part
+   * of the active-entity context.
+   *
+   * Independent of `intent` above: `intent` is the per-turn hint
+   * the UI passes on send (e.g. "the user clicked an extract
+   * field"); `currentIntent` is the persisted "what view is
+   * currently mounted" state.
+   */
+  currentIntent?: Record<string, unknown> | null;
   /**
    * Optional intent hint from the canvas orchestrator (e.g.
    * extract.field-hovered, smart.report). Lets the router skip
@@ -57,6 +106,38 @@ export interface SuggestedAction {
   detail?: Record<string, unknown>;
 }
 
+/**
+ * UI-01 Phase 2a — schema-field addition proposed by the grounded LLM
+ * in response to a user request like "add a field for total tax". The
+ * frontend renders this as an Accept/Reject card in the chat live-turn
+ * stream; Accept dispatches the ChatStore `addSchemaField` action.
+ *
+ * Shape mirrors the client-side `SchemaFieldAddition` (minus `id`,
+ * which the client mints) so the round-trip is lossless. Type values
+ * are restricted to the four supported primitive types — the parser
+ * filters anything else out.
+ */
+export interface ProposalEnvelopeProvenance {
+  /** Versioned envelope tag — currently always "v1". */
+  version: "v1";
+  /** True when the server-side Zod parse succeeded. */
+  verified: true;
+}
+
+export interface ProposedSchemaField {
+  categoryId: string;
+  name: string;
+  type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+  description: string;
+  /**
+   * `proposal-envelope-provenance`: present iff
+   * `proposalEnvelopeV1Schema.safeParse` accepted the LLM payload. The
+   * frontend renders a `proposal_v<version> · envelope verified` label
+   * sourced from this field.
+   */
+  provenance: ProposalEnvelopeProvenance;
+}
+
 export interface ChatRouterResponse {
   mode: ChatMode;
   answer: string;
@@ -64,6 +145,14 @@ export interface ChatRouterResponse {
   suggestedActions: SuggestedAction[];
   /** Tool calls the assistant invoked (Phase 7 wire-up). */
   tools: { name: string; arguments: Record<string, unknown> }[];
+  /**
+   * UI-01 Phase 2a — non-null when the LLM emitted a well-formed
+   * `proposedSchemaField` in its fenced JSON block AND the user's
+   * turn looked like a schema-add request. The frontend renders an
+   * Accept/Reject card inline with the assistant turn; Accept calls
+   * the ChatStore `addSchemaField` action.
+   */
+  proposedSchemaField: ProposedSchemaField | null;
 }
 
 /**
@@ -201,7 +290,9 @@ export class ChatRouteNotImplementedError extends Error {
  * the caller is responsible for ensure-creating a group of those
  * buckets and passing `{kind:"group", groupId}`. Multi-workspace
  * scopes aren't produced by any upstream caller today; the ensure-
- * group helper is tracked as backlog item CF-19.
+ * group helper is tracked in
+ * `openspec/specs/chat-routing/spec.md` (Multi-bucket pivots
+ * requirement).
  */
 export type RagContentScope =
   | { kind: "bucket"; bucketId: number; projectIds?: string[] }
@@ -352,7 +443,13 @@ async function runRagPipeline(
     { rbacFilter: deps.rbacFilter },
   );
 
-  const llmResponse = await callGroundedLlm(request.newUserMessage, snippets, deps.llmClient, deps.llmModelId);
+  const llmResponse = await callGroundedLlm(
+    request.newUserMessage,
+    snippets,
+    deps.llmClient,
+    deps.llmModelId,
+    request.scopeHint,
+  );
 
   // Parse the LLM's optional JSON block (CF-06 citations + CF-07
   // suggestedIntent live in the same fenced block). Cleaned answer is
@@ -400,6 +497,7 @@ async function runRagPipeline(
     citations,
     suggestedActions,
     tools: [],
+    proposedSchemaField: parsed.proposedSchemaField,
   };
 }
 
@@ -436,6 +534,14 @@ export interface ParsedRagAnswer {
   suggestedIntent: SuggestedIntent | null;
   /** Parsed `citations` array if emitted + well-formed (CF-06). */
   structuredCitations: StructuredCitation[] | null;
+  /**
+   * UI-01 Phase 2a — parsed `proposedSchemaField` if emitted +
+   * well-formed (categoryId, name, type ∈ {STRING|NUMBER|DATE|BOOLEAN},
+   * description all present + string-valued except `type`). Anything
+   * malformed reduces to null so the frontend never sees a half-built
+   * card.
+   */
+  proposedSchemaField: ProposedSchemaField | null;
 }
 
 /**
@@ -459,7 +565,12 @@ export interface ParsedRagAnswer {
 export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
   const fenceMatch = rawAnswer.match(/```json\s*\n([\s\S]*?)\n```/);
   if (!fenceMatch) {
-    return { cleanedAnswer: rawAnswer.trim(), suggestedIntent: null, structuredCitations: null };
+    return {
+      cleanedAnswer: rawAnswer.trim(),
+      suggestedIntent: null,
+      structuredCitations: null,
+      proposedSchemaField: null,
+    };
   }
   let parsed: unknown;
   try {
@@ -467,7 +578,12 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
   } catch {
     // Malformed JSON — leave the body alone (don't strip the block,
     // since the cleanup heuristic would be fragile on partial JSON).
-    return { cleanedAnswer: rawAnswer.trim(), suggestedIntent: null, structuredCitations: null };
+    return {
+      cleanedAnswer: rawAnswer.trim(),
+      suggestedIntent: null,
+      structuredCitations: null,
+      proposedSchemaField: null,
+    };
   }
 
   // suggestedIntent — same shape check as CF-07.
@@ -496,13 +612,39 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
     if (valid.length > 0) structuredCitations = valid;
   }
 
+  // `proposal-envelope-provenance`: validate the LLM's
+  // `proposedSchemaField` against `proposalEnvelopeV1Schema`. On
+  // success we attach `provenance: {version: "v1", verified: true}`;
+  // on failure we drop the proposal entirely so the frontend never
+  // surfaces a half-built card. The parse error is logged so an
+  // observability pipeline can flag drift in LLM output.
+  let proposedSchemaField: ProposedSchemaField | null = null;
+  const psfCandidate = (parsed as { proposedSchemaField?: unknown })?.proposedSchemaField;
+  if (psfCandidate !== undefined && psfCandidate !== null) {
+    const envelopeResult = proposalEnvelopeV1Schema.safeParse(psfCandidate);
+    if (envelopeResult.success) {
+      proposedSchemaField = {
+        categoryId: envelopeResult.data.categoryId,
+        name: envelopeResult.data.name,
+        type: envelopeResult.data.type,
+        description: envelopeResult.data.description,
+        provenance: { version: "v1", verified: true },
+      };
+    } else {
+      logger.warn(
+        { error: envelopeResult.error.flatten() },
+        "proposal-envelope-provenance: dropped malformed proposedSchemaField",
+      );
+    }
+  }
+
   // Strip the fenced block from the user-facing answer. Collapse any
   // surrounding blank lines so the cleaned answer reads naturally.
   const cleaned = rawAnswer
     .replace(fenceMatch[0], "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return { cleanedAnswer: cleaned, suggestedIntent, structuredCitations };
+  return { cleanedAnswer: cleaned, suggestedIntent, structuredCitations, proposedSchemaField };
 }
 
 /**
@@ -575,7 +717,7 @@ export async function searchGroundX(
 
   switch (scope.kind) {
     case "bucket": {
-      path = `/v1/search/${scope.bucketId}`;
+      path = `/search/${scope.bucketId}`;
       const ids = scope.projectIds ?? [];
       if (ids.length === 1) {
         scopeFilter = { projectId: ids[0] };
@@ -588,14 +730,14 @@ export async function searchGroundX(
       // Group search has the same shape as bucket search — different
       // resource id, same endpoint. GroundX resolves the group to its
       // member buckets server-side.
-      path = `/v1/search/${scope.groupId}`;
+      path = `/search/${scope.groupId}`;
       break;
     }
     case "documents": {
       if (scope.documentIds.length === 0) {
         throw new Error("rag scope 'documents' requires at least one documentId");
       }
-      path = "/v1/search/documents";
+      path = "/search/documents";
       body.documentIds = scope.documentIds;
       break;
     }
@@ -605,7 +747,7 @@ export async function searchGroundX(
       // onboarding). Log surfaces this so we can spot it in telemetry.
       // eslint-disable-next-line no-console
       console.warn("rag search dispatched with kind=unknown — falling back to /v1/search/documents");
-      path = "/v1/search/documents";
+      path = "/search/documents";
       break;
     }
   }
@@ -617,6 +759,17 @@ export async function searchGroundX(
   // independent filters must both match.
   const composed = composeFilters(options.rbacFilter ?? null, scopeFilter);
   if (composed) body.filter = composed;
+
+  // Dev-side full request log so the console shows what we're
+  // actually asking GroundX. Query goes through pino's redact paths
+  // (the `query` field is on the redact list), so prod logs see
+  // [REDACTED] for the prompt itself but keep scope info.
+  logger.info(
+    {
+      groundxSearch: { path, scope: scope.kind, bodyKeys: Object.keys(body), query: body.query, n: body.n, filter: body.filter ?? null },
+    },
+    "groundx search dispatch",
+  );
 
   const response = await client.forward(path, {
     method: "POST",
@@ -633,66 +786,133 @@ export async function searchGroundX(
     results?: Array<Record<string, unknown>>;
   };
   const rawResults = payload.search?.results ?? payload.results ?? [];
-  return rawResults.map((r) => ({
+  const mapped = rawResults.map((r) => ({
     documentId: typeof r.documentId === "string" ? r.documentId : String(r.documentId ?? ""),
     pageNumber: typeof r.pageNumber === "number" ? r.pageNumber : undefined,
     text: typeof r.text === "string" ? r.text : undefined,
     score: typeof r.score === "number" ? r.score : undefined,
     fileName: typeof r.fileName === "string" ? r.fileName : undefined,
   }));
+  // Result summary for dev visibility (top scores + filenames; we
+  // DON'T log full snippet text because it can contain user content
+  // and would dominate the log).
+  logger.info(
+    {
+      groundxSearchResult: {
+        count: mapped.length,
+        topScore: mapped[0]?.score ?? null,
+        files: Array.from(new Set(mapped.map((r) => r.fileName).filter(Boolean))).slice(0, 3),
+        // Top-3 snippets with truncated text so the log shows what
+        // actually came back from GroundX without exploding.
+        topSnippets: mapped.slice(0, 3).map((r) => ({
+          documentId: r.documentId,
+          fileName: r.fileName,
+          page: r.pageNumber,
+          score: r.score,
+          textPreview: (r.text ?? "").slice(0, 240),
+        })),
+      },
+    },
+    "groundx search result",
+  );
+  return mapped;
 }
 
 /**
- * CF-06: the grounded completion prompt now carries three constraints
- * the earlier version lacked:
+ * Grounded completion prompt. Three-mode behavior baked in:
  *
- *   1. Refusal contract — when snippets don't cover the question, the
- *      LLM must reply with the exact `GROUNDED_REFUSAL_PHRASE` rather
- *      than hedge or fill from general knowledge.
- *   2. Structured citations — instead of "repeat short phrases
- *      verbatim" (which produced inconsistent extraction), the LLM
- *      emits a `citations` array inside the same fenced JSON block as
- *      `suggestedIntent`. `runRagPipeline` validates each entry's
- *      `documentId` against the snippet set before using it.
- *   3. Token-budget guard — the assembled snippet block is truncated
- *      to `MAX_SNIPPET_BLOCK_CHARS` before being sent. With the
- *      search ranking putting most-relevant first, trailing snippets
- *      are dropped when over budget.
+ *   1. Greeting / meta — respond conversationally, name the file(s),
+ *      suggest a couple of starter questions. NOT a refusal.
+ *   2. In-coverage content question — concise answer using only the
+ *      snippets; cite via the fenced JSON block.
+ *   3. Out-of-coverage content question — honest acknowledgement +
+ *      pointer to what the doc DOES cover. No fabrication, no
+ *      general-knowledge fill-in.
  *
- * CF-07 (suggestedIntent) sits inside the same JSON block.
+ * Structured outputs (still required):
+ *   - `citations` array inside the same fenced JSON block as
+ *     `suggestedIntent`. `runRagPipeline` validates each entry's
+ *     `documentId` against the snippet set before using it.
+ *   - Token-budget guard: `buildSnippetBlock` truncates to
+ *     `MAX_SNIPPET_BLOCK_CHARS` (most-relevant first, trailing dropped).
  *
- * CF-06a (the eval-in-CI follow-up) lives in a separate row. Closing
- * THIS CF-06 covers the prompt code; the eval set scores it.
+ * `GROUNDED_REFUSAL_PHRASE` is no longer prescribed by the prompt —
+ * the model phrases its own refusal — but the constant + the
+ * pass-through test stay as a regression guard against
+ * legacy-phrase mutation.
  */
 async function callGroundedLlm(
   userMessage: string,
   snippets: GroundXSearchResult[],
   llmClient: LlmClient,
   modelId: string,
+  scopeHint?: { fileName?: string | null; scenarioTitle?: string | null },
 ): Promise<{ answer: string }> {
   const system =
-    "You are a document Q&A assistant. Answer ONLY using the snippets " +
-    "provided below as context. Be concise.\n\n" +
-    "REFUSAL CONTRACT: If the snippets do NOT contain enough " +
-    "information to answer the question, reply with EXACTLY this " +
-    `phrase and nothing else: "${GROUNDED_REFUSAL_PHRASE}" Don't use ` +
-    "your general knowledge to fill in. Don't invent facts. A clean " +
-    "refusal is better than a confident guess.\n\n" +
-    "OPTIONAL FENCED JSON BLOCK: at the end of your answer you MAY " +
-    "append a single ```json fenced code block carrying either or " +
-    "both of these fields:\n\n" +
+    "You are the user's analyst for the documents in the snippets " +
+    "below. You read them on the user's behalf and answer in plain " +
+    "English — warm, direct, brief.\n\n" +
+
+    "For content claims, use only what's in the snippets. Don't invent " +
+    "facts and don't fill in from general knowledge. If the snippets " +
+    "cover the answer, lead with it and quote a short verbatim phrase " +
+    "when it helps. If they don't, say so in one sentence and point to " +
+    "something the documents do cover.\n\n" +
+
+    "Greetings, small talk, and meta questions about your capabilities " +
+    "aren't content questions — respond conversationally and offer a " +
+    "starter question or two grounded in the snippets.\n\n" +
+
+    "After your answer you MAY append a single ```json fenced block " +
+    "with `citations`, `suggestedIntent`, and/or `proposedSchemaField`. " +
+    "Skip the block for non-content turns.\n\n" +
     "```json\n" +
     '{"citations":[{"documentId":"<id-from-the-snippet-header>","page":<int>,"quote":"<short verbatim phrase>"}],' +
-    '"suggestedIntent":{"intent":"<kebab-case-id>","confidence":<0-1 float>,"reason":"<short explanation>"}}\n' +
+    '"suggestedIntent":{"intent":"<kebab-case-id>","confidence":<0-1 float>,"reason":"<short explanation>"},' +
+    '"proposedSchemaField":{"version":"v1","categoryId":"<existing category id>","name":"<snake_case_id>","type":"STRING|NUMBER|DATE|BOOLEAN","description":"<one sentence>"}}\n' +
     "```\n\n" +
-    "- `citations`: list ONLY the snippets you actually used. Use the " +
-    "exact `documentId` from each snippet's header. The client will " +
-    "drop any citation referencing a documentId you weren't given.\n" +
-    "- `suggestedIntent`: only emit when you're confident (>0.8) that " +
-    "the user should look at a different view. The client surfaces it " +
-    "as a clickable chip ONLY at confidence >= 0.85.";
+    "`citations` must reference only documentIds present in the snippet " +
+    "headers — the client drops the rest. `suggestedIntent` should fire " +
+    "only at confidence > 0.8; the client surfaces it as a chip at ≥ 0.85.\n\n" +
+    "Emit `proposedSchemaField` only when the user explicitly asks to add " +
+    "a schema field (\"add a field for X\", \"track Y too\", \"capture Z\"). " +
+    "Pick the best-fit existing category id from the user's surrounding " +
+    "context if one is visible; otherwise use a plausible snake_case id. " +
+    "Type must be one of STRING, NUMBER, DATE, BOOLEAN. The frontend " +
+    "renders an Accept/Reject card — write the conversational answer " +
+    "naturally (\"I can add a 'total tax' field…\") and put the structured " +
+    "payload in the JSON block.";
 
   const contextBlock = buildSnippetBlock(snippets);
+  // Scope line — independent of snippet hits. Names the doc the user
+  // is currently looking at so the model knows what to talk about
+  // even when GroundX search returned 0 results. Goes ABOVE the
+  // snippet block so the model reads it first.
+  const scopeParts: string[] = [];
+  if (scopeHint?.fileName) scopeParts.push(`file=${scopeHint.fileName}`);
+  if (scopeHint?.scenarioTitle) scopeParts.push(`scenario=${scopeHint.scenarioTitle}`);
+  const scopeLine = scopeParts.length > 0 ? `Working on: ${scopeParts.join(", ")}\n\n` : "";
+  const userContent = `${scopeLine}Snippets:\n${contextBlock}\n\nQuestion: ${userMessage}`;
+
+  // Dev-side full request log. The `messages` field is on pino's
+  // redact list (prod sees [REDACTED]); dev sees the full prompt so
+  // the user can see what the model actually gets.
+  logger.info(
+    {
+      groundedLlmCall: {
+        model: modelId,
+        snippetCount: snippets.length,
+        snippetBlockChars: contextBlock.length,
+        userMessage,
+        systemChars: system.length,
+        userContentChars: userContent.length,
+        // The full bodies — gated to dev by log-level + pino redaction.
+        systemContent: system,
+        userContent,
+      },
+    },
+    "grounded LLM dispatch",
+  );
 
   const response = await llmClient.forward("/chat/completions", {
     method: "POST",
@@ -701,9 +921,8 @@ async function callGroundedLlm(
       model: modelId,
       messages: [
         { role: "system", content: system },
-        { role: "user", content: `Snippets:\n${contextBlock}\n\nQuestion: ${userMessage}` },
+        { role: "user", content: userContent },
       ],
-      temperature: 0.2,
     }),
   });
   if (!response.ok) {
@@ -715,6 +934,19 @@ async function callGroundedLlm(
   };
   const answer = payload.choices?.[0]?.message?.content?.trim();
   if (!answer) throw new Error("grounded llm call returned no content");
+  // Log the actual LLM response so the user can compare what was
+  // sent (logged above) with what came back. Counterpart to the
+  // "grounded LLM dispatch" log line.
+  logger.info(
+    {
+      groundedLlmResponse: {
+        model: modelId,
+        answerChars: answer.length,
+        answer,
+      },
+    },
+    "grounded LLM response",
+  );
   return { answer };
 }
 
@@ -731,7 +963,10 @@ export function buildSnippetBlock(snippets: GroundXSearchResult[]): string {
   let used = 0;
   for (const [i, s] of snippets.entries()) {
     const text = (s.text ?? "").slice(0, RAG_SNIPPET_CHARS);
-    const entry = `[${i + 1}] doc=${s.documentId} page=${s.pageNumber ?? "?"}\n${text}`;
+    const header = s.fileName
+      ? `[${i + 1}] file="${s.fileName}" doc=${s.documentId} page=${s.pageNumber ?? "?"}`
+      : `[${i + 1}] doc=${s.documentId} page=${s.pageNumber ?? "?"}`;
+    const entry = `${header}\n${text}`;
     // +2 for the "\n\n" join we'll add between entries.
     const projected = used + entry.length + (entries.length > 0 ? 2 : 0);
     if (projected > MAX_SNIPPET_BLOCK_CHARS) break;
@@ -920,6 +1155,7 @@ function mockRagResponse(request: ChatRouterRequest): ChatRouterResponse {
           citations: fixture.citations,
           suggestedActions: [{ key: "show-source", label: "Show source" }],
           tools: [],
+          proposedSchemaField: null,
         };
       }
     }
@@ -937,6 +1173,7 @@ function mockRagResponse(request: ChatRouterRequest): ChatRouterResponse {
       ],
       suggestedActions: [{ key: "show-source", label: "Show source" }],
       tools: [],
+      proposedSchemaField: null,
     };
   }
   // Fully-generic fallback for pre-CF-09 callers that don't ship
@@ -948,6 +1185,7 @@ function mockRagResponse(request: ChatRouterRequest): ChatRouterResponse {
     citations: [{ documentId: "mock-doc-1", page: 1, snippet: "Mock snippet for the cited page." }],
     suggestedActions: [{ key: "show-source", label: "Show source" }],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -963,6 +1201,7 @@ function mockResponseFor(mode: ChatMode, request: ChatRouterRequest): ChatRouter
         citations: [],
         suggestedActions: [{ key: "open-settings", label: "Open settings" }],
         tools: [],
+        proposedSchemaField: null,
       };
     case "hybrid":
       return {
@@ -974,6 +1213,7 @@ function mockResponseFor(mode: ChatMode, request: ChatRouterRequest): ChatRouter
           { key: "try-chat", label: "Try asking a question" },
         ],
         tools: [],
+        proposedSchemaField: null,
       };
   }
 }

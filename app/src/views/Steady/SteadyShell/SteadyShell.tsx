@@ -3,16 +3,16 @@
  *
  * ARCH-07 (2026-05-26): refactored to mount the canonical `<AppShell />`
  * with mode="steady" widgets, proving the unification with onboarding —
- * one shell, different widget bundle. Closure test asserts the
- * `appshell-root` testid is present (i.e. the shell is the canonical
- * one, not a parallel custom layout).
+ * one shell, different widget bundle.
  *
- * Today's steady-mode body is still mostly placeholder: SessionSwitcher
- * in the chat slot, "select a doc" in the canvas slot. Real widgets
- * (`ChatWithSources` for chat, steady-mode `PdfViewer` for canvas) are
- * future tickets — UI-05 lands the steady-mode chat + multi-session
- * drawer; the canvas-side viewer is the existing PdfViewer widget once
- * the steady-mode upload path exists.
+ * UI-05 (2026-05-27): chat slot now mounts the production chat widget
+ * (`<ChatColumn mode="steady" />` — same widget that powers F2-F5
+ * onboarding) instead of the SessionSwitcher placeholder. Per
+ * the no-duplicates rule, onboarding + steady share the same widget;
+ * the `mode` prop locks the onboarding-only decorations (scripted
+ * intro, Pick-a-view pills, sample-switcher). Persistence + hydration
+ * come for free via RT-01..05. Canvas slot still placeholder until
+ * the steady-mode PdfViewer wire-up exists (separate ticket).
  *
  * Per the chat session model (project_chat_session_model), the URL is
  * the source of truth for which session is active. The mount effect
@@ -29,12 +29,11 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Heading } from "@/components/primitives/Heading/Heading";
-import { Label } from "@/components/primitives/Label/Label";
 import { OnboardingNav, useOnboardingNavCollapsed } from "@/components/layout/OnboardingNav/OnboardingNav";
 import {
   BODY_TEXT,
   BORDER_RADIUS_CARD,
-  EYEBROW_ON_LIGHT,
+  FONT_SIZE_LABEL,
   NAVY,
   ONBOARDING_NAV_WIDTH_COLLAPSED,
   ONBOARDING_NAV_WIDTH_FULL,
@@ -42,6 +41,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { SessionSwitcher } from "@/views/Steady/SteadyShell/SessionSwitcher";
 
 export const SteadyShell: FC = () => {
@@ -57,66 +57,64 @@ export const SteadyShell: FC = () => {
       switchTo(sessionId);
     }
     // If the URL references a session we don't have locally, the
-    // BFF will need to fetch it. That fetch lands with the real
-    // multi-session DB read path — until then, the chat-side hint
-    // below surfaces an "unknown session" message.
+    // RT-05 hydrator (fires on auth-resolved) will populate it from
+    // the server-side list; UI-06 (separate ticket) wires a targeted
+    // fetch when the URL session id is missing entirely.
   }, [sessionId, state.activeSessionId, state.sessions, switchTo]);
 
   const active = sessionId ? state.sessions.get(sessionId) : null;
 
-  // Chat slot — for now a placeholder body with the SessionSwitcher
-  // and the session-id text. Replace with `ChatWithSources` widget in
-  // UI-05 (steady-mode chat surface). Keeps the existing test selectors
-  // (`steady-shell-session-id`, `steady-shell-unknown-session`) so the
-  // SteadyShell.test.tsx assertions don't need to know about the
-  // AppShell internals.
+  // Chat slot — UI-05 production chat widget. Same widget that powers
+  // F2-F5 onboarding, gated on `mode="steady"` so the scripted intro +
+  // sample-switcher + Pick-a-view pills don't render. RT-01..05 give
+  // us persistence + hydration for free.
+  //
+  // The data-testids that the existing SteadyShell.test.tsx still
+  // depends on (`steady-shell-session-id`, `steady-shell-unknown-session`)
+  // are preserved via a small header strip above the chat widget — the
+  // session id + the "this session isn't in localStorage yet" hint
+  // remain user-visible without re-introducing the placeholder body.
   const chatPane = (
     <Box
       sx={{
         height: "100%",
         width: "100%",
         backgroundColor: WARM_OFFWHITE,
-        overflow: "auto",
-        p: 2,
+        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
-        gap: 2,
       }}
       aria-label="Chat column"
     >
-      <Label sx={{ color: EYEBROW_ON_LIGHT }}>STEADY · CHAT SESSION</Label>
-      <Heading level="h4">{active?.title ?? "Untitled session"}</Heading>
-      <BodyText>
-        Session id:{" "}
-        <Box
-          component="span"
-          data-testid="steady-shell-session-id"
-          sx={{ fontFamily: "monospace", color: NAVY }}
-        >
-          {sessionId ?? "(missing)"}
-        </Box>
-        . The real steady-mode chat (ChatWithSources widget) is still
-        being built — for now use the switcher below.
-      </BodyText>
-      <Box>
-        <SessionSwitcher hideOnboardingSession={false} />
-      </Box>
-      {!active && sessionId && (
-        <BodyText
-          data-testid="steady-shell-unknown-session"
-          sx={{ color: BODY_TEXT, fontStyle: "italic" }}
-        >
-          Session{" "}
+      <Box sx={{ px: 2, pt: 1.5, pb: 1, flexShrink: 0, display: "flex", flexDirection: "column", gap: 0.5 }}>
+        <Heading level="h5" sx={{ color: NAVY, m: 0 }}>
+          {active?.title ?? "Untitled session"}
+        </Heading>
+        <BodyText sx={{ fontSize: FONT_SIZE_LABEL, color: BODY_TEXT }}>
           <Box
             component="span"
-            sx={{ fontFamily: "monospace", color: NAVY, fontStyle: "normal" }}
+            data-testid="steady-shell-session-id"
+            sx={{ fontFamily: "monospace", color: NAVY }}
           >
-            {sessionId}
-          </Box>{" "}
-          is not in this browser&apos;s ChatStore. Once the BFF fetch
-          path lands, the middleware will hydrate it from MySQL.
+            {sessionId ?? "(missing)"}
+          </Box>
         </BodyText>
-      )}
+        {!active && sessionId && (
+          <BodyText
+            data-testid="steady-shell-unknown-session"
+            sx={{ fontSize: FONT_SIZE_LABEL, color: BODY_TEXT, fontStyle: "italic" }}
+          >
+            Session not yet hydrated — RT-05 will populate it on auth-resolved.
+          </BodyText>
+        )}
+        {/* SessionSwitcher kept available here so the user can pivot
+            between sessions without leaving the steady shell. UI-07
+            will add a cmd-K shortcut on top of this. */}
+        <SessionSwitcher hideOnboardingSession={false} />
+      </Box>
+      <Box sx={{ flex: 1, minHeight: 0, px: 2, pb: 2 }}>
+        <ChatColumn mode="steady" />
+      </Box>
     </Box>
   );
 

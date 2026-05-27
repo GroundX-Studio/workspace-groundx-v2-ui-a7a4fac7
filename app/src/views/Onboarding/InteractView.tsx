@@ -96,6 +96,16 @@ export const InteractView: FC = () => {
             onboardingSessionId: chatSessionId,
             activeEntityKey: activeChatSession?.activeEntityKey ?? null,
           },
+          // Same scope hint F2's ChatColumn passes — names the active
+          // doc + scenario in the grounded LLM prompt so the model
+          // knows what to talk about even when GroundX search returns
+          // zero snippets for an off-topic query.
+          scopeHint: scenario
+            ? {
+                fileName: scenario.documents[0]?.fileName ?? null,
+                scenarioTitle: scenario.manifest.hero?.title ?? scenarioId,
+              }
+            : undefined,
         });
         const replyCitations: ScenarioCitation[] | undefined = result.reply.citations.length
           ? result.reply.citations.map((c) => ({ documentId: c.documentId, page: c.page, snippet: c.snippet }))

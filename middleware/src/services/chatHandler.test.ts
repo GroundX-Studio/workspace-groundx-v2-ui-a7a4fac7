@@ -430,11 +430,10 @@ describe("handleChatMessage — typed error mapping", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// CF-15: EntitySession scope refs propagate into the RAG search call.
-// Verifies the closure test from docs/agents/backlog.md:
-//   "Post a chat with entity having projectIds:[P1, P2] → search call
-//    body has filter: {projectId: {$in: [P1, P2]}}."
-// Plus parallel cases for groupId, documentIds, and single-projectId.
+// EntitySession scope refs propagate into the RAG search call.
+// Closure test: post a chat with entity having projectIds:[P1, P2] →
+// search call body has filter: {projectId: {$in: [P1, P2]}}. Plus
+// parallel cases for groupId, documentIds, and single-projectId.
 // ────────────────────────────────────────────────────────────────────
 describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", () => {
   let repo: MemoryAppRepository;
@@ -507,7 +506,7 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         mockMode: false,
       },
     );
-    expect(lastSearchPath()).toBe("/v1/search/42");
+    expect(lastSearchPath()).toBe("/search/42");
     expect(lastSearchBody()).toMatchObject({
       filter: { projectId: { $in: ["P1", "P2"] } },
     });
@@ -547,7 +546,7 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         mockMode: false,
       },
     );
-    expect(lastSearchPath()).toBe("/v1/search/7");
+    expect(lastSearchPath()).toBe("/search/7");
   });
 
   it("EntitySession with groupId → search path /v1/search/{groupId}, no filter", async () => {
@@ -564,7 +563,7 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         mockMode: false,
       },
     );
-    expect(lastSearchPath()).toBe("/v1/search/99");
+    expect(lastSearchPath()).toBe("/search/99");
     const body = lastSearchBody();
     expect(body.filter).toBeUndefined();
   });
@@ -585,7 +584,7 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         mockMode: false,
       },
     );
-    expect(lastSearchPath()).toBe("/v1/search/documents");
+    expect(lastSearchPath()).toBe("/search/documents");
     expect(lastSearchBody()).toMatchObject({ documentIds: ["doc-A", "doc-B"] });
   });
 
@@ -606,7 +605,7 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         mockMode: false,
       },
     );
-    expect(lastSearchPath()).toBe("/v1/search/100");
+    expect(lastSearchPath()).toBe("/search/100");
   });
 
   it("Malformed projectIdsJson (not JSON) → falls back to bucket scope without filter", async () => {
@@ -626,7 +625,7 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         mockMode: false,
       },
     );
-    expect(lastSearchPath()).toBe("/v1/search/5");
+    expect(lastSearchPath()).toBe("/search/5");
     const body = lastSearchBody();
     expect(body.filter).toBeUndefined();
   });
@@ -634,7 +633,7 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
 
 // ────────────────────────────────────────────────────────────────────
 // CF-03: rbacFilter end-to-end through chatHandler → routeChat → search.
-// The closure test from the backlog:
+// Closure gate:
 //   "Post a chat with a session carrying a fake RBAC seam returns
 //    search bodies with `$and: [rbacFilter, scopeFilter]`."
 // ────────────────────────────────────────────────────────────────────
@@ -1094,7 +1093,7 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
     });
   });
 
-  it("`maxSummaryOutputTokens` flows into the LLM call body as `max_tokens`", async () => {
+  it("`maxSummaryOutputTokens` flows into the LLM call body as `max_completion_tokens`", async () => {
     await repo.appendChatMessage(makeMessage("m1", "chat-1", 1, "user", "x".repeat(400)));
     await repo.appendChatMessage(makeMessage("m2", "chat-1", 2, "assistant", "y".repeat(400)));
     await handleChatMessage(
@@ -1111,12 +1110,13 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         maxSummaryOutputTokens: 250,
       },
     );
-    // The leaf-compaction LLM call should have included max_tokens=250.
+    // The leaf-compaction LLM call should have included
+    // max_completion_tokens=250 (gpt-5 family deprecated max_tokens).
     const summarizerCall = (llmClient.forward as ReturnType<typeof vi.fn>).mock.calls.find(
       (c) => c[0] === "/chat/completions",
     );
     expect(summarizerCall).toBeDefined();
     const body = JSON.parse((summarizerCall![1] as RequestInit).body as string);
-    expect(body.max_tokens).toBe(250);
+    expect(body.max_completion_tokens).toBe(250);
   });
 });

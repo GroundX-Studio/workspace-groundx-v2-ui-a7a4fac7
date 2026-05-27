@@ -130,6 +130,7 @@ async function answerPagesRemaining(deps: StructuredHandlerDeps): Promise<ChatRo
     citations: [],
     suggestedActions: [{ key: "open-settings", label: "Open settings" }],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -150,6 +151,7 @@ async function answerOnboardingState(deps: StructuredHandlerDeps): Promise<ChatR
       { key: "open-samples", label: "Pick another sample" },
     ],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -165,6 +167,7 @@ async function answerCurrentEntity(deps: StructuredHandlerDeps): Promise<ChatRou
       citations: [],
       suggestedActions: [{ key: "open-samples", label: "Open samples" }],
       tools: [],
+    proposedSchemaField: null,
     };
   }
   return {
@@ -176,6 +179,7 @@ async function answerCurrentEntity(deps: StructuredHandlerDeps): Promise<ChatRou
     citations: [],
     suggestedActions: [{ key: "show-source", label: "Show source" }],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -193,6 +197,7 @@ async function answerSavedSchemas(deps: StructuredHandlerDeps): Promise<ChatRout
       citations: [],
       suggestedActions: [{ key: "open-schema-builder", label: "Open schema builder" }],
       tools: [],
+    proposedSchemaField: null,
     };
   }
   const lines = rows.map((s) => `• ${s.name} (id ${s.id})`);
@@ -204,6 +209,7 @@ async function answerSavedSchemas(deps: StructuredHandlerDeps): Promise<ChatRout
     citations: [],
     suggestedActions: [{ key: "open-schema-builder", label: "Open schema builder" }],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -241,6 +247,7 @@ async function answerMyProjects(deps: StructuredHandlerDeps): Promise<ChatRouter
       citations: [],
       suggestedActions: [{ key: "open-workspace", label: "Open workspace" }],
       tools: [],
+    proposedSchemaField: null,
     };
   }
   const lines = projects.map((p) => `• ${p.name ?? "(unnamed)"} (id ${p.projectId ?? p.id ?? "?"})`);
@@ -252,6 +259,7 @@ async function answerMyProjects(deps: StructuredHandlerDeps): Promise<ChatRouter
     citations: [],
     suggestedActions: [{ key: "open-workspace", label: "Open workspace" }],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -289,6 +297,7 @@ async function answerApiKeys(deps: StructuredHandlerDeps): Promise<ChatRouterRes
       citations: [],
       suggestedActions: [{ key: "open-api-keys", label: "Manage API keys" }],
       tools: [],
+    proposedSchemaField: null,
     };
   }
   // SECURITY: never show the full key value in a chat answer. Show
@@ -307,6 +316,7 @@ async function answerApiKeys(deps: StructuredHandlerDeps): Promise<ChatRouterRes
     citations: [],
     suggestedActions: [{ key: "open-api-keys", label: "Manage API keys" }],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -317,6 +327,7 @@ function signInNudge(subject: string): ChatRouterResponse {
     citations: [],
     suggestedActions: [{ key: "open-signin", label: "Sign in" }],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -329,6 +340,7 @@ function upstreamErrorReply(subject: string): ChatRouterResponse {
     citations: [],
     suggestedActions: [],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -342,6 +354,7 @@ function answerUnknownStructuredQuery(question: string): ChatRouterResponse {
     citations: [],
     suggestedActions: [{ key: "open-settings", label: "Open settings" }],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 
@@ -426,7 +439,7 @@ export async function runHybridQuery(
     try {
       const composed = await composeTourAnswer(request, deps, active, savedSchemaCount, recentEvents);
       if (composed != null) {
-        return { mode: "hybrid", answer: composed, citations, suggestedActions, tools: [] };
+        return { mode: "hybrid", answer: composed, citations, suggestedActions, tools: [], proposedSchemaField: null };
       }
     } catch {
       // Fall through to hand-rolled.
@@ -448,7 +461,7 @@ export async function runHybridQuery(
       : `I didn't find document snippets that match your question. ` +
         `Try asking about a specific value, page, or field on the canvas.`);
 
-  return { mode: "hybrid", answer, citations, suggestedActions, tools: [] };
+  return { mode: "hybrid", answer, citations, suggestedActions, tools: [], proposedSchemaField: null };
 }
 
 async function composeTourAnswer(
@@ -506,7 +519,6 @@ async function composeTourAnswer(
         { role: "system", content: HYBRID_SYSTEM_PROMPT },
         { role: "user", content: userBlock },
       ],
-      temperature: 0.3,
     }),
   });
   if (!response.ok) return null;
@@ -526,6 +538,7 @@ function frank(message: string): ChatRouterResponse {
     citations: [],
     suggestedActions: [],
     tools: [],
+    proposedSchemaField: null,
   };
 }
 

@@ -1,7 +1,8 @@
 # Widget Contract
 
-> **Status: locked 2026-05-26.** Backlog tickets ARCH-01..ARCH-13 implement
-> this contract. The drift-guard test at
+> **Status: locked 2026-05-26.** Originally landed via the
+> ARCH-01..ARCH-13 epic; durable shape now lives in
+> `openspec/specs/app-architecture/spec.md`. The drift-guard test at
 > `app/src/test/widget-contract.test.ts` enforces it programmatically.
 > Updates to this file require updating the drift-guard test in lockstep.
 
@@ -132,7 +133,7 @@ Widgets that exist or will exist after ARCH-03..ARCH-11 land:
 | `PdfViewer` | shipped (move-only in ARCH-03) | the dead `shared/components/PdfViewer.tsx` |
 | `BookCallView` | shipped (move-only in ARCH-03) | n/a |
 | `SignUpWidget` | shipped (ARCH-05 · 2026-05-26) | the canvas half of monolithic `GateView` (deleted in ARCH-05C) |
-| `ExtractWorkbench` | future (per backlog UI-01) | scaffold inside ExtractView |
+| `ExtractWorkbench` | future (see `openspec/specs/onboarding-schema-editor/`) | scaffold inside ExtractView |
 | `SmartReport` | future | scaffold inside ReportView |
 | `InteractCanvas` | future | scaffold inside InteractView |
 | `IntegrateBoard` | future (UI-02) | scaffold inside IntegrateView |
@@ -278,15 +279,17 @@ Each route handler under `views/` is one of:
 | `views/Onboarding/` | F1-F7 flow + OnboardingShell + Gate*. Heavy today; goes on a diet in ARCH-06 + ARCH-10. | `/onboarding/*` | active |
 | `views/Steady/` | Post-signup app shell (`/c/:sessionId`). Becomes a thin AppShell mount after ARCH-07. | `/c/:sessionId`, `/c/new` | active |
 | `views/Home/` | Auth-aware redirect at `/`. Anonymous → `/onboarding`; signed-in with a persisted ChatStore session → `/c/<id>`; signed-in without one → `/onboarding`. Replaced the scaffold-default 161-line marketing card in ARCH-21 (2026-05-26). | `/` | active |
-| `views/Auth/` | Standalone login/register/forgot-password pages. Today partially used for magic-link landing; ARCH-23 (P2) audits whether each page is still load-bearing. | `/auth/*` | partially active; revisit on AU-01 / AU-02 |
+| `views/Auth/` | Standalone login/register/forgot-password pages. Today partially used for magic-link landing; `openspec/specs/app-architecture/spec.md` carries the requirement to audit per-page load-bearing-ness. | `/auth/*` | partially active; revisit on AU-01 / AU-02 |
 | `views/Banned/` | Stub "this account is not available" surface. Kept because the `/banned` route IS load-bearing — `api/axios.ts` redirects there on the archived-customer 403 and `Login.tsx` on the banned-login branch. The text inside is scaffold-default and should grow into a real account-recovery surface (separate follow-up; not in the ARCH epic). | `/banned` | active (stub content; route load-bearing) |
 | `views/_scaffold/` | Non-product scaffold pages held away from product directories. Currently houses `Health/` (returns "OK" for k8s probes). Moved here in ARCH-24 (2026-05-26). `AppStatus/` was deleted in the same ticket (no callers, no real product surface). | `/health` | active |
 
 ### Contexts catalog (added 2026-05-26)
 
 18 contexts today. Active in the product = 10; scaffold-default
-Partner-API state holders that the product doesn't use yet = 8
-(ARCH-25 audits these — most are deferred to UI-05 wiring).
+Partner-API state holders that the product doesn't use yet = 8.
+The `contexts/` audit requirement lives at
+`openspec/specs/app-architecture/spec.md` — most cleanup is deferred
+to UI-05 follow-on work.
 
 | Context | Status | Purpose |
 |---|---|---|
@@ -311,9 +314,10 @@ Partner-API state holders that the product doesn't use yet = 8
 | `HealthContext` | scaffold-default | Partner API state — unused by product today |
 | `OnboardingContext` (original) | superseded | Replaced by `OnboardingSessionContext`. Anon-id-tracker stub. |
 
-ARCH-25 audits the scaffold-default contexts during the UI-05
+The scaffold-default contexts get audited during UI-05 follow-on
 work — at that point we'll know which become real consumers vs
-which are dead.
+which are dead. The durable requirement lives at
+`openspec/specs/app-architecture/spec.md`.
 
 ## Component mapping table (added 2026-05-26 in ARCH-15)
 
@@ -404,8 +408,10 @@ surface for it (which won't exist) or building a viewer widget with no
 `mode="steady"` branch (which violates the contract). The cleaner
 path is to carve it out explicitly here.
 
-ARCH-04 in the backlog records the decision to drop the planned F1
-refactor in favor of this exception.
+The decision to drop the planned F1 widget-conformance refactor in
+favor of this exception is recorded in git history (commit messages
+referencing the ARCH-04 decision); the durable architecture
+requirements live at `openspec/specs/app-architecture/spec.md`.
 
 ## How to add a new widget
 
@@ -469,9 +475,7 @@ passes. Future widgets must conform on landing.
 
 - `memory/feedback_no_onboarding_duplicates.md` — the locked rule
   that motivated this contract
-- `scaffold/docs/agents/backlog.md` Epic: ARCH — execution tickets
+- `openspec/specs/app-architecture/spec.md` — architecture-level
+  capability spec; this contract is its implementation guide
 - `scaffold/docs/agents/architecture.md` — high-level architecture
   this contract slots into
-- `scaffold/docs/agents/harness-audit-widget-architecture.md` —
-  authored at end of epic per ARCH-13; the memo to the harness team
-  asking them to codify this contract scaffold-side

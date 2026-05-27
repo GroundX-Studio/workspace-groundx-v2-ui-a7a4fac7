@@ -16,6 +16,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { AppShell } from "@/components/layout/AppShell";
@@ -30,7 +31,7 @@ import { BookCallView } from "@/components/viewer-widgets/BookCallView/BookCallV
 import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
 import { ExtractView } from "./ExtractView";
 import { IngestView } from "./IngestView";
-import { OnboardingChatColumn } from "./OnboardingChatColumn";
+import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { IntegrateView } from "./IntegrateView";
 import { InteractView } from "./InteractView";
 import { NavDebugOverlay } from "./NavDebugOverlay";
@@ -166,6 +167,17 @@ export const OnboardingShell: FC = () => {
   openGateRef.current = openGate;
   advanceFrameRef.current = advanceFrame;
 
+  // `master-viewer-session` Phase 2 — overlay actions + state read.
+  // The sign-up overlay is the new source of truth for "is the
+  // signup surface visible." URL-driven push/pop replaces the prior
+  // reliance on the mode-flag `gate.status === "open"` for the canvas
+  // swap.
+  const { state: chatStoreState, pushOverlay, popOverlay } = useChatStore();
+  const pushOverlayRef = useRef(pushOverlay);
+  const popOverlayRef = useRef(popOverlay);
+  pushOverlayRef.current = pushOverlay;
+  popOverlayRef.current = popOverlay;
+
   useEffect(() => {
     const path = location.pathname;
     if (params.bucketId && params.scenarioId) {
@@ -186,12 +198,20 @@ export const OnboardingShell: FC = () => {
       return;
     }
     if (path.endsWith("/onboarding/signup")) {
+      // `master-viewer-session` Phase 2 — overlay is now the source of
+      // truth for the sign-up surface. The legacy `openGate("byo")`
+      // call STAYS for now because the chat-side `GateChatPanel` still
+      // reads `gate.status` (Phase 6 migrates that side too).
+      pushOverlayRef.current({ kind: "sign-up", state: "pending" });
       openGateRef.current("byo");
       return;
     }
     if (path === "/onboarding" || path === "/onboarding/") {
       // Picker. advanceFrame("f1") deactivates any entity AND clears
-      // signupOpen.
+      // the legacy signupOpen + gate state. Pop the sign-up overlay
+      // so the canvas-side overlay disappears in lockstep with the
+      // chat-side reset.
+      popOverlayRef.current("sign-up");
       advanceFrameRef.current("f1");
     }
   }, [params.bucketId, params.scenarioId, location.pathname, scenarioRegistry.bucketId]);
@@ -280,25 +300,36 @@ export const OnboardingShell: FC = () => {
   // top, the nav stays mounted in its compact/expanded state.
   const bookCallActive = new URLSearchParams(location.search).get("bookCall") === "1";
 
-  // ARCH-05B (2026-05-26): gate-active canvas swap. When the session-
-  // level gate is `open` or `committed`, the canvas mounts the
-  // `SignUpWidget` instead of whichever frame view would normally
-  // render. Fixes the bug where the user clicked Sign Up from F1
-  // BYO (or from F2-F6) and the viewer kept rendering the sample doc
-  // behind the chat-side form. Canvas precedence:
-  //   1. bookCall=1   → BookCallView (highest; even overrides gate)
-  //   2. gate active  → SignUpWidget
-  //   3. frame switch → IngestView / UnderstandView / ExtractView / ...
-  // BookCall sits above gate because the user *opted* into the
-  // calendar from inside the gate; the chat rail tracks the booking
-  // status via BookingStatusCard and re-renders the gate when the
-  // booking modal closes.
-  const gateActive =
+  // `master-viewer-session` Phase 2 — gate-as-overlay. The sign-up
+  // surface is now `viewer.overlays.find(o => o.kind === "sign-up")`.
+  // The legacy `gate.status === "open"` check is preserved transitionally
+  // (Phase 6 moves the chat-side off it too) so a committed identity
+  // still mounts `<SignUpWidget />` for the post-commit confirmation
+  // beat. New URL-driven flows push/pop the overlay; ExtractView's
+  // 401 path will push an overlay (Phase 5/6 cleanup).
+  //
+  // Canvas precedence:
+  //   1. bookCall=1                → BookCallView (highest; user opted into calendar from inside gate)
+  //   2. sign-up overlay present   → SignUpWidget renders on top of underlying step
+  //   3. gate.status === committed → SignUpWidget (transitional; chat shows confirmation)
+  //   4. currentFrame switch       → IngestView / UnderstandView / ExtractView / ...
+  const activeChatSession =
+    chatStoreState.activeSessionId != null
+      ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
+      : null;
+  const signupOverlay =
+    activeChatSession?.viewer.overlays.find((o) => o.kind === "sign-up") ?? null;
+  // Transitional bridge: until Phase 6 migrates the chat-side gate
+  // off `gate.status`, render the SignUpWidget when the legacy gate
+  // is open OR committed (intent-driven flows still flip `gate.status`
+  // imperatively via `openGate(...)`). New flows push the overlay.
+  const legacyGateOpenOrCommitted =
     session.gate.status === "open" || session.gate.status === "committed";
+  const signupSurfaceActive = signupOverlay != null || legacyGateOpenOrCommitted;
 
   const canvasContent = useMemo(() => {
     if (bookCallActive) return <BookCallView />;
-    if (gateActive) return <SignUpWidget />;
+    if (signupSurfaceActive) return <SignUpWidget />;
     switch (session.currentFrame) {
       case "f1":
         // ARCH-06B (2026-05-26): IngestView is rendered ONLY inside
@@ -313,6 +344,14 @@ export const OnboardingShell: FC = () => {
       case "f3":
       case "f3a":
       case "f4":
+        // Per spec (`project_spec_frames.md`), F3 / F3a / F4 are three
+        // surfaces of the same extraction-workbench widget. ExtractView
+        // is the workbench shell — it owns the topbar (export · ↻
+        // rerun · ✎ edit schema · 💾 Save) and switches its body
+        // between Results (F3) / Design (F3a / SchemaView) / Source
+        // peek (F4 — deferred; falls back to Results). Routing all
+        // three frames to ExtractView keeps the shell stable when the
+        // user toggles surfaces via the topbar.
         return <ExtractView />;
       case "f5":
       case "f6":
@@ -322,7 +361,7 @@ export const OnboardingShell: FC = () => {
       default:
         return null;
     }
-  }, [bookCallActive, gateActive, session.currentFrame]);
+  }, [bookCallActive, signupSurfaceActive, session.currentFrame]);
 
   // Theme-driven breakpoint detection. Compact step strip activates below
   // md (900 = MUI default; iPad-portrait-to-landscape divide). Phones +
@@ -469,7 +508,7 @@ export const OnboardingShell: FC = () => {
       }}
       aria-label="Chat column"
     >
-      {bookCallActive ? <BookingStatusCard /> : <OnboardingChatColumn />}
+      {bookCallActive ? <BookingStatusCard /> : <ChatColumn />}
     </Box>
   );
 

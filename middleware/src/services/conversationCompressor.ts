@@ -168,12 +168,9 @@ async function invokeSummarizer(
   const body: Record<string, unknown> = {
     model: deps.modelId,
     messages: prompt.messages,
-    // Compression is a tight summarization task — low temperature
-    // keeps the output deterministic and reduces token spread.
-    temperature: 0.1,
   };
   if (deps.maxOutputTokens != null) {
-    body.max_tokens = deps.maxOutputTokens;
+    body.max_completion_tokens = deps.maxOutputTokens;
   }
 
   const response = await deps.llmClient.forward("/chat/completions", {

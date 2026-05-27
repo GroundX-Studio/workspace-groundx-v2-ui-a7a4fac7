@@ -51,7 +51,7 @@ contacts in production. Columns:
   concern — once the underlying URLs are env-driven, the CSP entries
   should be derived from the same env vars, not hand-edited.
 
-## Recommended follow-ups (file as their own backlog items if/when needed)
+## Recommended follow-ups (file each as its own OpenSpec change if/when needed)
 
 1. **Self-hosted font bundle.** Drop both `@import` statements in
    `app/src/fonts.css`; serve woff2 from `public/fonts/`. Tighten CSP

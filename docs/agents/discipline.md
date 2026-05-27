@@ -94,45 +94,146 @@ Concrete corollaries:
   titles look like "X: seam + 3 of 7 sub-cases wired" — a
   `git log --oneline` reader should be able to tell what's
   shippable.
-- **When you close one item, write the follow-on backlog id
-  FIRST.** If your closure creates new pending work, that work
-  goes in `docs/agents/backlog.md` with a real id before you
-  add the inline `TODO(<id>)` and before you mark the parent
-  closed. Inline TODOs without a backlog-id resolution are
-  forbidden.
+- **When you close one item, file the follow-on work FIRST.** If
+  your closure creates new pending work, open the relevant OpenSpec
+  change (or extend the matching capability spec under
+  `openspec/specs/<capability>/`) before you add an inline `TODO`
+  and before you mark the parent closed. Inline TODOs without a
+  matching OpenSpec requirement are forbidden.
 - **Per-status client error mapping, real readers, real
   prompts.** These are not "polish" — they're the user-visible
   layer that determines whether the seam is doing anything.
 
-## 8. Single backlog, no tombstones, verify before flagging
+## 8. Planning via OpenSpec, no tombstones, verify before flagging
 
-Pending work lives in exactly one file:
-[`docs/agents/backlog.md`](backlog.md). Rules at the top of
-that file are part of this discipline.
+Pending work lives in OpenSpec at the repo root:
+
+- `openspec/specs/<capability>/spec.md` — durable requirements
+  (what behavior MUST hold)
+- `openspec/changes/<change-id>/` — in-flight proposals
+  (proposal.md, tasks.md, spec deltas)
+
+Useful commands:
+
+```bash
+OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list             # active changes
+OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list --specs     # durable capabilities
+OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict
+```
 
 Operational rules:
 
-- **One backlog.** Do not create new top-level tracking files
-  (no `chat-fix-list.md`, no `open-work.md`, no
-  `phase-X-tracker.md`). Memory's "Still open" section points at
-  the backlog. The backlog is the truth.
-- **No tombstones.** When you remove a file, delete it. Don't
-  leave a one-line stub saying "this file was merged into Y."
-  Single-agent project; the audit trail is in git.
-- **Verify before flagging `not-started`.** Before adding any
-  item with `not-started` status, grep for the seam first:
-  `grep -rn "<feature-name>" middleware/src app/src`. If a
-  component / hook / file matching the name exists, the item is
-  likely `in-progress`, not `not-started`. The UR-02 false
-  positive (drag-to-resize divider, listed `not-started` while
-  the component + hook + mount + test all existed) caused this
-  rule.
-- **Audits use the full discovery checklist** (14 methods at the
-  bottom of `backlog.md`), not just `grep TODO`. Past audits
-  missed work because they used one method.
+- **One planning surface.** Do not create new top-level tracking
+  files (no `chat-fix-list.md`, `open-work.md`, `phase-X-tracker.md`).
+  OpenSpec is the truth.
+- **No tombstones.** When you remove a file, delete it. Don't leave
+  a one-line stub saying "this file was merged into Y." Single-agent
+  project; the audit trail is in git.
+- **Verify before flagging a requirement as pending.** Before adding
+  a Requirement marked as not-yet-shipped, grep for the seam first:
+  `grep -rn "<feature-name>" middleware/src app/src`. If a component
+  / hook / file matching the name exists, the requirement is likely
+  partially shipped — annotate that in the requirement body. Past
+  drift: the UR-02 false positive (drag-to-resize divider, marked
+  not-started while the component + hook + mount + test all existed)
+  caused this rule.
+- **Audits use the full discovery checklist**, not just `grep TODO`.
+  Past audits missed work because they used one method.
 - **Closure deletes the inline TODO.** A `TODO(<id>)` in source
   pointing at a closed item is a drift signal. Grep should never
   find one.
 - **WIP cap = 3 per epic.** Before opening a 4th `in-progress`
   in any one epic, close one to genuine done OR move one back
   to `not-started`.
+
+## 9. Round-trip contract — every persisted byte gets read
+
+Rule 7 ("done = user-visible test") is the principle. This is the
+operational checklist that prevents the failure mode it was written
+against: write-side wired, read-side missing, item marked done.
+
+The failure pattern (audited 2026-05-27 across 7 features):
+
+> **Phase H** added DB tables + repository write methods. **Phase I**
+> added handler code that *reads* those tables for LLM context
+> bundling. **Phase J** marked the work done. The chat handler reads
+> `viewer_events`, `chat_session_entities`, and `current_intent`
+> every turn — but nothing outside tests ever WRITES to them, so the
+> reads always return `[]`/null. Three of the four LLM context axes
+> were dark for weeks before anyone noticed.
+
+The same pattern in reverse killed chat history: `POST /api/chat/
+messages` persists user + assistant rows on every turn, but **no
+GET endpoint exists** and the UI's `liveTurns` is component state
+that never hydrates. The DB has the conversation. The user sees
+"" after every refresh.
+
+Both failures pass Rule 7's wording ("a test exercising user-
+visible behavior") *if* you read "user-visible" charitably as "the
+seam is exercised." Operationally, the rule needs a checklist that
+forces the agent to demonstrate the byte's full journey.
+
+### Pre-closure checklist
+
+Before marking any item closed, run all four:
+
+1. **Round-trip test.** There exists a single test that:
+   (a) issues a user-shaped action through the public API,
+   (b) restarts the process / clears component state / forces a
+       fresh request,
+   (c) re-reads via a different public API call,
+   (d) asserts the user-visible state matches the original action.
+
+   If this test doesn't exist, the item is `in-progress`.
+
+2. **Dead-column check.** For every DB column the change writes,
+   grep for non-test reads:
+   ```
+   grep -rn "<column_name>\b" middleware/src app/src \
+     | grep -v "\.test\.\|/tests?/"
+   ```
+   At least one application-code read site must exist. A column
+   that's only read by test fixtures is a dead column — the item
+   is `in-progress`.
+
+3. **Dead-endpoint check.** For every server route the change
+   adds, grep for non-test callers in the app:
+   ```
+   grep -rn '"/api/<new-route>' app/src \
+     | grep -v "\.test\.\|/tests?/"
+   ```
+   At least one client call site outside tests must exist. A route
+   that's only hit by supertest is a dead endpoint — the item is
+   `in-progress`.
+
+4. **Dead-context check.** For every context field the change
+   exposes, grep for consumers:
+   ```
+   grep -rn "\.<fieldName>\b\|: { <fieldName>" app/src \
+     | grep -v "\.test\.\|/tests?/"
+   ```
+   At least one component / view / hook outside the context's own
+   file must read it. A field with zero consumers is dead.
+
+### Mark as seam-only, don't lie
+
+If any of the four checks fails AND the work landed anyway (e.g.,
+plumbing for a future phase), the row gets status **`seam-only`**
+(new status, added 2026-05-27 alongside this rule). `seam-only` is
+explicitly NOT `closed`. The honest commit title is "X: write side
+wired, read side blocked on Y."
+
+`seam-only` rows count against the WIP cap. They are visible in
+`/v/p1` triage. They block the parent epic from being declared
+"done at altitude" until they convert to `closed`.
+
+### What this catches (and doesn't)
+
+It catches: tables that get writes but no reads (or vice versa),
+endpoints with no callers, contexts with no consumers, persisted
+state that vanishes on refresh.
+
+It doesn't catch: writes that go to the wrong column, reads that
+return a value the UI ignores, persistence that races with
+hydration. Those are correctness bugs — Rule 1 (TDD) is the
+defense.

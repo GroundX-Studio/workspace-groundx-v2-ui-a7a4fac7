@@ -47,12 +47,23 @@ import {
 } from "./chatRouter.js";
 import { runCompression, runMetaCompaction, selectActiveSummaries } from "./conversationCompressor.js";
 import { UpstreamTimeoutError } from "./http.js";
+import { logger } from "../lib/logger.js";
 
 export interface HandleChatMessageRequest {
   chatSessionId: string;
   newUserMessage: string;
   /** Optional intent hint from the UI orchestrator. */
   intent?: string | null;
+  /**
+   * Optional friendly scope hint from the frontend (the scenario
+   * manifest + active doc). Threaded into the grounded LLM prompt
+   * so the model knows what doc the user is currently looking at,
+   * even when GroundX search returns zero snippets.
+   */
+  scopeHint?: {
+    fileName?: string | null;
+    scenarioTitle?: string | null;
+  };
 }
 
 export interface HandleChatMessageResponse {
@@ -352,7 +363,13 @@ export async function handleChatMessage(
       lastTurnContent: liveTail.length >= 2 ? liveTail[liveTail.length - 2].content : null,
     },
     recentViewerEvents: recentViewerEvents.map((v) => ({ action: v.action, entityKey: v.entityKey })),
+    // RT-04 — feed the persisted canvas intent into the router so
+    // it knows what view the user is on (independent of per-turn
+    // `intent` hints). Without RT-04 the column was stale after the
+    // first navigation, so this would always be null/seed-time.
+    currentIntent: session.currentIntent,
     intent: request.intent ?? null,
+    scopeHint: request.scopeHint,
   };
 
   let reply: ChatRouterResponse;
@@ -387,6 +404,15 @@ export async function handleChatMessage(
     //   - UpstreamTimeoutError         -> 504 (LLM/GroundX hung)
     //   - anything else                -> 502 (router/upstream blew up)
     errorCode = err instanceof Error ? err.message.slice(0, 200) : "unknown_error";
+    logger.error(
+      {
+        err,
+        chatSessionId: request.chatSessionId,
+        ownerUserId: session.ownerUserId,
+        ownerAnonId: session.ownerAnonId,
+      },
+      "chat router failed",
+    );
     const assistantId = idGen();
     await deps.repository.appendChatMessage({
       ...userMessage,

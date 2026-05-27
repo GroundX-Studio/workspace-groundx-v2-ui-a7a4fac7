@@ -544,4 +544,185 @@ describe("middleware scaffold", () => {
         .expect(401);
     });
   });
+
+  // UI-01 Phase 2d — Save template. The frontend POSTs the active
+  // session's pendingSchemaOverlay (merged onto the manifest schema)
+  // so the user can pin a named version of the schema. Gated on auth
+  // because anonymous sessions don't have a `groundxUsername` to key
+  // the row by; the frontend surfaces a sign-in nudge when 401 comes
+  // back.
+  describe("POST /api/extraction-schemas (UI-01 Phase 2d)", () => {
+    it("rejects unauthenticated requests with 401", async () => {
+      const { app } = setup();
+      await request(app)
+        .post("/api/extraction-schemas")
+        .send({ id: "es-1", name: "Utility", schema: { categories: [] } })
+        .expect(401);
+    });
+
+    it("returns 400 for malformed payload (missing required fields)", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+      await agent
+        .post("/api/extraction-schemas")
+        .send({ id: "es-1" })
+        .expect(400, { error: "invalid_payload" });
+      await agent
+        .post("/api/extraction-schemas")
+        .send({ id: "es-1", name: "X" })
+        .expect(400, { error: "invalid_payload" });
+    });
+
+    it("persists a saved schema scoped to the authed user (round-trip)", async () => {
+      const { app, repository } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+
+      const schema = {
+        name: "Utility",
+        categories: [
+          { id: "statement", type: "statement", name: "Statement", fields: [{ id: "total_tax", name: "Total tax", type: "NUMBER", description: "d" }] },
+        ],
+      };
+      const response = await agent
+        .post("/api/extraction-schemas")
+        .send({ id: "es-1", name: "Utility (custom)", schema })
+        .expect(200);
+      expect(response.body).toMatchObject({ id: "es-1", name: "Utility (custom)" });
+
+      // Round-trip: the row is visible to the same authed user via the
+      // repository read path.
+      const rows = await repository.listExtractionSchemasForUser("gx-user");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id).toBe("es-1");
+      expect(rows[0].name).toBe("Utility (custom)");
+      const parsed = JSON.parse(rows[0].schemaJson) as { categories: { id: string }[] };
+      expect(parsed.categories[0].id).toBe("statement");
+    });
+
+    it("upserts on the same id (second POST overwrites name + schema)", async () => {
+      const { app, repository } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+
+      await agent
+        .post("/api/extraction-schemas")
+        .send({ id: "es-1", name: "v1", schema: { categories: [] } })
+        .expect(200);
+      await agent
+        .post("/api/extraction-schemas")
+        .send({ id: "es-1", name: "v2", schema: { categories: [{ id: "x", type: "statement", name: "X", fields: [] }] } })
+        .expect(200);
+
+      const rows = await repository.listExtractionSchemasForUser("gx-user");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe("v2");
+      const parsed = JSON.parse(rows[0].schemaJson) as { categories: { id: string }[] };
+      expect(parsed.categories[0].id).toBe("x");
+    });
+  });
+
+  // UI-01 Phase 2c — focused per-field extraction. When the user
+  // Accepts a propose-card, the chat surface fires this endpoint so
+  // the new field has a real value (not a manifest placeholder).
+  describe("POST /api/extract-field (UI-01 Phase 2c)", () => {
+    it("rejects requests without a session cookie", async () => {
+      const { app } = setup();
+      await request(app)
+        .post("/api/extract-field")
+        .send({ chatSessionId: "chat-1", field: { name: "x", type: "STRING", description: "y" } })
+        .expect(401);
+    });
+
+    it("returns 400 for malformed payload (missing chatSessionId or field)", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/extract-field")
+        .send({ field: { name: "x", type: "STRING", description: "y" } })
+        .expect(400, { error: "invalid_payload" });
+      await agent
+        .post("/api/extract-field")
+        .send({ chatSessionId: "chat-1" })
+        .expect(400, { error: "invalid_payload" });
+      await agent
+        .post("/api/extract-field")
+        .send({ chatSessionId: "chat-1", field: { name: "x", type: "OBJECT", description: "y" } })
+        .expect(400, { error: "invalid_payload" });
+    });
+
+    it("returns 404 when the chat session row doesn't exist", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      const response = await agent
+        .post("/api/extract-field")
+        .send({
+          chatSessionId: "does-not-exist",
+          field: { name: "x", type: "STRING", description: "y" },
+        })
+        .expect(404);
+      expect(response.body.error).toMatch(/chat_session_not_found/);
+    });
+
+    it("returns a typed value envelope in mock mode (NUMBER field)", async () => {
+      const repository = new MemoryAppRepository();
+      const partnerClient = new FakePartnerClient();
+      const groundxClient = new FakeGroundXClient();
+      const llmClient = new FakeLlmClient();
+      const scenarioRegistry = new FakeScenarioRegistry();
+      const mockEnv = { ...testEnv, MOCK_MODE: true };
+      const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+      const agent = request.agent(app);
+      // Anon bootstrap mints the server session — POST /api/chat-sessions
+      // then sets `ownerAnonId = session.id` so the ownership check
+      // accepts the same agent's later call.
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/chat-sessions")
+        .send({ id: "chat-1", title: "Onboarding", isOnboarding: true })
+        .expect(200);
+
+      const response = await agent
+        .post("/api/extract-field")
+        .send({
+          chatSessionId: "chat-1",
+          field: { name: "total_tax", type: "NUMBER", description: "Total tax billed this period." },
+        })
+        .expect(200);
+
+      // value can be a number (mock plausible) OR null (couldn't infer).
+      // The contract is: shape is fixed; downstream UI renders both states.
+      expect(response.body).toHaveProperty("value");
+      expect(response.body).toHaveProperty("confidence");
+      expect(typeof response.body.confidence).toBe("number");
+      if (response.body.value !== null) {
+        expect(typeof response.body.value).toBe("number");
+      }
+    });
+
+    it("403 when caller doesn't own the chat session", async () => {
+      const { app, repository } = setup();
+      // Owner-A bootstrap + creates chat-1.
+      const ownerA = request.agent(app);
+      await ownerA.post("/api/onboarding/session").expect(200);
+      await ownerA
+        .post("/api/chat-sessions")
+        .send({ id: "chat-1", title: "A", isOnboarding: true })
+        .expect(200);
+      void repository;
+      // Owner-B bootstraps a fresh anon session — doesn't own chat-1.
+      const ownerB = request.agent(app);
+      await ownerB.post("/api/onboarding/session").expect(200);
+      await ownerB
+        .post("/api/extract-field")
+        .send({
+          chatSessionId: "chat-1",
+          field: { name: "x", type: "STRING", description: "y" },
+        })
+        .expect(403);
+    });
+  });
 });

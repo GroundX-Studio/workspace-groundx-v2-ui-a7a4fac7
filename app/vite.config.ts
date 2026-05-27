@@ -22,4 +22,20 @@ export default defineConfig({
       "@": srcPath,
     },
   },
+  build: {
+    // OB-05 (2026-05-27) — emit sourcemaps for prod builds so Sentry
+    // stack traces resolve to TS file + line, not minified js. Mode
+    // "hidden" generates the .map files but DOES NOT emit the
+    // `//# sourceMappingURL=` comment in the bundled .js, so source
+    // maps are never publicly served alongside the production assets.
+    // CI uploads them to Sentry via `sentry-cli sourcemaps upload`
+    // (deploy.yml step gated on the SENTRY_AUTH_TOKEN secret).
+    //
+    // After upload, CI deletes the .map files from the Docker build
+    // context so the runtime image never ships them. If the secret
+    // is unset (e.g. first deploys before Sentry is provisioned),
+    // the upload step skips and the .map files still get deleted at
+    // the same point — no exposure.
+    sourcemap: "hidden",
+  },
 });

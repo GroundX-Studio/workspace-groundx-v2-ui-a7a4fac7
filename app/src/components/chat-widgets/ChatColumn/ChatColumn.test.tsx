@@ -13,30 +13,40 @@ vi.mock("framer-motion", async () => {
 // CF-18: F2 chat input wires through the same sendChatMessage path
 // InteractView (F5) uses. Mock the API module so we can sniff the call
 // + control the assistant reply.
+//
+// RT-01: `listChatMessages` is also mocked here so the on-mount
+// hydration effect doesn't try to hit a real network. Default is
+// `[]` so existing tests still see an empty thread on mount; the
+// RT-01 round-trip test overrides with persisted turns.
 vi.mock("@/api/chatSessions", async () => {
   const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
   return {
     ...actual,
     sendChatMessage: vi.fn(),
+    listChatMessages: vi.fn(),
   };
 });
-import { ChatApiError, sendChatMessage } from "@/api/chatSessions";
+import { ChatApiError, listChatMessages, sendChatMessage } from "@/api/chatSessions";
 
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
-import { OnboardingChatColumn } from "./OnboardingChatColumn";
+import { ChatColumn } from "./ChatColumn";
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.mocked(sendChatMessage).mockReset();
+  vi.mocked(listChatMessages).mockReset();
+  // Default: no persisted thread (empty array). Individual tests
+  // can override to assert RT-01 hydration behavior.
+  vi.mocked(listChatMessages).mockResolvedValue([]);
 });
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("OnboardingChatColumn", () => {
+describe("ChatColumn", () => {
   // Replay-bug fix (2026-05-25) gates the thinking-stream behind
   // a sessionStorage key per scenario. Each test starts with a
   // clean slate so the stream always plays.
@@ -45,13 +55,13 @@ describe("OnboardingChatColumn", () => {
   });
 
   it("on F1 (no scenario picked), shows the idle placeholder", () => {
-    renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f1", initialScenario: null });
+    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f1", initialScenario: null });
     expect(screen.getByText(/Ask anything about the sample/i)).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
   });
 
   it("on F2 with a scenario, renders the wireframe conversation chrome", () => {
-    renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
     // Wireframe markers: a header that shows the FILE NAME (was
     // "Conversation" pre-2026-05-25, user wanted real context), the
     // scenario name as the first user bubble, a sample-switcher
@@ -77,7 +87,7 @@ describe("OnboardingChatColumn", () => {
     };
     renderWithOnboardingProviders(
       <>
-        <OnboardingChatColumn />
+        <ChatColumn />
         <PathProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
@@ -90,7 +100,7 @@ describe("OnboardingChatColumn", () => {
 
   it("streams thinking notes into the chat one at a time, then surfaces Done + Pick-a-view", () => {
     vi.useFakeTimers();
-    renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
 
     // First note is visible immediately.
     expect(screen.getAllByTestId(/thinking-note-/).length).toBe(1);
@@ -131,7 +141,7 @@ describe("OnboardingChatColumn", () => {
     }
     renderWithOnboardingProviders(
       <>
-        <OnboardingChatColumn />
+        <ChatColumn />
         <FrameProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
@@ -157,7 +167,7 @@ describe("OnboardingChatColumn", () => {
 
   it("derives Pick-a-view pills from the active scenario's extraction schema (Loan != Utility)", () => {
     vi.useFakeTimers();
-    renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "loan" });
+    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "loan" });
     for (let i = 0; i < 12; i += 1) {
       act(() => {
         // Per-note pause is now randomized 1500..2800ms (2026-05-25);
@@ -173,8 +183,10 @@ describe("OnboardingChatColumn", () => {
     expect(screen.getByTestId("onboarding-chat-pick-view-applicant")).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-pick-view-meters")).not.toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-pick-view-statement")).not.toBeInTheDocument();
-    // Edit-schema pill is always last.
-    expect(screen.getByTestId("onboarding-chat-pick-view-edit-schema")).toBeInTheDocument();
+    // Per realign-f3a-entry-point: F2's Pick-a-view bubble SHALL NOT
+    // contain the Edit-schema pill. F3a is reached from F3's
+    // fields-panel hamburger instead.
+    expect(screen.queryByTestId("onboarding-chat-pick-view-edit-schema")).not.toBeInTheDocument();
   });
 
   it("on a schemaless scenario (Solar), surfaces a single 'show me chat' pill that jumps to F5", () => {
@@ -187,7 +199,7 @@ describe("OnboardingChatColumn", () => {
     }
     renderWithOnboardingProviders(
       <>
-        <OnboardingChatColumn />
+        <ChatColumn />
         <FrameProbe />
       </>,
       { initialFrame: "f2", initialScenario: "solar" },
@@ -209,7 +221,7 @@ describe("OnboardingChatColumn", () => {
   });
 
   it("the sample switcher chip exposes the other scenarios as a menu", () => {
-    renderWithOnboardingProviders(<OnboardingChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
     const trigger = screen.getByTestId("onboarding-chat-sample-switch-trigger");
     act(() => {
       trigger.click();
@@ -221,13 +233,42 @@ describe("OnboardingChatColumn", () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
+  // schema-agent-chat-affordances: F3a-only chrome — Schema-Agent header
+  // and earlier-turns summary above the conversation. The header appears
+  // ONLY on F3a; F2 / F5 stay unchanged.
+  // ────────────────────────────────────────────────────────────────────
+  describe("schema-agent-chat-affordances", () => {
+    it("renders the Schema Agent header + sample switcher chip on F3a", () => {
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f3a",
+        initialScenario: "utility",
+      });
+      const header = screen.getByTestId("chat-schema-agent-header");
+      expect(header).toHaveTextContent(/Schema Agent/);
+      const chip = screen.getByTestId("chat-schema-agent-sample-switcher");
+      expect(chip).toHaveTextContent(/sample:/);
+      expect(chip).toHaveTextContent(/Utility Bill/);
+      expect(chip).toHaveTextContent(/switch ▾/);
+    });
+
+    it("omits the Schema-Agent header on F2 (frame-conditional)", () => {
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      expect(screen.queryByTestId("chat-schema-agent-header")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chat-schema-agent-sample-switcher")).not.toBeInTheDocument();
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────
   // CF-18: F2 chat input wire-up. Replaces the visual stub with a real
   // form that posts via sendChatMessage and renders the assistant turn
   // in the conversation body. Mirrors InteractView (F5).
   // ────────────────────────────────────────────────────────────────────
   describe("F2 chat input (CF-18)", () => {
     it("renders a real input + send button (not the visual stub copy)", () => {
-      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -247,12 +288,13 @@ describe("OnboardingChatColumn", () => {
           citations: [],
           suggestedActions: [],
           tools: [],
+          proposedSchemaField: null,
         },
         compressionRan: false,
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -284,7 +326,7 @@ describe("OnboardingChatColumn", () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Failed to fetch"));
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -304,7 +346,7 @@ describe("OnboardingChatColumn", () => {
     it("504 → renders 'took too long' copy (CF-08)", async () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("timeout", 504, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -321,7 +363,7 @@ describe("OnboardingChatColumn", () => {
     it("401 → renders 'sign in to continue' copy (CF-08)", async () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("unauth", 401, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -338,7 +380,7 @@ describe("OnboardingChatColumn", () => {
     it("501 → renders 'can't answer that yet' copy (CF-08)", async () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("nyi", 501, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -354,7 +396,7 @@ describe("OnboardingChatColumn", () => {
 
     it("empty / whitespace input does not post", async () => {
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<OnboardingChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -363,6 +405,154 @@ describe("OnboardingChatColumn", () => {
       await user.click(screen.getByTestId("onboarding-chat-send"));
       expect(sendChatMessage).not.toHaveBeenCalled();
       expect(screen.queryByTestId("onboarding-chat-live-user")).not.toBeInTheDocument();
+    });
+  });
+
+  // RT-01 (round-trip contract; discipline.md Rule 9 closure gate).
+  // The chat handler persists every turn to chat_messages. Before
+  // RT-01 the UI never read them back, so a refresh wiped the live
+  // thread. These tests assert the on-mount hydration AND lock in
+  // the race rule (optimistic state wins over a slow hydrate).
+  describe("RT-01 hydrate liveTurns from server on mount", () => {
+    it("renders persisted turns on first mount (refresh survival)", async () => {
+      vi.mocked(listChatMessages).mockResolvedValueOnce([
+        {
+          id: "m1",
+          chatSessionId: "rt-mount",
+          turnIndex: 1,
+          role: "user",
+          content: "what is the bill total?",
+          errorCode: null,
+        },
+        {
+          id: "m2",
+          chatSessionId: "rt-mount",
+          turnIndex: 2,
+          role: "assistant",
+          content: "The bill total is $7,613.20.",
+          errorCode: null,
+        },
+      ]);
+
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      await waitFor(() => {
+        expect(listChatMessages).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-chat-live-user")).toHaveTextContent(
+          "what is the bill total?",
+        );
+        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+          "The bill total is $7,613.20.",
+        );
+      });
+    });
+
+    it("filters out system-role rows (UI only renders user + assistant)", async () => {
+      vi.mocked(listChatMessages).mockResolvedValueOnce([
+        { id: "s1", chatSessionId: "rt-sys", turnIndex: 0, role: "system", content: "system bootstrap", errorCode: null },
+        { id: "u1", chatSessionId: "rt-sys", turnIndex: 1, role: "user", content: "hi there", errorCode: null },
+      ]);
+
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-chat-live-user")).toHaveTextContent("hi there");
+      });
+      expect(screen.queryByText(/system bootstrap/i)).not.toBeInTheDocument();
+    });
+
+    it("empty persisted thread leaves the UI in its pre-RT-01 state (no live bubbles)", async () => {
+      // Default mock is mockResolvedValue([]) already; explicit here
+      // so the test reads cleanly.
+      vi.mocked(listChatMessages).mockResolvedValueOnce([]);
+
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      await waitFor(() => {
+        expect(listChatMessages).toHaveBeenCalledTimes(1);
+      });
+      expect(screen.queryByTestId("onboarding-chat-live-user")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("onboarding-chat-live-assistant")).not.toBeInTheDocument();
+    });
+
+    it("hydration failure is non-fatal — the UI still mounts + accepts new sends", async () => {
+      vi.mocked(listChatMessages).mockRejectedValueOnce(
+        new ChatApiError("/api/chat-sessions/rt-fail/messages failed: 500", 500, null),
+      );
+
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      // Component still rendered + input still works.
+      expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
+      expect(screen.getByTestId("onboarding-chat-input")).toBeInTheDocument();
+    });
+
+    it("does NOT clobber optimistic state — if the user types while hydrate is in flight, the optimistic turn wins", async () => {
+      // Make hydrate hang so the user-typed message lands first.
+      let resolveHydrate: (msgs: never[]) => void = () => {};
+      vi.mocked(listChatMessages).mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveHydrate = resolve as (msgs: never[]) => void;
+        }) as ReturnType<typeof listChatMessages>,
+      );
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-new",
+        assistantMessageId: "a-new",
+        reply: {
+          mode: "rag",
+          answer: "fresh reply from server",
+          citations: [],
+          suggestedActions: [],
+          tools: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      // Type + send while hydrate is still pending.
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "live typed message");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+          "fresh reply from server",
+        );
+      });
+
+      // Now resolve hydrate with an old persisted thread. The component
+      // already has optimistic turns; hydrate must not overwrite them.
+      await act(async () => {
+        resolveHydrate([]);
+        await Promise.resolve();
+      });
+
+      // Optimistic turn + reply remain.
+      expect(screen.getByTestId("onboarding-chat-live-user")).toHaveTextContent(
+        "live typed message",
+      );
+      expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+        "fresh reply from server",
+      );
     });
   });
 
@@ -383,7 +573,7 @@ describe("OnboardingChatColumn", () => {
     renderWithOnboardingProviders(
       <>
         <GateOpener />
-        <OnboardingChatColumn />
+        <ChatColumn />
       </>,
       { initialFrame: "f1", initialScenario: null },
     );
@@ -398,5 +588,134 @@ describe("OnboardingChatColumn", () => {
       screen.queryByTestId("gate-typing-indicator") !== null ||
       screen.queryByTestId("gate-rail-preamble") !== null;
     expect(hasGateIndicator).toBe(true);
+  });
+
+  // UI-05 (2026-05-27) — steady-mode rendering. The widget contract
+  // says onboarding + steady use the same production widget with a
+  // `mode` prop. These tests pin the steady contract:
+  //   - No scripted decorations (thinking-stream, sample-switcher,
+  //     Pick-a-view pills, scenario header) — they're onboarding-only.
+  //   - RT-01 hydration still works (the persistence + render path
+  //     is the load-bearing shared surface).
+  //   - Send path still posts to /api/chat/messages and renders the reply.
+  describe("UI-05 steady mode", () => {
+    it("renders the bare steady conversation — no scripted decorations", async () => {
+      // Mount with mode="steady" outside the onboarding tree to mimic
+      // SteadyShell's parent context. We still wrap with the
+      // onboarding providers to keep ChatStore + AuthContext available;
+      // the steady branch short-circuits before reading
+      // OnboardingSession/ScenarioRegistry.
+      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      // Steady-specific anchor.
+      expect(screen.getByTestId("steady-chat-conversation")).toBeInTheDocument();
+
+      // No onboarding-only decorations.
+      expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("onboarding-chat-sample-switch")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("onboarding-chat-pick-a-view")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Reading/i)).not.toBeInTheDocument();
+    });
+
+    it("RT-01 hydration: persisted thread renders on mount", async () => {
+      vi.mocked(listChatMessages).mockResolvedValueOnce([
+        {
+          id: "m1",
+          chatSessionId: "steady-mount",
+          turnIndex: 1,
+          role: "user",
+          content: "what is the total?",
+          errorCode: null,
+        },
+        {
+          id: "m2",
+          chatSessionId: "steady-mount",
+          turnIndex: 2,
+          role: "assistant",
+          content: "The total is $42.00.",
+          errorCode: null,
+        },
+      ]);
+
+      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      await waitFor(() => {
+        expect(listChatMessages).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("steady-chat-live-user")).toHaveTextContent(
+          "what is the total?",
+        );
+        expect(screen.getByTestId("steady-chat-live-assistant")).toHaveTextContent(
+          "The total is $42.00.",
+        );
+      });
+    });
+
+    it("send path posts a message and renders the reply", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-steady",
+        assistantMessageId: "a-steady",
+        reply: {
+          mode: "rag",
+          answer: "Steady reply.",
+          citations: [],
+          suggestedActions: [],
+          tools: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "hello");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("steady-chat-live-user")).toHaveTextContent("hello");
+        expect(screen.getByTestId("steady-chat-live-assistant")).toHaveTextContent(
+          "Steady reply.",
+        );
+      });
+      // Steady sends should NOT carry isOnboarding=true.
+      const sendCall = vi.mocked(sendChatMessage).mock.calls[0][0];
+      expect(sendCall.sessionMeta.isOnboarding).toBe(false);
+    });
+
+    it("renders the empty-thread placeholder when no persisted turns exist", async () => {
+      vi.mocked(listChatMessages).mockResolvedValueOnce([]);
+      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("steady-chat-empty")).toBeInTheDocument();
+      });
+      // Empty placeholder gone once a turn lands.
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u",
+        assistantMessageId: "a",
+        reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [], proposedSchemaField: null },
+        compressionRan: false,
+      });
+      const user = userEvent.setup();
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "ping");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await waitFor(() => {
+        expect(screen.queryByTestId("steady-chat-empty")).not.toBeInTheDocument();
+      });
+    });
   });
 });

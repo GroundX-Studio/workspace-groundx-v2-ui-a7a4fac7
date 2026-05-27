@@ -11,6 +11,16 @@ RUN npm ci
 FROM deps AS build
 COPY app app
 RUN npm --workspace app run build
+# OB-05 — drop sourcemaps from the runtime image. `vite build` emits
+# `.map` files alongside the bundles (mode "hidden" — no
+# sourceMappingURL comment in the JS, so browsers don't auto-fetch),
+# but nginx would still serve them at the .map URL if requested. The
+# CI deploy flow uploads them to Sentry FIRST (docs/agents/observability.md
+# § Source-map upload) and then deletes from `app/dist` before the
+# image build. This RUN is the defense-in-depth: if the CI upload
+# step isn't wired yet (no Sentry secret), maps still never reach
+# the client. If CI runs upload + delete first, this is a no-op.
+RUN find /workspace/app/dist -name "*.map" -delete
 
 FROM nginx:1.27-alpine
 ENV MIDDLEWARE_SERVICE_URL=http://groundx-web-ui-middleware:3001

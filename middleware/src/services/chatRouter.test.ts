@@ -353,7 +353,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     const { client, calls } = spyClient();
     await searchGroundX("hello", { kind: "bucket", bucketId: 42 }, client, "k");
     expect(calls).toHaveLength(1);
-    expect(calls[0].path).toBe("/v1/search/42");
+    expect(calls[0].path).toBe("/search/42");
     expect(calls[0].body).toEqual({ query: "hello", n: 6 });
     expect(calls[0].apiKey).toBe("k");
   });
@@ -361,7 +361,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
   it("bucket scope with ONE project id → adds filter: { projectId: P }", async () => {
     const { client, calls } = spyClient();
     await searchGroundX("hello", { kind: "bucket", bucketId: 42, projectIds: ["proj-A"] }, client, "k");
-    expect(calls[0].path).toBe("/v1/search/42");
+    expect(calls[0].path).toBe("/search/42");
     expect(calls[0].body).toEqual({
       query: "hello",
       n: 6,
@@ -387,14 +387,14 @@ describe("searchGroundX (ContentScope dispatch)", () => {
   it("group scope → POST /v1/search/{groupId} with no filter", async () => {
     const { client, calls } = spyClient();
     await searchGroundX("hello", { kind: "group", groupId: 99 }, client, "k");
-    expect(calls[0].path).toBe("/v1/search/99");
+    expect(calls[0].path).toBe("/search/99");
     expect(calls[0].body).toEqual({ query: "hello", n: 6 });
   });
 
   it("documents scope → POST /v1/search/documents + documentIds in body", async () => {
     const { client, calls } = spyClient();
     await searchGroundX("hello", { kind: "documents", documentIds: ["d1", "d2"] }, client, "k");
-    expect(calls[0].path).toBe("/v1/search/documents");
+    expect(calls[0].path).toBe("/search/documents");
     expect(calls[0].body).toEqual({
       query: "hello",
       n: 6,
@@ -413,7 +413,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { client, calls } = spyClient();
     await searchGroundX("hello", { kind: "unknown" }, client, "k");
-    expect(calls[0].path).toBe("/v1/search/documents");
+    expect(calls[0].path).toBe("/search/documents");
     expect(calls[0].body).toEqual({ query: "hello", n: 6 });
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/kind=unknown/));
   });
@@ -505,7 +505,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
         "k",
         { rbacFilter: { tenant: "t-7" } },
       );
-      expect(calls[0].path).toBe("/v1/search/99");
+      expect(calls[0].path).toBe("/search/99");
       expect(calls[0].body).toEqual({
         query: "hello",
         n: 6,
@@ -870,7 +870,7 @@ describe("CF-06 refusal calibration in callGroundedLlm", () => {
     });
   }
 
-  it("system prompt instructs a canonical refusal phrase + no-fill rule", async () => {
+  it("system prompt forbids fabrication + handles greetings vs. content separately", async () => {
     const groundxClient: GroundXClient = {
       forward: vi.fn(async () =>
         jsonOk({ search: { results: [] } }),
@@ -890,10 +890,12 @@ describe("CF-06 refusal calibration in callGroundedLlm", () => {
     });
     const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body);
     const systemContent = body.messages.find((m: { role: string }) => m.role === "system").content;
-    // System prompt must contain the refusal phrase + a "do not
-    // invent / no general knowledge" rule.
-    expect(systemContent).toContain(GROUNDED_REFUSAL_PHRASE);
-    expect(systemContent).toMatch(/don't (use|rely on) (your )?general knowledge|do not invent/i);
+    // No-fabrication invariants — phrased flexibly so the prompt can
+    // evolve without rewriting tests on every tone pass.
+    expect(systemContent).toMatch(/don't invent|do not invent|don't fabricat/i);
+    expect(systemContent).toMatch(/general knowledge/i);
+    // Three-mode behavior — greetings/meta turns are NOT refusals.
+    expect(systemContent).toMatch(/greeting|hello|hi/i);
   });
 
   it("when LLM uses the refusal phrase, it passes through to the user unchanged", async () => {
@@ -1026,5 +1028,207 @@ describe("CF-06 structured citations wired into runRagPipeline", () => {
     });
     expect(reply.citations).toHaveLength(2);
     expect(reply.citations.map((c) => c.documentId).sort()).toEqual(["d1", "d2"]);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// UI-01 Phase 2a — propose-schema-field tool. The grounded LLM may
+// emit a `proposedSchemaField` entry in its fenced JSON block when the
+// user asks to add a field to the schema. The chatRouter validates
+// the shape and threads it through `ChatRouterResponse` so the
+// frontend can render an Accept/Reject card.
+// ────────────────────────────────────────────────────────────────────
+
+describe("parseGroundedAnswer — proposedSchemaField (UI-01 Phase 2a)", () => {
+  it("extracts a well-formed proposedSchemaField and strips the block", () => {
+    const raw = [
+      "I can add a 'total tax' field to the statement category.",
+      "",
+      "```json",
+      '{"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
+      "```",
+    ].join("\n");
+    const result = parseGroundedAnswer(raw);
+    expect(result.proposedSchemaField).toEqual({
+      categoryId: "statement",
+      name: "total_tax",
+      type: "NUMBER",
+      description: "Total tax billed this period.",
+      // proposal-envelope-provenance: parser tags successful parses
+      // with versioned provenance for the renderer.
+      provenance: { version: "v1", verified: true },
+    });
+    expect(result.cleanedAnswer).toBe(
+      "I can add a 'total tax' field to the statement category.",
+    );
+    expect(result.cleanedAnswer).not.toContain("proposedSchemaField");
+  });
+
+  it("returns null when no JSON block is present", () => {
+    const result = parseGroundedAnswer("Plain reply without a fenced block.");
+    expect(result.proposedSchemaField).toBeNull();
+  });
+
+  it("returns null when proposedSchemaField field is missing in the JSON", () => {
+    const raw = 'Body.\n\n```json\n{"somethingElse":1}\n```';
+    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
+  });
+
+  it("returns null when proposedSchemaField has wrong shape (missing required fields)", () => {
+    const raw =
+      'Body.\n\n```json\n{"proposedSchemaField":{"name":"x","type":"NUMBER"}}\n```';
+    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
+  });
+
+  it("returns null when proposedSchemaField type is not one of STRING/NUMBER/DATE/BOOLEAN", () => {
+    const raw = [
+      "Body.",
+      "",
+      "```json",
+      '{"proposedSchemaField":{"categoryId":"c","name":"n","type":"OBJECT","description":"d"}}',
+      "```",
+    ].join("\n");
+    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
+  });
+
+  // ── proposal-envelope-provenance ────────────────────────────────────
+
+  it("attaches provenance = {version: 'v1', verified: true} on a well-formed envelope (proposal-envelope-provenance)", () => {
+    const raw = [
+      "Adding total tax.",
+      "",
+      "```json",
+      '{"proposedSchemaField":{"version":"v1","categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
+      "```",
+    ].join("\n");
+    const result = parseGroundedAnswer(raw);
+    expect(result.proposedSchemaField).not.toBeNull();
+    expect(result.proposedSchemaField?.provenance).toEqual({ version: "v1", verified: true });
+  });
+
+  it("backfills provenance v1 when the envelope omits the version literal (proposal-envelope-provenance)", () => {
+    // Pre-envelope fixtures don't carry `version`. The parser MUST
+    // still accept them and tag provenance as v1 so the rendered card
+    // shows `envelope verified`.
+    const raw = [
+      "Adding total tax.",
+      "",
+      "```json",
+      '{"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
+      "```",
+    ].join("\n");
+    const result = parseGroundedAnswer(raw);
+    expect(result.proposedSchemaField?.provenance).toEqual({ version: "v1", verified: true });
+  });
+
+  it("drops the proposal when categoryId is missing (proposal-envelope-provenance)", () => {
+    const raw = [
+      "Adding total tax.",
+      "",
+      "```json",
+      '{"proposedSchemaField":{"version":"v1","name":"total_tax","type":"NUMBER","description":"…"}}',
+      "```",
+    ].join("\n");
+    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
+  });
+
+  it("drops the proposal when the version literal is unsupported (proposal-envelope-provenance)", () => {
+    const raw = [
+      "Adding total tax.",
+      "",
+      "```json",
+      '{"proposedSchemaField":{"version":"v2","categoryId":"statement","name":"total_tax","type":"NUMBER","description":"…"}}',
+      "```",
+    ].join("\n");
+    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
+  });
+
+  it("co-exists with citations + suggestedIntent in the same JSON block", () => {
+    const raw = [
+      "Adding total tax.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"d1","page":1,"quote":"Tax: $14"}],"suggestedIntent":{"intent":"edit-schema","confidence":0.9,"reason":"user asked to add a field"},"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
+      "```",
+    ].join("\n");
+    const result = parseGroundedAnswer(raw);
+    expect(result.proposedSchemaField).toMatchObject({
+      categoryId: "statement",
+      name: "total_tax",
+      type: "NUMBER",
+    });
+    expect(result.structuredCitations).toEqual([
+      { documentId: "d1", page: 1, quote: "Tax: $14" },
+    ]);
+    expect(result.suggestedIntent).toMatchObject({ intent: "edit-schema", confidence: 0.9 });
+    expect(result.cleanedAnswer).toBe("Adding total tax.");
+  });
+});
+
+describe("UI-01 Phase 2a — proposedSchemaField threading in runRagPipeline", () => {
+  function jsonOk(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  function mkClients(llmAnswer: string): { groundxClient: GroundXClient; llmClient: LlmClient } {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: {
+            results: [{ documentId: "utility-bill-2026-04", pageNumber: 1, text: "Tax: $14" }],
+          },
+        }),
+      ),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
+    };
+    return { groundxClient, llmClient };
+  }
+
+  it("propose-card payload threads through `reply.proposedSchemaField`", async () => {
+    const answer = [
+      "I can add a 'total tax' field to the statement category.",
+      "",
+      "```json",
+      '{"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
+      "```",
+    ].join("\n");
+    const { groundxClient, llmClient } = mkClients(answer);
+    const reply = await routeChat(
+      makeRequest({ newUserMessage: "Can you add a field for total tax?" }),
+      {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(reply.proposedSchemaField).toMatchObject({
+      categoryId: "statement",
+      name: "total_tax",
+      type: "NUMBER",
+    });
+    expect(reply.answer).toBe("I can add a 'total tax' field to the statement category.");
+  });
+
+  it("no propose-card → reply.proposedSchemaField is null", async () => {
+    const { groundxClient, llmClient } = mkClients("Just a plain answer about tax.");
+    const reply = await routeChat(
+      makeRequest({ newUserMessage: "What is the tax?" }),
+      {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    expect(reply.proposedSchemaField).toBeNull();
   });
 });

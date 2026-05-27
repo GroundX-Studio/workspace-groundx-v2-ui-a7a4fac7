@@ -1,6 +1,7 @@
 import { useMemo, type FC, type ReactNode } from "react";
 
-import { ChatStoreProvider, useChatStore, type ChatSession } from "@/contexts/ChatStoreContext";
+import { ChatStoreProvider, EMPTY_PENDING_SCHEMA_OVERLAY, EMPTY_VIEWER_SESSION, useChatStore, type ChatSession } from "@/contexts/ChatStoreContext";
+import { ChatStoreServerHydrator } from "@/contexts/ChatStoreContext/ChatStoreServerHydrator";
 
 import type { EntityKey, EntityRegistryApi, EntityRegistryState, EntitySession } from "./types";
 import { makeEntityKey } from "./types";
@@ -75,6 +76,8 @@ export const EntityRegistryProvider: FC<EntityRegistryProviderProps> = ({
       activeEntityKey: initialActiveKey,
       viewerHistory: [],
       currentIntent: null,
+      pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
+      viewer: EMPTY_VIEWER_SESSION,
       gate: { status: "idle" },
       signupOpen: false,
       isOnboardingSession: true,
@@ -95,6 +98,9 @@ export const EntityRegistryProvider: FC<EntityRegistryProviderProps> = ({
       initialActiveSessionId={initialActiveSessionId}
       autoSeedDefaultSession={!explicitlySeeded}
     >
+      {/* RT-05 — on auth-resolved, fetch the user's persisted chat
+          sessions and merge into ChatStore. Renders nothing. */}
+      <ChatStoreServerHydrator />
       {children}
     </ChatStoreProvider>
   );

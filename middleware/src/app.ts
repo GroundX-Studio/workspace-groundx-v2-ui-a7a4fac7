@@ -14,7 +14,8 @@ import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/met
 import { CSRF_COOKIE, csrfMiddleware } from "./middleware/csrf.js";
 import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
-import { ChatHandlerError, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
+import { ChatHandlerError, deriveRagContentScope, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
+import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
 import { sendUpstreamResponse } from "./services/http.js";
 import type {
   AppRepository,
@@ -405,6 +406,12 @@ export function createApp({
         isOnboarding: input.isOnboarding,
         activeEntityKey: input.activeEntityKey ?? null,
         currentIntent: existing?.currentIntent ?? null,
+        // `master-viewer-session` Phase 1: viewer slot defaults to
+        // null on creation; PATCH /api/chat-sessions/:id populates
+        // them as the user accumulates viewer history / overlays.
+        viewerHistory: existing?.viewerHistory ?? null,
+        viewerOverlays: existing?.viewerOverlays ?? null,
+        viewerWorkspace: existing?.viewerWorkspace ?? null,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
         archivedAt: existing?.archivedAt ?? null,
@@ -415,6 +422,42 @@ export function createApp({
         ownerUserId: record.ownerUserId,
         ownerAnonId: record.ownerAnonId,
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // RT-01 — read the persisted thread for a chat session. The chat
+  // handler writes every user + assistant turn to chat_messages on
+  // POST /api/chat/messages; this is the matching read endpoint so
+  // the UI can hydrate on mount and survive a refresh. Without it
+  // the visible thread lives only in component state and vanishes
+  // when the user reloads, even though the DB rows are intact.
+  //
+  // Ownership: the chat_sessions row carries ownerAnonId (cookie
+  // session id for anon visitors) and ownerUserId (Partner customer
+  // id once authed). The same chat session can flip from anon to
+  // authed mid-flow via /api/chat-sessions/claim, so we accept EITHER
+  // match — the visitor still owns the same cookie pre/post-sign-up.
+  app.get("/api/chat-sessions/:id/messages", apiLimiter, requireSession, async (req, res, next) => {
+    try {
+      const session = req.session!;
+      const chatSessionId = req.params.id;
+      const row = await repository.getChatSession(chatSessionId);
+      if (!row) {
+        res.status(404).json({ error: "chat_session_not_found" });
+        return;
+      }
+      const ownsViaUser =
+        row.ownerUserId !== null && row.ownerUserId === session.groundxUsername;
+      const ownsViaAnon =
+        row.ownerAnonId !== null && row.ownerAnonId === session.id;
+      if (!ownsViaUser && !ownsViaAnon) {
+        res.status(403).json({ error: "chat_session_forbidden" });
+        return;
+      }
+      const messages = await repository.listChatMessages(chatSessionId);
+      res.json({ messages });
     } catch (error) {
       next(error);
     }
@@ -443,6 +486,391 @@ export function createApp({
       }
       const result = await repository.rekeyAnonymousChatSessions(session.id, ownerUserId);
       res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // RT-05 — list the signed-in user's chat sessions for steady-mode
+  // hydration. Without this, the client-side SessionSwitcher reads
+  // from ChatStore which hydrates from localStorage only — a
+  // signed-in user on a new device sees zero sessions despite the
+  // DB carrying them. Anonymous visitors are scoped to a single
+  // cookie session and have no cross-device list, so this is
+  // gated on requireAuthenticatedUser (401 for anon / no cookie).
+  //
+  // Ownership: rows are filtered by `ownerUserId === groundxUsername`
+  // (the partner-issued customer id stored on the session). No
+  // cross-tenant leakage; no need to scrub fields server-side
+  // because every row is the caller's own.
+  app.get("/api/chat-sessions", apiLimiter, requireAuthenticatedUser, async (req, res, next) => {
+    try {
+      const session = req.session!;
+      const ownerUserId = session.groundxUsername;
+      if (!ownerUserId) {
+        // Defensive: requireAuthenticatedUser already enforces this,
+        // but the type checker doesn't know that.
+        res.status(401).json({ error: "no_signed_in_user" });
+        return;
+      }
+      const sessions = await repository.listChatSessionsForUser(ownerUserId);
+      res.json({ sessions });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // RT-04 — PATCH endpoint to keep `current_intent` (and
+  // `active_entity_key`) up to date as the user navigates the
+  // canvas. Before RT-04 the row was seeded at session-create
+  // time and never updated; chatHandler reads currentIntent every
+  // turn for the bundled LLM context, so it went stale on the
+  // first navigation. Now CanvasOrchestrator.setCurrentIntent
+  // (and entity activation) PATCH after the in-memory mutation,
+  // and the next chat turn's bundling sees the live value.
+  //
+  // Merge semantics: only fields present in the body are written.
+  // Title / isOnboarding / ownership / timestamps are preserved
+  // by reading the row first and overlaying the body.
+  app.patch("/api/chat-sessions/:id", apiLimiter, requireSession, async (req, res, next) => {
+    try {
+      const session = req.session!;
+      const chatSessionId = req.params.id;
+      const body = req.body as
+        | {
+            currentIntent?: unknown;
+            activeEntityKey?: unknown;
+            // `master-viewer-session` Phase 1 — three nullable viewer slots.
+            viewerHistory?: unknown;
+            viewerOverlays?: unknown;
+            viewerWorkspace?: unknown;
+          }
+        | null;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      const hasCurrentIntent = Object.prototype.hasOwnProperty.call(body, "currentIntent");
+      const hasActiveEntityKey = Object.prototype.hasOwnProperty.call(body, "activeEntityKey");
+      const hasViewerHistory = Object.prototype.hasOwnProperty.call(body, "viewerHistory");
+      const hasViewerOverlays = Object.prototype.hasOwnProperty.call(body, "viewerOverlays");
+      const hasViewerWorkspace = Object.prototype.hasOwnProperty.call(body, "viewerWorkspace");
+      // Body must carry at least one updatable field.
+      if (
+        !hasCurrentIntent &&
+        !hasActiveEntityKey &&
+        !hasViewerHistory &&
+        !hasViewerOverlays &&
+        !hasViewerWorkspace
+      ) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      // currentIntent: object | null when provided.
+      if (hasCurrentIntent) {
+        const v = body.currentIntent;
+        const ok = v === null || (typeof v === "object" && !Array.isArray(v));
+        if (!ok) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+      }
+      // activeEntityKey: string | null when provided.
+      if (hasActiveEntityKey) {
+        const v = body.activeEntityKey;
+        const ok = v === null || typeof v === "string";
+        if (!ok) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+      }
+      // viewerHistory: array | null when provided. Each element is an
+      // opaque JSON object (a ViewerStep) — the server doesn't
+      // validate per-step shape so the contract can evolve client-side.
+      if (hasViewerHistory) {
+        const v = body.viewerHistory;
+        const ok = v === null || Array.isArray(v);
+        if (!ok) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+      }
+      // viewerOverlays: array | null when provided.
+      if (hasViewerOverlays) {
+        const v = body.viewerOverlays;
+        const ok = v === null || Array.isArray(v);
+        if (!ok) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+      }
+      // viewerWorkspace: object | null when provided.
+      if (hasViewerWorkspace) {
+        const v = body.viewerWorkspace;
+        const ok = v === null || (typeof v === "object" && !Array.isArray(v));
+        if (!ok) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+      }
+
+      // FK + ownership — same pattern as the other RT routes.
+      const existing = await repository.getChatSession(chatSessionId);
+      if (!existing) {
+        res.status(404).json({ error: "chat_session_not_found" });
+        return;
+      }
+      const ownedByUser =
+        session.groundxUsername && existing.ownerUserId === session.groundxUsername;
+      const ownedByAnon = !session.groundxUsername && existing.ownerAnonId === session.id;
+      if (!ownedByUser && !ownedByAnon) {
+        res.status(403).json({ error: "not_session_owner" });
+        return;
+      }
+
+      // Merge: overlay body fields onto the existing row, preserve
+      // everything else (title, isOnboarding, ownership, createdAt).
+      const now = new Date();
+      const merged: ChatSessionRecord = {
+        ...existing,
+        currentIntent: hasCurrentIntent
+          ? (body.currentIntent as Record<string, unknown> | null)
+          : existing.currentIntent,
+        activeEntityKey: hasActiveEntityKey
+          ? (body.activeEntityKey as string | null)
+          : existing.activeEntityKey,
+        // `master-viewer-session` Phase 1 — three viewer slots merge with
+        // the same null-preserving semantics as the legacy fields.
+        viewerHistory: hasViewerHistory
+          ? (body.viewerHistory as unknown[] | null)
+          : existing.viewerHistory,
+        viewerOverlays: hasViewerOverlays
+          ? (body.viewerOverlays as unknown[] | null)
+          : existing.viewerOverlays,
+        viewerWorkspace: hasViewerWorkspace
+          ? (body.viewerWorkspace as Record<string, unknown> | null)
+          : existing.viewerWorkspace,
+        updatedAt: now,
+      };
+      await repository.upsertChatSession(merged);
+      res.json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // RT-03 — durable write side for the `chat_session_entities`
+  // table. chatHandler.ts:249 + structuredHandler read this every
+  // chat turn for the "active entity context" axis of LLM bundling,
+  // but before RT-03 nothing in application code wrote rows (only
+  // tests did), so the reads always returned []. EntityRegistry's
+  // upsert/update paths now PUT here after each in-memory mutation.
+  //
+  // Merge semantics: the thin client knows about lastFrame +
+  // completedFramesJson + the JSON blobs, NOT bucketId/projectIds/
+  // groupId/documentIds (those get populated server-side from
+  // chat-handler processing). We READ the existing row first and
+  // overlay the body fields onto it so server-only fields survive.
+  //
+  // Same anon/user ownership pattern as POST /api/intent + POST
+  // /api/viewer-events.
+  app.put("/api/chat-sessions/:id/entities/:entityKey", apiLimiter, requireSession, async (req, res, next) => {
+    try {
+      const session = req.session!;
+      const chatSessionId = req.params.id;
+      const entityKey = req.params.entityKey;
+      const body = req.body as
+        | {
+            lastFrame?: unknown;
+            completedFramesJson?: unknown;
+            scanProgressJson?: unknown;
+            extractedValuesJson?: unknown;
+          }
+        | null;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      // All four body fields are optional but must be the right type
+      // WHEN provided. lastFrame must be string-or-null; the three
+      // *Json fields must be string-or-null (JSON-encoded payload).
+      const lastFrameOk =
+        body.lastFrame === undefined ||
+        body.lastFrame === null ||
+        typeof body.lastFrame === "string";
+      const completedOk =
+        body.completedFramesJson === undefined ||
+        body.completedFramesJson === null ||
+        typeof body.completedFramesJson === "string";
+      const scanOk =
+        body.scanProgressJson === undefined ||
+        body.scanProgressJson === null ||
+        typeof body.scanProgressJson === "string";
+      const extractedOk =
+        body.extractedValuesJson === undefined ||
+        body.extractedValuesJson === null ||
+        typeof body.extractedValuesJson === "string";
+      if (!lastFrameOk || !completedOk || !scanOk || !extractedOk) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      // FK + ownership check (same shape as POST /api/intent +
+      // POST /api/viewer-events).
+      const chatSession = await repository.getChatSession(chatSessionId);
+      if (!chatSession) {
+        res.status(404).json({ error: "chat_session_not_found" });
+        return;
+      }
+      const ownedByUser =
+        session.groundxUsername && chatSession.ownerUserId === session.groundxUsername;
+      const ownedByAnon = !session.groundxUsername && chatSession.ownerAnonId === session.id;
+      if (!ownedByUser && !ownedByAnon) {
+        res.status(403).json({ error: "not_session_owner" });
+        return;
+      }
+
+      // Merge: read existing row (if any), overlay body fields,
+      // preserve server-only scope refs + createdAt.
+      const existingRows = await repository.listChatSessionEntities(chatSessionId);
+      const existing = existingRows.find((e) => e.entityKey === entityKey) ?? null;
+      const now = new Date();
+      const merged = {
+        chatSessionId,
+        entityKey,
+        lastFrame:
+          body.lastFrame !== undefined ? (body.lastFrame as string | null) : existing?.lastFrame ?? null,
+        completedFramesJson:
+          body.completedFramesJson !== undefined
+            ? (body.completedFramesJson as string | null) ?? "[]"
+            : existing?.completedFramesJson ?? "[]",
+        scanProgressJson:
+          body.scanProgressJson !== undefined
+            ? (body.scanProgressJson as string | null)
+            : existing?.scanProgressJson ?? null,
+        extractedValuesJson:
+          body.extractedValuesJson !== undefined
+            ? (body.extractedValuesJson as string | null)
+            : existing?.extractedValuesJson ?? null,
+        // Server-only fields (CF-15 scope refs) — never overwritten
+        // by a client PUT. They flow in via chat-handler processing.
+        bucketId: existing?.bucketId ?? null,
+        projectIdsJson: existing?.projectIdsJson ?? null,
+        groupId: existing?.groupId ?? null,
+        documentIdsJson: existing?.documentIdsJson ?? null,
+        createdAt: existing?.createdAt ?? now,
+        lastVisitedAt: now,
+      };
+      await repository.upsertChatSessionEntity(merged);
+      res.json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // RT-02 — durable write side for the `viewer_events` table.
+  // chatHandler reads viewer_events on every chat turn for the
+  // "recent viewer history" context axis, but before RT-02 nothing
+  // in application code actually wrote rows (only tests did), so
+  // the read always returned []. ChatStore.appendViewerEvent now
+  // POSTs here fire-and-forget; the rows surface in the next
+  // bundled LLM context.
+  //
+  // Same ownership pattern as POST /api/intent: caller must own
+  // the chat_session_id either via groundxUsername (signed-in) or
+  // via the cookie session id (anon).
+  app.post("/api/viewer-events", apiLimiter, requireSession, async (req, res, next) => {
+    try {
+      const body = req.body as
+        | {
+            chatSessionId?: unknown;
+            timestamp?: unknown;
+            entityKey?: unknown;
+            action?: unknown;
+            source?: unknown;
+            detail?: unknown;
+          }
+        | null;
+      if (!body || typeof body !== "object") {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      const chatSessionId = typeof body.chatSessionId === "string" ? body.chatSessionId : null;
+      const timestamp = typeof body.timestamp === "number" ? body.timestamp : null;
+      const entityKey =
+        typeof body.entityKey === "string" || body.entityKey === null ? body.entityKey : undefined;
+      const action = typeof body.action === "string" ? body.action : null;
+      const source = typeof body.source === "string" ? body.source : null;
+      // Allowed enum values are kept in lockstep with ViewerEventAction
+      // + ViewerEventSource in middleware/src/types.ts. Add a row here
+      // when extending the enum on the types side.
+      const allowedActions = new Set<string>([
+        "opened",
+        "frame-advanced",
+        "extracted-value-viewed",
+        "citation-clicked",
+        "scan-completed",
+        "intent-dispatched",
+        "left",
+      ]);
+      const allowedSources = new Set<string>(["user", "agent", "tour", "system"]);
+      if (
+        !chatSessionId ||
+        timestamp == null ||
+        entityKey === undefined ||
+        !action ||
+        !allowedActions.has(action) ||
+        !source ||
+        !allowedSources.has(source)
+      ) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      // Detail must serialize cleanly to JSON; reject anything else.
+      let detailJson: string | null = null;
+      if (body.detail !== undefined && body.detail !== null) {
+        if (typeof body.detail !== "object" || Array.isArray(body.detail)) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        try {
+          detailJson = JSON.stringify(body.detail);
+        } catch {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+      }
+      // FK + ownership check (same shape as POST /api/intent).
+      const chatSession = await repository.getChatSession(chatSessionId);
+      if (!chatSession) {
+        res.status(404).json({ error: "chat_session_not_found" });
+        return;
+      }
+      const reqSession = req.session!;
+      const ownedByUser =
+        reqSession.groundxUsername && chatSession.ownerUserId === reqSession.groundxUsername;
+      const ownedByAnon = !reqSession.groundxUsername && chatSession.ownerAnonId === reqSession.id;
+      if (!ownedByUser && !ownedByAnon) {
+        res.status(403).json({ error: "not_session_owner" });
+        return;
+      }
+      await repository.appendViewerEvent({
+        id: randomUUID(),
+        chatSessionId,
+        timestamp,
+        entityKey: entityKey ?? null,
+        action: action as
+          | "opened"
+          | "frame-advanced"
+          | "extracted-value-viewed"
+          | "citation-clicked"
+          | "scan-completed"
+          | "intent-dispatched"
+          | "left",
+        source: source as "user" | "agent" | "tour" | "system",
+        detailJson,
+      });
+      res.status(201).json({ ok: true });
     } catch (error) {
       next(error);
     }
@@ -513,6 +941,172 @@ export function createApp({
       next(error);
     }
   });
+
+  // UI-01 Phase 2d — POST /api/extraction-schemas. Persists a named,
+  // user-owned snapshot of the F4 schema overlay so the user can come
+  // back to "Utility (with tax)" or "Loan (DTI variant)" without
+  // re-walking the chat flow. Gated on `requireAuthenticatedUser`
+  // because the row is keyed by `groundx_username` — anonymous
+  // sessions can edit the schema in-memory but must sign in to pin a
+  // template. 401 here surfaces a "sign in to save" nudge in the UI.
+  //
+  // Idempotent upsert: same `id` overwrites name + schema. Repository
+  // handles the ON DUPLICATE KEY UPDATE in MySQL (memory repository
+  // mirrors the semantics via Map.set).
+  app.post(
+    "/api/extraction-schemas",
+    apiLimiter,
+    requireAuthenticatedUser,
+    async (req, res, next) => {
+      try {
+        const session = req.session!;
+        const groundxUsername = session.groundxUsername;
+        if (!groundxUsername) {
+          // requireAuthenticatedUser already enforced this; defensive.
+          res.status(401).json({ error: "no_signed_in_user" });
+          return;
+        }
+        const body = req.body as
+          | {
+              id?: unknown;
+              name?: unknown;
+              schema?: unknown;
+            }
+          | null;
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        const id = typeof body.id === "string" && body.id.trim().length > 0 ? body.id.trim() : null;
+        const name =
+          typeof body.name === "string" && body.name.trim().length > 0 ? body.name.trim() : null;
+        const schema =
+          body.schema && typeof body.schema === "object" && !Array.isArray(body.schema)
+            ? (body.schema as Record<string, unknown>)
+            : null;
+        if (!id || !name || !schema) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        const now = new Date();
+        await repository.upsertExtractionSchema({
+          id,
+          groundxUsername,
+          name,
+          schemaJson: JSON.stringify(schema),
+          // First-write path: createdAt is preserved by ON DUPLICATE
+          // KEY UPDATE so re-saves don't reset the original creation
+          // timestamp; the column is only mutated on the initial
+          // INSERT branch.
+          createdAt: now,
+          updatedAt: now,
+        });
+        res.status(200).json({ id, name, updatedAt: now.toISOString() });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // UI-01 Phase 2c — focused per-field extraction. Fired by the chat
+  // propose-card on Accept so the new schema field has a real value
+  // rather than a manifest placeholder. Uses the same GroundX scope
+  // derivation as chatHandler (active entity → bucket/group/documents
+  // → env fallback) so the search hits the right snippets even when
+  // the active entity is the anon seed.
+  //
+  // Auth: `requireSession`. Anon visitors can extract against the
+  // samples bucket too — same trust model as the chat surface itself.
+  // Ownership: the chat_session row must be owned by the caller.
+  app.post(
+    "/api/extract-field",
+    apiLimiter,
+    requireSession,
+    async (req, res, next) => {
+      try {
+        const body = req.body as
+          | {
+              chatSessionId?: unknown;
+              field?:
+                | {
+                    name?: unknown;
+                    type?: unknown;
+                    description?: unknown;
+                  }
+                | null;
+            }
+          | null;
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        const chatSessionId = typeof body.chatSessionId === "string" ? body.chatSessionId : null;
+        const fieldIn = body.field;
+        const fieldName =
+          fieldIn && typeof fieldIn === "object" && typeof fieldIn.name === "string" ? fieldIn.name : null;
+        const fieldType =
+          fieldIn && typeof fieldIn === "object" && typeof fieldIn.type === "string" ? fieldIn.type : null;
+        const fieldDescription =
+          fieldIn && typeof fieldIn === "object" && typeof fieldIn.description === "string"
+            ? fieldIn.description
+            : null;
+        const validTypes = new Set<SchemaFieldType>(["STRING", "NUMBER", "DATE", "BOOLEAN"]);
+        if (
+          !chatSessionId ||
+          !fieldName ||
+          !fieldType ||
+          !validTypes.has(fieldType as SchemaFieldType) ||
+          fieldDescription === null
+        ) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+
+        const chatSession = await repository.getChatSession(chatSessionId);
+        if (!chatSession) {
+          res.status(404).json({ error: "chat_session_not_found" });
+          return;
+        }
+        const reqSession = req.session!;
+        const ownedByUser =
+          reqSession.groundxUsername && chatSession.ownerUserId === reqSession.groundxUsername;
+        const ownedByAnon = !reqSession.groundxUsername && chatSession.ownerAnonId === reqSession.id;
+        if (!ownedByUser && !ownedByAnon) {
+          res.status(403).json({ error: "not_session_owner" });
+          return;
+        }
+
+        // Same scope derivation chatHandler uses for routed chat —
+        // entity-derived scope wins, samples-bucket env fallback last.
+        const activeEntity = chatSession.activeEntityKey
+          ? await repository.getChatSessionEntity(chatSessionId, chatSession.activeEntityKey)
+          : null;
+        const contentScope = deriveRagContentScope(activeEntity, env.GROUNDX_SAMPLES_BUCKET_ID ?? null);
+        const groundxApiKey = reqSession.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY ?? null;
+
+        const result = await extractField(
+          {
+            field: {
+              name: fieldName,
+              type: fieldType as SchemaFieldType,
+              description: fieldDescription,
+            },
+            contentScope,
+          },
+          {
+            llmClient,
+            groundxClient,
+            groundxApiKey: groundxApiKey ?? undefined,
+            llmModelId: env.LLM_MODEL_ID,
+            mockMode: env.MOCK_MODE,
+          },
+        );
+        res.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   // The chat surface's single entry point. Routes through chatHandler,
   // which validates → persists the user message → builds the 3-axis
@@ -718,10 +1312,22 @@ function parseChatMessageRequest(body: unknown): HandleChatMessageRequest | null
   if (typeof body.newUserMessage !== "string") return null;
   const intent = body.intent;
   if (intent !== undefined && intent !== null && typeof intent !== "string") return null;
+  // scopeHint is optional; defensive validation so a malformed shape
+  // doesn't poison the LLM prompt.
+  let scopeHint: HandleChatMessageRequest["scopeHint"] = undefined;
+  if (isObject(body.scopeHint)) {
+    const fn = body.scopeHint.fileName;
+    const st = body.scopeHint.scenarioTitle;
+    scopeHint = {
+      fileName: typeof fn === "string" ? fn : fn === null ? null : undefined,
+      scenarioTitle: typeof st === "string" ? st : st === null ? null : undefined,
+    };
+  }
   return {
     chatSessionId: body.chatSessionId,
     newUserMessage: body.newUserMessage,
     intent: typeof intent === "string" ? intent : intent === null ? null : undefined,
+    scopeHint,
   };
 }
 

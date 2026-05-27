@@ -137,7 +137,12 @@ Re-seed with `npm --workspace middleware run seed -- utility`. The
 `refreshManifestIfChanged()` helper rewrites the carrier doc's
 filter so the next `/api/scenarios` fetch returns the slim manifest.
 
-### Step 4: backlog cleanup
+### Step 4: planning cleanup
+
+Migrate the affected requirements into the OpenSpec capability specs.
+Most of these legacy rows are obsolete in light of the
+GroundX-workflow rewire; surface the remaining work as new OpenSpec
+changes under `openspec/changes/`.
 
 | Item | New status |
 |---|---|
@@ -145,7 +150,7 @@ filter so the next `/api/scenarios` fetch returns the slim manifest.
 | SCEN-06 (real PDFs ingested) | Closed-as-obsolete. PDFs are already there; the view just wasn't reading them. |
 | TS-04 (widget integration tests) | **Re-anchor**: this row was always about adopting the production widgets. The current blocked classification was wrong — the widgets either exist in the scaffold (port them in) or need to be authored. Either way, tests follow the widgets. |
 | UR-01 (PdfViewer with pdfjs-dist) | Closure note update: the new flow is `PdfViewerWidget` reads `getGroundXDocumentXray(documentId)` → binary URL → existing `<PdfViewer>` primitive. The `previewUrl` field on `ScenarioDocument` becomes dead code. |
-| New backlog items | One per locked-control surface that needs the mode gate. E.g. "F3 schema editor locked in onboarding mode", "F7 connector setup locked in onboarding mode", etc. |
+| New OpenSpec changes | One per locked-control surface that needs the mode gate. E.g. "F3 schema editor locked in onboarding mode", "F7 connector setup locked in onboarding mode", etc. — file each under `openspec/changes/` against the relevant capability spec. |
 
 ## Open: chat seeds (`scenario.manifest.chatSeeds`)
 
@@ -210,7 +215,7 @@ Rough order of magnitude (with TDD on each):
 | Test rewrites for the 4 onboarding-view wrappers | ~2 hr |
 | Test rewrites for the new production widgets | ~3 hr |
 | Strip mock manifest + re-seed | ~30 min |
-| Backlog reconciliation | ~30 min |
+| OpenSpec reconciliation | ~30 min |
 
 **Total: ~15-16 hours.** This is the real cost of fixing the drift,
 not the ~5-6 hours I quoted earlier (which assumed view-in-place

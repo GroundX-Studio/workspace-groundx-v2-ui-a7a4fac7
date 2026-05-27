@@ -1,5 +1,18 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// ChatStoreProvider's mount effect calls ensureServerChatSession for
+// the active session (fixes the cascade of 404s seen pre-2026-05-27
+// when RT-02..05 endpoints fired before the chat_sessions row existed
+// server-side). Mock the helper so tests don't try to hit the network.
+vi.mock("@/api/chatSessions", async () => {
+  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
+  return {
+    ...actual,
+    ensureServerChatSession: vi.fn().mockResolvedValue(undefined),
+  };
+});
+import { ensureServerChatSession } from "@/api/chatSessions";
 
 import {
   ChatStoreProvider,
@@ -14,6 +27,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 
 beforeEach(() => {
   window.localStorage.clear();
+  vi.mocked(ensureServerChatSession).mockClear();
 });
 
 afterEach(() => {
@@ -510,6 +524,67 @@ describe("ChatStoreContext", () => {
       expect(sess).toBeDefined();
       expect(sess!.messages).toHaveLength(beforeMessages);
       expect(sess!.messages[0]?.content).toBe("this tab's message");
+    });
+  });
+
+  // Lived-order regression: before this fix, RT-02..05 endpoints
+  // (POST viewer-events, PUT entity, PATCH chat-session, GET messages)
+  // all 404'd in the window between client-side session mint and the
+  // first chat send — `sendChatMessage` had its own lazy ensure-create
+  // cache, but those telemetry/state-sync endpoints fired well before
+  // any chat. The RT-* unit tests modeled the happy path (explicit
+  // POST /api/chat-sessions before the dependent endpoint) so the
+  // production order — writes BEFORE ensure — was an untested gap.
+  // ChatStoreProvider's mount effect now fires ensureServerChatSession
+  // for every active session so the row exists before RT endpoints
+  // are called.
+  describe("eager server-side chat_sessions ensure (lived-order fix)", () => {
+    it("calls ensureServerChatSession when a session is minted via newSession", async () => {
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      let newId = "";
+      act(() => {
+        newId = result.current.newSession({ title: "Test session" });
+      });
+      await waitFor(() => {
+        const calls = vi.mocked(ensureServerChatSession).mock.calls;
+        const matched = calls.find((c) => c[0]?.id === newId);
+        expect(matched).toBeDefined();
+      });
+    });
+
+    it("includes the session's title + isOnboarding flag in the ensure payload", async () => {
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      let onboardingId = "";
+      act(() => {
+        onboardingId = result.current.newSession({
+          title: "Onboarding",
+          isOnboardingSession: true,
+        });
+      });
+      await waitFor(() => {
+        const matched = vi
+          .mocked(ensureServerChatSession)
+          .mock.calls.find((c) => c[0]?.id === onboardingId);
+        expect(matched).toBeDefined();
+        expect(matched![0]).toMatchObject({
+          id: onboardingId,
+          title: "Onboarding",
+          isOnboarding: true,
+        });
+      });
+    });
+
+    it("does not fire when ChatStoreProvider is mounted in ephemeral mode (tests opt out)", async () => {
+      const ephemeralWrapper = ({ children }: { children: React.ReactNode }) => (
+        <ChatStoreProvider ephemeral>{children}</ChatStoreProvider>
+      );
+      const { result } = renderHook(() => useChatStore(), { wrapper: ephemeralWrapper });
+      act(() => {
+        result.current.newSession({ title: "Ephemeral" });
+      });
+      // Let any potentially-firing effects flush.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(ensureServerChatSession).not.toHaveBeenCalled();
     });
   });
 });

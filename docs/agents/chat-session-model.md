@@ -172,13 +172,14 @@ old history gets compressed further.
   prompt variant + the "active summary" filter
   (`WHERE NOT EXISTS (SELECT 1 FROM conversation_summaries s2 WHERE s2.absorbed_summary_ids_json LIKE …)`).
 
-See backlog items CF-01 (closed: leaf + meta-compaction shape) and
-CF-17 (closed: configurable compression tunables — all six env vars
-wired) in `docs/agents/backlog.md`.
+The leaf + meta-compaction shape and the configurable compression
+tunables (six env vars) are already shipped; the durable
+chat-routing requirements live at `openspec/specs/chat-routing/spec.md`.
 
 The whole chain still runs in the request hot path on the
-chatHandler thread today; background-job migration is a separate
-follow-up.
+chatHandler thread today; background-job migration is the
+`Compression SHALL run off the request hot path` requirement in
+that capability spec.
 
 ## Migrating an anonymous session to signed-in
 

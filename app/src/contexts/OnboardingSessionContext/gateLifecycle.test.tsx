@@ -126,6 +126,44 @@ describe("LC3 · gate lifecycle state machine", () => {
     expect(result.current.state.gate.status).toBe("idle");
   });
 
+  // ── back-out from BYO signup must reset the gate ────────────────────
+
+  it("advanceFrame('f1') dismisses an OPEN gate (user backed out of signup)", () => {
+    // Bug repro: user clicks Sign Up on F1 (opens gate with trigger=byo),
+    // then navigates back to /onboarding. The URL handler fires
+    // advanceFrame("f1"). The gate must NOT remain open — otherwise the
+    // SignUpWidget keeps covering the canvas and the F1 picker can't
+    // launch a sample.
+    const { result } = renderHook(() => useOnboardingSession(), { wrapper });
+    act(() => result.current.openGate("byo"));
+    expect(result.current.state.gate.status).toBe("open");
+    act(() => result.current.advanceFrame("f1"));
+    // The open gate is dismissed when the user returns to the picker.
+    expect(result.current.state.gate.status).not.toBe("open");
+  });
+
+  it("advanceFrame('f1') preserves a COMMITTED gate (signed-in user stays signed-in)", () => {
+    // Defensive: a committed gate represents a signed-in session, which
+    // is global. Returning to F1 must NOT log the user out.
+    const { result } = renderHook(() => useOnboardingSession(), { wrapper });
+    act(() => result.current.openGate("save"));
+    act(() => result.current.commitGate("register"));
+    expect(result.current.state.gate.status).toBe("committed");
+    act(() => result.current.advanceFrame("f1"));
+    expect(result.current.state.gate.status).toBe("committed");
+  });
+
+  it("pickScenario dismisses an OPEN gate (user chose to engage with a sample instead)", () => {
+    // Defense in depth: even if advanceFrame("f1") wasn't called,
+    // pickScenario means the user committed to the sample flow — the
+    // SignUpWidget overlay must clear so UnderstandView can render.
+    const { result } = renderHook(() => useOnboardingSession(), { wrapper });
+    act(() => result.current.openGate("byo"));
+    expect(result.current.state.gate.status).toBe("open");
+    act(() => result.current.pickScenario("utility"));
+    expect(result.current.state.gate.status).not.toBe("open");
+  });
+
   it("dismissGate from committed is a no-op (committed wins)", () => {
     const { result } = renderHook(() => useOnboardingSession(), { wrapper });
     act(() => result.current.openGate("save"));

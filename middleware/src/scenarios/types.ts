@@ -25,6 +25,14 @@ export interface SchemaFieldDef {
   name: string;
   type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
   description: string;
+  /** F3a required-toggle; defaults to false for pre-editor fixtures. */
+  required?: boolean;
+  /** F3a "instructions per line" — extra constraints for the focused extractor. */
+  instructions?: string[];
+  /** F3a "format (opt)" — free-text hint for post-extraction shape. */
+  format?: string;
+  /** F3a "identifiers" — short aliases or labels near the field. */
+  identifiers?: string[];
 }
 
 export interface SchemaCategoryDef {

@@ -125,6 +125,55 @@ Or `tracer.startActiveSpan(name, fn)` for the common case.
   server-side doesn't need a consent UI for non-PII events
   (all payloads scrubbed via `scrubPII()`).
 
+### Source-map upload (OB-05)
+
+`vite build` is configured with `sourcemap: "hidden"` — the `.map`
+files generate alongside the bundles but the production JS does NOT
+carry a `//# sourceMappingURL=` comment, so browsers won't fetch
+them automatically. Without source-map upload, every Sentry trace
+in prod resolves to minified `index-XXXX.js:1:5234` (unreadable).
+
+**To wire upload** (once a Sentry project exists):
+
+1. Provision a Sentry project; grab an internal auth token with
+   `project:releases` + `project:write` scopes.
+2. Add the token + org + project to GitHub Actions secrets:
+   `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`.
+3. Add a CI step to `deploy.yml` between `Build and push frontend
+   image` and the helm install, gated on the secret being set:
+
+   ```yaml
+   - name: Upload source maps to Sentry
+     if: env.SENTRY_AUTH_TOKEN != ''
+     env:
+       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+       SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+       SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+     run: |
+       npm --workspace app run build
+       npx @sentry/cli sourcemaps inject ./app/dist
+       npx @sentry/cli sourcemaps upload \
+         --release "${{ steps.deploy-vars.outputs.image_tag }}" \
+         ./app/dist
+       find ./app/dist -name "*.map" -delete
+   ```
+
+4. To prevent the runtime nginx image from shipping the maps
+   alongside the bundles, update `Dockerfile.frontend` so the
+   build stage cleans them: add
+   `RUN find /workspace/app/dist -name "*.map" -delete` AFTER
+   the `npm --workspace app run build` line. (This makes the
+   Docker-only flow safe even when CI upload doesn't run.)
+
+5. In `app/src/lib/sentry.ts` `initSentry()`, set `release` to the
+   same image tag the upload step used (read via `VITE_RELEASE`
+   env passed at build time) so traces match the uploaded artifacts.
+
+Until those four pieces land, Rule 9 status for OB-05 is
+`seam-only` — sourcemaps emit, the upload mechanism is documented,
+but production stack traces will resolve to minified js until the
+first Sentry-enabled deploy verifies the round trip.
+
 ## Security middleware
 
 helmet's defaults are tightened in `app.ts`:

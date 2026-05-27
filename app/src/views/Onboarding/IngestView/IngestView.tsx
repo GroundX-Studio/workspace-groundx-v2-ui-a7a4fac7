@@ -30,6 +30,7 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { ByoTile } from "@/views/Onboarding/IngestView/ByoTile";
@@ -71,6 +72,22 @@ const CAPABILITIES: ReadonlyArray<{ letter: "E" | "I" | "R"; name: string; key: 
 export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
   const { pickScenario, openGate } = useOnboardingSession();
+  // `master-viewer-session` Phase 5 — the pre-attached schema is now
+  // an annotation on the F1 ingest-picker step (pushed by ExtractView
+  // after a successful Save → sign-in → persist loop). The legacy
+  // `session.preAttachedSchemaId` slot is being retired in favor of
+  // this step-annotation source. ChatStore's projected state surfaces
+  // the latest viewer step here.
+  const { state: chatStoreState } = useChatStore();
+  const activeChatSession = chatStoreState.activeSessionId
+    ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
+    : null;
+  const latestStep =
+    activeChatSession && activeChatSession.viewer.currentStep.stepIndex >= 0
+      ? activeChatSession.viewer.history[activeChatSession.viewer.currentStep.stepIndex]
+      : null;
+  const preAttachedSchemaId =
+    latestStep && latestStep.kind === "ingest-picker" ? latestStep.attachedSchema?.schemaId ?? null : null;
   const navigate = useNavigate();
   const { dispatch } = useCanvasOrchestrator();
   const { state: registry, refresh: refreshRegistry } = useScenarioRegistry();
@@ -135,6 +152,43 @@ export const IngestView: FC = () => {
           diagrams. Try a sample, or bring your own.
         </Typography>
       </Stack>
+
+      {/* `f3a-save-signin-gate-handoff`: pre-attached schema banner.
+          When the user saved a custom schema on F3a and signed in to
+          persist it, the resulting schema id lands on the session and
+          this banner surfaces it on F1 so the next ingest pre-attaches
+          the schema. Stays visible until the user picks a new sample
+          (which clears the handoff on F2 transition) or signs out. */}
+      {preAttachedSchemaId && (
+        <Box
+          data-testid="ingest-pre-attached-schema"
+          sx={{
+            mb: 2,
+            p: 1.5,
+            borderRadius: BORDER_RADIUS_SM,
+            border: `1px dashed ${GREEN}`,
+            backgroundColor: alpha(GREEN, 0.05),
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+          }}
+        >
+          <Typography
+            variant="caption"
+            sx={{
+              color: NAVY,
+              fontWeight: FONT_WEIGHT_LABEL,
+              letterSpacing: LETTER_SPACING_LABEL,
+              fontSize: FONT_SIZE_LABEL,
+            }}
+          >
+            SCHEMA ATTACHED
+          </Typography>
+          <Typography variant="body2" sx={{ color: BODY_TEXT, fontFamily: "monospace" }}>
+            {preAttachedSchemaId}
+          </Typography>
+        </Box>
+      )}
 
       {/* Samples */}
       <Typography

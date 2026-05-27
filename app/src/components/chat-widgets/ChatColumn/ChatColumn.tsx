@@ -1,5 +1,5 @@
 /**
- * OnboardingChatColumn — the chat-column body across F1 ↔ F7.
+ * ChatColumn — the chat-column body across F1 ↔ F7.
  *
  * Dispatches between three states:
  *
@@ -34,9 +34,13 @@ import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { chatErrorToUserCopy, sendChatMessage } from "@/api/chatSessions";
+import { chatErrorToUserCopy, listChatMessages, sendChatMessage } from "@/api/chatSessions";
+import type { ProposedSchemaField } from "@/api/chatSessions";
+import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
+import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { captureException } from "@/lib/sentry";
 
 import {
   BODY_TEXT,
@@ -55,13 +59,14 @@ import {
   LETTER_SPACING_LABEL,
   MUTED_ON_LIGHT,
   NAVY,
+  WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 
-import { GateChatPanel } from "./GateChatPanel";
+import { GateChatPanel } from "@/views/Onboarding/GateChatPanel";
 
 // ARCH-11 (2026-05-26): the timed thinking-note reveal + done-state
 // persistence is now owned by `chat-widgets/ThinkingStream` — F2 mounts
@@ -78,7 +83,7 @@ interface PickViewOption {
 // Per-scenario pick-a-view pills derive from the scenario's extraction
 // schema in F2ConversationFlow itself — see the useMemo there.
 
-export interface OnboardingChatColumnProps {
+export interface ChatColumnProps {
   /**
    * Override the scenario id read from session/appMode context. Used by
    * the OnboardingShell during the F2->F1 slide-out so the panes can
@@ -90,9 +95,42 @@ export interface OnboardingChatColumnProps {
    * Override the current frame. Same use case as overrideScenarioId.
    */
   overrideFrame?: "f1" | "f2" | "f3" | "f3a" | "f4" | "f5" | "f6" | "f7";
+  /**
+   * UI-05 (2026-05-27) — controls how the column renders:
+   *   - "onboarding" (default): existing behavior. Gate + F1/F2/BYO
+   *     branching + scripted thinking-stream + sample-switcher +
+   *     Pick-a-view pills.
+   *   - "steady": bare conversation — bubbles for the persisted
+   *     thread, LiveChatInputBar at the bottom, send handler that
+   *     POSTs to /api/chat/messages and renders the reply. No
+   *     onboarding-only decorations. SteadyShell mounts this.
+   *
+   * Per the no-duplicates rule (memory `feedback_no_onboarding_duplicates.md`),
+   * onboarding + steady share the same production widget; this prop
+   * is the gate the rule prescribes.
+   */
+  mode?: "onboarding" | "steady";
 }
 
-export const OnboardingChatColumn: FC<OnboardingChatColumnProps> = ({ overrideScenarioId, overrideFrame }) => {
+/**
+ * Outer dispatch — selects between the onboarding-mode tree (which
+ * needs OnboardingSession + ScenarioRegistry + AppMode contexts)
+ * and the steady-mode tree (which needs only ChatStore). Splitting
+ * the two means each inner component has a stable hook order, even
+ * if `mode` were ever to change at runtime (in practice it doesn't —
+ * OnboardingShell vs SteadyShell mount different parents).
+ */
+export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFrame, mode = "onboarding" }) => {
+  if (mode === "steady") return <SteadyConversationFlow />;
+  return <ChatColumnInner overrideScenarioId={overrideScenarioId} overrideFrame={overrideFrame} />;
+};
+
+interface ChatColumnInnerProps {
+  overrideScenarioId?: string | null;
+  overrideFrame?: "f1" | "f2" | "f3" | "f3a" | "f4" | "f5" | "f6" | "f7";
+}
+
+const ChatColumnInner: FC<ChatColumnInnerProps> = ({ overrideScenarioId, overrideFrame }) => {
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
   const { byId } = useScenarioRegistry();
@@ -113,12 +151,20 @@ export const OnboardingChatColumn: FC<OnboardingChatColumnProps> = ({ overrideSc
       : appMode.scenario ?? session.scenario;
   const scenario = scenarioId ? byId(scenarioId) : undefined;
 
-  // F2 is the only frame with a streamed thinking-script conversation.
-  // F3-F7 (post-Understand) read as "ready for questions" — same idle
-  // placeholder as F1. The BYO placeholder is defensive; in practice
-  // the F2 BYO path opens the gate, so the gate-active branch above
-  // covers it.
-  if (isF2 && scenario) {
+  // 2026-05-27 update: chat conversation stays mounted across the
+  // F2→F5 onboarding journey so auto-advance (ThinkingStream done →
+  // F3, first live send → F5) doesn't unmount the component and
+  // wipe liveTurns. Scripted intro renders only on F2 mount; on
+  // re-renders for F3/F5 the same bubbles persist as conversation
+  // history (no timers re-fire because ThinkingStream's replay
+  // guard skips them after the first run).
+  const isInScenarioJourney =
+    currentFrame === "f2" ||
+    currentFrame === "f3" ||
+    currentFrame === "f3a" ||
+    currentFrame === "f4" ||
+    currentFrame === "f5";
+  if (isInScenarioJourney && scenario) {
     return (
       <F2ConversationFlow
         scenarioId={scenarioId!}
@@ -176,6 +222,180 @@ const ByoChatPlaceholder: FC = () => (
   </Stack>
 );
 
+// ── Steady-mode conversation flow (UI-05) ────────────────────────────────
+
+/**
+ * UI-05 (2026-05-27) — bare conversation for the steady-mode shell.
+ * No scripted thinking-stream, no Pick-a-view pills, no sample-switcher,
+ * no scenario header. Just the persisted thread + the input bar.
+ *
+ * Reuses everything load-bearing from F2ConversationFlow: the
+ * `liveTurns` state, the RT-01 hydration effect, the send handler
+ * (which writes to the same `/api/chat/messages` route), the
+ * UserBubble/BotBubble/LoadingDots primitives, and LiveChatInputBar.
+ *
+ * Per the no-duplicates rule: same production widget shared across
+ * onboarding + steady. Onboarding mode locks specific controls
+ * (the scripted intro). Steady mode renders only the production
+ * surface. Same code path, same data, same persistence.
+ */
+const SteadyConversationFlow: FC = () => {
+  const { state: chatState, enqueueFieldProposal } = useChatStore();
+  const chatSessionId = chatState.activeSessionId;
+  // Scroll-to-bottom ref — see effect below.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
+
+  const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
+  const [sending, setSending] = useState(false);
+
+  // RT-01 hydration — identical to F2ConversationFlow's effect. The
+  // chat handler writes every turn to chat_messages; without this the
+  // visible thread vanishes on refresh.
+  useEffect(() => {
+    if (!chatSessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const messages = await listChatMessages(chatSessionId);
+        if (cancelled || messages.length === 0) return;
+        const turns: LiveTurn[] = messages
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }));
+        setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
+      } catch (err) {
+        captureException(err, {
+          route: "/api/chat-sessions/:id/messages",
+          chatSessionId,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatSessionId]);
+
+  const handleSend = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || sending) return;
+      const userTurn: LiveTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
+      setLiveTurns((cur) => [...cur, userTurn]);
+      if (!chatSessionId) {
+        setLiveTurns((cur) => [
+          ...cur,
+          { id: `a-${Date.now()}`, role: "assistant", content: "No active chat session — please refresh and try again." },
+        ]);
+        return;
+      }
+      setSending(true);
+      try {
+        const result = await sendChatMessage({
+          chatSessionId,
+          newUserMessage: trimmed,
+          sessionMeta: {
+            title: activeChatSession?.title ?? "Steady chat",
+            isOnboarding: false,
+            onboardingSessionId: chatSessionId,
+            activeEntityKey: activeChatSession?.activeEntityKey ?? null,
+          },
+        });
+        setLiveTurns((cur) => [
+          ...cur,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: result.reply.answer,
+            proposedSchemaField: result.reply.proposedSchemaField,
+          },
+        ]);
+        // F3a wireframe-fix: also enqueue the proposal onto the
+        // canvas-side ProposalCard queue so SchemaView's "above the
+        // list" surface fires. The chat propose-card stays as a
+        // mirror; canvas + chat both show the same proposal until
+        // either surface accepts/dismisses it.
+        if (result.reply.proposedSchemaField) {
+          enqueueFieldProposal({
+            categoryId: result.reply.proposedSchemaField.categoryId,
+            name: result.reply.proposedSchemaField.name,
+            type: result.reply.proposedSchemaField.type,
+            description: result.reply.proposedSchemaField.description,
+            // proposal-envelope-provenance: forward the Zod parse
+            // provenance so the canvas ProposalCard surfaces the
+            // `envelope verified` label.
+            provenance: result.reply.proposedSchemaField.provenance,
+          });
+        }
+      } catch (err) {
+        const mapped = chatErrorToUserCopy(err);
+        setLiveTurns((cur) => [
+          ...cur,
+          { id: `a-${Date.now()}`, role: "assistant", content: mapped.message },
+        ]);
+      } finally {
+        setSending(false);
+      }
+    },
+    [sending, chatSessionId, activeChatSession, enqueueFieldProposal],
+  );
+
+  // Scroll the conversation body to the newest message whenever a
+  // turn is appended or the thinking indicator appears. The body
+  // has `overflow: auto`; we just push scrollTop to scrollHeight.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [liveTurns, sending]);
+
+  return (
+    <Box data-testid="steady-chat-conversation" sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: "auto", py: 1.5, display: "flex", flexDirection: "column", gap: 1.25 }}>
+        {liveTurns.length === 0 && !sending && (
+          <BotBubble testid="steady-chat-empty">
+            Ask anything about your documents.
+          </BotBubble>
+        )}
+        {(liveTurns.length > 0 || sending) && (
+          <Stack spacing={1} sx={{ mt: 0.5 }}>
+            {liveTurns.map((turn) =>
+              turn.role === "user" ? (
+                <UserBubble key={turn.id} testid="steady-chat-live-user">
+                  {turn.content}
+                </UserBubble>
+              ) : (
+                <Stack key={turn.id} spacing={1}>
+                  <BotBubble testid="steady-chat-live-assistant">
+                    {turn.content}
+                  </BotBubble>
+                  {turn.proposedSchemaField && (
+                    <ProposeSchemaFieldCard
+                      proposedField={turn.proposedSchemaField}
+                      mode="steady"
+                    />
+                  )}
+                </Stack>
+              ),
+            )}
+            {sending && (
+              <BotBubble testid="steady-chat-thinking">
+                <LoadingDots aria-label="Assistant is thinking" />
+              </BotBubble>
+            )}
+          </Stack>
+        )}
+      </Box>
+      <Box sx={{ pt: 1, borderTop: `1px solid ${BORDER}` }}>
+        <LiveChatInputBar onSend={handleSend} disabled={sending} />
+      </Box>
+    </Box>
+  );
+};
+
 // ── F2 conversation flow ─────────────────────────────────────────────────
 
 interface F2ConversationFlowProps {
@@ -198,18 +418,27 @@ interface F2ConversationFlowProps {
  * jumps to F5.
  */
 function derivePickViews(scenario: NonNullable<ReturnType<ReturnType<typeof useScenarioRegistry>["byId"]>>): PickViewOption[] {
+  // Per realign-f3a-entry-point (openspec): F2's Pick-a-view bubble
+  // SHALL contain only category-scope pills (statement / meters /
+  // charges) plus interact. F3a is reached from F3's fields-panel
+  // hamburger menu, not from a chat pill.
   const schema = scenario.manifest.extractionSchema;
   if (!schema) return [{ key: "interact", label: "Show me chat" }];
-  return [
-    ...schema.categories.map((c) => ({ key: c.id, label: c.name })),
-    { key: "edit-schema", label: "Edit schema" },
-  ];
+  return schema.categories.map((c) => ({ key: c.id, label: c.name }));
 }
 
 interface LiveTurn {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /**
+   * UI-01 Phase 2a — non-null when the grounded LLM proposed adding a
+   * schema field on this turn. The chat scroll renders an inline
+   * `<ProposeSchemaFieldCard>` beneath the assistant bubble so the
+   * user can Accept (→ `addSchemaField`) or Reject without leaving
+   * the conversation.
+   */
+  proposedSchemaField?: ProposedSchemaField | null;
 }
 
 const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
@@ -219,9 +448,12 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
   thinkingScript,
   pickViews,
 }) => {
-  const { advanceFrame } = useOnboardingSession();
+  const { advanceFrame, state: onboardingState } = useOnboardingSession();
+  const currentFrameRef = useRef(onboardingState.currentFrame);
+  // Keep ref synced for handleSend's gated auto-advance check.
+  currentFrameRef.current = onboardingState.currentFrame;
   const { state: registryState } = useScenarioRegistry();
-  const { state: chatState } = useChatStore();
+  const { state: chatState, enqueueFieldProposal } = useChatStore();
   const chatSessionId = chatState.activeSessionId;
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
   const navigate = useNavigate();
@@ -231,6 +463,76 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
   // scroll body alongside thinking notes + Pick-a-view.
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [sending, setSending] = useState(false);
+  // Scroll-to-bottom ref for the conversation body.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Push scrollTop to scrollHeight whenever a new turn appears or
+  // the thinking indicator toggles. Without this the user has to
+  // scroll manually to see the latest reply.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [liveTurns, sending]);
+
+  // RT-01: hydrate liveTurns from the persisted thread on mount.
+  // The chat handler writes every user + assistant turn to the
+  // chat_messages table, but `liveTurns` lives only in component
+  // state — without this fetch, a page refresh drops the visible
+  // conversation even though the DB rows are intact.
+  //
+  // Race rule: only seed when `liveTurns` is still empty. If the
+  // user has somehow typed + received a reply in the few ms it
+  // takes the fetch to resolve, the optimistic state wins; the
+  // hydrated fetch already covered those rows so nothing is lost.
+  //
+  // Errors are non-fatal: a failed hydrate just renders the empty
+  // thread and lets the user start a new turn. The server-side row
+  // still exists; future sends + their hydrates will work.
+  useEffect(() => {
+    if (!chatSessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const messages = await listChatMessages(chatSessionId);
+        if (cancelled || messages.length === 0) return;
+        const turns: LiveTurn[] = messages
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }));
+        setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
+      } catch (err) {
+        captureException(err, {
+          route: "/api/chat-sessions/:id/messages",
+          chatSessionId,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatSessionId]);
+
+  // `schema-agent-chat-affordances`: project ChatStore-emitted agent
+  // messages (id prefix `agent-`) into the rendered live-turns list.
+  // The Schema-Agent's confidence-delta narration is appended via
+  // `appendAgentMessage` from SchemaView's rerun handler; without this
+  // projection it would land in `ChatSession.messages` but never reach
+  // the rendered conversation surface.
+  useEffect(() => {
+    if (!activeChatSession) return;
+    setLiveTurns((cur) => {
+      const seen = new Set(cur.map((t) => t.id));
+      const projected: LiveTurn[] = activeChatSession.messages
+        .filter((m) => m.id.startsWith("agent-") && !seen.has(m.id))
+        .map((m) => ({ id: m.id, role: "assistant", content: m.content }));
+      if (projected.length === 0) return cur;
+      return [...cur, ...projected];
+    });
+  }, [activeChatSession?.messages, activeChatSession]);
 
   const handleSend = useCallback(
     async (text: string) => {
@@ -238,6 +540,16 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
       if (!trimmed || sending) return;
       const userTurn: LiveTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
       setLiveTurns((cur) => [...cur, userTurn]);
+
+      // 2026-05-27: a real user-typed turn means they're moving past
+      // browsing the canvas — auto-advance the nav to Interact (F5).
+      // Guard: only advance if currently on F2/F3/F3a/F4 (the
+      // pre-Interact part of the journey). If the user is already
+      // at/past F5 (e.g. clicked "Show me chat" pill), don't bounce.
+      const frame = currentFrameRef.current;
+      if (frame === "f2" || frame === "f3" || frame === "f3a" || frame === "f4") {
+        advanceFrame("f5");
+      }
 
       if (!chatSessionId) {
         // EntityRegistry seeds a chat session on mount; if we got here
@@ -265,6 +577,14 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             onboardingSessionId: chatSessionId,
             activeEntityKey: activeChatSession?.activeEntityKey ?? null,
           },
+          // Threaded into the grounded LLM prompt so the model knows
+          // what doc the user is currently looking at — even when
+          // GroundX search comes back empty for off-topic queries
+          // (greetings, "what can you help with", etc.).
+          scopeHint: {
+            fileName,
+            scenarioTitle: scenarioName,
+          },
         });
         setLiveTurns((cur) => [
           ...cur,
@@ -272,8 +592,25 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             id: `a-${Date.now()}`,
             role: "assistant",
             content: result.reply.answer,
+            proposedSchemaField: result.reply.proposedSchemaField,
           },
         ]);
+        // F3a wireframe-fix: also enqueue the proposal onto the
+        // canvas-side ProposalCard queue so SchemaView's "above the
+        // list" surface fires. The chat propose-card stays as a
+        // mirror.
+        if (result.reply.proposedSchemaField) {
+          enqueueFieldProposal({
+            categoryId: result.reply.proposedSchemaField.categoryId,
+            name: result.reply.proposedSchemaField.name,
+            type: result.reply.proposedSchemaField.type,
+            description: result.reply.proposedSchemaField.description,
+            // proposal-envelope-provenance: forward the Zod parse
+            // provenance so the canvas ProposalCard surfaces the
+            // `envelope verified` label.
+            provenance: result.reply.proposedSchemaField.provenance,
+          });
+        }
       } catch (err) {
         // CF-08: branch the user-facing copy on the upstream status
         // so 401 / 501 / 504 / 5xx / 400 each say the right thing.
@@ -290,7 +627,7 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
         setSending(false);
       }
     },
-    [sending, chatSessionId, activeChatSession],
+    [sending, chatSessionId, activeChatSession, advanceFrame, fileName, scenarioName, enqueueFieldProposal],
   );
 
   // Sample switcher dropdown anchor + state.
@@ -439,8 +776,85 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
         </Box>
       </Box>
 
+      {/* `schema-agent-chat-affordances` — frame-conditional Schema-Agent
+          header. Only renders on F3a, between the file header and the
+          conversation. The sample-switcher chip mirrors the existing
+          generic `onboarding-chat-sample-switch` UX but signals to the
+          user that they're in the focused Schema-Agent loop. */}
+      {onboardingState.currentFrame === "f3a" && (
+        <Box
+          data-testid="chat-schema-agent-header"
+          sx={{
+            mt: 1,
+            pb: 1,
+            borderBottom: `1px solid ${BORDER}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            flexWrap: "wrap",
+          }}
+        >
+          <Typography
+            variant="overline"
+            sx={{
+              color: NAVY,
+              letterSpacing: LETTER_SPACING_LABEL,
+              fontWeight: FONT_WEIGHT_HEADLINE,
+              fontSize: FONT_SIZE_LABEL,
+            }}
+          >
+            Schema Agent
+          </Typography>
+          <Box
+            component="span"
+            data-testid="chat-schema-agent-sample-switcher"
+            sx={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 0.5,
+              fontSize: FONT_SIZE_LABEL,
+              color: MUTED_ON_LIGHT,
+            }}
+          >
+            <span>sample:</span>
+            <span style={{ fontWeight: FONT_WEIGHT_HEADLINE, color: NAVY }}>{scenarioName}</span>
+            <span>·</span>
+            <span style={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>switch ▾</span>
+          </Box>
+        </Box>
+      )}
+
+      {/* `schema-agent-chat-affordances` — earlier-turns compaction
+          summary. Renders at the top of the conversation when the active
+          session has folded turns into `summaries`. `<P>` derives from
+          proposals seen (added + still-pending) and `<A>` from accepted
+          additions. Reads from `ChatSession.summaries` (existing slot). */}
+      {(activeChatSession?.summaries?.length ?? 0) > 0 && (
+        <Box
+          data-testid="chat-earlier-turns-summary"
+          sx={{
+            mt: 1,
+            px: 1,
+            py: 0.5,
+            backgroundColor: WARM_OFFWHITE,
+            borderRadius: BORDER_RADIUS_SM,
+            border: `1px dashed ${BORDER}`,
+            fontSize: FONT_SIZE_LABEL,
+            color: MUTED_ON_LIGHT,
+          }}
+        >
+          {(() => {
+            const overlay = activeChatSession?.pendingSchemaOverlay;
+            const accepted = overlay?.addedFields.length ?? 0;
+            const pending = overlay?.pendingFieldProposals.length ?? 0;
+            const proposalsSeen = accepted + pending;
+            return `▾ earlier turns (${proposalsSeen} proposals · ${accepted} fields accepted)`;
+          })()}
+        </Box>
+      )}
+
       {/* Bubble stream */}
-      <Box sx={{ flex: 1, minHeight: 0, overflow: "auto", py: 1.5, display: "flex", flexDirection: "column", gap: 1.25 }}>
+      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: "auto", py: 1.5, display: "flex", flexDirection: "column", gap: 1.25 }}>
         <UserBubble testid="onboarding-chat-user-bubble">{scenarioName}</UserBubble>
         <BotBubble testid="onboarding-chat-bot-lead">
           <Box component="span" sx={{ fontWeight: FONT_WEIGHT_HEADLINE }}>
@@ -453,7 +867,20 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             notes={thinkingScript}
             scenarioKey={scenarioId}
             mode="onboarding"
-            onDone={() => setShowDone(true)}
+            onDone={() => {
+              setShowDone(true);
+              // 2026-05-27: when the scripted thinking-stream finishes,
+              // auto-advance the nav from Understand (F2) to Extract
+              // (F3). The fake processing message is "Done. Ready to
+              // analyze." — at that moment the user should see the
+              // Extract canvas, not be stranded on Understand waiting
+              // for a pill click. Guard: only advance if still on F2;
+              // a user who already clicked a pill mid-stream stays
+              // wherever they navigated.
+              if (currentFrameRef.current === "f2") {
+                advanceFrame("f3");
+              }
+            }}
           />
         )}
 
@@ -478,16 +905,12 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
                     key={view.key}
                     label={view.label}
                     testid={`onboarding-chat-pick-view-${view.key}`}
-                    // First non-edit-schema, non-interact pill carries
-                    // the legacy `advance-to-f3` testid so existing e2e
-                    // suites that expect a canvas CTA still find a
-                    // clickable affordance.
-                    legacyTestid={idx === 0 && view.key !== "edit-schema" && view.key !== "interact" ? "advance-to-f3" : undefined}
+                    // First non-interact pill carries the legacy
+                    // `advance-to-f3` testid so existing e2e suites
+                    // that expect a canvas CTA still find a clickable
+                    // affordance.
+                    legacyTestid={idx === 0 && view.key !== "interact" ? "advance-to-f3" : undefined}
                     onClick={() => {
-                      if (view.key === "edit-schema") {
-                        advanceFrame("f3a");
-                        return;
-                      }
                       if (view.key === "interact") {
                         advanceFrame("f5");
                         return;
@@ -495,6 +918,8 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
                       // Schema-derived category pill → land on F3 with
                       // ?focus=<categoryId>. ExtractView reads that
                       // param to pre-select the user's picked slice.
+                      // F3a (Edit schema) is reached from F3's
+                      // fields-panel hamburger menu, not from this pill.
                       advanceFrame("f3");
                       navigate({ search: `?focus=${view.key}` }, { replace: false });
                     }}
@@ -507,7 +932,7 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
 
         {/* CF-18 live ad-hoc turns: appended after the scripted flow.
             User bubbles right-aligned, assistant bubbles left-aligned. */}
-        {liveTurns.length > 0 && (
+        {(liveTurns.length > 0 || sending) && (
           <Stack spacing={1} sx={{ mt: 0.5 }}>
             {liveTurns.map((turn) =>
               turn.role === "user" ? (
@@ -515,10 +940,23 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
                   {turn.content}
                 </UserBubble>
               ) : (
-                <BotBubble key={turn.id} testid="onboarding-chat-live-assistant">
-                  {turn.content}
-                </BotBubble>
+                <Stack key={turn.id} spacing={1}>
+                  <BotBubble testid="onboarding-chat-live-assistant">
+                    {turn.content}
+                  </BotBubble>
+                  {turn.proposedSchemaField && (
+                    <ProposeSchemaFieldCard
+                      proposedField={turn.proposedSchemaField}
+                      mode="onboarding"
+                    />
+                  )}
+                </Stack>
               ),
+            )}
+            {sending && (
+              <BotBubble testid="onboarding-chat-thinking">
+                <LoadingDots aria-label="Assistant is thinking" />
+              </BotBubble>
             )}
           </Stack>
         )}

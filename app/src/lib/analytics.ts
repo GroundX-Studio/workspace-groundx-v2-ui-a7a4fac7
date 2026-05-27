@@ -13,14 +13,14 @@
  * Wire-up: `main.tsx` calls `initAnalytics(import.meta.env.VITE_POSTHOG_API_KEY,
  * import.meta.env.VITE_POSTHOG_HOST)` once at boot.
  *
- * Catch-side: every funnel boundary calls `track("event.name", { extras })`
- * — see the OB-02 row in `docs/agents/backlog.md` for the full named-
- * event list. Adding a new event = adding the right `track(...)` call;
- * no new wrapper code needed.
+ * Catch-side: every funnel boundary calls `track("event.name", { extras })`.
+ * Named-event durable contract: `openspec/specs/observability/spec.md`.
+ * Adding a new event = adding the right `track(...)` call; no new
+ * wrapper code needed.
  *
- * NOT in scope for OB-02:
- *   - GA4 dimensions (OB-03)
- *   - Hotjar (OB-04)
+ * NOT in scope for this helper:
+ *   - GA4 dimensions (handled by `./ga`)
+ *   - Hotjar (see `openspec/specs/observability/spec.md` — Hotjar requirement)
  *   - Custom session-recording / autocapture defaults — kept minimal.
  */
 
@@ -53,8 +53,9 @@ export function initAnalytics(apiKey: string | undefined | null, host?: string):
 
 /**
  * Fire a named event. Silent no-op until `initAnalytics` was called
- * with a real key. Use the canonical event names from the OB-02
- * backlog row: session.started / sample.picked / understand.started /
+ * with a real key. Use the canonical event names from
+ * `openspec/specs/observability/spec.md`:
+ * session.started / sample.picked / understand.started /
  * understand.completed / extract.field_hovered / cite.peeked /
  * gate.shown / signup.completed / session.mode_flipped_to_steady /
  * report.pinned / report.section_added / report.rendered.
