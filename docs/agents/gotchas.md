@@ -217,8 +217,12 @@ When working as another agent, you don't have access to that.
 Any important rule from there needs to live in `docs/agents/` so
 you can see it. AGENTS.md is the table of contents into that.
 
-### The design bundle path may not exist on a fresh machine
+### The design bundle moved into the repo (was `/tmp/design-bundle/`)
 
-`/tmp/design-bundle/v2-dashboard-chat-driven-ui/` gets cleared
-on reboot. Re-fetch via the curl command in
-`design-bundle.md`.
+The wireframes used to live at `/tmp/design-bundle/v2-dashboard-chat-driven-ui/`
+fetched via curl from an Anthropic Artifacts URL. That path was fragile
+(wiped on reboot; curl URL scoped to the original chat). The bundle now
+ships in-repo at `openspec/wireframes/`. No fetch needed.
+
+Old docs / commit messages may still reference the `/tmp/` path — translate
+mentally to `openspec/wireframes/source/`.

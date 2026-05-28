@@ -1,0 +1,286 @@
+/* ============================================================================
+   EyeLevel · Harness Design System
+   colors_and_type.css
+
+   The complete brand foundation as CSS custom properties. Two surface families
+   share these tokens:
+   - Product / dashboard / slides / email — Inter
+   - Marketing / Webflow — Thicccboi
+
+   Source of truth: tokens.json in the upstream GroundX Studio Harness repo.
+   ============================================================================ */
+
+/* Inter — product, dashboards, slides, email. CDN. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap");
+
+/* Thicccboi — marketing / Webflow only. Self-hosted from /fonts. */
+@font-face {
+  font-family: "Thicccboi";
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-Thin.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Thicccboi";
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-Light.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Thicccboi";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Thicccboi";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-Medium.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Thicccboi";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-SemiBold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Thicccboi";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Thicccboi";
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-ExtraBold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Thicccboi";
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-Black.ttf") format("truetype");
+}
+/* ThicccAF — extra-display poster weight, sits above 900. */
+@font-face {
+  font-family: "ThicccAF";
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+  src: url("fonts/THICCCBOI-ThicccAF.ttf") format("truetype");
+}
+
+:root {
+  /* ── BRAND PALETTE (sacred — never round or re-derive) ─────────────────── */
+  --gx-navy:        #29335c;   /* Headings, dark surfaces, links. NOT true black. */
+  --gx-green:       #a1ec83;   /* Primary CTA + accent. Submit / success / "go". */
+  --gx-coral:       #f3663f;   /* Eyebrows, highlights, secondary CTA. */
+  --gx-cyan:        #c1e8ee;   /* Secondary accent. Icon bg, cyan card fill. */
+  --gx-tint:        #eff9fb;   /* Pale cyan section wash. */
+  --gx-body-text:   #40496b;   /* Body copy. Slightly-warmer navy. */
+  --gx-gray:        #f2f4f5;   /* Alt section bg / input fill. */
+  --gx-white:       #ffffff;   /* Cards, inputs, table cells. */
+  --gx-border:      rgba(41, 51, 92, 0.1);   /* Default hairline. */
+
+  /* ── SUPPORT ──────────────────────────────────────────────────────────── */
+  --gx-error-red:    #f70d1a;  /* Destructive / failure. */
+  --gx-lighter-red:  #ff7f7f;  /* Soft warning. */
+  --gx-blue:         #0b99ff;  /* Inline link accent. Rare. */
+  --gx-dark-grey:    #81879a;  /* Inactive chrome. */
+
+  /* ── SURFACE-AWARE ALIASES ────────────────────────────────────────────── */
+  --gx-eyebrow-on-light:  var(--gx-coral);
+  --gx-eyebrow-on-dark:   var(--gx-green);
+  --gx-body-on-light:     var(--gx-body-text);
+  --gx-body-on-dark:      rgba(255, 255, 255, 0.82);
+  --gx-muted-on-light:    rgba(64, 73, 107, 0.7);
+  --gx-muted-on-dark:     rgba(255, 255, 255, 0.65);
+  --gx-input-border:      rgba(41, 51, 92, 0.2);
+  --gx-focus-ring:        rgba(161, 236, 131, 0.25);
+
+  /* ── SLIDE CHROME (alphas — slide medium only) ───────────────────────── */
+  --gx-slide-number-on-dark:   rgba(255, 255, 255, 0.55);
+  --gx-stat-label-on-dark:     rgba(255, 255, 255, 0.7);
+  --gx-card-on-navy-bg:        rgba(255, 255, 255, 0.04);
+  --gx-card-on-navy-border:    rgba(255, 255, 255, 0.12);
+  --gx-card-body-on-navy:      rgba(255, 255, 255, 0.8);
+  --gx-outline-on-dark:        rgba(255, 255, 255, 0.35);
+  --gx-photo-scrim:            rgba(41, 51, 92, 0.72);
+  --gx-divider-on-dark:        rgba(255, 255, 255, 0.18);
+  --gx-divider-heavy:          rgba(41, 51, 92, 0.18);
+
+  /* ── TYPOGRAPHY: FAMILIES ─────────────────────────────────────────────── */
+  --gx-font:            "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --gx-font-marketing:  "Thicccboi", "Inter", sans-serif;
+  --gx-font-features:   "ss01", "cv11", "cv01"; /* single-story a, straight R, tailed l */
+
+  /* ── TYPOGRAPHY: WEIGHTS (400/600/700/800 — 500 & 900 retired) ─────────── */
+  --gx-weight-body:      400;  /* paragraphs, subheads */
+  --gx-weight-label:     600;  /* labels, eyebrows, CTAs, table headers */
+  --gx-weight-headline:  700;  /* H1–H6, slide headlines */
+  --gx-weight-display:   800;  /* cover headlines, display stat numerals */
+
+  /* ── TRACKING ─────────────────────────────────────────────────────────── */
+  --gx-track-label:         0.12em;
+  --gx-track-button:        0.04em;
+  --gx-track-chip:          0.5px;
+  --gx-track-pill:          0.08em;
+  --gx-track-display-label: 0.14em;
+  --gx-track-display-tight: -0.01em;
+  --gx-track-heading-tight: -0.005em;
+
+  /* ── LINE HEIGHT ─────────────────────────────────────────────────────── */
+  --gx-lh-display:      1.1;
+  --gx-lh-heading:      1.15;
+  --gx-lh-section:      1.2;
+  --gx-lh-subsection:   1.25;
+  --gx-lh-card-heading: 1.3;
+  --gx-lh-card-subhead: 1.4;
+  --gx-lh-tight-body:   1.5;
+  --gx-lh-body:         1.6;
+
+  /* ── WEB SIZE SCALE (~1.2× modular) ──────────────────────────────────── */
+  --gx-size-display-lg: 4rem;      /* 64px — marketing hero */
+  --gx-size-display-md: 3.375rem;  /* 54px — marketing sub-hero */
+  --gx-size-h1:         2.5rem;    /* 40px — dashboard H1 */
+  --gx-size-h2:         2rem;      /* 32px */
+  --gx-size-h3:         1.625rem;  /* 26px */
+  --gx-size-h4:         1.375rem;  /* 22px */
+  --gx-size-h5:         1.125rem;  /* 18px — card heading */
+  --gx-size-h6:         1rem;      /* 16px — card subhead */
+  --gx-size-body:       1rem;      /* 16px */
+  --gx-size-body-sm:    0.875rem;  /* 14px */
+  --gx-size-caption:    0.8125rem; /* 13px */
+  --gx-size-label:      0.75rem;   /* 12px — uppercase eyebrows */
+  --gx-size-label-dense:0.7rem;    /* 11px — dense pill chrome */
+
+  /* ── RADIUS (Webflow scale: 4/6/12/20/200) ───────────────────────────── */
+  --gx-radius-sm:    4px;    /* hairline wraps, inline chips */
+  --gx-radius-md:    6px;    /* inputs, nested surfaces */
+  --gx-radius-lg:    12px;   /* dropdowns, toasts */
+  --gx-radius-card:  20px;   /* top-level cards (DEFAULT) */
+  --gx-radius-pill:  200px;  /* buttons, pills, tags */
+
+  /* ── SPACING (Webflow named scale, raw px) ───────────────────────────── */
+  --space-2:  7px;
+  --space-3:  14px;
+  --space-4:  20px;
+  --space-5:  24px;   /* card padding */
+  --space-6:  28px;
+  --space-8:  36px;
+  --space-10: 56px;
+  --space-12: 84px;
+  --space-16: 112px;
+}
+
+/* ============================================================================
+   SEMANTIC ELEMENTS — defaults applied to bare HTML tags.
+   These are the dashboard/marketing baseline. Slides override with their own
+   ladder inside .slide-* contexts.
+   ============================================================================ */
+
+html {
+  font-family: var(--gx-font);
+  font-feature-settings: var(--gx-font-features);
+  color: var(--gx-body-text);
+  background: var(--gx-white);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-size: var(--gx-size-body);
+  font-weight: var(--gx-weight-body);
+  line-height: var(--gx-lh-body);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--gx-navy);
+  font-weight: var(--gx-weight-headline);
+  letter-spacing: var(--gx-track-heading-tight);
+  margin: 0;
+}
+
+h1 { font-size: var(--gx-size-h1); line-height: var(--gx-lh-heading);     letter-spacing: var(--gx-track-display-tight); }
+h2 { font-size: var(--gx-size-h2); line-height: var(--gx-lh-heading); }
+h3 { font-size: var(--gx-size-h3); line-height: var(--gx-lh-section); }
+h4 { font-size: var(--gx-size-h4); line-height: var(--gx-lh-subsection); }
+h5 { font-size: var(--gx-size-h5); line-height: var(--gx-lh-card-heading); }
+h6 { font-size: var(--gx-size-h6); line-height: var(--gx-lh-card-subhead); }
+
+p {
+  margin: 0;
+  font-size: var(--gx-size-body);
+  line-height: var(--gx-lh-body);
+  color: var(--gx-body-text);
+  text-wrap: pretty;
+}
+
+p + p { margin-top: 1em; }
+
+a {
+  color: var(--gx-navy);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--gx-border);
+}
+a:hover { text-decoration-color: var(--gx-coral); }
+
+/* ── Eyebrow / overline label — write text in UPPERCASE in source. ──────── */
+.eyebrow,
+.gx-eyebrow {
+  font-size: var(--gx-size-label);
+  font-weight: var(--gx-weight-label);
+  letter-spacing: var(--gx-track-label);
+  color: var(--gx-eyebrow-on-light);
+  line-height: 1.2;
+  /* NO text-transform — write "TUTORIAL" not "tutorial". */
+}
+
+/* ── Body sizes ─────────────────────────────────────────────────────────── */
+.body-sm  { font-size: var(--gx-size-body-sm); line-height: var(--gx-lh-tight-body); }
+.caption  { font-size: var(--gx-size-caption); color: var(--gx-muted-on-light); }
+
+/* ── Marketing display headings (Thicccboi surface only) ────────────────── */
+.gx-marketing { font-family: var(--gx-font-marketing); }
+.gx-marketing h1, .gx-marketing .display-lg {
+  font-size: var(--gx-size-display-lg);
+  font-weight: var(--gx-weight-display);
+  letter-spacing: var(--gx-track-display-tight);
+  line-height: var(--gx-lh-display);
+}
+.gx-marketing .display-md {
+  font-size: var(--gx-size-display-md);
+  font-weight: var(--gx-weight-headline);
+  line-height: var(--gx-lh-heading);
+}
+
+/* ── Surface canvases (six canonical) ───────────────────────────────────── */
+.bg-white { background: var(--gx-white); color: var(--gx-body-text); }
+.bg-gray  { background: var(--gx-gray);  color: var(--gx-body-text); }
+.bg-tint  { background: var(--gx-tint);  color: var(--gx-body-text); }
+.bg-cyan  { background: var(--gx-cyan);  color: var(--gx-navy); }
+.bg-green { background: var(--gx-green); color: var(--gx-navy); }
+.bg-navy  { background: var(--gx-navy);  color: var(--gx-white); }
+
+/* On navy, eyebrows swap green and body lifts to white-at-82%. */
+.bg-navy h1, .bg-navy h2, .bg-navy h3, .bg-navy h4, .bg-navy h5, .bg-navy h6 { color: var(--gx-white); }
+.bg-navy p { color: var(--gx-body-on-dark); }
+.bg-navy .eyebrow,
+.bg-navy .gx-eyebrow { color: var(--gx-eyebrow-on-dark); }
+
+/* ── Code (rare; for actual code blocks only). ─────────────────────────── */
+code, kbd, samp, pre {
+  font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  font-size: 0.92em;
+}

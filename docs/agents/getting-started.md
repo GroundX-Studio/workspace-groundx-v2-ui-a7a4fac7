@@ -113,7 +113,7 @@ See [deploy.md](deploy.md) for what happens then.
 
 In order:
 1. Re-read `docs/agents/gotchas.md` — your bug is probably listed.
-2. Re-read the wireframe spec under `/tmp/design-bundle/v2-dashboard-chat-driven-ui/project/`.
+2. Re-read the wireframe spec under [`openspec/wireframes/source/`](../../openspec/wireframes/source/) (or open `openspec/wireframes/Onboarding Spec _standalone_.html` in a browser for the visual).
 3. Read the relevant `docs/agents/*.md` reference.
 4. Ask the user — surface 2–3 possible causes + the one you'd pick.
    Don't dump a wall of speculation.
