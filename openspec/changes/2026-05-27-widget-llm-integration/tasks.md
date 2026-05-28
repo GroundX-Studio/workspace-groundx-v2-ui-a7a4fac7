@@ -117,6 +117,26 @@ order shown is the recommended one (smallest blast radius first).
         a "did you mean?" suggestion when there's no match
 - [ ] Wire the integrity script into `npm test` (runs alongside
       vitest)
+- [ ] **Failing test:** `scripts/check-tool-quality.test.mjs` —
+      asserts the four quality rules fire on bad fixtures
+      (PascalCase name, noun-only name, short description,
+      missing `.describe()` on a Zod field) and passes on a
+      conforming fixture
+- [ ] Add `scripts/check-tool-quality.mjs` that walks
+      `registry.all()` and asserts:
+      - Name matches `^[a-z][a-z0-9_]*$` AND starts with an
+        allowlisted action verb (`open_`, `jump_`, `propose_`,
+        `accept_`, `dismiss_`, `save_`, `send_`, `pick_`,
+        `pivot_`, `highlight_`, `commit_`, `book_`, `edit_`,
+        `pin_`, `run_`, `reject_`, `cancel_`, `delete_`)
+      - Description ≥ 40 chars AND contains `Use when` or
+        `Triggers when` (case-insensitive)
+      - Every Zod field on the `input` schema has a non-empty
+        `.describe(...)` (walk via `schema._def.shape()`)
+      - Failure messages include: tool name, owning widget path,
+        which rule failed, suggested fix
+- [ ] Wire the quality check into `npm test` (runs alongside the
+      registry-integrity check)
 - [ ] Migration sweep: catalog every existing `<Button>` /
       `<IconButton>` / `<TextField>` / `<DropdownMenu>` instance
       across the app. For each:

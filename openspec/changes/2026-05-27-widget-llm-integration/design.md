@@ -160,6 +160,42 @@ LLMs work best with (matches OpenAI/Anthropic example tools);
 camelCase is the convention TypeScript discriminated unions
 work best with. The mapping is one line per tool.
 
+### Tool name + description quality (locked 2026-05-27 PM)
+
+The LLM only sees three things per tool: `name`, `description`,
+and the per-parameter `.describe()` strings on the Zod schema.
+Sloppy values here directly degrade tool-selection accuracy.
+Four rules enforced by a build-time `scripts/check-tool-quality.mjs`
+script — runs alongside the registry-integrity check that already
+validates `tool="..."` references:
+
+1. **Globally unique name.** Registry-assembly already errors on
+   collision; the quality check restates it for completeness.
+2. **Naming convention.** `^[a-z][a-z0-9_]*$` (snake_case) AND
+   must start with one of an allowlisted action verb:
+   `open_`, `jump_`, `propose_`, `accept_`, `dismiss_`, `save_`,
+   `send_`, `pick_`, `pivot_`, `highlight_`, `commit_`, `book_`,
+   `edit_`, `pin_`, `run_`, `reject_`, `cancel_`, `delete_`.
+   New verbs may be added with PR review; the allowlist lives in
+   the script so additions are auditable.
+3. **Description quality.** ≥ 40 characters AND contains either
+   `Use when` or `Triggers when` (case-insensitive). The "Use when"
+   clause is the single most-impactful improvement to LLM
+   tool-selection — it tells the model the *condition* not just the
+   *behavior*.
+4. **Per-parameter `.describe()`.** Every field on the Zod input
+   schema must carry a non-empty `.describe(...)` call. Walked at
+   boot via `_def.shape()`; missing descriptions fail the build
+   with the field path and the owning tool name.
+
+**Trade-off:** raises the bar for tool authoring. Cost is one
+extra sentence per tool. Benefit: LLM tool-selection becomes a
+function of the developer's writing quality, not the model's
+ability to guess from a noun name. This is the kind of thing that
+sounds optional and is in practice the difference between a
+function-calling system that works and one that hallucinates
+tool calls.
+
 ## G. Zod validation — required?
 
 **Decision:** **yes, required at the middleware boundary.** Every

@@ -93,3 +93,47 @@ Tools with `category: "read"` MAY auto-dispatch into `intents[]` directly, surfa
 - **WHEN** the middleware processes the response
 - **THEN** the call lands in `suggestedActions[]` not `intents[]`
 - **AND** the frontend renders a chip the user must click to dispatch
+
+### Requirement: Tool names SHALL follow a discoverable convention and descriptions SHALL be LLM-actionable
+
+Every `WidgetTool` SHALL satisfy four quality rules enforced at build time by `scripts/check-tool-quality.mjs` (run alongside the existing registry-integrity check). The LLM sees `name`, `description`, and per-parameter `.describe()` calls — these rules ensure that surface is unambiguous and self-documenting.
+
+1. **Globally unique name.** No two widgets may declare a tool with the same `name`. Enforced by `registry.ts` at assembly time (already covered by the auto-discovery requirement above); the quality check restates this for completeness.
+2. **Naming convention.** `name` SHALL match the regex `^[a-z][a-z0-9_]*$` AND start with an action verb (`open_`, `jump_`, `propose_`, `accept_`, `dismiss_`, `save_`, `send_`, `pick_`, `pivot_`, `highlight_`, `commit_`, `book_`, `edit_`, `pin_`, `run_`, `reject_`, `cancel_`, `delete_`). Casing drift (`Save`, `saveX`, `SaveSchema`) and ambiguous noun-only names (`document`, `schema`) fail the check.
+3. **Description quality.** `description` SHALL be at least 40 characters AND SHALL contain either `Use when` or `Triggers when` (case-insensitive) so the LLM is told WHEN to pick the tool, not just what it does. `description: "saves"` fails; `description: "Save the current schema as a reusable template. Use when the user says 'save' or 'lock this schema'."` passes.
+4. **Per-parameter documentation.** Every field on the Zod `input` schema SHALL carry a `.describe(...)` call with a non-empty string. `documentId: z.string()` fails; `documentId: z.string().describe("GroundX document UUID")` passes. The check walks the Zod schema's `_def.shape()` at boot and asserts every leaf has a `description`.
+
+#### Scenario: A non-conforming tool name fails the build
+
+- **GIVEN** a widget declares a tool with `name: "SaveSchema"` (PascalCase, not snake_case)
+- **WHEN** `scripts/check-tool-quality.mjs` runs
+- **THEN** the build fails with an error naming the widget, the offending tool name, and the regex
+- **AND** the suggested fix `save_schema` appears in the error output
+
+#### Scenario: A noun-only tool name fails the build
+
+- **GIVEN** a tool declares `name: "document"` (no action verb prefix)
+- **WHEN** the quality check runs
+- **THEN** the build fails citing the missing action verb
+- **AND** the error lists the allowed verb prefixes
+
+#### Scenario: A too-short or non-actionable description fails
+
+- **GIVEN** a tool declares `description: "saves the thing"` (16 chars, no "Use when" / "Triggers when")
+- **WHEN** the quality check runs
+- **THEN** the build fails citing both the length floor (40 chars) and the missing trigger phrasing
+- **AND** the error includes a worked-example description for the failing tool
+
+#### Scenario: A Zod field missing .describe() fails
+
+- **GIVEN** a tool's input schema is `z.object({ documentId: z.string(), page: z.number().describe("page #") })`
+- **WHEN** the quality check walks the schema
+- **THEN** the build fails naming the field `documentId` and the tool that owns it
+- **AND** the error explains the LLM has to guess the field's meaning without a description
+
+#### Scenario: A fully-conforming tool passes all four checks
+
+- **GIVEN** a tool with `name: "open_document"`, a 60-character description containing "Use when…", and every Zod field carrying a `.describe(...)`
+- **WHEN** the quality check runs
+- **THEN** the check passes for that tool
+- **AND** the build proceeds
