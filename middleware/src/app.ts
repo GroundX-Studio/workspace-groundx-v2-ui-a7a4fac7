@@ -439,7 +439,7 @@ export function createApp({
   // id once authed). The same chat session can flip from anon to
   // authed mid-flow via /api/chat-sessions/claim, so we accept EITHER
   // match — the visitor still owns the same cookie pre/post-sign-up.
-  app.get("/api/chat-sessions/:id/messages", apiLimiter, requireSession, async (req, res, next) => {
+  app.get<{ id: string }>("/api/chat-sessions/:id/messages", apiLimiter, requireSession, async (req, res, next) => {
     try {
       const session = req.session!;
       const chatSessionId = req.params.id;
@@ -549,7 +549,7 @@ export function createApp({
   // Merge semantics: only fields present in the body are written.
   // Title / isOnboarding / ownership / timestamps are preserved
   // by reading the row first and overlaying the body.
-  app.patch("/api/chat-sessions/:id", apiLimiter, requireSession, async (req, res, next) => {
+  app.patch<{ id: string }>("/api/chat-sessions/:id", apiLimiter, requireSession, async (req, res, next) => {
     try {
       const session = req.session!;
       const chatSessionId = req.params.id;
@@ -691,7 +691,7 @@ export function createApp({
   //
   // Same anon/user ownership pattern as POST /api/intent + POST
   // /api/viewer-events.
-  app.put("/api/chat-sessions/:id/entities/:entityKey", apiLimiter, requireSession, async (req, res, next) => {
+  app.put<{ id: string; entityKey: string }>("/api/chat-sessions/:id/entities/:entityKey", apiLimiter, requireSession, async (req, res, next) => {
     try {
       const session = req.session!;
       const chatSessionId = req.params.id;
@@ -1095,8 +1095,13 @@ export function createApp({
 
         // Same scope derivation chatHandler uses for routed chat —
         // entity-derived scope wins, samples-bucket env fallback last.
+        // AppRepository doesn't expose a (sessionId, entityKey) get;
+        // list-then-find is the canonical lookup pattern used
+        // elsewhere (see PUT /api/chat-sessions/:id/entities/:entityKey).
         const activeEntity = chatSession.activeEntityKey
-          ? await repository.getChatSessionEntity(chatSessionId, chatSession.activeEntityKey)
+          ? (await repository.listChatSessionEntities(chatSessionId)).find(
+              (e) => e.entityKey === chatSession.activeEntityKey,
+            ) ?? null
           : null;
         const contentScope = deriveRagContentScope(activeEntity, env.GROUNDX_SAMPLES_BUCKET_ID ?? null);
         const groundxApiKey = reqSession.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY ?? null;

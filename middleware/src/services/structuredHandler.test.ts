@@ -272,10 +272,15 @@ describe("runStructuredQuery", () => {
       async forward(path: string, init: RequestInit & { customerKey?: string }): Promise<Response> {
         this.calls.push({ name: "forward", input: { path, init } });
         if (path === "/apikey" && init.method === "GET") {
+          // NOTE: Partner API keys are UUIDs in practice — these fake
+          // values use a `pk-` prefix (not `sk-`) so they don't trip
+          // `scripts/scan-secrets.mjs`'s OpenAI-style key regex. The
+          // last-4 assertions below still verify the safe-display
+          // contract.
           return Response.json({
             apiKeys: [
-              { id: "k1", name: "prod-key", apiKey: "sk-FULLSECRET-1234567890abcdef" },
-              { id: "k2", name: "dev-key", apiKey: "sk-OTHERSECRET-fedcba0987654321" },
+              { id: "k1", name: "prod-key", apiKey: "pk-FULLSECRET-1234567890abcdef" },
+              { id: "k2", name: "dev-key", apiKey: "pk-OTHERSECRET-fedcba0987654321" },
             ],
           });
         }

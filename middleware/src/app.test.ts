@@ -703,6 +703,53 @@ describe("middleware scaffold", () => {
       }
     });
 
+    // Regression: the route used to call
+    // `repository.getChatSessionEntity(...)` which doesn't exist on
+    // AppRepository (only `listChatSessionEntities` does). The bug
+    // was silent because no test had ever exercised the path where
+    // `chatSession.activeEntityKey` was set. With the entity set,
+    // the route 500'd at runtime with "is not a function".
+    it("succeeds when chatSession has an active entity (regression: missing getChatSessionEntity method)", async () => {
+      const repository = new MemoryAppRepository();
+      const partnerClient = new FakePartnerClient();
+      const groundxClient = new FakeGroundXClient();
+      const llmClient = new FakeLlmClient();
+      const scenarioRegistry = new FakeScenarioRegistry();
+      const mockEnv = { ...testEnv, MOCK_MODE: true };
+      const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/chat-sessions")
+        .send({ id: "chat-1", title: "Onboarding", isOnboarding: true, activeEntityKey: "sample:utility" })
+        .expect(200);
+      // Seed the entity directly so the route's scope-derivation path
+      // has something to read.
+      await repository.upsertChatSessionEntity({
+        chatSessionId: "chat-1",
+        entityKey: "sample:utility",
+        lastFrame: "f3",
+        completedFramesJson: JSON.stringify(["f1", "f2"]),
+        scanProgressJson: null,
+        extractedValuesJson: null,
+        bucketId: null,
+        groupId: null,
+        documentIdsJson: null,
+        projectIdsJson: null,
+        createdAt: new Date(),
+        lastVisitedAt: new Date(),
+      });
+      const response = await agent
+        .post("/api/extract-field")
+        .send({
+          chatSessionId: "chat-1",
+          field: { name: "total", type: "NUMBER", description: "Total amount due." },
+        })
+        .expect(200);
+      expect(response.body).toHaveProperty("value");
+      expect(response.body).toHaveProperty("confidence");
+    });
+
     it("403 when caller doesn't own the chat session", async () => {
       const { app, repository } = setup();
       // Owner-A bootstrap + creates chat-1.

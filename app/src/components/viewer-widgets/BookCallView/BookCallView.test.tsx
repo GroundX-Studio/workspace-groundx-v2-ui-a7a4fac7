@@ -14,7 +14,7 @@ import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProvid
 
 import { BookCallView } from "./BookCallView";
 
-const UTILITY: "utility" = "utility";
+const UTILITY = "utility" as const;
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
