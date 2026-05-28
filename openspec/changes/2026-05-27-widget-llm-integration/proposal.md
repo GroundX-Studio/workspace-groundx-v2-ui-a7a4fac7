@@ -1,4 +1,9 @@
-# Widget ↔ LLM integration — every widget LLM-drivable by default
+# LLM-drivable interactive surface — every clickable / editable element exposes a tool
+
+**Scope locked 2026-05-27 PM**: every interactive element anywhere in the app
+SHALL expose an LLM-callable tool. Not just widgets — buttons inside widgets,
+input fields, dropdowns, switches, any element a user can click or edit.
+The whole experience must be LLM-drivable.
 
 ## Why
 
@@ -33,8 +38,23 @@ relationship between widgets and the LLM.
 
 ## What changes
 
-Five concerns. Each lands as its own phase but the design lands first
+Six concerns. Each lands as its own phase but the design lands first
 (see `design.md`) to lock the architectural answers before code moves.
+
+### 0. The core principle: every user-facing action is a tool
+
+Every interactive element in the app — every button, input, dropdown,
+switch, slider, anywhere — SHALL be reachable by the LLM via a named
+tool. The DOM element is one trigger; the LLM tool call is another;
+both invoke the same handler.
+
+The compile-time enforcement: interactive primitives (`Button`,
+`TextField`, `IconButton`, `DropdownMenu`, `Switch`, etc.) take a
+required `tool: string` prop (or `noTool: string` for explicit opt-out
+with a justification). TypeScript refuses to compile a bare interactive
+element. There is no third option. This makes coverage automatic — the
+type system audits every screen instead of a regex drift guard trying
+to keep up.
 
 ### 1. Unify `CanvasIntent` + `AgentToolBus` into one declarative tool surface
 
@@ -49,13 +69,43 @@ Five concerns. Each lands as its own phase but the design lands first
 
 - ADD `<Name>.tools.ts` sibling file to every LLM-drivable widget.
   Exports a typed `tools` const: name + description + Zod input
-  schema + handler that produces a `CanvasIntent`.
+  schema + handler that produces a `CanvasIntent` or a state-mutation
+  callback. **Tools declared by a widget include all the actions
+  triggered by interactive elements inside that widget** — the
+  widget owns the tool, the button/input/etc. is one trigger.
 - ADD a central tool registry (`app/src/tools/registry.ts`) that
   auto-discovers all `<widget>/<name>.tools.ts` files at boot and
   composes them into the LLM-facing catalog.
 - ADD widget-contract drift guard extension: every widget MUST ship
-  either a `tools.ts` (declares tools) OR a `no-tools.md` marker
-  (explicit opt-out). Silent omission fails the build.
+  either a `tools.ts` (declares tools) OR a `no-llm.md` marker
+  (explicit opt-out with `## Why` justification). Silent omission
+  fails the build.
+
+### 2a. Interactive primitives require a tool binding (compile-time enforced)
+
+- MODIFY `components/primitives/Button/Button.tsx`,
+  `TextField/TextField.tsx`, `IconButton/IconButton.tsx`,
+  `DropdownMenu/DropdownMenu.tsx`, and every other interactive
+  primitive to take a **required** discriminated prop:
+
+  ```ts
+  type InteractiveProps =
+    | { tool: string; /* ... rest */ }
+    | { noTool: string; /* ... rest */ };
+  ```
+
+  Bare `<Button onClick={...}>` without one of `tool` or `noTool`
+  fails TypeScript compilation. There is no third option.
+- The `tool` prop's string value SHALL match a registered tool
+  name. A registry-time check fails the build if a primitive
+  references a `tool="..."` that no widget declared.
+- The `noTool` prop SHALL be a short justification string (e.g.,
+  `noTool="external redirect — not an in-app action"`) that lands
+  in the rendered DOM as a `data-no-tool` attribute for audit.
+- MIGRATE every existing `<Button>` / `<TextField>` / etc. instance
+  across the app to either declare its tool or opt out explicitly.
+  Auditable in one TypeScript pass: when migration is incomplete,
+  the build is red.
 
 ### 3. Function-calling at the middleware boundary
 

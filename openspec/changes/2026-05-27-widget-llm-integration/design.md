@@ -1,8 +1,16 @@
 # Design — widget-llm-integration
 
-Pre-implementation answers to the architecture questions the audit
-surfaced. Every answer below is a starting position; the user reviews
-+ flags any they disagree with before code lands.
+**Scope (locked 2026-05-27 PM)**: every interactive element in the
+app is LLM-drivable. Not "widgets" — every button, input, dropdown,
+switch, anywhere. The DOM element is one trigger; the LLM tool call
+is another; both invoke the same handler.
+
+**Picks locked 2026-05-27 PM**: the answers in §A through §K below
+are the chosen positions for v1. The open-question list at the end
+of this file is closed — all five picks confirmed by the user.
+
+§P (added 2026-05-27 PM) covers the element-level granularity
+decision.
 
 ## A. CanvasIntent vs. AgentTool — what's the relationship?
 
@@ -295,20 +303,95 @@ narrative.
 relies on the model's tool-following discipline. Both OpenAI and
 Anthropic are well-trained on this; should not be a problem.
 
-## Open questions for the user to confirm
+## §P. Element-level granularity — every interactive element must be LLM-drivable
 
-These positions are starting picks — flag any to revisit:
+**Decision:** every interactive element exposes a tool. Enforcement
+is at the TypeScript level via a required prop on every interactive
+primitive.
 
-1. (§A) Retire `AgentToolBus` entirely? OR rewrite it as the
-   widget tool registry under a new name?
-2. (§C) Auto-execute reads vs. user-confirm reads. Currently
-   `highlightCitation` (CiteChip click) auto-executes; a future
-   chat-emitted `highlight_citation` would do the same. Confirm?
-3. (§D) Drop the `registerAdapter` mechanism entirely vs. keep it
-   for future flexibility?
-4. (§E) Per-step catalog scoping vs. "expose everything"?
-5. (§K) Defer cross-widget tools to a v2?
+The architectural principle: **every user-facing action is a tool**.
+The DOM element (button click, input change, dropdown selection) is
+one way to trigger the action; the LLM tool call is another. Both
+go through the same handler. The widget that *owns* the action
+declares the tool; the element is one of potentially many entry
+points.
 
-Any "no" on those changes the rest of the design proportionally. A
-30-min review pass before any code lands is the right cost / benefit
-trade.
+### Enforcement: required `tool` or `noTool` prop on interactive primitives
+
+The interactive primitives in `components/primitives/` SHALL take
+a discriminated required prop:
+
+```ts
+type ButtonProps =
+  | { tool: string; onClick?: () => void; /* ... */ }
+  | { noTool: string; onClick?: () => void; /* ... */ };
+```
+
+There is no third overload. Bare `<Button>` fails compilation. The
+type system audits every screen, eliminating the "I forgot to add
+a tool" failure mode.
+
+`noTool` carries a justification string that lands as a
+`data-no-tool` attribute for runtime audit (e.g., "external redirect"
+or "decorative — has no action"). The drift guard greps for
+`data-no-tool` values that are empty or just `"x"` and flags them.
+
+### Coverage table
+
+| Primitive | Status |
+|---|---|
+| `Button` | tool/noTool required |
+| `IconButton` | tool/noTool required |
+| `TextField` | tool/noTool required (the tool sets the value) |
+| `DropdownMenu` | tool/noTool required (the tool selects an option) |
+| `Switch` (when added) | tool/noTool required |
+| `Slider` (when added) | tool/noTool required |
+| `Chip` (when interactive) | tool/noTool required |
+| `Card` (purely visual) | no requirement (not interactive) |
+| `Heading`, `BodyText`, `Label` (typography) | no requirement |
+
+### Where the tool lives
+
+Tools are declared at the *widget* level, not the *primitive* level.
+A widget that contains a Send button + an input field + a Cancel
+button declares all three tools in its `<Widget>.tools.ts`. The
+primitives reference the tool name via the `tool=` prop.
+
+This keeps the tool surface coherent: one widget = one tools file =
+one mental model. A reader of `ChatColumn.tools.ts` sees every
+LLM-callable action in the chat column.
+
+### Registry-time integrity check
+
+At app boot, the registry SHALL verify that every `tool="..."` value
+referenced in any rendered primitive maps to a declared tool in
+some widget's `tools.ts`. A missing mapping fails the build.
+
+This catches the case where a developer types `tool="send_msg"`
+(misspelled) — the build refuses until the typo is fixed.
+
+**Trade-off:** TypeScript can't enforce string-literal validity
+against a runtime-discovered set, so this check is build-time, not
+compile-time. A small `vite` plugin (or a pre-build script) walks
+the rendered tool names + the registry, fails if they diverge.
+
+### Cost
+
+Migration: every existing `<Button>` / `<TextField>` / `<IconButton>`
+across the app (~50-100 instances) needs a `tool=` or `noTool=` prop
+added. One sweep, one PR per file, type errors guide the work.
+
+Once migrated, the cost per future widget is minimal: declare the
+tool in `tools.ts`, reference the name from the primitive.
+
+## Open questions
+
+All previously-open picks are **closed** (user confirmed 2026-05-27 PM):
+
+1. ~~(§A) Retire `AgentToolBus` entirely?~~ **YES — retire.**
+2. ~~(§C) Auto-execute reads vs. user-confirm reads?~~ **Split: reads auto, mutates confirm.**
+3. ~~(§D) Drop the `registerAdapter` mechanism?~~ **YES — drop.**
+4. ~~(§E) Per-step catalog scoping?~~ **YES — scope per step.**
+5. ~~(§K) Defer cross-widget tools to v2?~~ **YES — single-widget tools in v1.**
+
+§P (element-level granularity) is the locked scope.

@@ -6,11 +6,12 @@ order shown is the recommended one (smallest blast radius first).
 
 ## Phase 0 — Lock the design (no code)
 
-- [ ] User reviews `design.md` and confirms or revises the 15
-      architectural picks (§A-§O)
-- [ ] Open-question list (end of `design.md`) is resolved
-- [ ] Any picks the user disagrees with get pinned in this tasks.md
-      with the new decision before code starts
+- [x] User reviews `design.md` and confirms the 15 architectural
+      picks (§A-§O) — confirmed 2026-05-27 PM
+- [x] User confirms all 5 open questions — confirmed 2026-05-27 PM
+- [x] Scope expanded to cover every interactive element (§P added)
+      — confirmed 2026-05-27 PM
+- Status: design locked. Implementation phases below.
 
 ## Phase 1 — Render `suggestedActions[]` (un-dark the existing path)
 
@@ -94,6 +95,36 @@ order shown is the recommended one (smallest blast radius first).
 - [ ] Persist each tool call to `intent_log` (existing table)
 - [ ] App-side: ChatColumn dispatches every `intents[]` entry on
       receipt; orchestrator routes them
+
+## Phase 5b — Interactive primitives require tool/noTool prop (compile-time enforcement)
+
+- [ ] **Failing test:** add a `.test-d.ts` (TypeScript type-check
+      test) asserting that `<Button onClick={...}>` without `tool`
+      or `noTool` fails compilation; `<Button tool="x" onClick={...}>`
+      compiles; `<Button noTool="reason" onClick={...}>` compiles.
+- [ ] Modify `components/primitives/Button/Button.tsx` to take the
+      discriminated `{ tool: string } | { noTool: string }` prop.
+      Render `data-tool` or `data-no-tool` attribute accordingly.
+- [ ] Same for `IconButton`, `TextField`, `DropdownMenu`. Each
+      interactive primitive gets the same treatment.
+- [ ] Add a build-time registry-integrity script
+      (`scripts/check-tool-references.mjs`) that:
+      - Greps every `.tsx` under `components/` + `views/` for
+        `tool="..."` literal references
+      - Cross-checks each against `registry.all()` from
+        `app/src/tools/registry.ts`
+      - Fails the build with the file path + offending tool name +
+        a "did you mean?" suggestion when there's no match
+- [ ] Wire the integrity script into `npm test` (runs alongside
+      vitest)
+- [ ] Migration sweep: catalog every existing `<Button>` /
+      `<IconButton>` / `<TextField>` / `<DropdownMenu>` instance
+      across the app. For each:
+      - If it triggers an in-app action: add `tool="<name>"` and
+        declare the tool in the owning widget's `tools.ts`
+      - If it's an external redirect or purely decorative:
+        `noTool="<justification>"`
+- [ ] App tests + tsc green after migration
 
 ## Phase 6 — Widget-contract drift guard extension
 
