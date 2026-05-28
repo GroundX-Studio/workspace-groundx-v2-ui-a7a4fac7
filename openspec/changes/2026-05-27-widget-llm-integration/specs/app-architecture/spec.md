@@ -2,6 +2,46 @@
 
 ## ADDED Requirements
 
+### Requirement: Every widget SHALL conform to the slot contract
+
+Every component placed under `app/src/components/chat-widgets/<Name>/` or `app/src/components/viewer-widgets/<Name>/` SHALL satisfy all five rules below. The drift-guard test at `app/src/test/widget-contract.test.ts` enforces them programmatically.
+
+1. **Single default export** — the directory SHALL contain a `<Name>.tsx` file whose default-exported React component is the consumer-facing entry point, named after the directory.
+
+2. **Mode prop** — the default-exported component's props type SHALL include a `mode: "onboarding" | "steady"` field. When `mode === "onboarding"`, editable affordances (input bars, save buttons, edit toolbars, etc.) SHALL be hidden or disabled; read-only viewing SHALL remain functional. Tool catalog scoping (`availableIn`) parallels this lock — see the LLM tool surface Requirement below.
+
+3. **Sibling README with required section headers** — a `README.md` SHALL sit alongside the `.tsx` file. The README SHALL contain section headers for: what the widget does + its slot, props (required + optional), locked affordances under `mode="onboarding"`, events / callbacks fired, and a one-line integration example. The drift guard SHALL enforce header presence, not just file presence.
+
+4. **Sibling test** — a `<Name>.test.tsx` SHALL sit alongside the `.tsx` file. The test SHALL cover: mounting in both `mode` values without crashing; locked affordances absent / disabled when `mode === "onboarding"`; and any events the widget fires on user action.
+
+5. **Dependency direction** — the widget SHALL compose only from `app/src/components/primitives/`, `app/src/components/brand/`, or `app/src/components/layout/`. Widgets SHALL NOT import from other widget slots OR from `app/src/views/`.
+
+#### Scenario: Drift guard fires when a widget directory is missing its sibling files
+
+- **GIVEN** a new directory `app/src/components/chat-widgets/ChipsBar/` containing only `ChipsBar.tsx`
+- **WHEN** `npx vitest run app/src/test/widget-contract.test.ts` executes
+- **THEN** the test fails with an error naming the missing `README.md`
+- **AND** the same drift guard fails with an error naming the missing `ChipsBar.test.tsx`
+
+#### Scenario: Drift guard fires when the README is missing a required section header
+
+- **GIVEN** `chat-widgets/ChipsBar/README.md` exists but lacks the `## Locked affordances` header
+- **WHEN** the drift guard runs
+- **THEN** the test fails naming the widget directory and the missing header
+- **AND** the error lists all required headers for reference
+
+#### Scenario: Drift guard fires when the widget's component is missing the mode prop
+
+- **GIVEN** `chat-widgets/ChipsBar/ChipsBar.tsx` exports a component whose props type lacks `mode`
+- **WHEN** the drift guard runs
+- **THEN** the test fails with an error naming the widget directory and the missing `mode` prop
+
+#### Scenario: Drift guard accepts a fully-conforming widget
+
+- **GIVEN** `chat-widgets/ChipsBar/` contains `ChipsBar.tsx` (default export with `mode` prop), `README.md` (with all required section headers), and `ChipsBar.test.tsx`
+- **WHEN** the drift guard runs
+- **THEN** the test passes for that directory
+
 ### Requirement: Every widget SHALL declare its LLM tool surface
 
 Every component placed under `app/src/components/chat-widgets/<Name>/` or `app/src/components/viewer-widgets/<Name>/` SHALL ship EITHER a sibling `<Name>.tools.ts` file declaring its LLM-callable tools OR a sibling `no-llm.md` file explicitly opting out. The drift-guard test at `app/src/test/widget-contract.test.ts` SHALL enforce this — silent omission of both files fails the build.

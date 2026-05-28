@@ -1,8 +1,13 @@
-# Tasks — widget-llm-integration
+# Tasks — widget contract + LLM-drivable interactive surface
 
-Eight phases. Each phase opens with a failing test or a
-user-visible verification step. Phases can land independently;
+Nine major phases (with two sub-phases: 3a contract-floor foundation
++ 5b interactive primitives). Each phase opens with a failing test or
+a user-visible verification step. Phases can land independently;
 order shown is the recommended one (smallest blast radius first).
+
+Merged 2026-05-27 PM with the former `widget-contract-floor-raise`
+change — Phase 3a + the README header drift guard in Phase 6 + the
+recipes/anti-examples in Phase 7 are the absorbed work.
 
 ## Phase 0 — Lock the design (no code)
 
@@ -58,6 +63,50 @@ order shown is the recommended one (smallest blast radius first).
       helper that filters by `availableIn` + step
 - [ ] Write tests covering: empty registry, duplicate tool name,
       schema validation, step-scoped filtering
+
+## Phase 3a — Contract-floor foundation: template + worked example + Slot Contract Requirement (absorbed from widget-contract-floor-raise)
+
+- [ ] **Failing assertion:** opening `app/src/components/_template/`
+      yields no file (the dir does not exist).
+- [ ] Create `app/src/components/_template/README.md` with all five
+      required section headers + filler explaining each:
+      `## What it does`, `## Props`, `## Locked affordances`,
+      `## Events`, `## How to mount`, `## LLM tools`.
+- [ ] Create `app/src/components/_template/Template.tsx` — minimal
+      widget exporting `Template` with `mode: "onboarding" | "steady"`
+      prop, demo affordance locked under onboarding, `data-mode`
+      attribute.
+- [ ] Create `app/src/components/_template/Template.test.tsx` —
+      the canonical 3 tests (mount-both-modes, locked-affordance-absent
+      under onboarding, mode-prop reflected on `data-mode`).
+- [ ] Create `app/src/components/_template/Template.tools.ts` — a
+      stub demonstrating one `read` tool + one `mutate` tool with a
+      Zod schema and per-parameter `.describe()` calls. (Alt: create
+      `_template/no-llm.md` with a `## Why` section showing the
+      opt-out shape.)
+- [ ] Add a header comment to each template file: "Copy this dir to
+      `chat-widgets/<Name>/` or `viewer-widgets/<Name>/`, rename
+      Template → Name, fill in the TODO markers."
+- [ ] Ensure `_template/` is **excluded** from the widget-contract
+      drift guard (its placement is `components/_template/`, not
+      `chat-widgets/` or `viewer-widgets/`).
+- [ ] **Failing assertion:** `grep -i "## How to add a new widget" docs/agents/widget-contract.md` does not match a worked-example walkthrough.
+- [ ] Extend `docs/agents/widget-contract.md` with a 7-step worked
+      example building `ChipsBar` from zero to green. Each step
+      shows actual file contents:
+      1. Pick the slot + name
+      2. Copy `_template/` → `chat-widgets/ChipsBar/`
+      3. Fill in `ChipsBar.README.md` (show the populated file)
+      4. Fill in `ChipsBar.test.tsx` (show the populated file)
+      5. Implement `ChipsBar.tsx` (show the populated file)
+      6. Declare `ChipsBar.tools.ts` with one tool (show the
+         populated file)
+      7. Mount it in a host (show the JSX) + run `npm test`
+- [ ] The walkthrough closes with the verification command + expected
+      output, not just the procedure.
+- [ ] OpenSpec validate: the Slot Contract Requirement already lives
+      in `specs/app-architecture/spec.md` (added when this change
+      was merged); confirm `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate 2026-05-27-widget-llm-integration --strict` passes.
 
 ## Phase 4 — Reference widget: PdfViewer gets its tools
 
@@ -146,7 +195,7 @@ order shown is the recommended one (smallest blast radius first).
         `noTool="<justification>"`
 - [ ] App tests + tsc green after migration
 
-## Phase 6 — Widget-contract drift guard extension
+## Phase 6 — Widget-contract drift guard extension (tools.ts/no-llm.md + README headers)
 
 - [ ] **Failing test:** `widget-contract.test.ts` — when a widget
       dir is missing BOTH `<Name>.tools.ts` and `no-llm.md`, the
@@ -159,6 +208,20 @@ order shown is the recommended one (smallest blast radius first).
 - [ ] If `tools.ts` is present: import it, assert the export is a
       valid `WidgetTool[]` (each entry has name / description /
       input schema / handler / category)
+- [ ] **Failing test:** `widget-contract.test.ts` — a widget README
+      missing the `## Locked affordances` (or `## LLM tools`) header
+      passes the drift guard today
+- [ ] Extend the drift guard to read each widget's README and assert
+      it contains all required section headers:
+      - `## What it does` (or `## Purpose`)
+      - `## Props`
+      - `## Locked affordances under \`mode="onboarding"\`` (or
+        equivalent)
+      - `## Events` (or `## Callbacks`)
+      - `## How to mount` (or `## Integration`)
+      - `## LLM tools` (or `## No LLM tools — see no-llm.md`)
+- [ ] Failure messages name the widget directory, the missing
+      header, and list all required headers for reference
 
 ## Phase 7 — Backfill all existing widgets
 
@@ -166,6 +229,18 @@ order shown is the recommended one (smallest blast radius first).
       `viewer-widgets/` (drift-guard test currently lists them)
 - [ ] For each: write `<Name>.tools.ts` if it should be LLM-drivable,
       OR write `no-llm.md` with justification
+- [ ] For each: backfill README to include all required section
+      headers introduced in Phase 6 (the same widgets get touched
+      once, not twice)
+- [ ] Add "Promote brand → widget" section to
+      `docs/agents/widget-contract.md`. Cover: signal that triggers
+      promotion (complexity threshold, multi-instance,
+      mode-conditional affordances), file-level migration steps,
+      test-suite migration, what stays in `brand/`.
+- [ ] Add "Anti-examples" section to `docs/agents/widget-contract.md`.
+      List 5 concrete examples of components that are NOT widgets
+      (`CiteChip`, `Heading`, `OnboardingNav`, `AppShell`,
+      `IconButton`) with the rule of thumb for each.
 - [ ] Existing widgets to triage:
       - `chat-widgets/ChatColumn` — no tools (it IS the chat
         surface; tools live on the widgets it composes)

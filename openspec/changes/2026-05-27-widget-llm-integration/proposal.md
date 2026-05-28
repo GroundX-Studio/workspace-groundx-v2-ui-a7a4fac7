@@ -1,9 +1,24 @@
-# LLM-drivable interactive surface — every clickable / editable element exposes a tool
+# Widget contract + LLM-drivable interactive surface
 
-**Scope locked 2026-05-27 PM**: every interactive element anywhere in the app
-SHALL expose an LLM-callable tool. Not just widgets — buttons inside widgets,
-input fields, dropdowns, switches, any element a user can click or edit.
-The whole experience must be LLM-drivable.
+**Scope locked 2026-05-27 PM**: this change folds two concerns that share
+the same drift-guard surface and would have overlapped on every widget
+backfill:
+
+1. **Raise the widget contract floor** — templates, worked example,
+   formalize the slot contract in OpenSpec, enforce README section
+   headers, add anti-examples + promote-brand-→-widget recipe.
+2. **LLM-drivable interactive surface** — every interactive element
+   anywhere in the app SHALL expose an LLM-callable tool. Not just
+   widgets — buttons inside widgets, input fields, dropdowns,
+   switches, any element a user can click or edit. The whole
+   experience must be LLM-drivable.
+
+Originally filed as two separate changes
+(`widget-contract-floor-raise` + `widget-llm-integration`); merged
+2026-05-27 PM because the templates need to teach BOTH the slot
+contract AND the LLM tool declaration in one walkthrough, the
+drift guard extends to check BOTH READMEs AND `tools.ts`, and the
+backfill sweep touches every widget once for both concerns.
 
 ## Why
 
@@ -38,8 +53,40 @@ relationship between widgets and the LLM.
 
 ## What changes
 
-Six concerns. Each lands as its own phase but the design lands first
+Seven concerns. Each lands as its own phase but the design lands first
 (see `design.md`) to lock the architectural answers before code moves.
+
+### -1. Widget contract floor: templates + worked example + slot-contract Requirement + README header drift guard
+
+Today the widget contract has a strong ceiling (great when followed) and
+a weak floor (easy to ship a thin widget that passes drift). Specifically:
+
+- No worked end-to-end example for a fresh agent to copy
+- No README template — existing READMEs are inconsistent
+- `mode="onboarding"` semantics are prose only — each widget judgment-calls
+  what to lock
+- OpenSpec doesn't carry the widget contract as a formal Requirement
+- No anti-examples (what's NOT a widget?) → over- or under-applied contract
+- No "promote brand → widget" recipe
+- README content isn't drift-guarded — only existence is
+
+This concern lands:
+
+- ADD `scaffold/app/src/components/_template/` containing canonical
+  `README.md` + `<Name>.tsx` + `<Name>.test.tsx` + `<Name>.tools.ts`
+  (or `no-llm.md`). Fresh agents copy the dir, rename, fill in. The
+  template teaches BOTH the slot contract AND the LLM tool declaration.
+- ADD a worked-example walkthrough in `docs/agents/widget-contract.md`
+  building `ChipsBar` from zero to green — each step shows actual file
+  contents.
+- ADD a formal "Every widget SHALL conform to the slot contract"
+  Requirement to `openspec/specs/app-architecture/spec.md` with five
+  rules + scenarios.
+- EXTEND the drift guard to assert every widget README contains the
+  required section headers (file-exists check stays; content-shape
+  check is added).
+- ADD "Promote brand → widget" + "Anti-examples" sections to
+  `widget-contract.md`.
 
 ### 0. The core principle: every user-facing action is a tool
 
@@ -158,21 +205,25 @@ to keep up.
   `app-architecture` (widget contract extension), `chat-routing`
   (function-calling Requirement).
 - Scaffold:
+  - `app/src/components/_template/` (NEW directory — canonical
+    widget template demonstrating slot contract + LLM tool surface)
   - `app/src/components/{chat-widgets,viewer-widgets}/<Name>/<Name>.tools.ts`
     (NEW; one per widget that exposes LLM-drivable behavior)
   - `app/src/tools/registry.ts` (NEW central registry +
     auto-discovery)
   - `app/src/components/chat-widgets/SuggestedActionChips/`
     (NEW chat-widget)
-  - `app/src/test/widget-contract.test.ts` (extended assertion)
+  - `app/src/test/widget-contract.test.ts` (extended assertion —
+    README headers + tools.ts/no-llm.md presence)
   - `app/src/contexts/AgentToolBusContext/` (RETIRED or rewritten
     against the new registry)
   - `middleware/src/services/chatRouter.ts` (function-calling tool
     catalog + tool-call execution path)
   - `middleware/src/services/chatHandler.ts` (tool catalog
     assembly per session)
-  - `docs/agents/widget-contract.md` (new "LLM tools" section +
-    worked example)
+  - `docs/agents/widget-contract.md` (new sections: worked example
+    "build ChipsBar from zero", "LLM tools", anti-examples,
+    promote-brand → widget recipe)
 
 ## Sequence
 
