@@ -436,19 +436,13 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
     // context-switching to the middleware terminal. Gated on
     // import.meta.env.DEV so prod builds strip the call entirely.
     if (import.meta.env.DEV && result.reply?._debug) {
-      // eslint-disable-next-line no-console
       console.groupCollapsed(
         `[chat] ${result.reply._debug.mode} · "${input.newUserMessage.slice(0, 60)}${input.newUserMessage.length > 60 ? "…" : ""}"`,
       );
-      // eslint-disable-next-line no-console
       console.log("scope", result.reply._debug.scope);
-      // eslint-disable-next-line no-console
       console.log("groundx", result.reply._debug.groundx);
-      // eslint-disable-next-line no-console
       console.log("llm", result.reply._debug.llm);
-      // eslint-disable-next-line no-console
       console.log("answer", result.reply.answer);
-      // eslint-disable-next-line no-console
       console.groupEnd();
     }
     return result;
