@@ -85,7 +85,7 @@ auto-discovers all widgets and enforces 1, 2, 4, 5.
 
 ### Chat widgets
 
-- Render inside the chat scroll body (the `OnboardingChatColumn`
+- Render inside the chat scroll body (the `ChatColumn`
   conversation flow or the steady `ChatWithSources` stream).
 - Use the canonical chat primitives from
   `components/chat-widgets/_primitives/` (see "Primitives" below).
@@ -146,7 +146,7 @@ Widgets that exist or will exist after ARCH-03..ARCH-11 land:
 | `BookingStatusCard` | shipped as `BookCallChatPanel` (move + rename in ARCH-03) | n/a |
 | `GateChatRail` | shipped (ARCH-05 · 2026-05-26) | the chat half of monolithic `GateView` (deleted in ARCH-05C) |
 | `ChatWithSources` | future (UI-05 / steady) | placeholder in SteadyShell |
-| `ThinkingStream` | ARCH-11 | inline `F2ConversationFlow` block in `OnboardingChatColumn` |
+| `ThinkingStream` | ARCH-11 | inline `F2ConversationFlow` block in `ChatColumn` |
 | `PickAViewPills` | ARCH-11 (extract from F2ConversationFlow) | inline pill row in F2ConversationFlow |
 
 ## The full component taxonomy (added 2026-05-26 in ARCH-14)

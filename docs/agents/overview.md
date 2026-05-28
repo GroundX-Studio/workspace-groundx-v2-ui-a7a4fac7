@@ -13,35 +13,55 @@ Frame sequence (F-series):
 | Frame | What | Status |
 |---|---|---|
 | F1 | Ingest — sample picker + BYO tiles | Real |
-| F2 | Understand — scan animation + thinking-notes streaming in chat | Real |
-| F3 | Extract — fields panel + citation peek | Real (schema-driven) |
-| F3a | Edit schema | Stub |
-| F4 | (collapsed into F3) | — |
-| F5 | Interact — chat with sources | Stub-ish |
-| F6 | Gate — sign-up (magic link / SSO / book a call) | Real, takes over chat column when active |
+| F2 | Understand — scan animation + thinking-notes streaming in chat + live chat input | Real |
+| F3 | Extract — schema-driven fields panel + citation chips that jump the viewer | Real |
+| F3a | Edit schema — schema-agent loop (inline editor, ProposeCard, save → sign-in gate) | Real (was a stub pre-2026-05-27) |
+| F4 | (retired — folded into F3a) | — |
+| F5 | Interact — chat with sources, citation chips → PDF viewer with bbox highlight | Real |
+| F6 | Gate — sign-up via real Partner API register + claim (renamed from "magic-link" 2026-05-25). Renders as a `sign-up` overlay z-stacked on the canvas (master-viewer-session); doesn't replace the chat column | Real |
 | F7 | Integrate — copy-paste API snippet + download agent plugins | Stub |
 
 ## What's deliberately NOT done yet
 
-- **Live GroundX search.** All scenario data (extracted values,
-  citations, chat scripts) comes from manifest fixtures in
-  `middleware/src/scenarios`. The chatRouter scaffold lands in
-  `services/chatRouter.ts` with a MOCK_MODE responder; live mode
-  throws "not yet wired" intentionally.
-- **Live LLM.** Same. The `FetchLlmClient` exists and forwards to
-  whichever provider's API base URL is configured, but the
-  router that decides which prompt to send doesn't actually call
-  it yet.
-- **MySQL chat-session tables in production use.** Schema +
-  repository methods + BFF endpoint all exist. We default
-  `APP_REPOSITORY_MODE=memory` on dev so MySQL is bypassed; flip
-  to `mysql` when ready + provide `MYSQL_*` env vars.
-- **The extraction-workbench widget integration.** F3 uses a
-  schema-driven flat list today; the full widget pattern (PDF
-  rendering with citation region overlays via pdfjs-dist) is
-  Phase-7 work.
-- **Steady mode UI.** Routing exists (`/c/:sessionId` → SteadyShell)
-  but the actual multi-session app shell is a placeholder.
+- **Steady-mode multi-session shell.** SteadyShell at `/c/:sessionId`
+  mounts the canonical AppShell with `ChatColumn mode="steady"` +
+  `PdfViewerWidget` (when the active ViewerStep is `doc-viewer`),
+  but the full steady-mode chrome (session switcher polish, BYO
+  upload flow, multi-doc carousel) is UI-05/06+ work.
+- **F4 SchemaView as a standalone frame.** Retired; the
+  schema-agent loop is now F3a, reached from F3's fields-panel
+  hamburger.
+- **F7 IntegrateView.** Still a stub. UI-02 (connectors catalog +
+  copy-paste API snippet + agent-plugin downloads) is the
+  product surface; not started.
+- **Streaming chat responses.** `routeChat` returns a full envelope
+  on completion. Streaming (SSE / WebSocket) is CF-11 — deferred
+  until the live RAG path stabilizes.
+- **Tool-call wiring.** `chat-with-sources` widget contract names
+  8 agent tools per `project_dev_contracts.md`; the chat router
+  doesn't dispatch tool calls yet (TL-01..TL-08).
+- **MySQL in production use.** Schema + repository methods + BFF
+  endpoints all exist. Dev defaults `APP_REPOSITORY_MODE=memory`
+  so MySQL is bypassed; flip to `mysql` + provide `MYSQL_*` env
+  vars for prod. The idempotent migration
+  (`ensureChatSessionsViewerColumns`) handles ALTER for existing
+  deployments.
+
+### What HAS shipped (don't re-do)
+
+- **Live GroundX search** (chatRouter `searchGroundX` → real
+  `/v1/search/{bucket|group}` endpoints; ContentScope-aware
+  routing; CF-15).
+- **Live LLM** (`FetchLlmClient` + grounded prompt + structured /
+  hybrid handlers; OpenAI + Anthropic providers supported).
+- **Compression chain** (leaf summaries + meta-compaction; no
+  telephone-game decay).
+- **Server-side persistence + RT hydrate** (every chat turn +
+  viewer event + active entity + viewer history persists; UI
+  rehydrates on mount).
+- **Clickable citations end-to-end** (chip → orchestrator →
+  `gotoDocViewer` ViewerStep → PdfViewerWidget with controlled
+  `targetPage` + `highlightBbox` overlay).
 
 ## Stack
 

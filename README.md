@@ -4,6 +4,22 @@ This is the canonical runnable scaffold for GroundX Studio web UI projects. Mana
 workspace projects are initialized from this repository, then agents clone the managed
 repo, edit locally, commit, push, and publish.
 
+## For agents (read first)
+
+If you're an AI agent picking up work on this project, the entry point is
+[`AGENTS.md`](AGENTS.md) — a table of contents that links to:
+
+- **Discipline rules** (TDD, secret hygiene, definition of done, round-trip contract)
+- **OpenSpec** for planning + active changes + capability specs (at `../openspec/`)
+- **Architecture** (shell, contexts, ViewerSession, middleware shape)
+- **Widget contract** (5-tier component tree + drift guards)
+- Onboarding flow (F1–F7), chat session model, testing layers, deploy, observability,
+  MCP tool surface, gotchas, airgap audit, real-data rewire plan
+
+Default discipline: failing test first, OpenSpec for planning (no rival tracking
+files), round-trip closure before declaring "done." See
+[`docs/agents/discipline.md`](docs/agents/discipline.md).
+
 ## Quick Start
 
 ```bash

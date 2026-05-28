@@ -83,7 +83,7 @@ need it for an MCP arg:
 
 ```bash
 grep -E '^GROUNDX_PARTNER_API_KEY=' \
-  /Users/benjaminfletcher/git/groundx-v2-ui/scaffold/.env.local \
+  "$(git rev-parse --show-toplevel)/scaffold/.env.local" \
   | cut -d= -f2-
 ```
 
@@ -139,9 +139,10 @@ If `.env.local` is missing or its value 403s, fall back to the
 transcript:
 
 ```bash
-grep -aoE '"PARTNER_API_KEY":"[^"]{30,50}"' \
-  ~/.claude/projects/-Users-benjaminfletcher-git-groundx-v2-ui/*.jsonl \
-  | sort -u
+# Claude Code stores transcripts at ~/.claude/projects/<encoded-repo-path>/
+# where <encoded-repo-path> is the repo's absolute path with `/` → `-`.
+project_dir="$HOME/.claude/projects/$(git rev-parse --show-toplevel | sed 's|/|-|g')"
+grep -aoE '"PARTNER_API_KEY":"[^"]{30,50}"' "$project_dir"/*.jsonl | sort -u
 ```
 
 This only works in Claude Code (because of the JSONL transcript

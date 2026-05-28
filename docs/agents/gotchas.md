@@ -34,7 +34,7 @@ MCP arg:
 
 ```bash
 grep -E '^GROUNDX_PARTNER_API_KEY=' \
-  /Users/benjaminfletcher/git/groundx-v2-ui/scaffold/.env.local \
+  "$(git rev-parse --show-toplevel)/scaffold/.env.local" \
   | cut -d= -f2-
 ```
 
@@ -154,7 +154,7 @@ flips on `openGate(trigger)` (any trigger). They're related but
 not the same. F2 BYO from F1's Sign-Up tile sets both. F5 "Save"
 button sets only `gate.status`.
 
-### `OnboardingChatColumn` dispatch order matters
+### `ChatColumn` dispatch order matters
 
 Gate-active branch must come first. If you add a new dispatch
 case, put it after gate-active and before `isF2 && scenario`.

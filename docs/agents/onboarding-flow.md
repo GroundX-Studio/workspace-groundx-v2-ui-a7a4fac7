@@ -7,15 +7,15 @@ the transitions + the rules that decide which surface mounts.
 
 | Frame | URL | Canvas content | Chat-column content |
 |---|---|---|---|
-| F1 | `/onboarding` | IngestView (sample picker + BYO) | (none — F1 is full-width picker) |
-| F1 BYO sign-up | `/onboarding/signup` | UnderstandView BYO placeholder | GateChatPanel |
-| F2 | `/onboarding/<bucketId>/<scenarioId>` | UnderstandView (LIVE PARSE + scan + thumbnails) | F2ConversationFlow (header + bubbles + streaming notes + Pick-a-view pills) |
-| F3 | (URL stays at F2's; frame state advances) | ExtractView (schema fields + citation peek) — `?focus=<categoryId>` opens to a specific slice | IdleChatPlaceholder |
-| F3a | … | ExtractView edit-schema branch (stub) | IdleChatPlaceholder |
-| F4 | (folded into F3) | — | — |
-| F5 | … | InteractView (chat-with-sources widget pattern) | IdleChatPlaceholder |
-| F6 | … (gate-open superimposes) | InteractView underneath | GateChatPanel (takes over) |
-| F7 | … (post-sign-in) | IntegrateView (API snippets + plugin downloads) | IdleChatPlaceholder |
+| F1 | `/onboarding` | IngestView (sample picker + BYO) — mounted as overlay above the AppShell | IdleChatPlaceholder underneath |
+| F1 BYO sign-up | `/onboarding/signup` | `sign-up` overlay z-stacked on the current step (master-viewer-session Phase 2). Underlying canvas keeps its content | GateChatPanel |
+| F2 | `/onboarding/<bucketId>/<scenarioId>` | UnderstandView (PdfViewerWidget mount; reads doc-viewer ViewerStep when present) | F2ConversationFlow (header + bubbles + streaming notes + Pick-a-view pills + live chat input + CiteChips on assistant turns) |
+| F3 | (URL stays at F2's; frame state advances) | ExtractView (schema-driven fields panel + citation chips) — `?focus=<categoryId>` opens to a specific slice | F2ConversationFlow stays mounted (chat persists across F2→F5) |
+| F3a | (URL stays the same) | SchemaView — schema-agent loop: inline editor, ProposeCard above the field list, save → sign-in gate. Reached from F3's fields-panel hamburger menu (NOT a chat pill) | F2ConversationFlow with Schema-Agent header chip + earlier-turns compaction summary |
+| F4 | — | retired; folded into F3a 2026-05-27 | — |
+| F5 | … | InteractView (chat-with-sources placeholder) | F2ConversationFlow continues |
+| F6 (gate active) | `/onboarding/signup` OR `/onboarding/<…>?gate=save\|export` | Underlying canvas (whatever step is active) stays mounted; `sign-up` overlay z-stacks on top | GateChatPanel takes over the chat column (legacy bridge — overlay model in viewer; chat side still on `gate.status` until Phase 6 close-out) |
+| F7 | … (post-sign-in) | IntegrateView (API snippets + plugin downloads — stub) | IdleChatPlaceholder |
 
 The URL is the **source of truth** for which surface mounts. The
 URL → state useEffect in `OnboardingShell` reads `useParams()` + 
@@ -56,7 +56,7 @@ change the URL (which is sometimes wrong — prefer navigate).
 - `transitionPhase` flips to `"leaving"`.
 - During leaving: F1 mounts underneath; SlideOverlay renders all
   three panes sliding OUT (nav + chat to the left, canvas to the
-  right). Chat + canvas pane contents are `OnboardingChatColumn`
+  right). Chat + canvas pane contents are `ChatColumn`
   + `UnderstandView` with `overrideScenarioId={leavingScenarioSnapshot}` + `overrideFrame="f2"` so the user sees the F2 chrome slide away with content intact.
 - After SWIPE_DURATION_MS all three panes unmount + the snapshot
   clears. The nav is gone (F1 has no nav per spec).
@@ -96,7 +96,7 @@ seed.
 
 ## Chat-column narrative model
 
-`OnboardingChatColumn` is the single component for the chat side.
+`ChatColumn` is the single component for the chat side.
 Its dispatch (in order):
 
 1. Gate active (`open` / `committed`) → `<GateChatPanel />`.
@@ -113,10 +113,18 @@ dispatch, don't rewrite the whole component.
 
 ## Gate (F6)
 
-Three doors:
-- Magic-link email.
-- SSO.
-- Book a call with an engineer.
+Three doors (`commitGate(method)`):
+- `register` — real Partner API `POST /api/auth/register` + claim
+  (was "magic-link" pre-2026-05-25; renamed when the magic-link
+  enum stopped tracking an unimplemented backend endpoint).
+- `sso` — placeholder for OAuth.
+- `engineer-call` — Calendly book-a-call.
+
+Master-viewer-session Phase 2 changes: the gate is now a `sign-up`
+ViewerOverlay z-stacked on the current canvas step, not a canvas
+swap. The chat-side `GateChatPanel` still drives off the legacy
+`gate.status` slot during the transitional bridge — Phase 6 (deferred)
+reshapes it into a widget message and retires the slot.
 
 Gate state machine in `OnboardingSessionContext`:
 

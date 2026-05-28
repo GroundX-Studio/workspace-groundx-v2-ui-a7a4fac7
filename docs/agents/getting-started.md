@@ -74,7 +74,7 @@ Workflow (for any new view under `app/src/views/Onboarding/`):
 Useful patterns to lift from existing views:
 - `IngestView` (F1): scenario picker grid, BYO tile.
 - `UnderstandView` (F2): scan animation, LIVE PARSE row, page thumbnails.
-- `OnboardingChatColumn`: header + sample switcher + bubbles + Pick-a-view pills.
+- `ChatColumn`: header + sample switcher + bubbles + Pick-a-view pills.
 
 ## Adding a middleware endpoint
 
