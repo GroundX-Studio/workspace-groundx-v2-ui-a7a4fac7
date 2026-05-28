@@ -65,6 +65,20 @@ async function readLlmModelId(existing) {
   return promptSecret("LLM model ID for local middleware completions");
 }
 
+// GROUNDX_SAMPLES_BUCKET_ID — required for the onboarding sample
+// flow. The chat router's `deriveRagContentScope` falls back to
+// this env var when the active entity has no scope refs. Without
+// it, scope becomes `{kind:"unknown"}` and GroundX search no-ops →
+// every chat reply degenerates to "I don't have any snippets."
+// Default to 28454 (the canonical dev/staging samples bucket) so
+// new clones work out of the box; override via env or by editing
+// an existing .env.local for other deployments.
+function readSamplesBucketId(existing) {
+  if (process.env.GROUNDX_SAMPLES_BUCKET_ID) return process.env.GROUNDX_SAMPLES_BUCKET_ID.trim();
+  if (existing.get("GROUNDX_SAMPLES_BUCKET_ID")) return existing.get("GROUNDX_SAMPLES_BUCKET_ID");
+  return "28454";
+}
+
 const existing = readExistingEnv();
 const partnerApiKey = await readPartnerApiKey(existing);
 if (!partnerApiKey) {
@@ -95,6 +109,8 @@ if (!llmApiKey) {
   process.exit(1);
 }
 
+const samplesBucketId = readSamplesBucketId(existing);
+
 const envLines = [
     "NODE_ENV=development",
     "PORT=3001",
@@ -106,6 +122,8 @@ const envLines = [
     "GROUNDX_BASE_URL=https://api.groundx.ai/api/v1",
     `GROUNDX_PARTNER_API_KEY=${partnerApiKey}`,
     "GROUNDX_ANON_API_KEY=",
+    // Required for onboarding RAG — see readSamplesBucketId().
+    `GROUNDX_SAMPLES_BUCKET_ID=${samplesBucketId}`,
     `LLM_SERVICE=${llmService}`,
     "LLM_BASE_URL=https://api.openai.com/v1",
     `LLM_API_KEY=${llmApiKey}`,

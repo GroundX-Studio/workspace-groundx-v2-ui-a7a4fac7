@@ -78,6 +78,12 @@ try {
       "LLM_API_KEY=test-llm-key",
       "MOCK_MODE=true",
       "APP_REPOSITORY_MODE=memory",
+      // GROUNDX_SAMPLES_BUCKET_ID is required for the onboarding
+      // RAG flow — without it the chat router can't search the
+      // samples bucket and every reply is "I don't have any snippets."
+      // Setup writes the canonical dev value (28454) unless the user
+      // overrides via env or an existing .env.local entry.
+      "GROUNDX_SAMPLES_BUCKET_ID=28454",
     ]) {
       if (!written.includes(required)) throw new Error(`${envPath} missing ${required}`);
     }
