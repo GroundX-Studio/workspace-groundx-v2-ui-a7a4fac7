@@ -10,7 +10,7 @@ If you're an AI agent picking up work on this project, the entry point is
 [`AGENTS.md`](AGENTS.md) — a table of contents that links to:
 
 - **Discipline rules** (TDD, secret hygiene, definition of done, round-trip contract)
-- **OpenSpec** for planning + active changes + capability specs (at `../openspec/`)
+- **OpenSpec** for planning + active changes + capability specs (at [`openspec/`](openspec/))
 - **Architecture** (shell, contexts, ViewerSession, middleware shape)
 - **Widget contract** (5-tier component tree + drift guards)
 - Onboarding flow (F1–F7), chat session model, testing layers, deploy, observability,

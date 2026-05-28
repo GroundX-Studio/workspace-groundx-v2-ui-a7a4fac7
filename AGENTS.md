@@ -4,7 +4,7 @@ Table of contents. Read what's relevant. This is the connective
 tissue between external specs (design bundle, GroundX APIs, harness
 skills) and this codebase.
 
-- **Planning + pending work** — managed via OpenSpec at `../openspec/`. Run `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list` for active changes and `… list --specs` for durable capability contracts. Capability specs live at `openspec/specs/<capability>/spec.md`; in-flight proposals live at `openspec/changes/<change-id>/`. Validate with `… validate --all --strict`.
+- **Planning + pending work** — managed via OpenSpec at [`openspec/`](openspec/). Run `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list` for active changes and `… list --specs` for durable capability contracts. Capability specs live at `openspec/specs/<capability>/spec.md`; in-flight proposals live at `openspec/changes/<change-id>/`. Validate with `… validate --all --strict`.
 - [**Discipline rules**](docs/agents/discipline.md) — failing test first, never commit `.env*` or Partner API `*username` fields, tight responses, **definition of done = user-visible test (not seam test)**, **planning via OpenSpec (no tombstones; verify before flagging not-started)**, WIP cap = 3 per epic, closure deletes inline TODOs, **round-trip contract** (Rule 9 — every persisted byte gets a read site, dead-column / dead-endpoint / dead-context checks before closure, `seam-only` status for write-only work).
 - [**Project overview + stack**](docs/agents/overview.md) — chat-driven GroundX onboarding UI on Vite + React + MUI + Express + MySQL + EKS. Two-mode model (Onboarding + Steady).
 - [**Getting started — first day**](docs/agents/getting-started.md) — clone → local preview → test loop → deploy loop → MCP tool usage.

@@ -1,0 +1,40 @@
+schema: spec-driven
+
+context: |
+  Repository: GroundX V2 UI — chat-driven onboarding for GroundX Studio.
+
+  Repo root is the scaffold itself: Vite + React + MUI v5 + Emotion frontend
+  (`app/`), Express + TypeScript middleware (`middleware/`), MySQL in
+  production / in-memory in dev. The authoritative onboarding wireframes
+  ship as the built artifact at the harness team's design bundle (fetched
+  via the curl command in `docs/agents/design-bundle.md`); their JSX source
+  is the v2-dashboard checkout the design bundle references. Steady-mode
+  wireframes (post-signin product) live in the `groundx-wireframes`
+  companion checkout.
+
+  OpenSpec captures durable requirements and the changes that touch them.
+  The test runner (`npx vitest run`) and TypeScript (`npx tsc --noEmit`)
+  are the enforcement layer. `openspec/specs/<capability>/` carries
+  durable requirements, `openspec/changes/<change-id>/` carries in-flight
+  proposals, and archived proposals land under `openspec/changes/archive/`.
+
+rules:
+  proposal:
+    - State what is in scope and out of scope.
+    - Identify the affected wireframe frames (F-series in spec-flow.jsx),
+      the touched scaffold modules, and the closure-gate tests.
+  specs:
+    - Use SHALL/MUST language and include at least one scenario per requirement.
+    - Each requirement must be testable from a user-visible state OR by a
+      data-shape contract (no internal-implementation-only requirements).
+    - Cross-reference the originating wireframe (spec-flow.jsx function or
+      groundx-wireframes mock card) so future audits can re-verify.
+  design:
+    - Name the source of truth and the scaffold module that mirrors it.
+    - Identify drift-prevention tests (testIDs, contract tests) and which
+      command proves the requirement holds.
+  tasks:
+    - Start with the failing test (round-trip per docs/agents/discipline.md
+      Rule 9), then implementation tasks, then closure verification.
+    - Include the dead-column / dead-endpoint / dead-context cross-check
+      step explicitly.
