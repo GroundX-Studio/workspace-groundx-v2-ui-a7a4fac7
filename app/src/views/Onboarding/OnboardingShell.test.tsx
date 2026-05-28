@@ -791,4 +791,69 @@ describe("OnboardingShell", () => {
       expect(screen.getByTestId("onboarding-frame-f7")).toBeInTheDocument();
     });
   });
+
+  // Regression: clicking a citation while on F3 pushes a doc-viewer
+  // ViewerStep — canvas swaps to UnderstandView, but the StepStrip
+  // pill was reading `session.currentFrame` directly, so the nav
+  // still highlighted "Analyze" (F3) while the canvas showed F2
+  // content. The fix derives the active pill from the active viewer
+  // step's kind (which doc-viewer maps to "understand") rather than
+  // from `session.currentFrame`.
+  it("F3 + citation click → nav highlight moves to 'Understand' (matches the canvas swap)", async () => {
+    // We exercise the citation-click side effect by calling
+    // `gotoDocViewer` directly on the ChatStore (which is what the
+    // CanvasOrchestrator's `highlightCitation` handler does
+    // internally). Avoids pulling another context hook just to dispatch.
+    let storeRef: ReturnType<typeof useChatStore> | null = null;
+    function StoreGrabber() {
+      storeRef = useChatStore();
+      return null;
+    }
+
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <StoreGrabber />
+      </>,
+      { initialFrame: "f3", initialScenario: "utility" },
+    );
+
+    // The StepStrip's parent "Analyze" pill is a bracket-group
+    // wrapping Extract/Interact/Report substeps; only the leaf
+    // *Pill* component sets `aria-current="step"`, and SubPills do
+    // NOT. So before the click (active state lives inside the
+    // Analyze bracket on a SubPill) there's no aria-current node.
+    // After the fix, the active step becomes Understand — which IS
+    // a Pill that sets aria-current. That asymmetry IS the user-
+    // visible bug being closed: the nav indicator now travels with
+    // the canvas swap.
+    function activeStepLabel(): string {
+      const active = document.querySelector<HTMLElement>('[aria-current="step"]');
+      if (!active) return "";
+      return (active.textContent ?? "").replace(/^\d+\s*/, "").trim();
+    }
+
+    // Before the click — the active step is the "Analyze" bracket's
+    // Extract SubPill, which doesn't expose aria-current. Confirm
+    // the canvas is the ExtractView (no understand-canvas testid).
+    expect(screen.queryByTestId("understand-canvas")).not.toBeInTheDocument();
+    expect(activeStepLabel()).toBe(""); // no aria-current node
+
+    // Fire the citation-click side effect (the orchestrator's
+    // `highlightCitation` handler calls this internally).
+    act(() => {
+      storeRef!.gotoDocViewer({
+        documentId: "doc-cite",
+        page: 7,
+        bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 },
+      });
+    });
+
+    // After the click — canvas is UnderstandView AND the Understand
+    // pill has aria-current="step" (matches the canvas).
+    await waitFor(() => {
+      expect(screen.getByTestId("understand-canvas")).toBeInTheDocument();
+    });
+    expect(activeStepLabel()).toMatch(/understand/i);
+  });
 });

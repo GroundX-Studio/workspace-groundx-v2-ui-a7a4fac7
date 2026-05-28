@@ -132,7 +132,34 @@ export const OnboardingShell: FC = () => {
   const { state: appMode } = useAppMode();
   const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate } = useOnboardingSession();
   const { state: scenarioRegistry } = useScenarioRegistry();
-  const currentStep = FRAME_TO_STEP[session.currentFrame];
+  // ChatStore is read up here so the StepStrip pill state below can
+  // derive from the active ViewerStep (citation clicks push a
+  // doc-viewer step → nav highlight follows the canvas swap, see
+  // master-viewer-session). The same `chatStoreState` is used later
+  // for overlay reads + canvas-content selection.
+  const { state: chatStoreState, pushOverlay, popOverlay } = useChatStore();
+  const activeChatSessionEarly =
+    chatStoreState.activeSessionId != null
+      ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
+      : null;
+  const latestViewerStepEarly =
+    activeChatSessionEarly && activeChatSessionEarly.viewer.currentStep.stepIndex >= 0
+      ? activeChatSessionEarly.viewer.history[activeChatSessionEarly.viewer.currentStep.stepIndex]
+      : null;
+  // ViewerStep → StepStrip pill mapping. Clickable citations push a
+  // `doc-viewer` step which maps to the Understand pill, so the nav
+  // indicator matches what the canvas surfaces.
+  const VIEWER_STEP_KIND_TO_STEP_ID: Record<string, StepId> = {
+    "ingest-picker": "ingest",
+    "doc-viewer": "understand",
+    "extract-workbench": "analyze",
+    "interact-chat": "analyze",
+    report: "analyze",
+    integrate: "integrate",
+  };
+  const currentStep: StepId =
+    (latestViewerStepEarly && VIEWER_STEP_KIND_TO_STEP_ID[latestViewerStepEarly.kind]) ??
+    FRAME_TO_STEP[session.currentFrame];
   const isF1 = session.currentFrame === "f1";
 
   // -- URL ↔ surface sync ----------------------------------------
@@ -167,12 +194,11 @@ export const OnboardingShell: FC = () => {
   openGateRef.current = openGate;
   advanceFrameRef.current = advanceFrame;
 
-  // `master-viewer-session` Phase 2 — overlay actions + state read.
-  // The sign-up overlay is the new source of truth for "is the
-  // signup surface visible." URL-driven push/pop replaces the prior
-  // reliance on the mode-flag `gate.status === "open"` for the canvas
-  // swap.
-  const { state: chatStoreState, pushOverlay, popOverlay } = useChatStore();
+  // `master-viewer-session` Phase 2 — overlay actions referenced
+  // via refs so the URL→state effect can call them without listing
+  // them as deps. `chatStoreState` itself was destructured at the
+  // top of the component (needed early for the StepStrip pill
+  // derivation).
   const pushOverlayRef = useRef(pushOverlay);
   const popOverlayRef = useRef(popOverlay);
   pushOverlayRef.current = pushOverlay;

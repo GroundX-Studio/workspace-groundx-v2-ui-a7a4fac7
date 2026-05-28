@@ -1425,4 +1425,156 @@ describe("middleware API route contract", () => {
       init: expect.objectContaining({ method: method.toUpperCase() }),
     });
   });
+
+  // ── Populated-session sweep ────────────────────────────────────────
+  //
+  // Regression class: routes branch on `chatSession.activeEntityKey`
+  // / `viewer.history.length > 0` / `messages.length > 0` etc., but
+  // the test suite was constructing sessions with empty defaults.
+  // Code paths that only fire when those fields are populated stayed
+  // dark. The `getChatSessionEntity` runtime bug (route called a
+  // method that doesn't exist on AppRepository) was silent for weeks
+  // because the existing extract-field test never set
+  // `activeEntityKey`.
+  //
+  // Fix: a single fixture that pre-populates every chat-session field
+  // a route might branch on, then exercises every chat-session
+  // endpoint. If a route 500s on populated input, this test catches
+  // it.
+  describe("populated-session sweep (catches code paths only reachable with non-empty session)", () => {
+    async function seedPopulatedSession(
+      agent: ReturnType<typeof request.agent>,
+      repository: ReturnType<typeof setup>["repository"],
+      chatSessionId: string,
+    ) {
+      const now = new Date();
+      // Create the row via the public route so ownership matches the
+      // agent's cookie. Then PATCH every viewer-state field.
+      await agent
+        .post("/api/chat-sessions")
+        .send({
+          id: chatSessionId,
+          onboardingSessionId: chatSessionId,
+          title: "Populated",
+          isOnboarding: true,
+          activeEntityKey: "sample:utility",
+        })
+        .expect(200);
+      await agent
+        .patch(`/api/chat-sessions/${chatSessionId}`)
+        .send({
+          currentIntent: { kind: "showSample", scenario: "utility" },
+          viewerHistory: [
+            { kind: "ingest-picker" },
+            { kind: "doc-viewer", documentId: "doc-A", page: 1 },
+            { kind: "extract-workbench", scenarioId: "utility" },
+          ],
+          viewerOverlays: [{ kind: "citation-peek", documentId: "doc-A", page: 7 }],
+          viewerWorkspace: { schemaOverlay: { addedFields: [], pendingFieldProposals: [], dismissedFieldProposalKeys: [] } },
+        })
+        .expect(200);
+      // Seed an active entity directly via the repo (the case the
+      // `getChatSessionEntity` bug missed).
+      await repository.upsertChatSessionEntity({
+        chatSessionId,
+        entityKey: "sample:utility",
+        lastFrame: "f3",
+        completedFramesJson: JSON.stringify(["f1", "f2"]),
+        scanProgressJson: null,
+        extractedValuesJson: null,
+        bucketId: null,
+        groupId: null,
+        documentIdsJson: null,
+        projectIdsJson: null,
+        createdAt: now,
+        lastVisitedAt: now,
+      });
+      // Seed a message + a viewer event so list routes return non-empty.
+      await repository.appendChatMessage({
+        id: "msg-1",
+        chatSessionId,
+        turnIndex: 1,
+        role: "user",
+        content: "what is the total?",
+        citationsJson: null,
+        toolCallsJson: null,
+        attachmentsJson: null,
+        compressedIntoSummaryId: null,
+        llmProvider: null,
+        llmModelId: null,
+        latencyMs: null,
+        promptTokens: null,
+        completionTokens: null,
+        errorCode: null,
+        createdAt: now,
+      });
+      await repository.appendViewerEvent({
+        id: "ev-1",
+        chatSessionId,
+        entityKey: "sample:utility",
+        action: "opened",
+        source: "user",
+        detailJson: null,
+        timestamp: now.getTime(),
+        createdAt: now,
+      });
+    }
+
+    async function bootstrappedAgent() {
+      const { app, repository } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await seedPopulatedSession(agent, repository, "pop-1");
+      return { app, repository, agent };
+    }
+
+    it("GET /api/chat-sessions/:id/messages returns the populated thread without 500", async () => {
+      const { agent } = await bootstrappedAgent();
+      const response = await agent.get("/api/chat-sessions/pop-1/messages").expect(200);
+      expect(response.body.messages.length).toBeGreaterThan(0);
+    });
+
+    it("PATCH /api/chat-sessions/:id merges into a populated session without 500", async () => {
+      const { agent } = await bootstrappedAgent();
+      await agent
+        .patch("/api/chat-sessions/pop-1")
+        .send({ activeEntityKey: "sample:loan" })
+        .expect(200);
+    });
+
+    it("PUT /api/chat-sessions/:id/entities/:entityKey merges onto a pre-seeded entity without 500", async () => {
+      const { agent } = await bootstrappedAgent();
+      await agent
+        .put("/api/chat-sessions/pop-1/entities/sample%3Autility")
+        .send({ lastFrame: "f4" })
+        .expect(200);
+    });
+
+    it("POST /api/viewer-events appends to a populated session without 500", async () => {
+      const { agent } = await bootstrappedAgent();
+      await agent
+        .post("/api/viewer-events")
+        .send({
+          chatSessionId: "pop-1",
+          timestamp: Date.now(),
+          entityKey: "sample:utility",
+          action: "citation-clicked",
+          source: "user",
+          detail: { citationId: "c-1", page: 1 },
+        })
+        .expect(201);
+    });
+
+    it("POST /api/extract-field succeeds on a session with an active entity (regression: getChatSessionEntity runtime bug)", async () => {
+      const { agent } = await bootstrappedAgent();
+      const response = await agent
+        .post("/api/extract-field")
+        .send({
+          chatSessionId: "pop-1",
+          field: { name: "total", type: "NUMBER", description: "Total amount due." },
+        })
+        .expect(200);
+      expect(response.body).toHaveProperty("value");
+    });
+  });
 });
