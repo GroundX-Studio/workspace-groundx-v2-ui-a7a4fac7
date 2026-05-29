@@ -27,25 +27,43 @@ import MuiIconButton, {
 } from "@mui/material/IconButton";
 import { type FC, type ReactNode } from "react";
 
-export interface IconButtonProps extends Omit<MuiIconButtonProps, "children"> {
+import { resolveToolAttribute, type ToolBindingProps } from "../_tool-binding";
+
+interface IconButtonBaseProps extends Omit<MuiIconButtonProps, "children"> {
   /** The icon glyph. Defaults to `<CloseIcon />` since close is dominant. */
   icon?: ReactNode;
   /** Optional children — typically a badge overlay over the icon. */
   children?: ReactNode;
 }
 
-export const IconButton: FC<IconButtonProps> = ({
-  icon,
-  size = "small",
-  "aria-label": ariaLabel,
-  children,
-  ...rest
-}) => {
+/**
+ * widget-llm-integration Phase 5b — every interactive primitive
+ * requires exactly one of `tool` or `noTool`. See
+ * `components/primitives/_tool-binding.ts` for the contract.
+ */
+export type IconButtonProps = IconButtonBaseProps & ToolBindingProps;
+
+export const IconButton: FC<IconButtonProps> = (props) => {
+  const {
+    icon,
+    size = "small",
+    "aria-label": ariaLabel,
+    children,
+    tool,
+    noTool,
+    ...rest
+  } = props as IconButtonBaseProps & { tool?: string; noTool?: string };
   const glyph =
     icon ?? <CloseIcon fontSize={size === "large" ? "medium" : "small"} />;
+  const toolAttrs = resolveToolAttribute(
+    (tool !== undefined
+      ? ({ tool } as const)
+      : ({ noTool: noTool ?? "unknown" } as const)),
+  );
   return (
     <MuiIconButton
       {...rest}
+      {...toolAttrs}
       size={size}
       aria-label={ariaLabel ?? "close"}
       disableRipple

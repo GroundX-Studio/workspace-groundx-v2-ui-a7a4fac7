@@ -20,36 +20,136 @@ const FrameProbe = ({ onFrame }: { onFrame: (frame: string) => void }) => {
 describe("ExtractView (F3/F4)", () => {
   it("pre-selects the first field in the focus category on mount when ?focus= is set", async () => {
     // F2 Pick-a-view pills navigate to F3 with ?focus=<categoryId>;
-    // the user lands already inspecting their picked slice instead of
-    // staring at the blank preview placeholder.
+    // the user lands already inspecting their picked slice. WF-01 C9
+    // (2026-05-28): when ?focus= picks a category, the first field in
+    // that category becomes the active selection AND the provenance
+    // panel surfaces; the user lands on F4-shape provenance, not the
+    // fields list. (If we want a fields-list-default behavior with
+    // ?focus= just biasing the visible category, that's a follow-up.)
     renderWithOnboardingProviders(<ExtractView />, {
       initialFrame: "f3",
       initialScenario: "utility",
       initialUrl: "/onboarding/28454/utility?focus=meters",
     });
-    const preview = screen.getByTestId("extract-preview");
-    // The first Meters field opens in the preview. Use waitFor since
-    // the useEffect that reads ?focus runs after mount.
-    await waitFor(() => expect(within(preview).getByText("Source pages")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument());
+    expect(screen.getByTestId("extract-breadcrumb").textContent ?? "").toMatch(/meter_kwh/);
   });
 
-  it("renders schema categories and citation preview for the Utility sample", async () => {
-    const user = userEvent.setup();
-
+  it("renders schema categories for the Utility sample", async () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
-
-    // Topbar title carries the scenario id; category labels render in body.
     expect(screen.getByTestId("extract-topbar-title")).toHaveTextContent(/utility/);
-    expect(screen.getByText("Statement")).toBeInTheDocument();
-    expect(screen.getByText("Meters")).toBeInTheDocument();
-    expect(screen.getByText("Click a field on the left to see its source pages and snippets.")).toBeInTheDocument();
+    // "Statement" + "Meters" appear in both the category-tab row and
+    // the field-card eyebrow; assert by the aria-labeled category Card.
+    expect(document.querySelector('[aria-label="Statement"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Meters"]')).not.toBeNull();
+  });
 
+  // WF-01 C7 (2026-05-28). Category tabs let the user filter the
+  // fields panel by category; the wireframe pins them above the field
+  // cards. The unlock banner below the panes flags locked features and
+  // funnels signed-out users to F6.
+  it("WF-01 C7: F3 renders one category tab per schema category", () => {
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    const tabs = screen.getByTestId("extract-category-tabs");
+    // Utility schema has two categories (statement + meters).
+    expect(within(tabs).getByTestId("extract-category-tab-statement")).toBeInTheDocument();
+    expect(within(tabs).getByTestId("extract-category-tab-meters")).toBeInTheDocument();
+  });
+
+  it("WF-01 C7: F3 renders a sign-in unlock banner for anonymous users", () => {
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    const banner = screen.getByTestId("extract-unlock-banner");
+    expect(banner).toBeInTheDocument();
+    expect(banner.textContent ?? "").toMatch(/sign in/i);
+  });
+
+  // WF-01 C8 (2026-05-28). Per canonical (`spec-flow.jsx` line ~589),
+  // F3 field rows show the snake_case field key in monospace as the
+  // primary identifier, and the citation chip uses coral instead of
+  // the default cyan.
+  it("WF-01 C8: F3 field row renders the snake_case key", () => {
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    const row = screen.getByTestId("field-row-account_number");
+    // Snake_case key visible in the row (in addition to or instead of
+    // the human label — implementation chooses).
+    expect(row.textContent ?? "").toMatch(/account_number/);
+  });
+
+  it("WF-01 C8: F3 cite chip carries coral background", () => {
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    // Utility schema's account_number field has one citation → cite-chip-1
+    // inside that field row.
+    const row = screen.getByTestId("field-row-account_number");
+    const chip = within(row).getByTestId("cite-chip-1");
+    expect(chip).toHaveAttribute("data-color", "coral");
+  });
+
+  // WF-01 C9 (2026-05-28). Clicking a field card in F3 SHALL swap the
+  // fields panel into a provenance panel with FIELD / SOURCE / WHY
+  // MATCHED / CONFIDENCE / NEIGHBORS sections + a breadcrumb above
+  // the panes. The "▴ collapse" control returns to the fields list.
+  it("WF-01 C9: clicking a field card swaps the panel to a provenance view", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    await user.click(screen.getByTestId("field-row-account_number"));
+    expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("extract-breadcrumb")).toBeInTheDocument();
+    // Required sections.
+    const panel = screen.getByTestId("field-provenance-panel");
+    expect(panel.textContent ?? "").toMatch(/FIELD/);
+    expect(panel.textContent ?? "").toMatch(/SOURCE/);
+    expect(panel.textContent ?? "").toMatch(/WHY MATCHED/);
+    expect(panel.textContent ?? "").toMatch(/CONFIDENCE/);
+    expect(panel.textContent ?? "").toMatch(/NEIGHBORS/);
+  });
+
+  it("WF-01 C9: clicking ▴ collapse returns to the fields list", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    await user.click(screen.getByTestId("field-row-account_number"));
+    expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument();
+    await user.click(screen.getByTestId("extract-breadcrumb-collapse"));
+    expect(screen.queryByTestId("field-provenance-panel")).not.toBeInTheDocument();
+    // Back to fields panel.
+    expect(screen.getByTestId("field-row-account_number")).toBeInTheDocument();
+  });
+
+  // WF-01b C (2026-05-28). When a field is selected, the left-pane
+  // PdfViewerWidget receives the selected field's first-citation page
+  // as `targetPage` (and bbox as `highlightBbox` when the citation
+  // carries one). We assert via the data-attrs the widget surfaces on
+  // its root so the test doesn't depend on the xray fetch (which
+  // doesn't resolve in jsdom without an API mock).
+  it("WF-01b C: selecting a field threads the citation's page to the left-pane viewer", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    const viewer = screen.getByTestId("pdf-viewer-widget");
+    expect(viewer.getAttribute("data-target-page")).toBeNull();
     await user.click(screen.getByTestId("field-row-amount_due"));
+    // The Utility fixture's `amount_due` citation has page 1 (no bbox
+    // in this fixture, so the highlight overlay stays off — that's
+    // production-realistic: bbox is sometimes missing upstream).
+    expect(viewer.getAttribute("data-target-page")).toBe("1");
+  });
 
-    const preview = screen.getByTestId("extract-preview");
-    expect(within(preview).getByText("Amount due")).toBeInTheDocument();
-    expect(within(preview).getByText("Source pages")).toBeInTheDocument();
-    expect(within(preview).getByText(/utility-bill-2026-04/)).toBeInTheDocument();
+  // WF-01 C6 (2026-05-28). F3 layout is PDF viewer LEFT, fields panel
+  // RIGHT — matching `spec-flow.jsx Flow_Peek`. Before this change the
+  // panes were inverted: fields LEFT and an empty PREVIEW placeholder
+  // RIGHT. The fix flips the panes and replaces the PREVIEW placeholder
+  // with the actual PdfViewerWidget so the user can see the source
+  // alongside the extracted data.
+  it("WF-01 C6: F3 puts PdfViewerWidget in the left pane, fields in the right", () => {
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    const viewer = screen.getByTestId("pdf-viewer-widget");
+    const fields = screen.getByTestId("extract-fields-panel");
+    // Both panes present, and the PDF viewer precedes the fields panel
+    // in document order (which is grid column order for a 2-column grid
+    // with default `grid-auto-flow: row`).
+    expect(viewer).toBeInTheDocument();
+    expect(fields).toBeInTheDocument();
+    // eslint-disable-next-line no-bitwise
+    const beforeFields = viewer.compareDocumentPosition(fields) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(beforeFields).toBeTruthy();
   });
 
   it("supports the Loan table-to-JSON handoff render mode", async () => {
@@ -58,17 +158,19 @@ describe("ExtractView (F3/F4)", () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "loan" });
 
     expect(screen.getByTestId("render-mode-tabs")).toBeInTheDocument();
-    expect(screen.getByText("Gross monthly income")).toBeInTheDocument();
+    // WF-01 C8 (2026-05-28): field rows now show snake_case key as
+    // primary label; the human label lives in the description.
+    expect(screen.getByTestId("field-row-gross_monthly_income")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("render-mode-json"));
 
     const json = screen.getByTestId("extract-json");
     expect(json).toHaveTextContent('"schemaId": "loan-schema-v1"');
     expect(json).toHaveTextContent('"gross_monthly_income"');
-    expect(screen.queryByText("Gross monthly income")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("field-row-gross_monthly_income")).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("render-mode-table"));
-    expect(screen.getByText("Gross monthly income")).toBeInTheDocument();
+    expect(screen.getByTestId("field-row-gross_monthly_income")).toBeInTheDocument();
   });
 
   it("skips extract for the Solar Interact and Report scenario", () => {

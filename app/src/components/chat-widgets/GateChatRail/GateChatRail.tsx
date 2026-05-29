@@ -118,7 +118,7 @@ export const GateChatRail: FC<GateChatRailProps> = ({ mode = "onboarding" }) => 
           <Label sx={{ color: EYEBROW_ON_LIGHT }}>{eyebrow}</Label>
           <BodyText>{body}</BodyText>
           {mode === "onboarding" ? (
-            <Button
+            <Button noTool="legacy — Phase 7 backfills tool"
               type="button"
               variant="primary"
               fullWidth

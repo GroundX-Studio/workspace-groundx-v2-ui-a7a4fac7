@@ -6,6 +6,7 @@ import {
   customerDataUrl,
   customerLoginUrl,
   customerLogoutUrl,
+  customerResetUrl,
   customerRegisterUrl,
   resetPasswordCodeUrl,
   resetPasswordConfirmUrl,
@@ -120,6 +121,15 @@ export const updateAppMetadata = async (data: UpdateAppMetadataInput): Promise<A
 
 export const logout = async (): Promise<{ success: boolean }> => {
   const response = await axios.post<{ success: boolean }>(customerLogoutUrl);
+  return response.data;
+};
+
+// DBG-01: debug-overlay session reset. Clears the httpOnly session + csrf
+// cookies server-side for any caller (anon or authed). Distinct from
+// `logout` (which requires a session and is auth-semantic); reset works
+// even with no session, so the next request mints a fresh anon id.
+export const resetSession = async (): Promise<{ success: boolean }> => {
+  const response = await axios.post<{ success: boolean }>(customerResetUrl);
   return response.data;
 };
 

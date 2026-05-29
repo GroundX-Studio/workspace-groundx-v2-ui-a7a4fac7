@@ -25,7 +25,18 @@ import { z } from "zod";
 import type { AppRepository, GroundXClient, GroundXPartnerClient, LlmClient } from "../types.js";
 
 import { logger } from "../lib/logger.js";
+import {
+  bboxForResult,
+  parseBoundingBoxes,
+  parsePages,
+  resolveGeometryFromXray,
+  type NormalizedBbox,
+} from "./citationGeometry.js";
 import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
+import { assignTier, confidenceFor, verifyQuote, type AttributionTier } from "./attribution.js";
+import { fetchDocumentXray } from "./xrayCache.js";
+import { getServerTool, toolsForStep, type ViewerStepKind } from "./toolCatalog.js";
+import { toOpenAiTools, type OpenAiFunctionTool } from "./zodToJsonSchema.js";
 
 /**
  * `proposal-envelope-provenance`: Zod schema for the LLM's
@@ -92,12 +103,33 @@ export interface ChatRouterRequest {
    * classification when the UI has already signalled the mode.
    */
   intent?: string | null;
+  /**
+   * widget-llm-integration Phase 5 — the active ViewerStep kind the
+   * user is currently on (mirrors `ViewerStep["kind"]` from the app
+   * side). When present, the tool catalog sent to the LLM is filtered
+   * to tools whose `availableSteps` include this kind. When omitted,
+   * the full catalog is sent.
+   */
+  activeStepKind?: string | null;
 }
 
 export interface Citation {
   documentId: string;
   page: number;
   snippet?: string;
+  /** WF-03 — normalized 0-1 page-relative source region for PDF highlight. */
+  bbox?: NormalizedBbox;
+  /**
+   * WF-06 — attribution tier (graduated precision):
+   *   exact      verified verbatim quote + atom box → word-level highlight (dormant w/o WF-05 1b)
+   *   paraphrase verified quote → chunk-level highlight (WF-03 bbox)
+   *   ambient    unverified / retrieved-only → source chip, no auto inline span
+   */
+  tier?: AttributionTier;
+  /** WF-06 — citation confidence [0,1] from the quote-verification gate. */
+  confidence?: number;
+  /** WF-06 — the claim in the answer this citation supports (Bridge B). */
+  answerSpan?: string;
 }
 
 export interface SuggestedAction {
@@ -175,6 +207,27 @@ export interface ChatRouterDebug {
   } | null;
 }
 
+/**
+ * widget-llm-integration Phase 5 — one successful tool call. The
+ * frontend looks up the tool by name in the app-side `toolRegistry`,
+ * runs the handler with `arguments`, and dispatches the resulting
+ * intent via the canvas orchestrator. We also carry the
+ * already-constructed `intent` payload (built by the server tool's
+ * `intentBuilder`) so the app can dispatch directly without a second
+ * handler invocation when it trusts the server.
+ */
+export interface DispatchedIntent {
+  name: string;
+  arguments: Record<string, unknown>;
+  intent: Record<string, unknown>;
+}
+
+/** widget-llm-integration Phase 5 — one failed tool call. */
+export interface ToolFailure {
+  name: string;
+  reason: string;
+}
+
 export interface ChatRouterResponse {
   mode: ChatMode;
   answer: string;
@@ -182,6 +235,20 @@ export interface ChatRouterResponse {
   suggestedActions: SuggestedAction[];
   /** Tool calls the assistant invoked (Phase 7 wire-up). */
   tools: { name: string; arguments: Record<string, unknown> }[];
+  /**
+   * widget-llm-integration Phase 5 — validated, dispatchable LLM tool
+   * calls. The frontend orchestrator routes each entry to its
+   * registered intent handler. Empty array when the LLM emitted no
+   * tool calls.
+   */
+  intents: DispatchedIntent[];
+  /**
+   * widget-llm-integration Phase 5 — tool calls that failed
+   * validation (unknown tool name, Zod parse failure, etc.). The
+   * frontend can surface these as a "tried to do X but ..." chip;
+   * v1 does not auto-retry (design.md §M).
+   */
+  toolFailures: ToolFailure[];
   /**
    * UI-01 Phase 2a — non-null when the LLM emitted a well-formed
    * `proposedSchemaField` in its fenced JSON block AND the user's
@@ -356,6 +423,8 @@ interface GroundXSearchResult {
   text?: string;
   score?: number;
   fileName?: string;
+  /** WF-03 — normalized 0-1 bbox of the cited region, read off the result. */
+  bbox?: NormalizedBbox;
 }
 
 /**
@@ -494,6 +563,13 @@ async function runRagPipeline(
     { rbacFilter: deps.rbacFilter, ...(debugEnabled ? { debug: debugCapture } : {}) },
   );
 
+  // widget-llm-integration Phase 5 — assemble the tool catalog
+  // (filtered to the active ViewerStep) + advertise it to the LLM via
+  // native function calling. The empty-catalog case still sends a
+  // `tools: []` so the test surface can assert request shape.
+  const catalog = toolsForStep(request.activeStepKind as ViewerStepKind | undefined);
+  const openAiTools: OpenAiFunctionTool[] = toOpenAiTools(catalog);
+
   const llmResponse = await callGroundedLlm(
     request.newUserMessage,
     snippets,
@@ -501,24 +577,106 @@ async function runRagPipeline(
     deps.llmModelId,
     request.scopeHint,
     debugEnabled ? debugCapture : undefined,
+    openAiTools,
   );
 
-  // Parse the LLM's optional JSON block (CF-06 citations + CF-07
-  // suggestedIntent live in the same fenced block). Cleaned answer is
-  // the user-facing text with that block stripped.
+  // widget-llm-integration Phase 5 — validate each emitted tool_call
+  // against the server catalog. Successful calls land on
+  // `intents[]`; failures (unknown name / bad args) land on
+  // `toolFailures[]`. Per design.md §M, v1 surfaces failures
+  // without auto-retry.
+  // widget-llm-integration Phase 8 — category-aware routing.
+  // Read-category tools auto-dispatch via `intents[]`. Mutate-category
+  // tools surface as confirmable chips on `suggestedActions[]` (per
+  // design.md §C — state-mutating actions are user-confirmed by
+  // default). The mutate buffer below is flushed into the
+  // `suggestedActions` array after the "show-source" + legacy
+  // `suggested-intent` chips are seeded.
+  const intents: DispatchedIntent[] = [];
+  const toolFailures: ToolFailure[] = [];
+  const mutateChips: SuggestedAction[] = [];
+  for (const call of llmResponse.toolCalls) {
+    const tool = getServerTool(call.name);
+    if (!tool) {
+      toolFailures.push({ name: call.name, reason: `unknown tool name "${call.name}"` });
+      continue;
+    }
+    let parsedArgs: unknown;
+    try {
+      parsedArgs = JSON.parse(call.argumentsJson);
+    } catch {
+      toolFailures.push({ name: call.name, reason: "arguments_not_valid_json" });
+      continue;
+    }
+    const parseResult = tool.inputSchema.safeParse(parsedArgs);
+    if (!parseResult.success) {
+      const issues = parseResult.error.issues
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; ");
+      toolFailures.push({ name: call.name, reason: `invalid arguments — ${issues}` });
+      continue;
+    }
+    const intentPayload = tool.intentBuilder(parseResult.data);
+    if (tool.category === "mutate") {
+      // Surface as a chip the user must click to confirm. The label
+      // is the first sentence of the tool description (terminated at
+      // the first ".", "?", or "!") so the chat row stays compact.
+      const firstSentenceMatch = tool.description.match(/^[^.?!]+[.?!]?/);
+      const label = (firstSentenceMatch?.[0] ?? tool.description).trim();
+      mutateChips.push({
+        key: `tool:${call.name}`,
+        label,
+        detail: {
+          name: call.name,
+          arguments: parseResult.data as Record<string, unknown>,
+          intent: intentPayload,
+        },
+      });
+    } else {
+      intents.push({
+        name: call.name,
+        arguments: parseResult.data as Record<string, unknown>,
+        intent: intentPayload,
+      });
+    }
+  }
+
+  // Parse the LLM's optional JSON block. Post-A.5 (follow-up
+  // 2026-05-28) this only extracts `citations` — `suggestedIntent`
+  // + `proposedSchemaField` ship via `tool:*` chips now.
   const parsed = parseGroundedAnswer(llmResponse.answer);
   const suggestedActions: ChatRouterResponse["suggestedActions"] = [
     { key: "show-source", label: "Show source" },
   ];
-  if (parsed.suggestedIntent && parsed.suggestedIntent.confidence >= SUGGESTED_INTENT_THRESHOLD) {
-    suggestedActions.push({
-      key: "suggested-intent",
-      label: parsed.suggestedIntent.reason,
-      detail: {
-        intent: parsed.suggestedIntent.intent,
-        confidence: parsed.suggestedIntent.confidence,
-      },
-    });
+  // widget-llm-integration follow-up A.5 — the legacy
+  // `suggested-intent` chip emit is gone. `tool:suggest_intent`
+  // chips arrive via the mutateChips buffer below.
+  // Phase 8 — append every mutate-tool chip AFTER the legacy chips so
+  // the existing "show-source" / "suggested-intent" rendering order is
+  // preserved. Frontend `SuggestedActionChips` renders in array order.
+  for (const chip of mutateChips) suggestedActions.push(chip);
+
+  // widget-llm-integration follow-up A.4 (2026-05-28) — back-compat
+  // shim: when the LLM emits a `propose_schema_field` tool call,
+  // mirror the validated payload onto `reply.proposedSchemaField`
+  // so consumers that still read the legacy field (ChatColumn,
+  // ExtractView) keep working through the one-release shim window.
+  // A.5 deletes this once consumers migrate.
+  let proposedSchemaFieldShim: ProposedSchemaField | null = null;
+  const proposeChip = mutateChips.find((c) => c.key === "tool:propose_schema_field");
+  if (proposeChip) {
+    const args = proposeChip.detail?.arguments as
+      | { categoryId: string; name: string; type: ProposedSchemaField["type"]; description: string }
+      | undefined;
+    if (args) {
+      proposedSchemaFieldShim = {
+        categoryId: args.categoryId,
+        name: args.name,
+        type: args.type,
+        description: args.description,
+        provenance: { version: "v1", verified: true },
+      };
+    }
   }
 
   // CF-06 structured citations. When the LLM emitted a citations
@@ -530,17 +688,41 @@ async function runRagPipeline(
   const allowedDocIds = new Set(snippets.map((s) => s.documentId));
   const validatedCitations =
     parsed.structuredCitations?.filter((c) => allowedDocIds.has(c.documentId)) ?? [];
-  const citations =
+  // WF-03 — attach the normalized source-region bbox. For LLM-emitted
+  // (validated) citations, look up the matching snippet's geometry by
+  // documentId + page; for the ambient fallback, the snippet IS the source.
+  const bboxFor = (documentId: string, page: number): NormalizedBbox | undefined =>
+    snippets.find((s) => s.documentId === documentId && (s.pageNumber ?? 1) === page)?.bbox;
+  const snippetTextFor = (documentId: string, page: number): string =>
+    snippets.find((s) => s.documentId === documentId && (s.pageNumber ?? 1) === page)?.text ?? "";
+  // WF-06 — graduated attribution. For each LLM-emitted (validated) citation,
+  // verify the verbatim `quote` against the chunk it cited and assign a tier
+  // + confidence + the supported answer span. The `exact` (word-level) tier
+  // needs WF-05's `-118-map` atom box (not built) so it's dormant: a verified
+  // quote resolves at `paraphrase` (chunk bbox). The all-snippets fallback has
+  // no claim-level proof → `ambient` (source chip; bbox kept for click-to-view).
+  const citations: Citation[] =
     validatedCitations.length > 0
-      ? validatedCitations.map((c) => ({
-          documentId: c.documentId,
-          page: c.page,
-          snippet: c.quote.slice(0, RAG_SNIPPET_CHARS),
-        }))
+      ? validatedCitations.map((c) => {
+          const v = verifyQuote(c.quote, snippetTextFor(c.documentId, c.page));
+          const tier = assignTier(v, { hasAtomBox: false });
+          return {
+            documentId: c.documentId,
+            page: c.page,
+            snippet: c.quote.slice(0, RAG_SNIPPET_CHARS),
+            bbox: bboxFor(c.documentId, c.page),
+            tier,
+            confidence: confidenceFor(v),
+            ...(c.answerSpan ? { answerSpan: c.answerSpan } : {}),
+          };
+        })
       : snippets.map((s) => ({
           documentId: s.documentId,
           page: s.pageNumber ?? 1,
           snippet: s.text ? s.text.slice(0, RAG_SNIPPET_CHARS) : undefined,
+          bbox: s.bbox,
+          tier: "ambient" as const,
+          confidence: 0,
         }));
 
   return {
@@ -549,7 +731,13 @@ async function runRagPipeline(
     citations,
     suggestedActions,
     tools: [],
-    proposedSchemaField: parsed.proposedSchemaField,
+    intents,
+    toolFailures,
+    // widget-llm-integration follow-up A.4 — prefer the back-compat
+    // shim from the tool call; fall back to the fenced-JSON parse
+    // until A.5 deletes the legacy branch. After A.5, the parsed
+    // branch returns null and only the shim path is live.
+    proposedSchemaField: proposedSchemaFieldShim ?? parsed.proposedSchemaField,
     ...(debugEnabled
       ? {
           _debug: {
@@ -593,6 +781,8 @@ export interface StructuredCitation {
   documentId: string;
   page: number;
   quote: string;
+  /** WF-06 — the claim in the answer this quote supports (Bridge B). Optional. */
+  answerSpan?: string;
 }
 
 export interface ParsedRagAnswer {
@@ -631,6 +821,16 @@ export interface ParsedRagAnswer {
  *     can fall back to the GroundX-derived list.
  */
 export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
+  // widget-llm-integration follow-up A.5 (2026-05-28) — the
+  // fenced-JSON parser used to handle three concerns: `citations`,
+  // `suggestedIntent`, and `proposedSchemaField`. The latter two
+  // have migrated to native LLM function-calling (see toolCatalog's
+  // `suggest_intent` and `propose_schema_field` tools). This
+  // parser retains ONLY the `citations` branch — citations are
+  // metadata on the answer, not a tool surface. The
+  // `suggestedIntent` and `proposedSchemaField` fields on the
+  // return type are preserved (always `null`) for one release as a
+  // type-shape shim; deprecated, slated for removal.
   const fenceMatch = rawAnswer.match(/```json\s*\n([\s\S]*?)\n```/);
   if (!fenceMatch) {
     return {
@@ -654,17 +854,6 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
     };
   }
 
-  // suggestedIntent — same shape check as CF-07.
-  const siCandidate = (parsed as { suggestedIntent?: unknown })?.suggestedIntent;
-  const suggestedIntent: SuggestedIntent | null =
-    siCandidate &&
-    typeof siCandidate === "object" &&
-    typeof (siCandidate as SuggestedIntent).intent === "string" &&
-    typeof (siCandidate as SuggestedIntent).confidence === "number" &&
-    typeof (siCandidate as SuggestedIntent).reason === "string"
-      ? (siCandidate as SuggestedIntent)
-      : null;
-
   // citations — filter to well-formed entries (CF-06).
   const citationsRaw = (parsed as { citations?: unknown })?.citations;
   let structuredCitations: StructuredCitation[] | null = null;
@@ -680,39 +869,21 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
     if (valid.length > 0) structuredCitations = valid;
   }
 
-  // `proposal-envelope-provenance`: validate the LLM's
-  // `proposedSchemaField` against `proposalEnvelopeV1Schema`. On
-  // success we attach `provenance: {version: "v1", verified: true}`;
-  // on failure we drop the proposal entirely so the frontend never
-  // surfaces a half-built card. The parse error is logged so an
-  // observability pipeline can flag drift in LLM output.
-  let proposedSchemaField: ProposedSchemaField | null = null;
-  const psfCandidate = (parsed as { proposedSchemaField?: unknown })?.proposedSchemaField;
-  if (psfCandidate !== undefined && psfCandidate !== null) {
-    const envelopeResult = proposalEnvelopeV1Schema.safeParse(psfCandidate);
-    if (envelopeResult.success) {
-      proposedSchemaField = {
-        categoryId: envelopeResult.data.categoryId,
-        name: envelopeResult.data.name,
-        type: envelopeResult.data.type,
-        description: envelopeResult.data.description,
-        provenance: { version: "v1", verified: true },
-      };
-    } else {
-      logger.warn(
-        { error: envelopeResult.error.flatten() },
-        "proposal-envelope-provenance: dropped malformed proposedSchemaField",
-      );
-    }
-  }
-
   // Strip the fenced block from the user-facing answer. Collapse any
   // surrounding blank lines so the cleaned answer reads naturally.
   const cleaned = rawAnswer
     .replace(fenceMatch[0], "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return { cleanedAnswer: cleaned, suggestedIntent, structuredCitations, proposedSchemaField };
+  return {
+    cleanedAnswer: cleaned,
+    // Deprecated — always null after A.5; one-release shim.
+    suggestedIntent: null,
+    structuredCitations,
+    // Deprecated — always null after A.5; populated via the
+    // tool-call back-compat shim in routeChat. One-release shim.
+    proposedSchemaField: null,
+  };
 }
 
 /**
@@ -861,13 +1032,34 @@ export async function searchGroundX(
     results?: Array<Record<string, unknown>>;
   };
   const rawResults = payload.search?.results ?? payload.results ?? [];
-  const mapped = rawResults.map((r) => ({
-    documentId: typeof r.documentId === "string" ? r.documentId : String(r.documentId ?? ""),
-    pageNumber: typeof r.pageNumber === "number" ? r.pageNumber : undefined,
-    text: typeof r.text === "string" ? r.text : undefined,
-    score: typeof r.score === "number" ? r.score : undefined,
-    fileName: typeof r.fileName === "string" ? r.fileName : undefined,
-  }));
+  const mapped: GroundXSearchResult[] = rawResults.map((r) => {
+    // WF-03: the deployed API does NOT return a top-level `r.pageNumber`.
+    // Page + bbox live in `r.boundingBoxes[]` (px corners + pageNumber) and
+    // `r.pages[]` (page dims). Read geometry off the result and normalize.
+    const { page, bbox } = bboxForResult(parseBoundingBoxes(r.boundingBoxes), parsePages(r.pages));
+    return {
+      documentId: typeof r.documentId === "string" ? r.documentId : String(r.documentId ?? ""),
+      pageNumber: page,
+      bbox: bbox ?? undefined,
+      text: typeof r.text === "string" ? r.text : undefined,
+      score: typeof r.score === "number" ? r.score : undefined,
+      fileName: typeof r.fileName === "string" ? r.fileName : undefined,
+    };
+  });
+  // WF-03 fallback — results that carry NO search-side geometry resolve from
+  // the document's X-Ray (cached per doc). Fires ONLY when `bbox` is absent,
+  // so the common layout-doc path (geometry already on the result) pays no
+  // X-Ray fetch. Best-effort: a failed fetch/parse leaves the citation bare.
+  for (const r of mapped) {
+    if (r.bbox || !r.text || !r.documentId) continue;
+    const xray = await fetchDocumentXray(client, apiKey, r.documentId);
+    if (!xray) continue;
+    const geo = resolveGeometryFromXray(r.text, xray);
+    if (geo) {
+      r.pageNumber = geo.page;
+      if (geo.bbox) r.bbox = geo.bbox;
+    }
+  }
   // Result summary for dev visibility (top scores + filenames; we
   // DON'T log full snippet text because it can contain user content
   // and would dominate the log).
@@ -935,6 +1127,18 @@ export async function searchGroundX(
  * pass-through test stay as a regression guard against
  * legacy-phrase mutation.
  */
+/**
+ * widget-llm-integration Phase 5 — raw LLM tool call as parsed from
+ * the upstream provider response. The router validates these against
+ * the server tool catalog before exposing them on the chat reply.
+ */
+export interface RawToolCall {
+  id: string;
+  name: string;
+  /** Raw JSON string emitted by the LLM. Unparsed at this layer. */
+  argumentsJson: string;
+}
+
 async function callGroundedLlm(
   userMessage: string,
   snippets: GroundXSearchResult[],
@@ -942,7 +1146,8 @@ async function callGroundedLlm(
   modelId: string,
   scopeHint?: { fileName?: string | null; scenarioTitle?: string | null },
   debug?: { llm?: ChatRouterDebug["llm"] },
-): Promise<{ answer: string }> {
+  tools?: OpenAiFunctionTool[],
+): Promise<{ answer: string; toolCalls: RawToolCall[] }> {
   const system =
     "You are the user's analyst for the documents in the snippets " +
     "below. You read them on the user's behalf and answer in plain " +
@@ -954,29 +1159,60 @@ async function callGroundedLlm(
     "when it helps. If they don't, say so in one sentence and point to " +
     "something the documents do cover.\n\n" +
 
+    // Snippet-rereading nudge (2026-05-28). Observed failure mode: a
+    // snippet contains a JSON object whose key directly answers the
+    // question (e.g. `"due_date": "2025-07-30"`), and the model still
+    // replies "no snippets." Tell it to read the JSON.
+    "Snippets may be JSON-shaped (key/value blocks extracted from the " +
+    "document). If a JSON field or JSON key in a snippet directly " +
+    "answers the question, quote its value verbatim — that IS the " +
+    "answer. Do not claim 'no snippets' or 'I can't determine' when " +
+    "the JSON field is right there.\n\n" +
+
     "Greetings, small talk, and meta questions about your capabilities " +
     "aren't content questions — respond conversationally and offer a " +
     "starter question or two grounded in the snippets.\n\n" +
 
+    // widget-llm-integration follow-up A.3 (2026-05-28) — the
+    // grounded prompt no longer asks for `proposedSchemaField` or
+    // `suggestedIntent` JSON. Both surfaces ship via native LLM
+    // function-calling tools now; the chat router validates +
+    // routes them to `reply.intents[]` (read) or
+    // `reply.suggestedActions[]` (mutate, user-confirmed chip).
+    //
+    // The fenced ```json block is still permitted for `citations`
+    // (citations are metadata on the answer, not a tool surface).
     "After your answer you MAY append a single ```json fenced block " +
-    "with `citations`, `suggestedIntent`, and/or `proposedSchemaField`. " +
-    "Skip the block for non-content turns.\n\n" +
+    "with `citations` only. Skip the block for non-content turns. Add one " +
+    "entry per content claim: `quote` MUST be copied VERBATIM from that " +
+    "snippet (it is the proof the claim is grounded), and `answerSpan` is " +
+    "the exact phrase from YOUR answer that the quote supports.\n\n" +
     "```json\n" +
-    '{"citations":[{"documentId":"<id-from-the-snippet-header>","page":<int>,"quote":"<short verbatim phrase>"}],' +
-    '"suggestedIntent":{"intent":"<kebab-case-id>","confidence":<0-1 float>,"reason":"<short explanation>"},' +
-    '"proposedSchemaField":{"version":"v1","categoryId":"<existing category id>","name":"<snake_case_id>","type":"STRING|NUMBER|DATE|BOOLEAN","description":"<one sentence>"}}\n' +
+    '{"citations":[{"documentId":"<id-from-the-snippet-header>","page":<int>,"quote":"<verbatim phrase copied from the snippet>","answerSpan":"<the claim in your answer it supports>"}]}\n' +
     "```\n\n" +
-    "`citations` must reference only documentIds present in the snippet " +
-    "headers — the client drops the rest. `suggestedIntent` should fire " +
-    "only at confidence > 0.8; the client surfaces it as a chip at ≥ 0.85.\n\n" +
-    "Emit `proposedSchemaField` only when the user explicitly asks to add " +
-    "a schema field (\"add a field for X\", \"track Y too\", \"capture Z\"). " +
-    "Pick the best-fit existing category id from the user's surrounding " +
-    "context if one is visible; otherwise use a plausible snake_case id. " +
-    "Type must be one of STRING, NUMBER, DATE, BOOLEAN. The frontend " +
-    "renders an Accept/Reject card — write the conversational answer " +
-    "naturally (\"I can add a 'total tax' field…\") and put the structured " +
-    "payload in the JSON block.";
+    "`citations` MUST reference only documentIds present in the snippet " +
+    "headers — the client drops the rest. Copy `quote` exactly; do NOT " +
+    "paraphrase it (a quote that doesn't match the source is dropped to a " +
+    "lower-confidence, region-only citation).\n\n" +
+
+    "**Schema-field proposals and intent suggestions ship via tools, " +
+    "not JSON.**\n\n" +
+    "When the user explicitly asks to add a schema field (\"add a " +
+    "field for X\", \"track Y too\", \"capture Z\"), call the " +
+    "`propose_schema_field` tool with `{categoryId, name, type, " +
+    "description}`. Pick the best-fit existing category id from the " +
+    "user's surrounding context if one is visible; otherwise use a " +
+    "plausible snake_case id. Type must be one of STRING, NUMBER, " +
+    "DATE, BOOLEAN. The frontend renders an Accept/Reject card; " +
+    "write the conversational answer naturally (\"I can add a 'total " +
+    "tax' field…\") and let the tool call carry the structured payload.\n\n" +
+
+    "When you've reasoned that the user might want to navigate to " +
+    "another canvas surface (\"open the extract to compare line " +
+    "items\", \"check the report for the rollup\"), call the " +
+    "`suggest_intent` tool with `{intent, reason, confidence}`. " +
+    "Use `show-extract` / `show-report` / `show-interact` for the " +
+    "intent label. Fire only at confidence > 0.8.";
 
   const contextBlock = buildSnippetBlock(snippets);
   // Scope line — independent of snippet hits. Names the doc the user
@@ -1009,26 +1245,64 @@ async function callGroundedLlm(
     "grounded LLM dispatch",
   );
 
+  const requestBody: Record<string, unknown> = {
+    model: modelId,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: userContent },
+    ],
+  };
+  // Phase 5 — when a (filtered) tool catalog is supplied, advertise
+  // it on the LLM request via OpenAI's function-calling envelope.
+  // We always include the `tools` key when the caller passed one
+  // (even if empty) so the test for "step with zero tools" can
+  // assert the request shape exactly.
+  if (tools !== undefined) {
+    requestBody.tools = tools;
+    if (tools.length > 0) {
+      requestBody.tool_choice = "auto";
+    }
+  }
   const response = await llmClient.forward("/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: modelId,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: userContent },
-      ],
-    }),
+    body: JSON.stringify(requestBody),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "<unreadable>");
     throw new Error(`grounded llm call failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`);
   }
   const payload = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        tool_calls?: Array<{
+          id?: string;
+          type?: string;
+          function?: { name?: string; arguments?: string };
+        }>;
+      };
+    }>;
   };
-  const answer = payload.choices?.[0]?.message?.content?.trim();
-  if (!answer) throw new Error("grounded llm call returned no content");
+  const message = payload.choices?.[0]?.message;
+  // Either a textual answer OR tool_calls is acceptable — providers
+  // return an empty content string when the model emitted a tool
+  // call instead of prose. Treat that as a "no answer" fallback
+  // (empty string) rather than throwing.
+  const rawAnswer = message?.content?.trim() ?? "";
+  const toolCalls: RawToolCall[] = (message?.tool_calls ?? [])
+    .filter((tc) => tc.type === "function" && tc.function?.name)
+    .map((tc, idx) => ({
+      id: tc.id ?? `call_${idx}`,
+      name: tc.function!.name!,
+      argumentsJson: tc.function!.arguments ?? "{}",
+    }));
+  // If there's no prose AND no tool calls, we got a useless reply —
+  // surface as a hard error so the user sees something specific.
+  if (!rawAnswer && toolCalls.length === 0) {
+    throw new Error("grounded llm call returned no content");
+  }
+  const answer = rawAnswer;
   // Capture dev-side debug snapshot (browser surfaces this via _debug
   // on the chat reply). Only populated when the caller passed `debug`.
   if (debug) {
@@ -1053,7 +1327,7 @@ async function callGroundedLlm(
     },
     "grounded LLM response",
   );
-  return { answer };
+  return { answer, toolCalls };
 }
 
 /**
@@ -1261,6 +1535,8 @@ function mockRagResponse(request: ChatRouterRequest): ChatRouterResponse {
           citations: fixture.citations,
           suggestedActions: [{ key: "show-source", label: "Show source" }],
           tools: [],
+          intents: [],
+          toolFailures: [],
           proposedSchemaField: null,
         };
       }
@@ -1279,6 +1555,8 @@ function mockRagResponse(request: ChatRouterRequest): ChatRouterResponse {
       ],
       suggestedActions: [{ key: "show-source", label: "Show source" }],
       tools: [],
+      intents: [],
+      toolFailures: [],
       proposedSchemaField: null,
     };
   }
@@ -1291,6 +1569,8 @@ function mockRagResponse(request: ChatRouterRequest): ChatRouterResponse {
     citations: [{ documentId: "mock-doc-1", page: 1, snippet: "Mock snippet for the cited page." }],
     suggestedActions: [{ key: "show-source", label: "Show source" }],
     tools: [],
+    intents: [],
+    toolFailures: [],
     proposedSchemaField: null,
   };
 }
@@ -1307,6 +1587,8 @@ function mockResponseFor(mode: ChatMode, request: ChatRouterRequest): ChatRouter
         citations: [],
         suggestedActions: [{ key: "open-settings", label: "Open settings" }],
         tools: [],
+        intents: [],
+        toolFailures: [],
         proposedSchemaField: null,
       };
     case "hybrid":
@@ -1319,6 +1601,8 @@ function mockResponseFor(mode: ChatMode, request: ChatRouterRequest): ChatRouter
           { key: "try-chat", label: "Try asking a question" },
         ],
         tools: [],
+        intents: [],
+        toolFailures: [],
         proposedSchemaField: null,
       };
   }

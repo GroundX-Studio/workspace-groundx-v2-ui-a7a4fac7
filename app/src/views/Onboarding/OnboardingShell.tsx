@@ -316,6 +316,23 @@ export const OnboardingShell: FC = () => {
     [advanceFrame, appMode.authState, isF1, navigate, session.scenario],
   );
 
+  // WF-01 C3 (2026-05-28). Sub-pill clicks (Extract / Interact / Report)
+  // route directly to the corresponding F-frame. Report stays disabled
+  // until the user signs in (canonical onboarding never visits it), so
+  // it never reaches this handler.
+  const handleSubstepClick = useCallback(
+    (subId: "extract" | "interact" | "report") => {
+      if (session.scenario == null) return;
+      const frameBySub: Record<typeof subId, FFrame> = {
+        extract: "f3",
+        interact: "f5",
+        report: "f7",
+      };
+      advanceFrame(frameBySub[subId]);
+    },
+    [advanceFrame, session.scenario],
+  );
+
   // F6a — Book a Call · Calendly embed.
   // Activated by `?bookCall=1` in the URL (set by the GateChatRail's
   // Book-a-call CTA). Lives on the same route as F2-F7 so all back-
@@ -440,7 +457,7 @@ export const OnboardingShell: FC = () => {
             edge on every viewport. Ultrawide (xl) bumps to 1320 — see
             IngestView for the rationale. */}
         <Box sx={{ maxWidth: { xs: "100%", md: PICKER_MAX_WIDTH, xl: PICKER_MAX_WIDTH_ULTRAWIDE }, mx: "auto", px: { xs: 2, md: 4 } }}>
-          <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
+          <StepStrip steps={steps} onStepClick={handleStepClick} onSubstepClick={handleSubstepClick} compact={stripCompact} />
         </Box>
       </Box>
       <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
@@ -615,7 +632,7 @@ export const OnboardingShell: FC = () => {
         px: 2,
       }}
     >
-      <StepStrip steps={steps} onStepClick={handleStepClick} compact={stripCompact} />
+      <StepStrip steps={steps} onStepClick={handleStepClick} onSubstepClick={handleSubstepClick} compact={stripCompact} />
     </Box>
   );
 
@@ -667,6 +684,15 @@ export const OnboardingShell: FC = () => {
           returns), reinforcing the "shell coming into focus" feel
           without any one element doing the heavy lift. */}
       <motion.div
+        data-testid="onboarding-shell-underneath"
+        // WF-01 C1 (2026-05-28). While F1 is up, the underneath shell is
+        // visually masked by the opaque F1 overlay AND must be hidden
+        // from assistive tech + keyboard navigation. `aria-hidden`
+        // pulls it out of the a11y tree; `inert` blocks focus + click
+        // (React 19's first-class attr; we set it as a string for
+        // React 18 forward-compat).
+        aria-hidden={isF1 || undefined}
+        {...(isF1 ? { inert: "" as unknown as undefined } : {})}
         style={{
           position: "absolute",
           inset: 0,

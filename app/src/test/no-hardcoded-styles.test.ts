@@ -55,6 +55,11 @@ const ASSET_ALLOWLIST = new Set<string>([
   // sizes (terminal-feel monospace text). ARCH-20 (2026-05-26): keep
   // allowlisted rather than tokenizing — debug colors aren't brand.
   "views/Onboarding/NavDebugOverlay.tsx",
+  // DBG-01 (2026-05-28): dev-only debug overlay (gated on `?debug=true`).
+  // Same rationale as NavDebugOverlay — intentionally off-brand
+  // debug-vibrant hex (#1b1b1b / #ffd700 / #90ee90) + monospace so it
+  // reads as a dev tool, never product UI. Not brand tokens by design.
+  "components/layout/DebugOverlay/DebugOverlay.tsx",
   // Framework-independent fallback UI — renders BEFORE the theme
   // provider has a chance to load (it's the safety net for when the
   // app tree throws during initial render). Uses inline `style={...}`

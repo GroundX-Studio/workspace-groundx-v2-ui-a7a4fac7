@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 
 import { recordIntent } from "@/api/intentLog";
 import { useChatStoreOptional } from "@/contexts/ChatStoreContext";
+import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { captureException } from "@/lib/sentry";
 
 import type { CanvasAdapter, CanvasIntent, CanvasOrchestratorApi, IntentSource, StampedIntent } from "./types";
@@ -24,6 +25,13 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
   // tests, embedded canvases outside the session shell) dispatch just
   // works without the side effects — silent fallback.
   const chatStore = useChatStoreOptional();
+  // widget-llm-integration follow-up B.2 — soft-optional access
+  // to OnboardingSession so the orchestrator can route
+  // `commit_gate` / `dismiss_gate` intents through the gate
+  // lifecycle. Returns null in the steady tree (no provider);
+  // those intents are no-ops there, which matches the design —
+  // gate lifecycle is onboarding-only.
+  const onboardingSession = useOnboardingSessionOptional();
 
   const registerAdapter = useCallback(<K extends CanvasIntent["kind"]>(adapter: CanvasAdapter<K>) => {
     // The map's value type is the union-narrowed CanvasAdapter; a specific
@@ -90,6 +98,62 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             ...(intent.bbox ? { bbox: intent.bbox } : {}),
           });
         }
+        // widget-llm-integration Phase 4 — lighter-weight cousin of
+        // the citation handler above. `jump_to_page` (LLM tool) and
+        // future page-navigation affordances dispatch `jumpToPage`
+        // when there's no citation context (no bbox). Same
+        // push/swap surface, just without the highlight overlay.
+        if (intent.kind === "jumpToPage") {
+          chatStore.gotoDocViewer({
+            documentId: intent.documentId,
+            page: intent.page,
+          });
+        }
+        // widget-llm-integration follow-up B.1 — schema-field
+        // proposal flow. The LLM tool calls
+        // `propose_schema_field` / `accept_proposal` / `reject_proposal`
+        // produce these intents; the orchestrator routes them to
+        // the existing ChatStore mutators so the chat scroll +
+        // canvas ProposalCard surfaces stay in sync.
+        if (intent.kind === "proposeSchemaField") {
+          chatStore.enqueueFieldProposal({
+            categoryId: intent.categoryId,
+            name: intent.name,
+            type: intent.type,
+            description: intent.description,
+          });
+        }
+        if (intent.kind === "acceptSchemaField") {
+          chatStore.acceptFieldProposal(intent.proposalId);
+        }
+        if (intent.kind === "rejectSchemaField") {
+          chatStore.dismissFieldProposal(intent.proposalId);
+        }
+      }
+      // widget-llm-integration follow-up B.2 — gate-lifecycle
+      // routing. Soft-fail when no OnboardingSessionProvider is
+      // mounted (steady tree); the LLM emitting commit_gate /
+      // dismiss_gate outside onboarding is a no-op by design.
+      if (onboardingSession) {
+        if (intent.kind === "commitGate") {
+          onboardingSession.commitGate(intent.method);
+        }
+        if (intent.kind === "dismissGate") {
+          onboardingSession.dismissGate();
+        }
+      }
+      // widget-llm-integration follow-up B.3 — book-call routing.
+      // The OnboardingShell watches `?bookCall=1` to swap the
+      // viewer to `BookCallView` + the chat to `BookingStatusCard`.
+      // We just set the URL param; the existing react-router
+      // navigation handles the swap.
+      if (intent.kind === "openBookCall" && typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("bookCall", "1");
+        window.history.pushState({}, "", url.toString());
+        // Fire a popstate event so react-router (and anyone
+        // subscribed to location changes) re-reads the URL.
+        window.dispatchEvent(new PopStateEvent("popstate"));
       }
 
       const adapter = adaptersRef.current.get(intent.kind);
@@ -119,7 +183,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
       setLastAppliedIntentId(stamped.intentId);
       return stamped;
     },
-    [now, chatStore]
+    [now, chatStore, onboardingSession]
   );
 
   // ── post-mvs-cleanup Phase A — chat↔viewer bus convenience channels ──

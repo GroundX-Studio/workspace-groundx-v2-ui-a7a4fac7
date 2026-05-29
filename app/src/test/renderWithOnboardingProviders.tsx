@@ -3,7 +3,6 @@ import { render } from "@testing-library/react";
 import { HelmetProvider } from "react-helmet-async";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-import { AgentToolBusProvider } from "@/contexts/AgentToolBusContext";
 import { AppModeProvider } from "@/contexts/AppModeContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
@@ -75,28 +74,26 @@ export const renderWithOnboardingProviders = (
                   + message bar wrappers because it dispatches to both. */}
               <DocumentsProvider>
                 <OnboardingSessionProvider initialFrame={initialFrame} initialScenario={initialScenario}>
-                  <AgentToolBusProvider>
-                    <CanvasOrchestratorProvider>
-                      <OnboardingSkillProvider>
-                        <HelmetProvider>
-                          <MemoryRouter initialEntries={[resolvedUrl]}>
-                            <Routes>
-                              {/* Three onboarding route shapes — the
-                                  OnboardingShell reads useParams() and
-                                  useLocation() to decide what surface to
-                                  mount. */}
-                              <Route path="/onboarding" element={ui} />
-                              <Route path="/onboarding/signup" element={ui} />
-                              <Route path="/onboarding/:bucketId/:scenarioId" element={ui} />
-                              {/* Catch-all so tests that don't care about
-                                  routing still get their UI rendered. */}
-                              <Route path="*" element={ui} />
-                            </Routes>
-                          </MemoryRouter>
-                        </HelmetProvider>
-                      </OnboardingSkillProvider>
-                    </CanvasOrchestratorProvider>
-                  </AgentToolBusProvider>
+                  <CanvasOrchestratorProvider>
+                    <OnboardingSkillProvider>
+                      <HelmetProvider>
+                        <MemoryRouter initialEntries={[resolvedUrl]}>
+                          <Routes>
+                            {/* Three onboarding route shapes — the
+                                OnboardingShell reads useParams() and
+                                useLocation() to decide what surface to
+                                mount. */}
+                            <Route path="/onboarding" element={ui} />
+                            <Route path="/onboarding/signup" element={ui} />
+                            <Route path="/onboarding/:bucketId/:scenarioId" element={ui} />
+                            {/* Catch-all so tests that don't care about
+                                routing still get their UI rendered. */}
+                            <Route path="*" element={ui} />
+                          </Routes>
+                        </MemoryRouter>
+                      </HelmetProvider>
+                    </OnboardingSkillProvider>
+                  </CanvasOrchestratorProvider>
                 </OnboardingSessionProvider>
               </DocumentsProvider>
             </ScenarioRegistryProvider>

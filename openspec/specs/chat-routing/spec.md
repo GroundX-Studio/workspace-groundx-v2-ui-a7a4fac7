@@ -107,3 +107,180 @@ formalizes the transport contract end-to-end.
 - **THEN** `result.reply.citations[0]` carries the same documentId, page, snippet, and bbox values byte-for-byte
 - **AND** the `chat_messages.citations_json` row holds the same JSON shape
 
+### Requirement: Chat replies SHALL carry intents and toolFailures when the LLM uses function-calling
+
+The `ChatReply` envelope SHALL be extended with two new arrays:
+
+- `intents: CanvasIntent[]` — auto-dispatched read-category tool results
+- `toolFailures: { name: string; reason: string }[]` — validation or handler failures
+
+Existing `suggestedActions[]` SHALL carry mutate-category tool proposals as chips (the user clicks to dispatch). Existing `proposedSchemaField` + `suggestedIntent` continue to ship in their current envelope shapes during the migration phase (Phase 8); after migration, they become derived from `intents[]` / `suggestedActions[]`.
+
+#### Scenario: Read-tool chat reply carries an intent + no chip
+
+- **GIVEN** the LLM emits a tool call for the `read`-category tool `open_document`
+- **WHEN** the chat router returns the reply
+- **THEN** `reply.intents[0]` is the resulting `CanvasIntent`
+- **AND** `reply.suggestedActions` does NOT contain a chip for that tool
+
+#### Scenario: Mutate-tool chat reply carries a chip + no auto-intent
+
+- **GIVEN** the LLM emits a tool call for the `mutate`-category tool `save_schema_template`
+- **WHEN** the chat router returns the reply
+- **THEN** `reply.suggestedActions[]` contains an entry with the tool name and the would-be intent payload
+- **AND** `reply.intents[]` does NOT contain that intent yet
+
+#### Scenario: Failure surfaces in toolFailures, not as an intent
+
+- **GIVEN** the LLM emits a tool call with arguments that fail Zod validation
+- **WHEN** the chat router processes the response
+- **THEN** `reply.toolFailures[]` contains a `{ name, reason }` entry
+- **AND** `reply.intents[]` does NOT include that call's intent
+- **AND** the answer text still flows (the LLM's natural-language response is not blocked by a tool failure)
+
+### Requirement: The chat router SHALL pass a step-scoped tool catalog to the LLM provider
+
+Per chat turn, the chat router SHALL:
+
+1. Read the active `ViewerStep.kind` from the chat session's viewer slot
+2. Build the LLM-facing tool catalog via `toolRegistry.forStep(kind)` filtered also by the session's mode (`onboarding` / `steady`)
+3. Pass the catalog to the LLM provider via the native `tools` parameter (OpenAI / Anthropic equivalent)
+4. Set `tool_choice` to `"auto"` (let the model decide whether to use a tool)
+
+The catalog SHALL NOT be duplicated into the system prompt narrative — the provider's structured `tools` field is the canonical surface.
+
+#### Scenario: Tool catalog reflects the current viewer step
+
+- **GIVEN** a chat session whose active ViewerStep is `extract-workbench` in onboarding mode
+- **WHEN** the chat router builds the LLM request
+- **THEN** the request's `tools` array contains `propose_field`, `accept_field`, `dismiss_field`, etc. (tools scoped to `extract-workbench`)
+- **AND** the array excludes tools scoped to other steps
+- **AND** the array excludes tools whose `availableIn` is `["steady"]` only
+
+### Requirement: The fenced-JSON proposal paths SHALL be retired
+
+After this change lands, the chat router SHALL emit
+`proposedSchemaField` and `suggestedIntent` via native LLM
+function-calling tools only. The fenced-JSON parser SHALL retain
+only its `citations` branch — `citations` are metadata on the
+answer, not a tool surface.
+
+The chat router previously emitted `proposedSchemaField` and
+`suggestedIntent` by parsing a fenced ```json block from the
+grounded LLM's answer. After this change, both surfaces SHALL be
+emitted via native function-calling instead. The fenced-JSON parser
+SHALL retain only its `citations` branch.
+
+`ChatReply.proposedSchemaField` SHALL become a derived back-compat
+shim for one release window — its value is the first matching
+`tool:propose_schema_field` entry on `reply.suggestedActions[]`.
+After the shim window closes, the field SHALL be removed from the
+`ChatReply` type.
+
+`ChatReply.suggestedActions[]` SHALL include `tool:suggest_intent`
+chips when the LLM emits a `suggest_intent` tool call. The
+pre-existing `key === "suggested-intent"` chip key SHALL be
+preserved for one release as a back-compat shim, then removed.
+
+#### Scenario: Grounded LLM emits a `propose_schema_field` tool call
+
+- **GIVEN** the user asks "add a field for total tax"
+- **WHEN** the grounded LLM emits a `propose_schema_field`
+  function-call with `{ name, type, description, categoryId }`
+- **THEN** the middleware validates the args against the Zod
+  schema, builds a `proposeSchemaField` intent, and routes it to
+  `reply.suggestedActions[]` (key `tool:propose_schema_field`) per
+  the mutate-category routing rule (`design.md` §C).
+- **AND** the legacy `ChatReply.proposedSchemaField` field returns
+  the same payload during the one-release shim window.
+- **AND** the system prompt sent to the LLM no longer describes a
+  fenced `proposedSchemaField` JSON envelope.
+
+#### Scenario: Grounded LLM emits a `suggest_intent` tool call
+
+- **GIVEN** the LLM reasons that the user should pivot to the
+  extract view
+- **WHEN** the LLM emits `suggest_intent({intent: "show-extract", reason: "compare line items", confidence: 0.92})`
+- **THEN** the chip lands on `reply.suggestedActions[]` with key
+  `tool:suggest_intent` and `detail.intent: "show-extract"`.
+- **AND** clicking the chip dispatches a `switchFrame` intent to
+  `f3` via the app-side `suggestedActionToIntent` mapper.
+
+### Requirement: Chat citations SHALL carry page + normalized bbox resolved from X-Ray or the search result
+
+The chat router SHALL populate each `reply.citations[*]` with the correct `page` and a normalized
+`bbox` (0-1 page-relative `{x,y,w,h}`). When the search result already carries geometry
+(`boundingBoxes` + `pages`), the router SHALL read it directly: page from
+`boundingBoxes[0].pageNumber` (falling back to `pages[0].number`), and bbox from the union of the
+result's pixel `boundingBoxes` **on the cited page** (grouped by `pageNumber`, never unioned across
+pages) normalized by that page's `width`/`height`. When the result carries no `boundingBoxes`, the
+router SHALL resolve geometry from the document's X-Ray by matching the citation snippet against
+`chunks[].text`, taking the page from the
+matched chunk's `pageNumbers[0]` and normalizing the chunk's cited-page `boundingBoxes`; the X-Ray
+SHALL be fetched at most once per document (cached). The router SHALL NOT read a top-level
+`pageNumber` field — the deployed API does not return one, so doing so silently defaults every
+citation to page 1. On no match the citation SHALL ship geometry-less. Resolution MUST be
+best-effort: a resolver error MUST NOT fail the chat turn.
+
+#### Scenario: Geometry read directly off a result that carries it
+
+- **GIVEN** a RAG reply whose search result carries `boundingBoxes`
+  `(362,593)-(1601,2031)` with `pageNumber: 2` and a `pages` entry `{number:2, width:1700, height:2200}`
+- **WHEN** the chat router assembles the reply
+- **THEN** the citation carries `page: 2`
+- **AND** `bbox` is approximately `{x:0.213, y:0.270, w:0.729, h:0.654}` (px ÷ page dims)
+- **AND** no X-Ray fetch is needed for that citation.
+
+#### Scenario: A result lacking geometry resolves via X-Ray, once per document
+
+- **GIVEN** a reply with two citations from one document whose search results carry no `boundingBoxes`
+- **WHEN** geometry is resolved for both
+- **THEN** the document's X-Ray is fetched at most once (cached)
+- **AND** each citation whose snippet matches an X-Ray chunk carries the chunk's normalized geometry.
+
+#### Scenario: Unresolvable citation ships geometry-less without failing
+
+- **GIVEN** a citation whose result has no `boundingBoxes` and matches no X-Ray chunk
+- **WHEN** the chat router assembles the reply
+- **THEN** the citation is returned with no `bbox`
+- **AND** the chat turn still succeeds (no thrown error).
+
+### Requirement: RAG citations SHALL be claim-level, quote-verified, and tiered by attribution confidence
+
+The chat router SHALL produce claim-level citations whose precision is earned through
+verification, rather than highlighting whole chunks unconditionally. The router SHALL prompt the
+RAG model for quote-anchored structured output (`{ answerSpan, sourceIndices, supportingQuote }`)
+and SHALL fall back to the legacy freeform `[n]` markers when no structured claims are emitted.
+Each `supportingQuote` SHALL be verified against its chunk — exact substring, then normalized
+match (case/whitespace/punctuation/currency stripped), then (optionally) embedding similarity to a
+`suggestedText` sentence — and the resulting citation SHALL carry a `tier` of `exact`,
+`paraphrase`, or `ambient` plus a `confidence`. A verified quote SHALL resolve at `paraphrase`
+with the chunk-level `bbox` (WF-03); when the `-118-map` atom resolver is present, a verbatim
+raw-`text` quote MAY upgrade to `exact` with a word-level `bbox` (Bridge A) — that resolver is
+optional, so the `exact` tier MAY be dormant. An `ambient` citation (unverified, marker-only, or
+the all-snippets fallback) carries no claim-level inline span. Verification + any geometry fetches
+MUST be best-effort and cached per `documentId`; any failure SHALL drop the claim one tier and
+MUST NOT fail the chat turn.
+
+#### Scenario: Verbatim claim upgrades to a word-level exact tier when the atom resolver is wired
+
+- **GIVEN** the `-118-map` atom resolver is available
+- **AND** an answer claim whose `supportingQuote` is a verbatim substring of chunk[2]'s raw `text`
+- **WHEN** the chat router assembles citations
+- **THEN** the claim's citation has `tier: "exact"`
+- **AND** its `bbox` is the union of the matched atoms' boxes (tighter than the chunk box).
+
+#### Scenario: Paraphrased claim degrades to chunk-level
+
+- **GIVEN** a claim whose `supportingQuote` matches chunk[2]'s `suggestedText` but no raw-text span
+- **WHEN** the chat router assembles citations
+- **THEN** the citation has `tier: "paraphrase"`
+- **AND** its `bbox` is the chunk-level `boundingBoxes` envelope.
+
+#### Scenario: Unverified or marker-only answer degrades to ambient
+
+- **GIVEN** an answer with only freeform `[n]` markers, or a quote that clears no verification threshold
+- **WHEN** the chat router assembles citations
+- **THEN** the affected citations have `tier: "ambient"` and no `bbox`
+- **AND** the chat turn still succeeds (no thrown error).
+

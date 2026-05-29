@@ -87,6 +87,29 @@ states inline — the host doesn't render a loading skeleton.
 scaffold-provided pdf.js renderer that took a `previewUrl` prop and
 painted to canvas. Was unused after the SCEN-06 real-API rewire.
 
+## LLM tools
+
+`PdfViewerWidget.tools.ts` exposes two read-category tools (both
+available in onboarding + steady; scoped to the
+`doc-viewer` / `interact-chat` / `extract-workbench` ViewerSteps):
+
+- `open_document(documentId, page?)` — produces a `highlightCitation`
+  intent at the requested page (defaults to page 1). Use when the
+  user references a document by name or you're about to cite one.
+- `jump_to_page(documentId, page)` — produces a `jumpToPage` intent
+  for the active viewer (no bbox highlight). Use when the user
+  references a page number directly.
+
+Round-trip: LLM emits a tool call → middleware (Phase 5) validates
+the Zod input + invokes the handler → resulting `CanvasIntent` ships
+on `ChatReply.intents[]` → frontend orchestrator's built-in handler
+routes to `ChatStore.gotoDocViewer` → viewer pane re-mounts with the
+new page (and bbox, when present).
+
+`jump_to_page`'s `jumpToPage` intent is a lighter-weight cousin of
+`highlightCitation`, introduced in Phase 4 alongside this file. Both
+land on the same `gotoDocViewer` sink; `jumpToPage` omits the bbox.
+
 ## Tests
 
 `PdfViewerWidget.test.tsx`. Covers: mount-fetches-xray, loading state,
@@ -94,3 +117,10 @@ filename via aria-label, page-thumbnail click switches pages, error
 state, widget-contract data attributes, controlled `targetPage` mount
 + re-render jumps, `highlightBbox` overlay positioning, thumb clicks
 still work after a controlled-page mount.
+
+`PdfViewerWidget.tools.test.ts`. Covers: tool catalog completeness
+(both tools present), Zod schema accept/reject for valid + invalid
+input, handler-produced `CanvasIntent` shape for each tool, plus the
+Phase-5b quality-rule preconditions (every Zod field carries
+`.describe()`; every description has a `Use when` clause and meets
+the 40-char floor).

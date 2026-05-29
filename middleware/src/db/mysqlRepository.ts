@@ -677,6 +677,25 @@ export class MySqlAppRepository implements AppRepository {
 
 // ── Row mappers ──────────────────────────────────────────────────────
 
+/**
+ * mysql2 auto-parses MySQL `JSON` columns into objects by default,
+ * but a column declared as TEXT/VARCHAR that *contains* JSON stays a
+ * string. The `chat_sessions.*_json` columns are typed `JSON` in
+ * MySQL but were `TEXT` in earlier installs — both shapes coexist in
+ * the wild. Calling `JSON.parse` on an already-parsed object stringifies
+ * it to `"[object Object]"` first, which throws. Handle both shapes
+ * defensively.
+ */
+function parseJsonColumn(value: unknown): unknown {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    if (value.length === 0) return null;
+    return JSON.parse(value);
+  }
+  // mysql2 already deserialized a native JSON column for us.
+  return value;
+}
+
 function rowToChatSession(row: mysql.RowDataPacket): ChatSessionRecord {
   return {
     id: row.id,
@@ -686,14 +705,31 @@ function rowToChatSession(row: mysql.RowDataPacket): ChatSessionRecord {
     title: row.title,
     isOnboarding: Boolean(row.is_onboarding),
     activeEntityKey: row.active_entity_key,
-    currentIntent: row.current_intent_json ? JSON.parse(row.current_intent_json) : null,
-    viewerHistory: row.viewer_history_json ? JSON.parse(row.viewer_history_json) : null,
-    viewerOverlays: row.viewer_overlays_json ? JSON.parse(row.viewer_overlays_json) : null,
-    viewerWorkspace: row.viewer_workspace_json ? JSON.parse(row.viewer_workspace_json) : null,
+    currentIntent: parseJsonColumn(row.current_intent_json) as ChatSessionRecord["currentIntent"],
+    viewerHistory: parseJsonColumn(row.viewer_history_json) as ChatSessionRecord["viewerHistory"],
+    viewerOverlays: parseJsonColumn(row.viewer_overlays_json) as ChatSessionRecord["viewerOverlays"],
+    viewerWorkspace: parseJsonColumn(row.viewer_workspace_json) as ChatSessionRecord["viewerWorkspace"],
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     archivedAt: row.archived_at ? new Date(row.archived_at) : null,
   };
+}
+
+/**
+ * WF-16 — a MySQL `JSON` column is returned ALREADY parsed by the
+ * driver (object/array), but `ChatMessageRecord` types these slots as
+ * `string | null`. Normalize back to a string so the record honors its
+ * type and downstream `JSON.parse` consumers (e.g. the messages-GET
+ * projection) don't choke on an already-parsed value.
+ */
+function jsonColumnToString(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return null;
+  }
 }
 
 function rowToChatMessage(row: mysql.RowDataPacket): ChatMessageRecord {
@@ -703,9 +739,9 @@ function rowToChatMessage(row: mysql.RowDataPacket): ChatMessageRecord {
     turnIndex: row.turn_index,
     role: row.role,
     content: row.content,
-    citationsJson: row.citations_json,
-    toolCallsJson: row.tool_calls_json,
-    attachmentsJson: row.attachments_json,
+    citationsJson: jsonColumnToString(row.citations_json),
+    toolCallsJson: jsonColumnToString(row.tool_calls_json),
+    attachmentsJson: jsonColumnToString(row.attachments_json),
     compressedIntoSummaryId: row.compressed_into_summary_id,
     llmProvider: row.llm_provider,
     llmModelId: row.llm_model_id,

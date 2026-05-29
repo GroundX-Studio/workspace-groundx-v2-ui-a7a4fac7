@@ -34,9 +34,11 @@ import {
   WHITE,
 } from "@/constants";
 
+import { resolveToolAttribute, type ToolBindingProps } from "../_tool-binding";
+
 export type ButtonVariant = "primary" | "secondary";
 
-export interface ButtonProps extends Omit<MuiButtonProps, "variant"> {
+interface ButtonBaseProps extends Omit<MuiButtonProps, "variant"> {
   /**
    * Which visual treatment to render. `primary` = green pill for
    * "do the thing" CTAs; `secondary` = text-style for cancel actions.
@@ -63,19 +65,36 @@ export interface ButtonProps extends Omit<MuiButtonProps, "variant"> {
   isUppercase?: boolean;
 }
 
-export const Button: FC<ButtonProps> = ({
-  variant = "primary",
-  children,
-  submitting = false,
-  invert = false,
-  isUppercase,
-  onClick,
-  type = "button",
-  ...rest
-}) => {
+/**
+ * widget-llm-integration Phase 5b — every interactive primitive
+ * requires exactly one of `tool` or `noTool`. See
+ * `components/primitives/_tool-binding.ts` for the contract.
+ */
+export type ButtonProps = ButtonBaseProps & ToolBindingProps;
+
+export const Button: FC<ButtonProps> = (props) => {
+  const {
+    variant = "primary",
+    children,
+    submitting = false,
+    invert = false,
+    isUppercase,
+    onClick,
+    type = "button",
+    // Pull off the tool-binding props; render them as data attrs
+    // via `toolAttrs` below.
+    tool,
+    noTool,
+    ...rest
+  } = props as ButtonBaseProps & { tool?: string; noTool?: string };
   const isPrimary = variant === "primary";
   const upper = isUppercase ?? isPrimary;
   const disabled = Boolean(rest.disabled || submitting);
+  const toolAttrs = resolveToolAttribute(
+    (tool !== undefined
+      ? ({ tool } as const)
+      : ({ noTool: noTool ?? "unknown" } as const)),
+  );
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
     if (!onClick) return;
     onClick(event);
@@ -84,6 +103,7 @@ export const Button: FC<ButtonProps> = ({
   return (
     <MuiButton
       {...rest}
+      {...toolAttrs}
       type={type}
       aria-busy={submitting || undefined}
       disableRipple

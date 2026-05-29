@@ -106,7 +106,7 @@ export const LoginForm: FC<LoginFormProps> = ({ values, forgotPassword, onSubmit
 
       {forgotPassword}
 
-      <Button variant="primary" type="submit" id="login-submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
+      <Button noTool="pre-app auth (not agent-driven)" variant="primary" type="submit" id="login-submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
         {LOGIN_SUBMIT_LABEL}
       </Button>
     </form>

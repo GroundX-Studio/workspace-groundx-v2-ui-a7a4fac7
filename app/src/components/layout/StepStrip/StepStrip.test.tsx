@@ -170,4 +170,45 @@ describe("StepStrip", () => {
     // No substeps means no sub-pills inside the bracket.
     expect(screen.queryByText("Extract")).not.toBeInTheDocument();
   });
+
+  // WF-01 C3 (2026-05-28). Sub-pills must be keyboard-navigable when
+  // reachable; disabled ones must NOT be focusable. The on-substep-click
+  // callback fires only for the reachable/active ones.
+  describe("WF-01 C3: sub-pill interactivity", () => {
+    it("reachable + active sub-pills carry role=button and tabindex=0 when a handler is wired", () => {
+      render(<StepStrip steps={baseSteps} onSubstepClick={() => {}} />);
+      const extract = screen.getByText("Extract").closest('[role="button"]') as HTMLElement | null;
+      const interact = screen.getByText("Interact").closest('[role="button"]') as HTMLElement | null;
+      expect(extract).not.toBeNull();
+      expect(extract!).toHaveAttribute("tabindex", "0");
+      expect(interact).not.toBeNull();
+      expect(interact!).toHaveAttribute("tabindex", "0");
+    });
+
+    it("disabled sub-pill has aria-disabled + tabindex=-1, never role=button focusable", () => {
+      render(<StepStrip steps={baseSteps} onSubstepClick={() => {}} />);
+      const report = screen.getByText("Report").closest("div");
+      expect(report).not.toBeNull();
+      // aria-disabled true is required; tabindex must be -1 (or absent on a non-button).
+      expect(report!.getAttribute("aria-disabled")).toBe("true");
+      const tabindex = report!.getAttribute("tabindex");
+      expect(tabindex === null || tabindex === "-1").toBe(true);
+    });
+
+    it("clicking a reachable sub-pill fires onSubstepClick with its id", async () => {
+      const user = userEvent.setup();
+      const onSubstepClick = vi.fn();
+      render(<StepStrip steps={baseSteps} onSubstepClick={onSubstepClick} />);
+      await user.click(screen.getByText("Interact"));
+      expect(onSubstepClick).toHaveBeenCalledWith("interact");
+    });
+
+    it("clicking a disabled sub-pill does NOT fire onSubstepClick", async () => {
+      const user = userEvent.setup();
+      const onSubstepClick = vi.fn();
+      render(<StepStrip steps={baseSteps} onSubstepClick={onSubstepClick} />);
+      await user.click(screen.getByText("Report"));
+      expect(onSubstepClick).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -39,10 +39,13 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState, type FC } from "react";
 
+import { isResolvedDocumentId } from "@/api/documentId";
+
 import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity";
 import {
   BORDER,
   BORDER_RADIUS_SM,
+  CORAL,
   CYAN,
   EYEBROW_ON_LIGHT,
   FONT_WEIGHT_HEADLINE,
@@ -80,6 +83,32 @@ export interface PdfViewerWidgetProps {
    * page image. Pass `null` / `undefined` to hide the overlay.
    */
   highlightBbox?: { x: number; y: number; w: number; h: number } | null;
+  /**
+   * WF-01 C5 (2026-05-28). When true, paint a top→bottom sweeping
+   * scan-line over the active page image. Used by F2 UnderstandView
+   * while the thinking-stream plays in chat. The overlay is purely
+   * decorative — it doesn't gate any other UI affordance — and it
+   * crossfades instead of sweeping when the OS reports
+   * `prefers-reduced-motion: reduce`.
+   */
+  showScanAnimation?: boolean;
+  /**
+   * WF-01 C10 (2026-05-28). Multiple lit regions painted on top of
+   * the active page image — one per `[N]` citation in an F5 assistant
+   * answer. Each region carries 0-1 page-relative coords + a `color`
+   * that mirrors the `CiteChip` color the user sees in chat: `green`
+   * for the primary citation, `cyan` for secondaries, `coral` for
+   * anomaly / low-confidence. Only regions whose `page` matches the
+   * currently active page render; the rest are inert.
+   */
+  litRegions?: Array<{
+    page: number;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    color: "green" | "cyan" | "coral";
+  }>;
 }
 
 export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
@@ -88,6 +117,8 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   initialPage = 1,
   targetPage,
   highlightBbox,
+  showScanAnimation = false,
+  litRegions,
 }) => {
   const { getDocumentXray } = useDocumentsContext();
   const [xray, setXray] = useState<DocumentXrayResponse | null>(null);
@@ -110,6 +141,17 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
     let cancelled = false;
     setXray(null);
     setError(null);
+    // WF-15 — gate the fetch on a resolved GroundX documentId. The
+    // canvas mounts with a placeholder id (`scenario:utility`) before
+    // the active entity resolves the real UUID; fetching an X-Ray for
+    // it 406s and flashes "COULD NOT LOAD". Hold the neutral loading
+    // state (xray + error both null → `loading` true) until a real id
+    // arrives, then re-run via the `documentId` dep.
+    if (!isResolvedDocumentId(documentId)) {
+      return () => {
+        cancelled = true;
+      };
+    }
     void (async () => {
       const result = await getDocumentXray(documentId);
       if (cancelled) return;
@@ -135,6 +177,12 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
       data-testid="pdf-viewer-widget"
       data-mode={mode}
       data-loading={loading ? "true" : "false"}
+      // WF-01b C (2026-05-28). Surface the controlled-prop values as
+      // data attrs on the root so consumers + tests can assert the
+      // prop wiring without waiting on the async xray fetch to resolve.
+      data-target-page={typeof targetPage === "number" ? String(targetPage) : undefined}
+      data-highlight-page={highlightBbox ? String(targetPage ?? activePage) : undefined}
+      data-highlight-bbox={highlightBbox ? JSON.stringify(highlightBbox) : undefined}
       sx={{
         display: "flex",
         flexDirection: "column",
@@ -244,6 +292,68 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                   border: `2px solid ${CYAN}`,
                   borderRadius: BORDER_RADIUS_SM,
                   pointerEvents: "none",
+                }}
+              />
+            )}
+            {/* WF-01 C10 (2026-05-28). One <Box> per litRegion whose
+                page matches the currently active page. The color
+                tokens map to the same palette as the corresponding
+                `[N]` CiteChip in the chat answer. */}
+            {(litRegions ?? [])
+              .filter((r) => r.page === activePage)
+              .map((region, idx) => {
+                const bg = region.color === "green" ? GREEN : region.color === "coral" ? CORAL : CYAN;
+                return (
+                  <Box
+                    key={`lit-${idx}`}
+                    data-testid={`pdf-viewer-lit-region-${idx}`}
+                    data-color={region.color}
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      left: `${region.x * 100}%`,
+                      top: `${region.y * 100}%`,
+                      width: `${region.w * 100}%`,
+                      height: `${region.h * 100}%`,
+                      backgroundColor: `${bg}55`,
+                      border: `2px solid ${bg}`,
+                      borderRadius: BORDER_RADIUS_SM,
+                      pointerEvents: "none",
+                      boxShadow: `0 0 10px ${bg}80`,
+                    }}
+                  />
+                );
+              })}
+            {showScanAnimation && (
+              // WF-01 C5 (2026-05-28). F2 scan-line: a thin horizontal
+              // bar with a green→cyan→green gradient + glow sweeps top
+              // →bottom over 4s, looping. Decorative only — purely
+              // overlays the page image at z=2 (above highlight bbox
+              // when both are present is fine). Reduced-motion users
+              // get a static centered bar (no sweep).
+              <Box
+                data-testid="pdf-viewer-scan-line"
+                aria-hidden
+                sx={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  height: 3,
+                  background: `linear-gradient(90deg, ${GREEN}00 0%, ${CYAN} 50%, ${GREEN}00 100%)`,
+                  boxShadow: `0 0 12px ${GREEN}80`,
+                  pointerEvents: "none",
+                  animation: "pdfScanSweep 4s ease-in-out infinite",
+                  "@keyframes pdfScanSweep": {
+                    "0%": { top: "0%", opacity: 0 },
+                    "10%": { opacity: 1 },
+                    "90%": { opacity: 1 },
+                    "100%": { top: "100%", opacity: 0 },
+                  },
+                  "@media (prefers-reduced-motion: reduce)": {
+                    animation: "none",
+                    top: "50%",
+                    opacity: 0.5,
+                  },
                 }}
               />
             )}

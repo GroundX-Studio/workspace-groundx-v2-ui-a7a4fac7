@@ -58,6 +58,51 @@ mentally consult:
   visible work).
 - `docs/agents/gotchas.md` for already-known traps.
 
+## 4a. Tone: talk like a busy engineer
+
+Default voice for chat replies in this repo: succinct like a Slack DM
+to a peer who's heads-down. Short sentences. State the thing, then
+stop. No throat-clearing ("Great question", "Let me explain"), no
+restatement of what the user just said, no trailing "in summary"
+paragraphs. Tables > prose for multi-item answers. Concrete
+file:line / env-var / table-name beats abstract description. End with
+the next decision, not a recap. Locked 2026-05-28.
+
+## 4b. UI verification tooling — prefer Chrome DevTools MCP
+
+When verifying or debugging visible UI in a running app, prefer the
+richest inspection tool available, in this order:
+
+1. **Chrome DevTools MCP** (`chrome-devtools` connector), when attached.
+   Use it for DOM measurement (`evaluate_script` → `getBoundingClientRect`,
+   computed styles, pane widths), network inspection with **response
+   bodies**, console errors, the a11y snapshot, and performance /
+   Lighthouse. This is what catches layout bugs a screenshot hides.
+2. **The built-in preview** for (a) **starting the dev servers** — it
+   reads `.claude/launch.json` (`frontend` / `middleware`), the canonical
+   boot path; Chrome DevTools MCP only attaches to an already-running
+   page — and (b) **screenshots** (a reliable visual fallback; Chrome
+   DevTools MCP screenshot capture can time out).
+3. **Source reading only** when no browser tooling is attached — and say
+   so rather than asserting behavior you didn't observe.
+
+**Measure, don't eyeball.** A blank-looking region in a screenshot is
+often a zero-width / collapsed container, not a broken component (DBG-01:
+the "PDF doesn't render" report was a 24px-collapsed canvas pane, proven
+by a DOM measurement, not the viewer). Locked 2026-05-28.
+
+## 4c. The debug reset stays exhaustive
+
+The debug overlay's Reset (`?debug=true`, `lib/resetExperience.ts`)
+returns the app to a first-time anonymous visitor by clearing ALL
+session state. **Any change that adds session-scoped state — a
+localStorage key, cookie, context cache, or server session record —
+MUST extend `resetExperience` + its test in the SAME change.** A reset
+that misses newly-added state is a regression. `resetExperience.ts` is
+the canonical "what counts as session state" inventory; see
+`chat-session-model.md` for the state surface it must cover. Locked
+2026-05-28.
+
 ## 5. Improve, don't preserve drift
 
 When touching legacy code (hardcoded colors, inline media queries,

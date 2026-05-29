@@ -95,9 +95,18 @@ export class FakePartnerClient implements GroundXPartnerClient {
 
 export class FakeGroundXClient implements GroundXClient {
   calls: Array<{ path: string; init: RequestInit & { apiKey: string } }> = [];
+  /**
+   * Test seam — when a `forward` path includes one of these fragments, the
+   * mapped body is returned as JSON instead of the default stub. Lets tests
+   * inject e.g. an X-Ray fixture for the field-geometry endpoint.
+   */
+  responseByPathFragment = new Map<string, unknown>();
 
   async forward(path: string, init: RequestInit & { apiKey: string }): Promise<Response> {
     this.calls.push({ path, init });
+    for (const [fragment, body] of this.responseByPathFragment) {
+      if (path.includes(fragment)) return Response.json(body as Record<string, unknown>);
+    }
     return Response.json({ path, hasApiKey: Boolean(init.apiKey) });
   }
 }

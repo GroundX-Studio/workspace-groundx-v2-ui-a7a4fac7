@@ -27,16 +27,36 @@ import {
   WHITE,
 } from "@/constants";
 
+import { resolveToolAttribute, type ToolBindingProps } from "../_tool-binding";
+
 // Omit `variant` from the props type — the wrapper hardcodes "outlined"
 // so callers don't have to pass it (and can't override it).
-export interface TextFieldProps extends Omit<OutlinedTextFieldProps, "variant"> {
+interface TextFieldBaseProps extends Omit<OutlinedTextFieldProps, "variant"> {
   /** Drop the default top margin (use inside explicit-spacing layouts). */
   dense?: boolean;
 }
 
-export const TextField: FC<TextFieldProps> = ({ dense = false, ...props }) => (
+/**
+ * widget-llm-integration Phase 5b — every interactive primitive
+ * requires exactly one of `tool` or `noTool`. See
+ * `components/primitives/_tool-binding.ts` for the contract.
+ */
+export type TextFieldProps = TextFieldBaseProps & ToolBindingProps;
+
+export const TextField: FC<TextFieldProps> = (props) => {
+  const { dense = false, tool, noTool, ...rest } = props as TextFieldBaseProps & {
+    tool?: string;
+    noTool?: string;
+  };
+  const toolAttrs = resolveToolAttribute(
+    tool !== undefined
+      ? ({ tool } as const)
+      : ({ noTool: noTool ?? "unknown" } as const),
+  );
+  return (
   <MuiTextField
-    {...props}
+    {...rest}
+    {...toolAttrs}
     variant="outlined"
     sx={{
       mt: dense ? 0 : 2,
@@ -64,6 +84,7 @@ export const TextField: FC<TextFieldProps> = ({ dense = false, ...props }) => (
       ...props.sx,
     }}
   />
-);
+  );
+};
 
 export default TextField;

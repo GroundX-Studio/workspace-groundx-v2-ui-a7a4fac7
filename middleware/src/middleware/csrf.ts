@@ -38,6 +38,10 @@ export const CSRF_EXEMPT_PATHS = new Set<string>([
   "/api/onboarding/session",
   "/api/auth/login",
   "/api/auth/register",
+  // DBG-01: the debug-overlay Reset only clears the caller's own cookies
+  // (session + csrf). It can't be weaponized, and exempting avoids a
+  // bootstrap edge when the client has already torn down its csrf token.
+  "/api/auth/reset",
   // Health/observability probes are GET-only so they skip via the
   // safe-method check, but list them here for documentation.
 ]);

@@ -6,7 +6,6 @@ Define the durable shape of the sample scenarios (Utility, Loan, Solar)
 — manifest layout, document packets, pre-canned extraction values, chat
 seeds and scripts — plus the bucket-seeding contract that lets a fresh
 samples bucket boot the F1 picker without runtime authoring.
-
 ## Requirements
 ### Requirement: Loan scenario SHALL ship a 12-doc packet fixture
 
@@ -78,4 +77,42 @@ MUST drift-check `workflow_id` and PUT updates when it changes.
 - **WHEN** the seed script runs end-to-end
 - **THEN** every uploaded doc carries `filter.workflow_id` matching the scenario's authored value
 - **AND** a manual `workflow_id` change in the scenario JSON triggers a PUT update on the existing doc
+
+### Requirement: Solar ContentScope SHALL use bucket + project filter, not a group
+
+The Solar scenario's content scope SHALL resolve a project view to the Solar workspace bucket plus a
+`projectId` filter, and a portfolio view to the bucket itself (bucket-wide) — correcting the earlier
+"project view = group" mapping. The Solar workspace is one GroundX bucket holding all Solar
+documents; the Portfolio → Fund → Project hierarchy is expressed as document filter fields, not as
+separate buckets or groups. A GroundX group SHALL NOT be used for a single-workspace Solar view.
+
+#### Scenario: Solar project view scopes by filter
+
+- **GIVEN** the Solar scenario with a selected project
+- **WHEN** the chat/search content scope is built
+- **THEN** the scope is `{ type: "bucket", bucketId: <solar workspace> }` with a `projectId` filter
+- **AND** no GroundX group is created or referenced for that view.
+
+#### Scenario: Solar portfolio view is bucket-wide
+
+- **GIVEN** the Solar scenario at the portfolio level
+- **WHEN** the content scope is built
+- **THEN** the scope targets the Solar workspace bucket (optionally filtered by portfolio)
+- **AND** it is not a group.
+
+### Requirement: The scenario seed manifest SHALL carry only narrative copy, not data fixtures
+
+The scenario seed manifest SHALL NOT carry `extractionSchema`, `sampleExtractionValues`, or
+`sampleChatScript`, since the schema comes from `getGroundXWorkflow(filter.workflow_id)`, the
+values from `getGroundXDocumentExtract(documentId)`, and the chat from the live router. The
+manifest MAY retain `hero`, `thinkingScript`, and `chatSeeds` (starter-chip prompts that feed the
+real chat). Re-seeding SHALL rewrite the carrier doc's `filter.manifest` so `/api/scenarios`
+returns the slim manifest.
+
+#### Scenario: Seeded manifest has no data fixtures
+
+- **GIVEN** a freshly seeded scenario carrier doc
+- **WHEN** `/api/scenarios` returns its manifest
+- **THEN** the manifest has no `extractionSchema`, `sampleExtractionValues`, or `sampleChatScript`
+- **AND** it still carries `hero`, `thinkingScript`, and `chatSeeds`.
 

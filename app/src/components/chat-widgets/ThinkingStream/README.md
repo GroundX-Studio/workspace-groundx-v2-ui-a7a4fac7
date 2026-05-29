@@ -8,6 +8,13 @@ Extracted from `views/Onboarding/OnboardingChatColumn.tsx`'s
 `F2ConversationFlow` in ARCH-11 (2026-05-26) so steady mode can show
 the same beat when a real upload is parsing.
 
+## What it does
+
+Renders a randomly-paced reveal of `notes[]` as italic, left-bordered
+bubbles. Owns: per-note delay (1500-2800ms), post-stream pause
+(1200ms), per-`scenarioKey` sessionStorage replay guard (onboarding
+only), and a single-fire `onDone` callback.
+
 ## Props
 
 | Prop          | Type                          | Default        | Notes                                                                |
@@ -61,3 +68,36 @@ tab but NOT across tab close.
 Steady mode's cadence will likely move from timer-driven to event-
 driven once the real upload-progress stream lands. Until then the
 widget treats both modes identically except for the persistence flag.
+
+## Locked affordances under `mode="onboarding"`
+
+- Replay guard via sessionStorage — onboarding's scripted notes only
+  play once per scenario per tab. Steady mode persists nothing
+  (each upload is unique).
+
+## Events
+
+- `onDone()` — fires once after the post-stream delay. Subscribe and
+  reveal whatever Done / CTA combo the host needs.
+
+## How to mount
+
+```tsx
+import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
+
+<ThinkingStream
+  notes={scenario.thinkingScript}
+  scenarioKey={scenario.id}
+  mode="onboarding"
+  onDone={() => setShowDone(true)}
+/>
+```
+
+`ChatColumn`'s `F2ConversationFlow` is the only production caller
+today; steady mode will mount it once a real upload-progress feed
+exists.
+
+## LLM tools
+
+See [`no-llm.md`](./no-llm.md). The widget is a pure timer-driven
+display; the host owns the note source and the post-stream behavior.

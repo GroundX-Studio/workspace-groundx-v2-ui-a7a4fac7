@@ -59,6 +59,50 @@ Mounted by `chat-widgets/ChatColumn/ChatColumn` whenever an assistant
 live-turn carries a non-null `proposedSchemaField`. The card sits
 inline within the assistant bubble — sibling to the answer text.
 
+## How to mount
+
+```tsx
+import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
+
+// ChatColumn mounts this inline within each assistant bubble that
+// carries a non-null reply.proposedSchemaField:
+{turn.proposedSchemaField && (
+  <ProposeSchemaFieldCard proposedField={turn.proposedSchemaField} mode="onboarding" />
+)}
+```
+
+`ChatColumn`'s F2 and Steady flows are the only production callers.
+
+## LLM tools
+
+`ProposeSchemaFieldCard.tools.ts` exposes three mutate-category tools
+(widget-llm-integration follow-up B.1, 2026-05-28). All three surface
+on `reply.suggestedActions[]` as user-confirmable chips:
+
+- `propose_schema_field({ categoryId, name, type, description })` —
+  the LLM-proposed addition. Replaces the legacy fenced-JSON
+  `proposedSchemaField` envelope. Use when the user asks to capture
+  an additional value.
+- `accept_proposal({ proposalId })` — agentic auto-accept. Use only
+  when an agent flow has high confidence the user wants the
+  proposal applied. The user can still Reject via the inline card.
+- `reject_proposal({ proposalId })` — agentic auto-reject. Use when
+  the proposal doesn't fit the active scenario.
+
+Round-trip: LLM emits tool call → middleware validates Zod schema →
+chat router routes the call to `reply.suggestedActions[]` → the
+`SuggestedActionChips` widget renders the chip → user click → app-
+side `suggestedActionToIntent` dispatches the corresponding
+`CanvasIntent` (`proposeSchemaField` / `acceptSchemaField` /
+`rejectSchemaField`) → orchestrator routes to the matching
+`ChatStore` mutator (`enqueueFieldProposal` / `acceptFieldProposal` /
+`dismissFieldProposal`).
+
+Back-compat: while A.4 consumer migration is in flight, the
+middleware also mirrors a validated `propose_schema_field` call
+onto `reply.proposedSchemaField` so the existing inline card render
+keeps working.
+
 ## Tests
 
 `ProposeSchemaFieldCard.test.tsx`. Covers: name/type/description

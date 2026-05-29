@@ -73,12 +73,19 @@ drift guard at `app/src/test/no-hardcoded-styles.test.ts` walks every
 | `OnboardingSessionContext` | façade | Exposes `state` (current frame, scenario, gate) + actions (`pickScenario`, `advanceFrame`, `openGate`, `dismissGate`, `commitGate`). Each action emits a ViewerEvent + pushes a ViewerStep via ChatStore |
 | `ScenarioRegistryContext` | loads `/api/scenarios` | Scenarios + bucketId for canonical URLs |
 | `CanvasOrchestratorContext` | **live (post-mvs-cleanup)** | Generic `dispatch`/`registerAdapter` surface for `CanvasIntent` union; named convenience channels `openCitation` (push citation-peek overlay) + `docOpened` (append assistant chat message). Built-in handler for `highlightCitation` routes to `ChatStore.gotoDocViewer`. Soft-degrade when no ChatStoreProvider is in the tree |
-| `AgentToolBusContext` | scaffolded | Tool calls (not yet wired) |
 | `OnboardingSkillContext` | empty stub | Plugin-loaded skills; loader not yet implemented |
 
 Order in the provider tree: `AppMode` → `ChatStore` (via
 `EntityRegistryProvider`) → `OnboardingSession` → `ScenarioRegistry`
-→ `CanvasOrchestrator` / `AgentToolBus` / `OnboardingSkill` → views.
+→ `CanvasOrchestrator` / `OnboardingSkill` → views.
+
+`AgentToolBusContext` was retired in widget-llm-integration Phase 2
+(2026-05-27). The architectural replacement is the declarative widget
+tool registry (`app/src/tools/registry.ts`, Phase 3) — each widget
+ships its own `<Name>.tools.ts`, the registry auto-discovers them at
+boot, and the middleware emits tool calls via native LLM function
+calling rather than via an in-app event bus. The retired bus had
+zero production consumers.
 
 ## ChatSession + ViewerSession (master pairing)
 

@@ -16,12 +16,65 @@ export type CanvasIntent =
   | { kind: "showSample"; scenario: Scenario }
   | { kind: "openDocument"; documentId: string; page?: number }
   | { kind: "highlightCitation"; documentId: string; page: number; bbox?: { x: number; y: number; w: number; h: number } }
+  /**
+   * widget-llm-integration Phase 4 — lighter-weight cousin of
+   * `highlightCitation`. Same viewer-step push/swap, but no
+   * `bbox` highlight. Produced by `PdfViewer.jump_to_page` (LLM
+   * tool) and by future page-navigation affordances inside the
+   * viewer pane itself.
+   */
+  | { kind: "jumpToPage"; documentId: string; page: number }
   | { kind: "showExtract"; scope: ContentScope; schemaId: string }
   | { kind: "editSchema"; schemaId: string }
   | { kind: "showReport"; templateId: string; scope: ContentScope }
   | { kind: "editTemplate"; templateId: string }
   | { kind: "openGate"; trigger: "save" | "export" | "byo" | "threshold" }
-  | { kind: "switchFrame"; frame: import("@/types/onboarding").FFrame };
+  | { kind: "switchFrame"; frame: import("@/types/onboarding").FFrame }
+  /**
+   * widget-llm-integration follow-up B.1 — schema-field proposal
+   * (the LLM-proposed addition). Replaces the fenced-JSON
+   * `proposedSchemaField` envelope. The orchestrator handler
+   * routes to `ChatStore.enqueueFieldProposal` so the chat scroll
+   * + canvas-side ProposalCard both surface the proposal.
+   */
+  | {
+      kind: "proposeSchemaField";
+      categoryId: string;
+      name: string;
+      type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+      description: string;
+    }
+  /**
+   * widget-llm-integration follow-up B.1 — accept a queued
+   * proposal. The orchestrator handler routes to
+   * `ChatStore.acceptFieldProposal(proposalId)`.
+   */
+  | { kind: "acceptSchemaField"; proposalId: string }
+  /**
+   * widget-llm-integration follow-up B.1 — reject a queued
+   * proposal. The orchestrator handler routes to
+   * `ChatStore.dismissFieldProposal(proposalId)`.
+   */
+  | { kind: "rejectSchemaField"; proposalId: string }
+  /**
+   * widget-llm-integration follow-up B.2 — commit the sign-up
+   * gate via a specific method. Orchestrator routes to
+   * `OnboardingSessionContext.commitGate(method)`.
+   */
+  | { kind: "commitGate"; method: "register" | "sso" | "engineer-call" }
+  /**
+   * widget-llm-integration follow-up B.2 — dismiss the sign-up
+   * gate. Orchestrator routes to `OnboardingSessionContext.dismissGate()`.
+   */
+  | { kind: "dismissGate" }
+  /**
+   * widget-llm-integration follow-up B.3 — open the Book Call
+   * surface by setting `?bookCall=1` on the URL. The
+   * OnboardingShell already watches this param to mount
+   * `BookCallView` + `BookingStatusCard`. The orchestrator
+   * handler manipulates `window.location.search` directly.
+   */
+  | { kind: "openBookCall" };
 
 export type IntentSource = "user" | "agent" | "tour";
 

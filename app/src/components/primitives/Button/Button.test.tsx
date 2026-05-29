@@ -12,7 +12,7 @@ import { Button } from "./Button";
 
 describe("Button primitive — variant semantics", () => {
   it("variant=\"primary\" renders a green-pill button with uppercase label by default", () => {
-    render(<Button variant="primary">Save</Button>);
+    render(<Button noTool="test fixture" variant="primary">Save</Button>);
     const btn = screen.getByRole("button", { name: /save/i });
     expect(btn).toBeInTheDocument();
     expect(btn.getAttribute("data-button-variant")).toBe("primary");
@@ -21,7 +21,7 @@ describe("Button primitive — variant semantics", () => {
   });
 
   it("variant=\"secondary\" renders a text-style button with mixed-case label by default", () => {
-    render(<Button variant="secondary">Cancel</Button>);
+    render(<Button noTool="test fixture" variant="secondary">Cancel</Button>);
     const btn = screen.getByRole("button", { name: /cancel/i });
     expect(btn).toBeInTheDocument();
     expect(btn.getAttribute("data-button-variant")).toBe("secondary");
@@ -30,12 +30,12 @@ describe("Button primitive — variant semantics", () => {
   });
 
   it("defaults to primary when no variant is supplied", () => {
-    render(<Button>Default</Button>);
+    render(<Button noTool="test fixture">Default</Button>);
     expect(screen.getByRole("button").getAttribute("data-button-variant")).toBe("primary");
   });
 
   it("defaults type to 'button' so use inside <form> doesn't accidentally submit", () => {
-    render(<Button variant="primary">Save</Button>);
+    render(<Button noTool="test fixture" variant="primary">Save</Button>);
     expect(screen.getByRole("button").getAttribute("type")).toBe("button");
   });
 
@@ -43,7 +43,7 @@ describe("Button primitive — variant semantics", () => {
     const onSubmit = vi.fn((event) => event.preventDefault());
     render(
       <form onSubmit={onSubmit}>
-        <Button variant="primary" type="submit">
+        <Button noTool="test fixture" variant="primary" type="submit">
           Send
         </Button>
       </form>,
@@ -56,7 +56,7 @@ describe("Button primitive — variant semantics", () => {
 describe("Button primitive — submitting state (primary only)", () => {
   it("disables the button and renders a spinner when submitting", () => {
     render(
-      <Button variant="primary" submitting>
+      <Button noTool="test fixture" variant="primary" submitting>
         Saving
       </Button>,
     );
@@ -68,7 +68,7 @@ describe("Button primitive — submitting state (primary only)", () => {
 
   it("does not render a spinner for secondary variant", () => {
     render(
-      <Button variant="secondary" submitting>
+      <Button noTool="test fixture" variant="secondary" submitting>
         Cancel
       </Button>,
     );
@@ -80,13 +80,13 @@ describe("Button primitive — onClick", () => {
   it("fires onClick for primary + secondary", () => {
     const onClick = vi.fn();
     const { rerender } = render(
-      <Button variant="primary" onClick={onClick}>
+      <Button noTool="test fixture" variant="primary" onClick={onClick}>
         Save
       </Button>,
     );
     fireEvent.click(screen.getByRole("button"));
     rerender(
-      <Button variant="secondary" onClick={onClick}>
+      <Button noTool="test fixture" variant="secondary" onClick={onClick}>
         Cancel
       </Button>,
     );
@@ -97,7 +97,7 @@ describe("Button primitive — onClick", () => {
   it("does not fire onClick when disabled", () => {
     const onClick = vi.fn();
     render(
-      <Button variant="primary" disabled onClick={onClick}>
+      <Button noTool="test fixture" variant="primary" disabled onClick={onClick}>
         Save
       </Button>,
     );
@@ -109,7 +109,7 @@ describe("Button primitive — onClick", () => {
 describe("Button primitive — invert + isUppercase overrides", () => {
   it("primary + invert ships as a contained MuiButton (visual flip is sx-driven)", () => {
     render(
-      <Button variant="primary" invert>
+      <Button noTool="test fixture" variant="primary" invert>
         Confirm
       </Button>,
     );
@@ -120,7 +120,7 @@ describe("Button primitive — invert + isUppercase overrides", () => {
 
   it("primary + isUppercase=false renders sentence-case label", () => {
     render(
-      <Button variant="primary" isUppercase={false}>
+      <Button noTool="test fixture" variant="primary" isUppercase={false}>
         Save
       </Button>,
     );
@@ -130,7 +130,7 @@ describe("Button primitive — invert + isUppercase overrides", () => {
 
   it("secondary + isUppercase=true UPPER-CASES the label", () => {
     render(
-      <Button variant="secondary" isUppercase>
+      <Button noTool="test fixture" variant="secondary" isUppercase>
         Discard
       </Button>,
     );

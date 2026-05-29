@@ -15,8 +15,10 @@ import { CSRF_COOKIE, csrfMiddleware } from "./middleware/csrf.js";
 import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { ChatHandlerError, deriveRagContentScope, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
+import { resolveFieldGeometry } from "./services/citationGeometry.js";
 import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
 import { sendUpstreamResponse } from "./services/http.js";
+import { fetchDocumentXray } from "./services/xrayCache.js";
 import type {
   AppRepository,
   ChatSessionRecord,
@@ -287,6 +289,26 @@ export function createApp({
     res.json({ success: true });
   });
 
+  // DBG-01 (2026-05-28). Debug-overlay Reset support. Unlike logout this
+  // does NOT require a session — it clears the session + csrf cookies for
+  // ANY caller (anon, authed, or sessionless) so the next request mints a
+  // fresh anonymous id. Best-effort deletes the session row if one exists.
+  // CSRF-exempt (see CSRF_EXEMPT_PATHS): clearing your own cookies can't be
+  // weaponized, and exempting avoids a bootstrap edge when the client has
+  // already torn down its csrf token.
+  app.post("/api/auth/reset", async (req, res, next) => {
+    try {
+      if (req.session?.id) {
+        await repository.deleteSession(req.session.id);
+      }
+      clearSessionCookie(res);
+      res.clearCookie(CSRF_COOKIE, { path: "/" });
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/auth/me", requireAuthenticatedUser, async (req, res, next) => {
     try {
       const [customer, metadata] = await Promise.all([
@@ -464,9 +486,15 @@ export function createApp({
       // so a corrupt row doesn't 500 the whole hydrate.
       const projected = messages.map((m) => {
         let parsed: unknown[] = [];
-        if (m.citationsJson) {
+        const raw: unknown = m.citationsJson;
+        if (raw) {
           try {
-            const j = JSON.parse(m.citationsJson);
+            // WF-16 — the MySQL `JSON` column comes back ALREADY parsed
+            // (an array), while the memory repo + older rows store a
+            // string. Tolerate both: parse a string, use an array as-is.
+            // Without this the MySQL path threw and dropped every
+            // hydrated turn's chips to [].
+            const j = typeof raw === "string" ? JSON.parse(raw) : raw;
             if (Array.isArray(j)) parsed = j;
           } catch {
             // soft-fail — corrupt row degrades to no chips
@@ -1195,6 +1223,46 @@ export function createApp({
     }
   });
 
+  // WF-05 — resolve extract-field source geometry from the document X-Ray.
+  // `document_getextract` returns field VALUES only (no geometry, ever), so a
+  // field's source region is recovered by matching its value against the
+  // X-Ray chunks (`resolveFieldGeometry`). The app posts the active fields
+  // ({value,label}); we return a parallel `geometry[]` (null where no chunk
+  // matches → highlight degrades to none). X-Ray fetch is cached per doc.
+  app.post<{ documentId: string }>(
+    "/api/documents/:documentId/field-geometry",
+    apiLimiter,
+    requireSession,
+    async (req, res, next) => {
+      try {
+        const { documentId } = req.params;
+        const rawFields = (req.body as { fields?: unknown } | undefined)?.fields;
+        if (!Array.isArray(rawFields)) {
+          res.status(400).json({ error: "fields_required" });
+          return;
+        }
+        const fields = rawFields as Array<{ value?: unknown; label?: unknown }>;
+        const apiKey = req.session!.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY;
+        if (!apiKey) {
+          res.status(503).json({ error: "GroundX API key is not available for this session" });
+          return;
+        }
+        const xray = await fetchDocumentXray(groundxClient, apiKey, documentId);
+        const geometry = fields.map((f) => {
+          if (!xray) return null;
+          const value =
+            typeof f.value === "string" || typeof f.value === "number" || typeof f.value === "boolean"
+              ? f.value
+              : null;
+          return resolveFieldGeometry(value, typeof f.label === "string" ? f.label : "", xray);
+        });
+        res.json({ documentId, geometry });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   app.use("/api/v1", apiLimiter, requireSession, async (req: Request, res: Response, next) => {
     try {
       // Per-session customer key when the user has signed up; partner
@@ -1345,11 +1413,20 @@ function parseChatMessageRequest(body: unknown): HandleChatMessageRequest | null
       scenarioTitle: typeof st === "string" ? st : st === null ? null : undefined,
     };
   }
+  // widget-llm-integration Phase 5 — accept the active ViewerStep
+  // kind so the tool catalog sent to the LLM is filtered to the
+  // user's current surface. Unknown/missing values fall through to
+  // the broad catalog (no filter) — defensive against legacy clients.
+  let activeStepKind: string | null | undefined = undefined;
+  const ask = (body as Record<string, unknown>).activeStepKind;
+  if (typeof ask === "string") activeStepKind = ask;
+  else if (ask === null) activeStepKind = null;
   return {
     chatSessionId: body.chatSessionId,
     newUserMessage: body.newUserMessage,
     intent: typeof intent === "string" ? intent : intent === null ? null : undefined,
     scopeHint,
+    activeStepKind,
   };
 }
 

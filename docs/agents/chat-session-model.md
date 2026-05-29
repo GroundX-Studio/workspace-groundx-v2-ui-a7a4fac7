@@ -4,6 +4,13 @@ The chat session is the **parent** of entity state, conversation,
 and viewer events. This is the foundation the whole onboarding +
 steady-mode flow sits on.
 
+> **Reset coupling (DBG-01, locked 2026-05-28):** everything described
+> here is session-scoped state. The debug-overlay Reset
+> (`lib/resetExperience.ts`) must clear ALL of it. If you add a new
+> session key / context / cookie / server session record, extend
+> `resetExperience` + its test in the SAME change — see
+> `discipline.md` §4c. A reset that misses new state is a regression.
+
 ## The shape
 
 ```

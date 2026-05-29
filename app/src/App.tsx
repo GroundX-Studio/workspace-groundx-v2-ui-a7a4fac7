@@ -9,10 +9,10 @@ import { AppModeProvider } from "@/contexts/AppModeContext";
 import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
 import { OnboardingSessionProvider } from "@/contexts/OnboardingSessionContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
-import { AgentToolBusProvider } from "@/contexts/AgentToolBusContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
 import { ScenarioRegistryProviderWithDemoHooks } from "@/contexts/ScenarioRegistryContext";
 import { AppErrorBoundary } from "@/components/layout/AppErrorBoundary/AppErrorBoundary";
+import { DebugOverlay } from "@/components/layout/DebugOverlay/DebugOverlay";
 import { MotionRoot } from "@/components/primitives/MotionRoot/MotionRoot";
 import { WireframeFilters } from "@/components/brand/WireframeFilters/WireframeFilters";
 import { GxThemeProvider } from "@/ThemeProvider";
@@ -56,13 +56,11 @@ export const AppProviders: FC<{ children: ReactNode }> = ({ children }) => (
                 <AppModeProvider>
                   <ScenarioRegistryProviderWithDemoHooks>
                     <OnboardingSessionProvider>
-                      <AgentToolBusProvider>
-                        <CanvasOrchestratorProvider>
-                          <OnboardingSkillProvider>
-                            <HelmetProvider>{children}</HelmetProvider>
-                          </OnboardingSkillProvider>
-                        </CanvasOrchestratorProvider>
-                      </AgentToolBusProvider>
+                      <CanvasOrchestratorProvider>
+                        <OnboardingSkillProvider>
+                          <HelmetProvider>{children}</HelmetProvider>
+                        </OnboardingSkillProvider>
+                      </CanvasOrchestratorProvider>
                     </OnboardingSessionProvider>
                   </ScenarioRegistryProviderWithDemoHooks>
                 </AppModeProvider>
@@ -79,6 +77,11 @@ export default function App() {
   return (
     <AppProviders>
       <RouterProvider router={router} />
+      {/* DBG-01: app-wide debug overlay, gated on `?debug=true`. Router-
+          independent (reads window.location.search), so it mounts once
+          here beside the router and covers every route. Renders null in
+          production / without the param. */}
+      <DebugOverlay />
     </AppProviders>
   );
 }

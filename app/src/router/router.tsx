@@ -58,6 +58,15 @@ export const router = createBrowserRouter([
   { path: ROUTER_PATHS.ONBOARDING, element: <OnboardingShell /> },
   { path: `${ROUTER_PATHS.ONBOARDING}/signup`, element: <OnboardingShell /> },
   { path: `${ROUTER_PATHS.ONBOARDING}/:bucketId/:scenarioId`, element: <OnboardingShell /> },
+  // WF-01 C4 (2026-05-28). Catch unknown sub-paths under an onboarding
+  // scenario so they don't trip the error boundary. Currently the only
+  // canonical sub-paths recognized at the shell level are the scenario
+  // root + signup; per-frame routing happens via state (advanceFrame),
+  // not URL. A splat here mounts the same OnboardingShell, which then
+  // ignores the extra segment and renders the canonical scenario URL's
+  // surface. (If we add real per-frame deep-links later, this splat
+  // becomes the dispatch table.)
+  { path: `${ROUTER_PATHS.ONBOARDING}/:bucketId/:scenarioId/*`, element: <OnboardingShell /> },
   // Steady-mode chat-session URL. Authenticated users land here after
   // the onboarding flow completes; the URL carries the active chat
   // session so refresh / share keeps you in the same conversation.

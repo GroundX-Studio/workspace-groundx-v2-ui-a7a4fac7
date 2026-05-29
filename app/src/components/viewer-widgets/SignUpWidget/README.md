@@ -3,6 +3,14 @@
 Viewer-slot widget that hosts the GroundX sign-up form. The chat-side
 companion is `chat-widgets/GateChatRail/`.
 
+## What it does
+
+Renders the sign-up form in the viewer pane while the gate is open.
+Owns: form field rendering + validation, the submit pipeline
+(register → claim → promote → commitGate), and the in-flight loading
+state. The chat-side rail carries the preamble, dismiss link, and
+book-a-call CTA.
+
 ## Why split from `GateView`?
 
 Before ARCH-05, `GateView` was a ~400-line monolith that lived inside
@@ -51,3 +59,35 @@ In this exact order on a happy-path submit:
   — lives in `GateChatRail`. This widget shows the FORM. When
   `gate.status === "committed"`, the OnboardingShell unmounts this
   widget (the user doesn't need to re-see the form they just submitted).
+
+## Locked affordances under `mode="onboarding"`
+
+- `commitGate("register")` fires on successful sign-up to drive the
+  gate state machine to `committed`. Steady mode skips this (the auth
+  promotion is enough — no gate to commit).
+- Otherwise both modes render the same form. Identity actions are
+  user-driven by definition; the mode prop is for the post-submit
+  side effect.
+
+## Events
+
+- Form submit → register → claim → promote → (onboarding) commitGate.
+  See § "Submit pipeline" above for the exact order + failure routing.
+- Validation failures stay local to the form; no host callback fires.
+
+## How to mount
+
+```tsx
+import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
+
+// OnboardingShell mounts this in the viewer pane while gate.status === "open".
+<SignUpWidget mode="onboarding" />
+```
+
+The chat-side `GateChatRail` is mounted in parallel by the same shell.
+
+## LLM tools
+
+See [`no-llm.md`](./no-llm.md). Identity actions are user-driven by
+definition; an LLM "signing up" the user is an authentication-fraud
+vector.

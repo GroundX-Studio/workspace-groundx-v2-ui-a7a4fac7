@@ -40,7 +40,7 @@ export function DialogTitle({ children, onClose }: DialogTitleProps) {
       >
         {children}
       </Typography>
-      {onClose && <IconButton onClick={onClose} />}
+      {onClose && <IconButton noTool="legacy — Phase 7 backfills tool" onClick={onClose} />}
     </MuiDialogTitle>
   );
 }

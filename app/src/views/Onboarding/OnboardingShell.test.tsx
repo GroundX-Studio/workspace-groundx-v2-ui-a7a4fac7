@@ -233,6 +233,27 @@ describe("OnboardingShell", () => {
     expect(screen.getByTestId("onboarding-shell-canvas-pane")).toBeInTheDocument();
   });
 
+  // WF-01 C1 (2026-05-28). The underneath AppShell stays mounted under
+  // F1 so the F1→F2 transition can re-use it without remount. But it
+  // must be hidden from assistive tech while the F1 overlay covers it,
+  // otherwise screen-reader / keyboard-Tab users hit phantom sidebar +
+  // chat elements that have no visible affordance. The fix: wrap the
+  // underneath shell in a div carrying `aria-hidden="true"` and `inert`
+  // while `isF1` is true; clear both on F2.
+  it("WF-01 C1: F1 marks the underneath shell aria-hidden + inert", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
+    const wrap = screen.getByTestId("onboarding-shell-underneath");
+    expect(wrap).toHaveAttribute("aria-hidden", "true");
+    expect(wrap).toHaveAttribute("inert");
+  });
+
+  it("WF-01 C1: F2 clears aria-hidden + inert on the underneath shell", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    const wrap = screen.getByTestId("onboarding-shell-underneath");
+    expect(wrap).not.toHaveAttribute("aria-hidden");
+    expect(wrap).not.toHaveAttribute("inert");
+  });
+
   it("F1 picker covers the always-mounted AppShell underneath (overlay model)", () => {
     // ARCH-06B (2026-05-26): the F1 picker is an absolute-positioned
     // overlay above a fully-mounted AppShell. The wireframe rule —

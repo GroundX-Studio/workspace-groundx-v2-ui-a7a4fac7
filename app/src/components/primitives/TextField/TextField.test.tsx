@@ -6,7 +6,7 @@ import TextField from "./TextField";
 
 describe("TextField", () => {
   it("renders an accessible labelled input", () => {
-    render(<TextField label="Email" />);
+    render(<TextField noTool="test fixture" label="Email" />);
 
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
   });
@@ -14,7 +14,7 @@ describe("TextField", () => {
   it("accepts user input", async () => {
     const user = userEvent.setup();
 
-    render(<TextField label="Full name" />);
+    render(<TextField noTool="test fixture" label="Full name" />);
     await act(async () => {
       await user.type(screen.getByLabelText("Full name"), "Ada Lovelace");
     });
@@ -23,7 +23,7 @@ describe("TextField", () => {
   });
 
   it("renders helper text and invalid state", () => {
-    render(<TextField label="Email" error helperText="Email is required" />);
+    render(<TextField noTool="test fixture" label="Email" error helperText="Email is required" />);
 
     expect(screen.getByText("Email is required")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true");

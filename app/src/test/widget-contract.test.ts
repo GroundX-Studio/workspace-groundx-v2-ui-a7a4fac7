@@ -136,6 +136,107 @@ describe("widget contract drift guard", () => {
           `${mainTsx} must accept a \`mode\` prop — see widget-contract.md § "The contract" #3`,
         ).toBe(true);
       });
+
+      // widget-llm-integration Phase 6 — every widget MUST declare
+      // an LLM tool surface or explicitly opt out. The drift guard
+      // walks for one of two siblings: `<Name>.tools.ts` (the
+      // declaration path) or `no-llm.md` (the opt-out path).
+      it("has either <Name>.tools.ts OR no-llm.md (Phase 6)", () => {
+        const entries = readdirSync(widget.absPath);
+        const hasTools = entries.some(
+          (e) => e === `${widget.name}.tools.ts` || e === `${widget.name}Widget.tools.ts`,
+        );
+        const hasNoLlm = entries.includes("no-llm.md");
+        const summary = `${widget.slot}/${widget.name}: ` +
+          `tools.ts present=${hasTools}, no-llm.md present=${hasNoLlm}`;
+        expect(
+          hasTools || hasNoLlm,
+          `${summary} — declare LLM tools in <Name>.tools.ts OR add no-llm.md with a ## Why section. See docs/agents/widget-contract.md § "How to add a new widget".`,
+        ).toBe(true);
+        expect(
+          !(hasTools && hasNoLlm),
+          `${summary} — declare EXACTLY ONE. Both files coexisting is ambiguous.`,
+        ).toBe(true);
+      });
+
+      // widget-llm-integration Phase 6 — opt-out path requires a
+      // justification. Without this every widget would default to
+      // `no-llm.md` to skip the work; the `## Why` header keeps the
+      // author honest.
+      it("no-llm.md (when present) contains a ## Why section (Phase 6)", () => {
+        const noLlmPath = join(widget.absPath, "no-llm.md");
+        if (!existsSync(noLlmPath)) return;
+        const src = readFileSync(noLlmPath, "utf8");
+        expect(
+          /^##\s+Why\b/m.test(src),
+          `${noLlmPath} must contain a "## Why" section justifying the opt-out (e.g. "pure display", "user-driven nav", "already user-confirmed legacy flow").`,
+        ).toBe(true);
+      });
+
+      // widget-llm-integration Phase 6 — README must declare each
+      // contract surface. Accepts a small set of equivalent header
+      // wordings (Purpose vs What it does, Integration vs How to
+      // mount, etc.) so the rule reads as "every concept is
+      // addressed" rather than "exact spelling". The "LLM tools"
+      // header pairs with the tools.ts vs no-llm.md fork.
+      const requiredHeaders: { name: string; aliases: RegExp[] }[] = [
+        {
+          name: "What it does (or Purpose)",
+          aliases: [/^##\s+What it does\b/m, /^##\s+Purpose\b/m],
+        },
+        {
+          name: "Props",
+          aliases: [/^##\s+Props\b/m],
+        },
+        {
+          name: "Locked affordances",
+          aliases: [
+            /^##\s+Locked affordances\b/m,
+            /^##\s+Locked behavior\b/m,
+            /^##\s+Mode lock\b/m,
+          ],
+        },
+        {
+          name: "Events (or Callbacks)",
+          aliases: [
+            /^##\s+Events\b/m,
+            /^##\s+Callbacks\b/m,
+            /^##\s+Activation\b/m,
+          ],
+        },
+        {
+          name: "How to mount (or Integration)",
+          aliases: [
+            /^##\s+How to mount\b/m,
+            /^##\s+Integration\b/m,
+            /^##\s+Mount\b/m,
+          ],
+        },
+        {
+          name: "LLM tools (or No LLM tools)",
+          aliases: [
+            /^##\s+LLM tools\b/mi,
+            /^##\s+No LLM tools\b/mi,
+            /^##\s+Tools\b/mi,
+          ],
+        },
+      ];
+
+      it("README contains the required section headers (Phase 6)", () => {
+        const readme = join(widget.absPath, "README.md");
+        if (!existsSync(readme)) return; // earlier test will fail
+        const src = readFileSync(readme, "utf8");
+        const missing: string[] = [];
+        for (const header of requiredHeaders) {
+          const hit = header.aliases.some((re) => re.test(src));
+          if (!hit) missing.push(header.name);
+        }
+        expect(
+          missing.length === 0,
+          `${readme} is missing required section header(s): ${missing.join(", ")}. ` +
+            `Required (any one alias per row): ${requiredHeaders.map((h) => h.name).join(" · ")}.`,
+        ).toBe(true);
+      });
     });
   }
 });

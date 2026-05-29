@@ -81,16 +81,16 @@ export function OnboardingWizard({ steps = APP_CONFIG.onboarding.steps }: Onboar
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: PADDING, pb: PADDING, flexWrap: "wrap", gap: 1 }}>
-        <Button variant="secondary" onClick={closeWithoutCompleting}>Not now</Button>
-        <Button variant="secondary" onClick={back} disabled={isFirstStep}>
+        <Button noTool="legacy — Phase 7 backfills tool" variant="secondary" onClick={closeWithoutCompleting}>Not now</Button>
+        <Button noTool="legacy — Phase 7 backfills tool" variant="secondary" onClick={back} disabled={isFirstStep}>
           Back
         </Button>
         {isLastStep ? (
-          <Button variant="primary" onClick={() => void finish()} isUppercase={false}>
+          <Button noTool="legacy — Phase 7 backfills tool" variant="primary" onClick={() => void finish()} isUppercase={false}>
             Finish
           </Button>
         ) : (
-          <Button variant="primary" onClick={next} isUppercase={false}>
+          <Button noTool="legacy — Phase 7 backfills tool" variant="primary" onClick={next} isUppercase={false}>
             {step.primaryActionLabel ?? "Next"}
           </Button>
         )}

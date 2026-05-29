@@ -164,6 +164,28 @@ describe("middleware scaffold", () => {
     expect(repository.sessions.size).toBe(0);
   });
 
+  // DBG-01 A2 (2026-05-28). The debug-overlay Reset needs to clear the
+  // httpOnly session cookie, which client JS can't touch. `/api/auth/reset`
+  // clears the session (+ csrf) cookies for ANY caller — anon or authed,
+  // session or no session — so the next request mints a fresh anon id.
+  it("DBG-01: POST /api/auth/reset clears the session for an authenticated user", async () => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+    expect(repository.sessions.size).toBe(1);
+    await agent.post("/api/auth/reset").expect(200, { success: true });
+    expect(repository.sessions.size).toBe(0);
+    // After reset, the protected route is no longer authorized.
+    await agent.get("/api/auth/me").expect(401);
+  });
+
+  it("DBG-01: POST /api/auth/reset succeeds with no session (anon first-time)", async () => {
+    const { app } = setup();
+    const agent = request.agent(app);
+    // No login, no onboarding session — reset must still 200 (idempotent).
+    await agent.post("/api/auth/reset").expect(200, { success: true });
+  });
+
   it("updates app-owned onboarding metadata for the current session", async () => {
     const { app, repository } = setup();
     const agent = request.agent(app);

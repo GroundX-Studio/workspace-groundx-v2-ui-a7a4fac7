@@ -25,6 +25,7 @@ const expectedExports: Record<string, { module: Record<string, unknown>; exports
       "login",
       "logout",
       "register",
+      "resetSession",
       "resetUserPassword",
       "updateAppMetadata",
     ],

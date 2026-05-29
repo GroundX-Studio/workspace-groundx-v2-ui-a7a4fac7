@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "lint": "eslint src",
-    "test": "vitest run",
+    "test": "npm run test:tool-references && npm run test:tool-quality && vitest run",
     "test:e2e": "playwright test",
     "test:watch": "vitest",
+    "test:tool-references": "node scripts/check-tool-references.mjs && node scripts/check-tool-references.test.mjs",
+    "test:tool-quality": "node scripts/check-tool-quality.mjs && node scripts/check-tool-quality.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

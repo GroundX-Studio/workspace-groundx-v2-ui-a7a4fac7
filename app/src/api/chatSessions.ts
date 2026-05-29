@@ -116,12 +116,42 @@ export interface ChatReplyDebug {
   } | null;
 }
 
+/**
+ * widget-llm-integration Phase 5 — one successful LLM tool call
+ * round-trip from the middleware. The frontend dispatches each
+ * `intent` through the canvas orchestrator on receipt.
+ */
+export interface ChatDispatchedIntent {
+  name: string;
+  arguments: Record<string, unknown>;
+  intent: Record<string, unknown>;
+}
+
+/** widget-llm-integration Phase 5 — one failed LLM tool call. */
+export interface ChatToolFailure {
+  name: string;
+  reason: string;
+}
+
 export interface ChatReply {
   mode: "rag" | "structured" | "hybrid";
   answer: string;
   citations: ChatCitation[];
   suggestedActions: ChatSuggestedAction[];
   tools: { name: string; arguments: Record<string, unknown> }[];
+  /**
+   * widget-llm-integration Phase 5 — validated LLM tool calls. The
+   * chat surface dispatches each `intent` through the canvas
+   * orchestrator on receipt. Empty array when the LLM emitted no
+   * tools (or no tools matched the registry).
+   */
+  intents: ChatDispatchedIntent[];
+  /**
+   * widget-llm-integration Phase 5 — tool calls that failed
+   * validation (unknown name, Zod parse failure, etc.). v1 surfaces
+   * these as a one-line note; no auto-retry (design.md §M).
+   */
+  toolFailures: ChatToolFailure[];
   /**
    * UI-01 Phase 2a — non-null when the grounded LLM emitted a
    * well-formed proposed field in its JSON block. The chat surface
@@ -173,6 +203,13 @@ export interface SendChatMessageInput {
     fileName?: string | null;
     scenarioTitle?: string | null;
   };
+  /**
+   * widget-llm-integration Phase 5 — the active ViewerStep kind the
+   * user is currently on. Sent to the middleware so the LLM tool
+   * catalog gets filtered to tools relevant for the user's surface.
+   * Mirrors `ViewerStep["kind"]` from `ChatStoreContext`.
+   */
+  activeStepKind?: string | null;
 }
 
 export class ChatApiError extends Error {
@@ -430,6 +467,7 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
       newUserMessage: input.newUserMessage,
       intent: input.intent ?? null,
       scopeHint: input.scopeHint,
+      activeStepKind: input.activeStepKind ?? null,
     });
     // Dev-only: log the raw chat-pipeline diagnostics so the user can
     // see what was actually asked of GroundX + the LLM without

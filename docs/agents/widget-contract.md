@@ -293,7 +293,6 @@ to UI-05 follow-on work.
 
 | Context | Status | Purpose |
 |---|---|---|
-| `AgentToolBusContext` | active | Dispatches LLM tool calls to widgets |
 | `AppModeContext` | active | Onboarding vs steady mode + auth state |
 | `AuthContext` | active | Auth state for the scaffold's auth pages |
 | `CanvasOrchestratorContext` | active | Which widget the canvas should mount |
@@ -413,24 +412,267 @@ favor of this exception is recorded in git history (commit messages
 referencing the ARCH-04 decision); the durable architecture
 requirements live at `openspec/specs/app-architecture/spec.md`.
 
-## How to add a new widget
+## How to add a new widget — worked example (`ChipsBar`)
 
-1. Decide the slot: does it render in the chat scroll (chat-widget) or
-   the viewer pane (viewer-widget)?
+The seven steps below walk a fresh agent from zero to a green
+drift-guard in roughly five minutes. The example builds a tiny
+`ChipsBar` chat-widget that renders one chip per item and fires an
+`onPick(item)` callback. Every step shows the actual file contents
+you'd commit. Skim once, follow on the next widget.
 
-2. Create the directory under `components/<slot>-widgets/<Name>/`.
+The canonical starting point lives at
+[`app/src/components/_template/`](../../app/src/components/_template).
+Copy it instead of typing from scratch.
 
-3. Write the README first. Document props, locked affordances under
-   `mode="onboarding"`, and the host-side wiring. This is the contract
-   surface; everything else implements it.
+### Step 1 — Pick the slot + name
 
-4. Write the `.test.tsx` next. Failing tests covering both modes,
-   locked affordances, and required event firings.
+Decision tree:
 
-5. Implement the widget. Compose from primitives where possible.
+- Does the widget render inside the chat scroll (between bubbles)?
+  → `chat-widgets/`. Examples today: `SuggestedActionChips`,
+  `ThinkingStream`, `ProposeSchemaFieldCard`.
+- Does the widget render in the viewer pane (the right-hand side)?
+  → `viewer-widgets/`. Examples today: `PdfViewer`, `BookCallView`,
+  `SignUpWidget`.
 
-6. Run `npm test app/src/test/widget-contract.test.ts` — the
-   drift-guard should pass without modification.
+For `ChipsBar` we pick **chat-widgets** — it's a chip row beneath an
+assistant bubble. Name it `ChipsBar` (PascalCase, no `Widget`
+suffix unless ambiguity demands it).
+
+### Step 2 — Copy `_template/` → `chat-widgets/ChipsBar/`
+
+```bash
+cp -r app/src/components/_template app/src/components/chat-widgets/ChipsBar
+cd app/src/components/chat-widgets/ChipsBar
+mv Template.tsx          ChipsBar.tsx
+mv Template.test.tsx     ChipsBar.test.tsx
+mv Template.tools.ts     ChipsBar.tools.ts
+# README.md keeps its name
+```
+
+Then rename `Template` → `ChipsBar` everywhere inside those files
+(search / replace), and delete the "COPY THIS DIR" header comments.
+
+### Step 3 — Fill in `ChipsBar/README.md`
+
+```markdown
+# ChipsBar
+
+**Slot:** `chat-widgets` · **Status:** shipped
+
+## What it does
+
+Renders a horizontal row of pill-shaped chips beneath an assistant
+bubble. One chip per item; click fires `onPick(item)`. Used for
+quick-pick affordances (sample picker, view picker, action picker).
+
+## Props
+
+```ts
+interface ChipsBarProps {
+  items: { id: string; label: string }[];
+  mode?: "onboarding" | "steady";
+  onPick?: (id: string) => void;
+}
+```
+
+## Locked affordances under `mode="onboarding"`
+
+No mode-conditional behavior today — the prop exists to satisfy the
+widget contract and to absorb future onboarding-only locks (e.g.,
+disabling destructive picks during guided steps).
+
+## Events
+
+- `onPick(id)` — fires when the user activates a chip via click or
+  keyboard Enter / Space.
+
+## How to mount
+
+`​`​`tsx
+<ChipsBar
+  items={[{ id: "a", label: "Option A" }, { id: "b", label: "Option B" }]}
+  mode="onboarding"
+  onPick={(id) => console.log("picked", id)}
+/>
+`​`​`
+
+## LLM tools
+
+`ChipsBar.tools.ts` exposes `pick_chip` (`read`). Tool name uses the
+allowlisted `pick_` verb prefix; description carries a "Use when"
+clause; the `chipId` parameter on the Zod schema carries a
+`.describe()`.
+```
+
+### Step 4 — Fill in `ChipsBar.test.tsx`
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { ChipsBar } from "./ChipsBar";
+
+const items = [
+  { id: "a", label: "Option A" },
+  { id: "b", label: "Option B" },
+];
+
+describe("ChipsBar", () => {
+  it("renders one chip per item with a stable testid", () => {
+    render(<ChipsBar items={items} />);
+    expect(screen.getByTestId("chipsbar-chip-a")).toHaveTextContent("Option A");
+    expect(screen.getByTestId("chipsbar-chip-b")).toHaveTextContent("Option B");
+  });
+
+  it("reflects the mode prop on data-mode", () => {
+    const { rerender } = render(<ChipsBar items={items} mode="onboarding" />);
+    expect(screen.getByTestId("chipsbar-root")).toHaveAttribute("data-mode", "onboarding");
+    rerender(<ChipsBar items={items} mode="steady" />);
+    expect(screen.getByTestId("chipsbar-root")).toHaveAttribute("data-mode", "steady");
+  });
+
+  it("clicking a chip fires onPick with the item id", async () => {
+    const user = userEvent.setup();
+    const onPick = vi.fn();
+    render(<ChipsBar items={items} onPick={onPick} />);
+    await user.click(screen.getByTestId("chipsbar-chip-a"));
+    expect(onPick).toHaveBeenCalledWith("a");
+  });
+});
+```
+
+### Step 5 — Implement `ChipsBar.tsx`
+
+```tsx
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import { type FC } from "react";
+
+import {
+  BORDER,
+  BORDER_RADIUS_PILL,
+  FONT_SIZE_LABEL,
+  FONT_WEIGHT_LABEL,
+  NAVY,
+  WHITE,
+} from "@/constants";
+
+export interface ChipsBarProps {
+  items: { id: string; label: string }[];
+  mode?: "onboarding" | "steady";
+  onPick?: (id: string) => void;
+}
+
+export const ChipsBar: FC<ChipsBarProps> = ({ items, mode = "onboarding", onPick }) => {
+  if (items.length === 0) return null;
+  return (
+    <Stack
+      direction="row"
+      spacing={0.5}
+      data-testid="chipsbar-root"
+      data-mode={mode}
+      sx={{ pl: 0.25, flexWrap: "wrap", rowGap: 0.5 }}
+    >
+      {items.map((item) => (
+        <Box
+          key={item.id}
+          role="button"
+          tabIndex={0}
+          data-testid={`chipsbar-chip-${item.id}`}
+          onClick={() => onPick?.(item.id)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onPick?.(item.id);
+            }
+          }}
+          sx={{
+            px: 1,
+            py: 0.25,
+            borderRadius: BORDER_RADIUS_PILL,
+            backgroundColor: WHITE,
+            border: `1px solid ${BORDER}`,
+            color: NAVY,
+            fontSize: FONT_SIZE_LABEL,
+            fontWeight: FONT_WEIGHT_LABEL,
+            cursor: "pointer",
+            "&:hover": { backgroundColor: BORDER },
+            "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
+          }}
+        >
+          {item.label}
+        </Box>
+      ))}
+    </Stack>
+  );
+};
+```
+
+### Step 6 — Declare `ChipsBar.tools.ts`
+
+```ts
+import { z } from "zod";
+
+import type { WidgetTool } from "@/tools/types";
+
+const pickChip: WidgetTool = {
+  name: "pick_chip",
+  description:
+    "Activate one of the chips in the ChipsBar. Use when the user names " +
+    "one of the available options or asks to proceed with a specific choice.",
+  category: "read",
+  input: z.object({
+    chipId: z.string().min(1).describe("The id of the chip the user wants to activate"),
+  }),
+  // ChipsBar's onPick is the host's job — the tool's handler just
+  // signals "the user picked X" and the orchestrator routes it via
+  // the host's selection state. v1: dispatch a switchFrame as a
+  // placeholder; Phase 4+ replaces it with the right CanvasIntent
+  // once `pick_chip` is wired into a real host.
+  handler: () => null,
+};
+
+export const tools: WidgetTool[] = [pickChip];
+```
+
+### Step 7 — Mount it in a host + verify
+
+```tsx
+// Wherever the chat surface decides to render quick-pick chips:
+<ChipsBar
+  items={proposedPicks}
+  mode={isOnboarding ? "onboarding" : "steady"}
+  onPick={(id) => activatePick(id)}
+/>
+```
+
+Then run the verification gate from the scaffold root:
+
+```bash
+cd scaffold/app
+npx vitest run \
+  src/test/widget-contract.test.ts \
+  src/test/no-hardcoded-styles.test.ts \
+  src/components/chat-widgets/ChipsBar
+```
+
+Expected output:
+
+```
+ ✓ src/test/widget-contract.test.ts            (29 tests)
+ ✓ src/test/no-hardcoded-styles.test.ts        (64 tests)
+ ✓ src/components/chat-widgets/ChipsBar/ChipsBar.test.tsx  (3 tests)
+
+ Test Files  3 passed (3)
+      Tests  96 passed (96)
+```
+
+If the widget-contract guard fails, the error names the missing
+piece (README, sibling test, mode prop, or `<Name>.tools.ts` /
+`no-llm.md`). Fix and re-run; no other gate is needed for the
+widget to land.
 
 ## How to mount a widget into the AppShell
 
@@ -470,6 +712,122 @@ just with `mode="steady"`. No parallel shell, no different code path.
 
 When ARCH-03 lands, the test runs against the moved widgets and
 passes. Future widgets must conform on landing.
+
+## Anti-examples — what is NOT a widget
+
+The widget contract has a strong floor and ceiling; the cheapest way
+to honor both is to recognize the shapes that DON'T belong in
+`chat-widgets/` or `viewer-widgets/`. Five running examples from
+this codebase:
+
+### `CiteChip` (`components/brand/CiteChip/`)
+
+Not a widget — a **brand primitive**. It renders one citation chip
+with a single visual treatment, has no `mode` lock, no host-side
+contract, and is composed by widgets (e.g. ChatColumn's live-turn
+list maps citations to chips). Rule of thumb: if the component is a
+visual atom that other widgets COMPOSE WITH, it belongs in `brand/`.
+
+### `Heading` (`components/primitives/Heading/`)
+
+Not a widget — a **typography primitive**. It's a thin `<h1>`/`<h2>`
+wrapper that resolves brand tokens (weights, sizes). No mode prop,
+no LLM-callable surface. Rule of thumb: typography wrappers belong
+in `primitives/`. They're the building blocks widgets use to render
+their content; they're not "widgets" themselves.
+
+### `OnboardingNav` (`components/layout/OnboardingNav/`)
+
+Not a widget — a **layout shell component**. It sits in `AppShell`'s
+nav slot and renders the F1-F7 progress strip plus a per-frame
+title. It's the chrome AROUND widgets, not a widget itself; the
+LLM doesn't navigate via the nav (it dispatches `switchFrame`
+intents). Rule of thumb: anything in `layout/` is host chrome —
+widgets fill the slots layout components expose.
+
+### `AppShell` (`components/layout/AppShell/`)
+
+Not a widget — the **canonical layout shell** itself. It's the
+universe widgets live IN: a flex row that exposes a chat-column slot
+and a viewer-pane slot. The shell never renders user-facing content;
+it stages widgets that do. Rule of thumb: shells are infrastructure;
+their job is to compose widgets, not to be widgets.
+
+### `IconButton` (`components/primitives/IconButton/`)
+
+Not a widget — an **interactive primitive**. It's the icon-only
+sibling of `Button`. Both primitives now require a `tool`/`noTool`
+prop (widget-llm-integration Phase 5b) so the LLM-drivability gate
+fires at compile time, but primitives ARE NOT widgets — they don't
+carry mode-conditional affordances, README + test contracts, or
+LLM tool declarations of their own. The widget that USES the
+primitive declares the tool; the primitive references it via the
+`tool="…"` prop. Rule of thumb: if it doesn't have a `mode` lock
+and doesn't ship a README, it's not a widget.
+
+## Promote brand → widget
+
+A brand primitive becomes a widget when one or more of the following
+fires:
+
+- **Complexity threshold** — the file grows past ~150 LOC OR its
+  prop surface adds a third semantic axis (e.g. a `CiteChip` that
+  also handles tooltip placement, popover positioning, and inline
+  vs. floating renders is no longer "one chip").
+- **Multi-instance state** — the component owns state that
+  coordinates instances (cross-chip highlighting, focus management
+  across a list), and that coordination is host-specific.
+- **Mode-conditional affordances** — the component starts taking
+  branched behavior on `mode="onboarding"` vs `"steady"` (locked
+  controls under one mode, different defaults under the other).
+- **LLM-callable surface** — the component owns an in-app action
+  the LLM should be able to drive (not just a visual atom inside a
+  larger widget's action).
+
+### File-level migration
+
+1. **Move the directory**: `components/brand/<Name>/` →
+   `components/chat-widgets/<Name>/` or `components/viewer-widgets/<Name>/`.
+   The drift guard's slot walk picks it up automatically.
+2. **Update the imports** at every call site. The `@/` alias means
+   most files only need the path segment changed.
+3. **Add the contract surfaces** the brand-tier file lacked:
+   - `README.md` with the 6 required section headers (see "How to
+     add a new widget" above for the worked example).
+   - Sibling `<Name>.test.tsx` covering both `mode` values + locked
+     affordances + every event the widget fires.
+   - Either `<Name>.tools.ts` (LLM-drivable) OR `no-llm.md` (with a
+     `## Why` justification).
+4. **Add the `mode` prop** to the props type. Default it to
+   `"onboarding"` unless the brand component was steady-only.
+
+### Test-suite migration
+
+Brand primitives typically have a single visual / a11y test. The
+widget-tier sibling test must additionally cover:
+
+- Both modes mount without crashing.
+- Locked affordances under `mode="onboarding"` are absent / disabled.
+- Every event the widget exposes fires on the documented trigger
+  (click, keyboard, postMessage).
+
+Don't delete the brand-tier visual / a11y assertions during the move
+— port them into the new widget test. The widget contract is
+additive over the brand-tier floor.
+
+### What stays in `brand/`
+
+- Visual atoms — chip + glyph + lockup components that other widgets
+  COMPOSE WITH. Once they cross the complexity threshold, they
+  promote.
+- Brand-token resolvers — components whose only job is to translate
+  a brand abstraction (a heading level, a card surface) into the
+  exact tokens for the current theme. These never have mode locks.
+- Lockups — multi-element brand assemblies (logo + wordmark, etc.)
+  that have one canonical render.
+
+If the brand file starts to fit one of the four promotion signals
+above, move it.
 
 ## Cross-references
 

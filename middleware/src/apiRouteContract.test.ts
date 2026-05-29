@@ -601,6 +601,39 @@ describe("middleware API route contract", () => {
       expect(response.body.messages[1]).toMatchObject({ id: "m2", role: "assistant", content: "hello there", turnIndex: 2 });
     });
 
+    // WF-16 (2026-05-29). MySQL returns a JSON column already PARSED (an
+    // array), not a string — so the route's `JSON.parse(citationsJson)`
+    // threw and degraded every hydrated turn to `citations: []` (chips
+    // never survived a reload). The projection must tolerate an
+    // already-parsed array/object as well as a string.
+    it("projects citations[] when citationsJson is an already-parsed array (MySQL JSON column)", async () => {
+      const { app, repository } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/chat-sessions")
+        .send({ id: "wf16-cites", onboardingSessionId: "wf16-cites", title: "Onboarding", isOnboarding: true })
+        .expect(200);
+      const citations = [
+        { documentId: "c3bfff49", page: 1, snippet: "Amount Due $7,613.20", bbox: { x: 0.55, y: 0.41, w: 0.39, h: 0.18 } },
+      ];
+      await repository.appendChatMessage({
+        id: "wf16-m", chatSessionId: "wf16-cites", turnIndex: 1, role: "assistant",
+        content: "The total amount due is $7,613.20.",
+        // Simulate MySQL's parsed-JSON return (array, not string).
+        citationsJson: citations as unknown as string,
+        toolCallsJson: null, attachmentsJson: null, compressedIntoSummaryId: null,
+        llmProvider: null, llmModelId: null, latencyMs: null, promptTokens: null,
+        completionTokens: null, errorCode: null, createdAt: new Date(),
+      });
+
+      const response = await agent.get("/api/chat-sessions/wf16-cites/messages").expect(200);
+      const msg = response.body.messages.find((m: { id: string }) => m.id === "wf16-m");
+      expect(msg.citations).toHaveLength(1);
+      expect(msg.citations[0]).toMatchObject({ documentId: "c3bfff49", page: 1 });
+      expect(msg.citations[0].bbox).toMatchObject({ x: 0.55 });
+    });
+
     it("returns 404 for a session id that does not exist", async () => {
       const { app } = setup();
       const agent = request.agent(app);
@@ -1575,6 +1608,43 @@ describe("middleware API route contract", () => {
         })
         .expect(200);
       expect(response.body).toHaveProperty("value");
+    });
+  });
+
+  describe("POST /api/documents/:id/field-geometry (WF-05)", () => {
+    const xray = {
+      documentPages: [{ pageNumber: 1, width: 1700, height: 2200 }],
+      chunks: [
+        {
+          text: "Current Charges $7,613.20",
+          pageNumbers: [1],
+          boundingBoxes: [{ pageNumber: 1, topLeftX: 100, topLeftY: 200, bottomRightX: 1600, bottomRightY: 400 }],
+        },
+      ],
+    };
+
+    it("resolves per-field geometry from the document X-Ray (value match)", async () => {
+      const { app, groundxClient } = setup();
+      groundxClient.responseByPathFragment.set("/ingest/document/xray/", xray);
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+
+      const res = await agent
+        .post("/api/documents/c3bfff49/field-geometry")
+        .send({ fields: [{ value: 7613.2, label: "balance_payable" }, { value: "no such value zzz", label: "x" }] })
+        .expect(200);
+
+      expect(res.body.geometry).toHaveLength(2);
+      expect(res.body.geometry[0]).toMatchObject({ page: 1 });
+      expect(res.body.geometry[0].bbox.x).toBeCloseTo(100 / 1700, 2);
+      expect(res.body.geometry[1]).toBeNull(); // unmatched value → no geometry
+    });
+
+    it("400s when fields is missing", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent.post("/api/documents/c3bfff49/field-geometry").send({}).expect(400);
     });
   });
 });

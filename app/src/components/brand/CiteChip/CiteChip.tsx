@@ -2,14 +2,19 @@ import Chip from "@mui/material/Chip";
 import { useCallback, type FC } from "react";
 
 import {
+  CORAL,
   CYAN,
   FONT_SIZE_LABEL,
   FONT_WEIGHT_LABEL,
+  GREEN,
   NAVY,
+  WHITE,
 } from "@/constants";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { track } from "@/lib/analytics";
 import type { Citation } from "@/types/onboarding";
+
+export type CiteChipColor = "cyan" | "coral" | "green";
 
 export interface CiteChipProps {
   citation: Citation;
@@ -17,6 +22,13 @@ export interface CiteChipProps {
   index: number;
   /** Optional override for click behavior. Default dispatches highlightCitation. */
   onActivate?: (citation: Citation) => void;
+  /**
+   * Chip color. Default cyan; coral signals an anomaly / low-confidence
+   * citation (used by F3 field-rows per canonical); green is used for
+   * the primary citation in synthesis answers (F5). Maps to the design
+   * tokens, NOT raw hex.
+   */
+  color?: CiteChipColor;
 }
 
 /**
@@ -38,8 +50,18 @@ export interface CiteChipProps {
  * the orchestrator dispatch is suppressed — the caller's affordance
  * owns the click.
  */
-export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate }) => {
+export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color = "cyan" }) => {
   const { dispatch } = useCanvasOrchestrator();
+  const palette = (() => {
+    switch (color) {
+      case "coral":
+        return { background: CORAL, foreground: WHITE };
+      case "green":
+        return { background: GREEN, foreground: NAVY };
+      default:
+        return { background: CYAN, foreground: NAVY };
+    }
+  })();
 
   const handle = useCallback(() => {
     // OB-02 — cite.peeked fires on every citation chip activation
@@ -83,11 +105,12 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate }) => 
       data-testid={`cite-chip-${index}`}
       data-citation-doc={citation.documentId}
       data-citation-page={citation.page}
+      data-color={color}
       sx={{
         height: 20,
         fontSize: FONT_SIZE_LABEL,
-        backgroundColor: CYAN,
-        color: NAVY,
+        backgroundColor: palette.background,
+        color: palette.foreground,
         fontWeight: FONT_WEIGHT_LABEL,
         cursor: "pointer",
         "&:hover": { filter: "brightness(0.95)" },

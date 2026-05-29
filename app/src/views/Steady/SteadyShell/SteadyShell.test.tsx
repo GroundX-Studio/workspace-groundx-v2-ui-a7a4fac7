@@ -51,11 +51,13 @@ function Harness({ initialUrl, children }: { initialUrl: string; children: React
   return (
     <GxThemeProvider>
       <ChatStoreProvider initialOwnerKey="anon-test" autoSeedDefaultSession>
-        <MemoryRouter initialEntries={[initialUrl]}>
-          <Routes>
-            <Route path={ROUTER_PATHS.STEADY_SESSION} element={children} />
-          </Routes>
-        </MemoryRouter>
+        <CanvasOrchestratorProvider>
+          <MemoryRouter initialEntries={[initialUrl]}>
+            <Routes>
+              <Route path={ROUTER_PATHS.STEADY_SESSION} element={children} />
+            </Routes>
+          </MemoryRouter>
+        </CanvasOrchestratorProvider>
       </ChatStoreProvider>
     </GxThemeProvider>
   );

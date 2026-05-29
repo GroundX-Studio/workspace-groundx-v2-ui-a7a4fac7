@@ -358,8 +358,18 @@ describe("ChatStoreContext", () => {
 
     it("throws a clear error when used outside the provider", () => {
       // Calling renderHook without a wrapper triggers the throw paths.
-      expect(() => renderHook(() => useChatStoreActions())).toThrow(/ChatStoreProvider/);
-      expect(() => renderHook(() => useChatStoreState())).toThrow(/ChatStoreProvider/);
+      // React logs the render-time throw to console.error; the global
+      // setup.ts spy normally rethrows on console.error (to catch
+      // accidental React warnings). For this test the console.error
+      // IS expected — silence the spy locally so React's log doesn't
+      // surface as an unhandled exception in vitest.
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(() => renderHook(() => useChatStoreActions())).toThrow(/ChatStoreProvider/);
+        expect(() => renderHook(() => useChatStoreState())).toThrow(/ChatStoreProvider/);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

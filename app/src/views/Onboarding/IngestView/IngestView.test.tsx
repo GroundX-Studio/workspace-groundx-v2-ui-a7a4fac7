@@ -250,4 +250,13 @@ describe("IngestView (F1)", () => {
     await user.keyboard("{Enter}");
     expect(gateStatus).toBe("open");
   });
+
+  // WF-01b A was reverted 2026-05-28: the "↳ Sign up triggers F1→F2
+  // transition…" copy was a wireframe annotation, not production copy.
+  // The pill must NOT render.
+  it("does NOT render a wireframe-annotation affordance pill below the BYO label", () => {
+    render(wrap(<IngestView />));
+    expect(screen.queryByTestId("byo-affordance-pill")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sign up triggers F1.+F2 transition/)).not.toBeInTheDocument();
+  });
 });

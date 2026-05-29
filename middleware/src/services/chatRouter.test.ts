@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GroundXClient, LlmClient } from "../types.js";
 
+import { __clearXrayCache } from "./xrayCache.js";
 import {
   classifyChatMode,
   GROUNDED_REFUSAL_PHRASE,
@@ -320,6 +321,8 @@ describe("routeChat", () => {
     expect(reply.answer).toMatch(/sample:utility/);
     expect(reply.citations).toHaveLength(1);
     expect(reply.citations[0].documentId).toBe("d-1");
+    // (WF-06 tiering is RAG-path scoped; hybrid tour-mode citations come from
+    // runHybridQuery and stay tier-less → the app defaults them to ambient.)
   });
 });
 
@@ -345,6 +348,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    __clearXrayCache();
     // Quiet the warn-on-unknown-scope log so test output stays clean.
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
@@ -400,6 +404,70 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       n: 6,
       documentIds: ["d1", "d2"],
     });
+  });
+
+  it("WF-03: reads page + normalized bbox off a result's boundingBoxes/pages", async () => {
+    const client: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: {
+            results: [
+              {
+                documentId: "c3bfff49",
+                text: "Demand 2,218.75",
+                score: 99,
+                fileName: "utility-bill-april-2026.pdf",
+                boundingBoxes: [
+                  { pageNumber: 2, topLeftX: 362, topLeftY: 593, bottomRightX: 1601, bottomRightY: 2031, corrected: false },
+                ],
+                pages: [{ number: 2, width: 1700, height: 2200 }],
+              },
+            ],
+          },
+        }),
+      ),
+    };
+    const results = await searchGroundX("demand charge", { kind: "bucket", bucketId: 28454 }, client, "k");
+    expect(results).toHaveLength(1);
+    expect(results[0].pageNumber).toBe(2);
+    expect(results[0].bbox).toBeDefined();
+    expect(results[0].bbox!.x).toBeCloseTo(0.213, 2);
+    expect(results[0].bbox!.y).toBeCloseTo(0.27, 2);
+    expect(results[0].bbox!.w).toBeCloseTo(0.729, 2);
+    expect(results[0].bbox!.h).toBeCloseTo(0.654, 2);
+  });
+
+  it("WF-03: a result without boundingBoxes ships geometry-less (page 1, no bbox)", async () => {
+    const client: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "flat", text: "t" }] } })),
+    };
+    const results = await searchGroundX("q", { kind: "bucket", bucketId: 1 }, client, "k");
+    expect(results[0].pageNumber).toBe(1);
+    expect(results[0].bbox).toBeUndefined();
+  });
+
+  it("WF-03 fallback: a geometry-less result resolves bbox from the doc's X-Ray", async () => {
+    const client: GroundXClient = {
+      forward: vi.fn(async (path: string, init: RequestInit & { apiKey: string }) => {
+        if (init.method === "GET" && path.includes("/ingest/document/xray/")) {
+          return jsonOk({
+            documentPages: [{ pageNumber: 2, width: 1700, height: 2200 }],
+            chunks: [
+              {
+                text: "Industrial Electric Demand 125 kW 2,218.75",
+                pageNumbers: [2],
+                boundingBoxes: [{ pageNumber: 2, topLeftX: 362, topLeftY: 593, bottomRightX: 1601, bottomRightY: 2031 }],
+              },
+            ],
+          });
+        }
+        return jsonOk({ search: { results: [{ documentId: "c3bfff49", text: "Demand 2,218.75" }] } });
+      }),
+    };
+    const results = await searchGroundX("demand", { kind: "bucket", bucketId: 28454 }, client, "k");
+    expect(results[0].pageNumber).toBe(2);
+    expect(results[0].bbox).toBeDefined();
+    expect(results[0].bbox!.x).toBeCloseTo(0.213, 2);
   });
 
   it("documents scope with empty documentIds throws (programming bug guard)", async () => {
@@ -569,14 +637,14 @@ describe("searchGroundX (ContentScope dispatch)", () => {
 // confidence >= 0.85. Never auto-navigates.
 // ────────────────────────────────────────────────────────────────────
 
-describe("parseSuggestedIntentFromAnswer (CF-07)", () => {
+describe("parseGroundedAnswer (post-A.5: suggestedIntent retired)", () => {
   it("returns no intent + cleaned answer when no JSON block is present", () => {
     const result = parseSuggestedIntentFromAnswer("Just a plain answer about the bill total.");
     expect(result.suggestedIntent).toBeNull();
     expect(result.cleanedAnswer).toBe("Just a plain answer about the bill total.");
   });
 
-  it("extracts a well-formed suggestedIntent block and strips it from the cleaned answer", () => {
+  it("ignores fenced suggestedIntent blocks (the path retired in follow-up A.5)", () => {
     const raw = [
       "The total is $214.07.",
       "",
@@ -585,14 +653,13 @@ describe("parseSuggestedIntentFromAnswer (CF-07)", () => {
       "```",
     ].join("\n");
     const result = parseSuggestedIntentFromAnswer(raw);
-    expect(result.suggestedIntent).toEqual({
-      intent: "show-extract",
-      confidence: 0.92,
-      reason: "They asked about a value extracted from the bill.",
-    });
-    // The fenced block is removed; the user-facing answer is clean.
+    // Post-A.5: the fenced JSON is still stripped from the cleaned
+    // answer (the parser handles citations), but `suggestedIntent`
+    // is no longer extracted. LLMs that emit the legacy shape get
+    // their suggestion silently dropped — they should call the
+    // `suggest_intent` tool instead.
+    expect(result.suggestedIntent).toBeNull();
     expect(result.cleanedAnswer).toBe("The total is $214.07.");
-    expect(result.cleanedAnswer).not.toContain("suggestedIntent");
     expect(result.cleanedAnswer).not.toContain("```");
   });
 
@@ -600,23 +667,7 @@ describe("parseSuggestedIntentFromAnswer (CF-07)", () => {
     const raw = "Answer text.\n\n```json\n{ not valid json at all }\n```";
     const result = parseSuggestedIntentFromAnswer(raw);
     expect(result.suggestedIntent).toBeNull();
-    // Cleaned answer just gets a trim — malformed block stays in the
-    // raw string so the user can at least see something rather than
-    // a silently truncated reply.
     expect(result.cleanedAnswer).toContain("Answer text.");
-  });
-
-  it("returns null intent when JSON parses but shape is wrong (missing fields)", () => {
-    const raw = 'Answer.\n\n```json\n{"suggestedIntent":{"intent":"x"}}\n```';
-    const result = parseSuggestedIntentFromAnswer(raw);
-    expect(result.suggestedIntent).toBeNull();
-  });
-
-  it("returns null intent when confidence is not a number", () => {
-    const raw =
-      'Answer.\n\n```json\n{"suggestedIntent":{"intent":"x","confidence":"high","reason":"r"}}\n```';
-    const result = parseSuggestedIntentFromAnswer(raw);
-    expect(result.suggestedIntent).toBeNull();
   });
 });
 
@@ -646,7 +697,7 @@ describe("CF-07 viewer-intent chip gating in runRagPipeline", () => {
     return { groundxClient, llmClient };
   }
 
-  it("high-confidence suggestedIntent (≥0.85) → suggestedActions contains a 'suggested-intent' chip with detail", async () => {
+  it("legacy fenced suggestedIntent block is silently ignored (A.5 retired the path)", async () => {
     const answer = [
       "The bill total is $214.07.",
       "",
@@ -663,37 +714,12 @@ describe("CF-07 viewer-intent chip gating in runRagPipeline", () => {
       llmModelId: "test-model",
       mockMode: false,
     });
-    const chip = reply.suggestedActions.find((a) => a.key === "suggested-intent");
-    expect(chip).toBeDefined();
-    expect(chip?.label).toMatch(/extract/i);
-    expect(chip?.detail).toMatchObject({
-      intent: "show-extract",
-      confidence: 0.91,
-    });
-    // The user-facing answer is the cleaned version (no JSON block).
-    expect(reply.answer).toBe("The bill total is $214.07.");
-  });
-
-  it("low-confidence suggestedIntent (<0.85) → no 'suggested-intent' chip emitted", async () => {
-    const answer = [
-      "The bill total is $214.07.",
-      "",
-      "```json",
-      '{"suggestedIntent":{"intent":"show-extract","confidence":0.40,"reason":"Maybe relevant."}}',
-      "```",
-    ].join("\n");
-    const { groundxClient, llmClient } = mkClients(answer);
-    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
-      llmClient,
-      groundxClient,
-      groundxApiKey: "k",
-      samplesBucketId: 42,
-      llmModelId: "test-model",
-      mockMode: false,
-    });
-    const chip = reply.suggestedActions.find((a) => a.key === "suggested-intent");
-    expect(chip).toBeUndefined();
-    // Answer is still cleaned even though no chip is emitted.
+    // Post-A.5: legacy chip key is gone. The LLM should call the
+    // `suggest_intent` tool instead, which lands on
+    // `suggestedActions[]` with key `tool:suggest_intent`.
+    expect(reply.suggestedActions.find((a) => a.key === "suggested-intent")).toBeUndefined();
+    // The user-facing answer is still cleaned (citations branch
+    // still strips the fenced block).
     expect(reply.answer).toBe("The bill total is $214.07.");
   });
 
@@ -748,7 +774,7 @@ describe("parseGroundedAnswer — structured citations (CF-06)", () => {
     expect(result.cleanedAnswer).toBe("The total is $214.07.");
   });
 
-  it("extracts citations AND suggestedIntent from the same JSON block", () => {
+  it("extracts citations and ignores suggestedIntent in the same block (A.5)", () => {
     const raw = [
       "Answer body.",
       "",
@@ -758,7 +784,9 @@ describe("parseGroundedAnswer — structured citations (CF-06)", () => {
     ].join("\n");
     const result = parseGroundedAnswer(raw);
     expect(result.structuredCitations).toEqual([{ documentId: "d1", page: 1, quote: "foo" }]);
-    expect(result.suggestedIntent).toMatchObject({ intent: "show-extract", confidence: 0.9 });
+    // Post-A.5: suggestedIntent always returns null; LLMs should
+    // call the `suggest_intent` tool instead.
+    expect(result.suggestedIntent).toBeNull();
   });
 
   it("returns null citations when JSON parses but citations field is missing", () => {
@@ -898,6 +926,33 @@ describe("CF-06 refusal calibration in callGroundedLlm", () => {
     expect(systemContent).toMatch(/greeting|hello|hi/i);
   });
 
+  // Snippet-rereading nudge (2026-05-28). The "due date" probe in the
+  // Option-A validation showed the LLM saying "no snippets" even when
+  // a snippet contained `"due_date": "2025-07-30"` as a JSON field.
+  // The prompt must explicitly tell the model to quote JSON-field
+  // values directly when they answer the question.
+  it("system prompt instructs the model to quote JSON-field values from snippets when present", async () => {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+    };
+    const llmForward = vi.fn(async () =>
+      jsonOk({ choices: [{ message: { content: "ok" } }] }),
+    );
+    const llmClient: LlmClient = { forward: llmForward };
+    await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body);
+    const systemContent = body.messages.find((m: { role: string }) => m.role === "system").content;
+    expect(systemContent).toMatch(/json field|json key/i);
+    expect(systemContent).toMatch(/quote/i);
+  });
+
   it("when LLM uses the refusal phrase, it passes through to the user unchanged", async () => {
     const groundxClient: GroundXClient = {
       forward: vi.fn(async () =>
@@ -1032,147 +1087,52 @@ describe("CF-06 structured citations wired into runRagPipeline", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// UI-01 Phase 2a — propose-schema-field tool. The grounded LLM may
-// emit a `proposedSchemaField` entry in its fenced JSON block when the
-// user asks to add a field to the schema. The chatRouter validates
-// the shape and threads it through `ChatRouterResponse` so the
-// frontend can render an Accept/Reject card.
+// Post-A.5 (follow-up 2026-05-28) — the fenced-JSON
+// `proposedSchemaField` path is RETIRED. The grounded LLM is now
+// expected to call the `propose_schema_field` tool instead, which the
+// chat router routes onto `reply.suggestedActions[]` (tool:* chip) AND
+// mirrors onto `reply.proposedSchemaField` for one-release
+// back-compat with consumers that still read the legacy field.
+//
+// The original UI-01 Phase 2a parser tests below have been pruned to
+// pin the new behavior: the parser always returns null for
+// `proposedSchemaField` regardless of fenced-JSON content. The
+// tool-call path is exercised separately in the Phase 8 +
+// follow-up B.1 tests.
 // ────────────────────────────────────────────────────────────────────
 
-describe("parseGroundedAnswer — proposedSchemaField (UI-01 Phase 2a)", () => {
-  it("extracts a well-formed proposedSchemaField and strips the block", () => {
+describe("parseGroundedAnswer — proposedSchemaField is ignored post-A.5", () => {
+  it("returns null even when a well-formed proposedSchemaField appears in the fenced block", () => {
     const raw = [
-      "I can add a 'total tax' field to the statement category.",
+      "I can add a 'total tax' field.",
       "",
       "```json",
-      '{"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
+      '{"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax."}}',
       "```",
     ].join("\n");
     const result = parseGroundedAnswer(raw);
-    expect(result.proposedSchemaField).toEqual({
-      categoryId: "statement",
-      name: "total_tax",
-      type: "NUMBER",
-      description: "Total tax billed this period.",
-      // proposal-envelope-provenance: parser tags successful parses
-      // with versioned provenance for the renderer.
-      provenance: { version: "v1", verified: true },
-    });
-    expect(result.cleanedAnswer).toBe(
-      "I can add a 'total tax' field to the statement category.",
-    );
-    expect(result.cleanedAnswer).not.toContain("proposedSchemaField");
+    expect(result.proposedSchemaField).toBeNull();
+    // The fenced block is still stripped from the user-facing answer
+    // (the parser still handles citations).
+    expect(result.cleanedAnswer).toBe("I can add a 'total tax' field.");
   });
 
   it("returns null when no JSON block is present", () => {
-    const result = parseGroundedAnswer("Plain reply without a fenced block.");
-    expect(result.proposedSchemaField).toBeNull();
-  });
-
-  it("returns null when proposedSchemaField field is missing in the JSON", () => {
-    const raw = 'Body.\n\n```json\n{"somethingElse":1}\n```';
-    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
-  });
-
-  it("returns null when proposedSchemaField has wrong shape (missing required fields)", () => {
-    const raw =
-      'Body.\n\n```json\n{"proposedSchemaField":{"name":"x","type":"NUMBER"}}\n```';
-    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
-  });
-
-  it("returns null when proposedSchemaField type is not one of STRING/NUMBER/DATE/BOOLEAN", () => {
-    const raw = [
-      "Body.",
-      "",
-      "```json",
-      '{"proposedSchemaField":{"categoryId":"c","name":"n","type":"OBJECT","description":"d"}}',
-      "```",
-    ].join("\n");
-    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
-  });
-
-  // ── proposal-envelope-provenance ────────────────────────────────────
-
-  it("attaches provenance = {version: 'v1', verified: true} on a well-formed envelope (proposal-envelope-provenance)", () => {
-    const raw = [
-      "Adding total tax.",
-      "",
-      "```json",
-      '{"proposedSchemaField":{"version":"v1","categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
-      "```",
-    ].join("\n");
-    const result = parseGroundedAnswer(raw);
-    expect(result.proposedSchemaField).not.toBeNull();
-    expect(result.proposedSchemaField?.provenance).toEqual({ version: "v1", verified: true });
-  });
-
-  it("backfills provenance v1 when the envelope omits the version literal (proposal-envelope-provenance)", () => {
-    // Pre-envelope fixtures don't carry `version`. The parser MUST
-    // still accept them and tag provenance as v1 so the rendered card
-    // shows `envelope verified`.
-    const raw = [
-      "Adding total tax.",
-      "",
-      "```json",
-      '{"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
-      "```",
-    ].join("\n");
-    const result = parseGroundedAnswer(raw);
-    expect(result.proposedSchemaField?.provenance).toEqual({ version: "v1", verified: true });
-  });
-
-  it("drops the proposal when categoryId is missing (proposal-envelope-provenance)", () => {
-    const raw = [
-      "Adding total tax.",
-      "",
-      "```json",
-      '{"proposedSchemaField":{"version":"v1","name":"total_tax","type":"NUMBER","description":"…"}}',
-      "```",
-    ].join("\n");
-    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
-  });
-
-  it("drops the proposal when the version literal is unsupported (proposal-envelope-provenance)", () => {
-    const raw = [
-      "Adding total tax.",
-      "",
-      "```json",
-      '{"proposedSchemaField":{"version":"v2","categoryId":"statement","name":"total_tax","type":"NUMBER","description":"…"}}',
-      "```",
-    ].join("\n");
-    expect(parseGroundedAnswer(raw).proposedSchemaField).toBeNull();
-  });
-
-  it("co-exists with citations + suggestedIntent in the same JSON block", () => {
-    const raw = [
-      "Adding total tax.",
-      "",
-      "```json",
-      '{"citations":[{"documentId":"d1","page":1,"quote":"Tax: $14"}],"suggestedIntent":{"intent":"edit-schema","confidence":0.9,"reason":"user asked to add a field"},"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
-      "```",
-    ].join("\n");
-    const result = parseGroundedAnswer(raw);
-    expect(result.proposedSchemaField).toMatchObject({
-      categoryId: "statement",
-      name: "total_tax",
-      type: "NUMBER",
-    });
-    expect(result.structuredCitations).toEqual([
-      { documentId: "d1", page: 1, quote: "Tax: $14" },
-    ]);
-    expect(result.suggestedIntent).toMatchObject({ intent: "edit-schema", confidence: 0.9 });
-    expect(result.cleanedAnswer).toBe("Adding total tax.");
+    expect(parseGroundedAnswer("Plain reply.").proposedSchemaField).toBeNull();
   });
 });
 
-describe("UI-01 Phase 2a — proposedSchemaField threading in runRagPipeline", () => {
+describe("proposedSchemaField via propose_schema_field tool call (A.4 back-compat shim)", () => {
   function jsonOk(payload: unknown): Response {
     return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
   }
-  function mkClients(llmAnswer: string): { groundxClient: GroundXClient; llmClient: LlmClient } {
+  function mkClientsWithTool(
+    llmAnswer: string,
+    toolCalls: { name: string; arguments: Record<string, unknown> }[],
+  ): { groundxClient: GroundXClient; llmClient: LlmClient } {
     const groundxClient: GroundXClient = {
       forward: vi.fn(async () =>
         jsonOk({
@@ -1183,20 +1143,41 @@ describe("UI-01 Phase 2a — proposedSchemaField threading in runRagPipeline", (
       ),
     };
     const llmClient: LlmClient = {
-      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
+      forward: vi.fn(async () =>
+        jsonOk({
+          choices: [
+            {
+              message: {
+                content: llmAnswer,
+                tool_calls: toolCalls.map((tc, idx) => ({
+                  id: `call_${idx}`,
+                  type: "function",
+                  function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+                })),
+              },
+            },
+          ],
+        }),
+      ),
     };
     return { groundxClient, llmClient };
   }
 
-  it("propose-card payload threads through `reply.proposedSchemaField`", async () => {
-    const answer = [
-      "I can add a 'total tax' field to the statement category.",
-      "",
-      "```json",
-      '{"proposedSchemaField":{"categoryId":"statement","name":"total_tax","type":"NUMBER","description":"Total tax billed this period."}}',
-      "```",
-    ].join("\n");
-    const { groundxClient, llmClient } = mkClients(answer);
+  it("LLM calling `propose_schema_field` populates reply.proposedSchemaField via shim", async () => {
+    const { groundxClient, llmClient } = mkClientsWithTool(
+      "I can add a 'total tax' field.",
+      [
+        {
+          name: "propose_schema_field",
+          arguments: {
+            categoryId: "statement",
+            name: "total_tax",
+            type: "NUMBER",
+            description: "Total tax billed this period.",
+          },
+        },
+      ],
+    );
     const reply = await routeChat(
       makeRequest({ newUserMessage: "Can you add a field for total tax?" }),
       {
@@ -1212,12 +1193,18 @@ describe("UI-01 Phase 2a — proposedSchemaField threading in runRagPipeline", (
       categoryId: "statement",
       name: "total_tax",
       type: "NUMBER",
+      provenance: { version: "v1", verified: true },
     });
-    expect(reply.answer).toBe("I can add a 'total tax' field to the statement category.");
+    // Same payload also lands on suggestedActions[] as a chip.
+    const chip = reply.suggestedActions.find((a) => a.key === "tool:propose_schema_field");
+    expect(chip).toBeDefined();
   });
 
-  it("no propose-card → reply.proposedSchemaField is null", async () => {
-    const { groundxClient, llmClient } = mkClients("Just a plain answer about tax.");
+  it("no propose tool call → reply.proposedSchemaField is null", async () => {
+    const { groundxClient, llmClient } = mkClientsWithTool(
+      "Just a plain answer about tax.",
+      [],
+    );
     const reply = await routeChat(
       makeRequest({ newUserMessage: "What is the tax?" }),
       {
@@ -1391,5 +1378,365 @@ describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
       mockMode: false,
     });
     expect(reply._debug).toBeUndefined();
+  });
+});
+
+// ── widget-llm-integration Phase 5 — function-calling round-trip ────────
+//
+// These tests pin the end-to-end shape:
+//   1. The chat router sends a `tools` array (in OpenAI shape) on the
+//      LLM request, derived from the server tool catalog
+//   2. When the LLM returns `tool_calls[]`, the router validates each
+//      against the tool's Zod schema
+//   3. Successful calls push onto `reply.intents[]` (each carrying
+//      name + arguments + the constructed CanvasIntent payload)
+//   4. Failed calls push onto `reply.toolFailures[]` with a reason
+//   5. The catalog is filtered by the request's `activeStepKind`
+describe("Phase 5 — function-calling tool round-trip", () => {
+  function jsonOk(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  function mkClients(
+    llmAnswer: string,
+    toolCalls: { id?: string; name: string; arguments: Record<string, unknown> }[] = [],
+  ): { groundxClient: GroundXClient; llmClient: LlmClient; llmForward: ReturnType<typeof vi.fn> } {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: {
+            results: [{ documentId: "doc-1", pageNumber: 1, text: "snippet text" }],
+          },
+        }),
+      ),
+    };
+    const llmForward = vi.fn(async () =>
+      jsonOk({
+        choices: [
+          {
+            message: {
+              content: llmAnswer,
+              tool_calls: toolCalls.map((tc, idx) => ({
+                id: tc.id ?? `call_${idx}`,
+                type: "function",
+                function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+              })),
+            },
+          },
+        ],
+      }),
+    );
+    const llmClient: LlmClient = { forward: llmForward };
+    return { groundxClient, llmClient, llmForward };
+  }
+
+  it("LLM returns one valid tool_call → reply.intents[] carries the constructed CanvasIntent", async () => {
+    const { groundxClient, llmClient } = mkClients("Sure, opening the doc.", [
+      { name: "open_document", arguments: { documentId: "doc-abc", page: 5 } },
+    ]);
+    const reply = await routeChat(makeRequest({ newUserMessage: "show me doc-abc page 5" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply.intents).toHaveLength(1);
+    expect(reply.intents[0]).toMatchObject({
+      name: "open_document",
+      arguments: { documentId: "doc-abc", page: 5 },
+      intent: { kind: "highlightCitation", documentId: "doc-abc", page: 5 },
+    });
+    expect(reply.toolFailures).toEqual([]);
+  });
+
+  it("optional arg defaults are filled by the handler (open_document page → 1)", async () => {
+    const { groundxClient, llmClient } = mkClients("Opening doc.", [
+      { name: "open_document", arguments: { documentId: "doc-abc" } },
+    ]);
+    const reply = await routeChat(makeRequest({ newUserMessage: "show doc-abc" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply.intents[0].intent).toMatchObject({
+      kind: "highlightCitation",
+      documentId: "doc-abc",
+      page: 1,
+    });
+  });
+
+  it("Bad tool arguments → toolFailures[] (not intents[]); other calls still process", async () => {
+    const { groundxClient, llmClient } = mkClients("Mixed reply.", [
+      { name: "open_document", arguments: { documentId: 42 } }, // wrong type
+      { name: "jump_to_page", arguments: { documentId: "doc-z", page: 3 } },
+    ]);
+    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply.intents).toHaveLength(1);
+    expect(reply.intents[0].name).toBe("jump_to_page");
+    expect(reply.toolFailures).toHaveLength(1);
+    expect(reply.toolFailures[0].name).toBe("open_document");
+    expect(reply.toolFailures[0].reason).toMatch(/documentId/i);
+  });
+
+  it("Unknown tool name → toolFailures[] with a clear reason", async () => {
+    const { groundxClient, llmClient } = mkClients("Got an unknown one.", [
+      { name: "bogus_tool", arguments: { x: 1 } },
+    ]);
+    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply.intents).toEqual([]);
+    expect(reply.toolFailures).toEqual([
+      expect.objectContaining({ name: "bogus_tool", reason: expect.stringMatching(/unknown/i) }),
+    ]);
+  });
+
+  it("LLM emits no tool_calls → intents[] + toolFailures[] are both empty arrays", async () => {
+    const { groundxClient, llmClient } = mkClients("Just an answer, no tools used.", []);
+    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply.intents).toEqual([]);
+    expect(reply.toolFailures).toEqual([]);
+  });
+
+  it("Catalog is included on the LLM request as OpenAI `tools` array", async () => {
+    const { groundxClient, llmClient, llmForward } = mkClients("Answer.", []);
+    await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(llmForward).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((llmForward.mock.calls[0][1] as RequestInit).body as string);
+    expect(Array.isArray(body.tools)).toBe(true);
+    expect(body.tools.length).toBeGreaterThan(0);
+    expect(body.tools[0].type).toBe("function");
+    expect(body.tools[0].function.name).toMatch(/^[a-z][a-z0-9_]*$/);
+  });
+
+  it("activeStepKind filters the catalog sent to the LLM", async () => {
+    const { groundxClient, llmClient, llmForward } = mkClients("Answer.", []);
+    await routeChat(
+      makeRequest({ newUserMessage: "Q", activeStepKind: "report" }),
+      {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+        mockMode: false,
+      },
+    );
+    const body = JSON.parse((llmForward.mock.calls[0][1] as RequestInit).body as string);
+    // `report` step doesn't expose PdfViewer's scoped tools, but it
+    // DOES expose the universal/unscoped tools (suggest_intent +
+    // commit_gate / dismiss_gate / book_call). The request still
+    // includes a `tools` key with the universal subset.
+    const toolNames = (body.tools as Array<{ function: { name: string } }>)
+      .map((t) => t.function.name)
+      .sort();
+    expect(toolNames).toEqual([
+      "book_call",
+      "commit_gate",
+      "dismiss_gate",
+      "suggest_intent",
+    ]);
+  });
+});
+
+// ── widget-llm-integration Phase 8 — category-aware routing ────────────
+//
+// Per design.md §C, mutate-category tool calls require user confirmation
+// before they take effect. They MUST land on `reply.suggestedActions[]`
+// (rendered as a chip by SuggestedActionChips) rather than
+// `reply.intents[]` (which the orchestrator auto-dispatches).
+//
+// Read-category routing from Phase 5 stays intact — the existing
+// `open_document` / `jump_to_page` tests above still pass.
+describe("Phase 8 — category-aware mutate-tool routing", () => {
+  function jsonOk(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  function mkClients(
+    llmAnswer: string,
+    toolCalls: { id?: string; name: string; arguments: Record<string, unknown> }[] = [],
+  ): { groundxClient: GroundXClient; llmClient: LlmClient } {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: {
+            results: [{ documentId: "doc-1", pageNumber: 1, text: "snippet text" }],
+          },
+        }),
+      ),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          choices: [
+            {
+              message: {
+                content: llmAnswer,
+                tool_calls: toolCalls.map((tc, idx) => ({
+                  id: tc.id ?? `call_${idx}`,
+                  type: "function",
+                  function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+                })),
+              },
+            },
+          ],
+        }),
+      ),
+    };
+    return { groundxClient, llmClient };
+  }
+
+  // Inject a synthetic mutate-category tool via vi.spyOn on the
+  // catalog's `getServerTool`. Lets the routing logic run end-to-end
+  // without polluting the production catalog with a fixture-only tool.
+  async function withMutateTool(
+    name: string,
+    test: () => Promise<void>,
+  ): Promise<void> {
+    const toolCatalog = await import("./toolCatalog.js");
+    const actualGet = toolCatalog.getServerTool;
+    const mutateProbe = {
+      name,
+      description:
+        "Mutate-category probe. Use when verifying Phase 8 category-aware routing.",
+      category: "mutate" as const,
+      inputSchema: (await import("zod")).z.object({
+        fieldId: (await import("zod")).z.string().describe("opaque id"),
+      }),
+      intentBuilder: (input: { fieldId: string }) => ({
+        kind: "highlightCitation",
+        documentId: input.fieldId,
+        page: 1,
+      }),
+    };
+    const spy = vi.spyOn(toolCatalog, "getServerTool").mockImplementation((n: string) => {
+      if (n === name) return mutateProbe;
+      return actualGet(n);
+    });
+    try {
+      await test();
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it("mutate-category tool call lands on suggestedActions[] (not intents[])", async () => {
+    await withMutateTool("accept_probe", async () => {
+      const { groundxClient, llmClient } = mkClients("Sure — propose accepted.", [
+        { name: "accept_probe", arguments: { fieldId: "field-xyz" } },
+      ]);
+      const reply = await routeChat(makeRequest({ newUserMessage: "accept it" }), {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+        mockMode: false,
+      });
+      // Should NOT auto-dispatch via intents[].
+      expect(reply.intents).toEqual([]);
+      // Should appear as a confirmable chip.
+      const chip = reply.suggestedActions.find((a) => a.key === "tool:accept_probe");
+      expect(chip).toBeDefined();
+      expect(chip?.detail).toMatchObject({
+        name: "accept_probe",
+        arguments: { fieldId: "field-xyz" },
+        intent: { kind: "highlightCitation", documentId: "field-xyz", page: 1 },
+      });
+    });
+  });
+
+  it("read-category routing from Phase 5 still routes to intents[]", async () => {
+    const { groundxClient, llmClient } = mkClients("Opening doc.", [
+      { name: "open_document", arguments: { documentId: "doc-abc", page: 4 } },
+    ]);
+    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    expect(reply.intents.length).toBe(1);
+    expect(reply.intents[0].name).toBe("open_document");
+    // No tool:* chip — read-category tools don't surface a confirmable chip.
+    expect(reply.suggestedActions.find((a) => a.key.startsWith("tool:"))).toBeUndefined();
+  });
+
+  it("mutate + read tool calls in the same reply split correctly", async () => {
+    await withMutateTool("accept_probe", async () => {
+      const { groundxClient, llmClient } = mkClients("Mixed.", [
+        { name: "open_document", arguments: { documentId: "doc-1", page: 2 } },
+        { name: "accept_probe", arguments: { fieldId: "field-1" } },
+      ]);
+      const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+        mockMode: false,
+      });
+      expect(reply.intents.length).toBe(1);
+      expect(reply.intents[0].name).toBe("open_document");
+      expect(reply.suggestedActions.some((a) => a.key === "tool:accept_probe")).toBe(true);
+    });
+  });
+
+  it("mutate-tool chip label is the tool description's first sentence", async () => {
+    await withMutateTool("accept_probe", async () => {
+      const { groundxClient, llmClient } = mkClients("ok", [
+        { name: "accept_probe", arguments: { fieldId: "x" } },
+      ]);
+      const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+        mockMode: false,
+      });
+      const chip = reply.suggestedActions.find((a) => a.key === "tool:accept_probe");
+      expect(chip?.label).toMatch(/Mutate-category probe/);
+    });
   });
 });

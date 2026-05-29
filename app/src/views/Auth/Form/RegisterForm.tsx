@@ -129,7 +129,7 @@ export const RegisterForm: FC<RegisterFormProps> = ({ values, onSubmit }) => {
         )}
       </FormGroup>
 
-      <Button variant="primary" type="submit" id="register-submit" submitting={formik.isSubmitting} endIcon={<TaskAltIcon />} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
+      <Button noTool="pre-app auth (not agent-driven)" variant="primary" type="submit" id="register-submit" submitting={formik.isSubmitting} endIcon={<TaskAltIcon />} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
         Register
       </Button>
     </form>

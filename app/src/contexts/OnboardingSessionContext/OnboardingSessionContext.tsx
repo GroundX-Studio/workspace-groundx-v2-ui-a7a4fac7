@@ -430,6 +430,17 @@ export const useOnboardingSession = (): OnboardingSessionApi => {
   return value;
 };
 
+/**
+ * widget-llm-integration follow-up B.2 — soft variant for consumers
+ * that work in BOTH the onboarding tree (where this provider is
+ * mounted) and the steady tree (where it isn't). Returns `null`
+ * instead of throwing. Mirrors the `useChatStoreOptional` pattern
+ * the orchestrator already uses for `chatStore`-side effects.
+ */
+export const useOnboardingSessionOptional = (): OnboardingSessionApi | null => {
+  return useContext(OnboardingSessionContext);
+};
+
 // re-export for external `makeEntityKey` callers (e.g., tests that
 // need to construct an entity key for inspection)
 export { makeEntityKey };

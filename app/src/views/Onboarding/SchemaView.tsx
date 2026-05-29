@@ -135,7 +135,14 @@ const TYPE_COLOR: Record<SchemaFieldDef["type"], string> = {
 
 const FIELD_TYPES: SchemaFieldDef["type"][] = ["STRING", "NUMBER", "DATE", "BOOLEAN"];
 
-export const SchemaView: FC = () => {
+export interface SchemaViewProps {
+  /** WF-12 — live workflow schema from ExtractView (falls back to manifest). */
+  schema?: ExtractionSchemaDef | null;
+  /** WF-12 — live extract values from ExtractView (falls back to manifest). */
+  values?: ExtractedFieldValue[];
+}
+
+export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: liveValues }) => {
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
   const { byId } = useScenarioRegistry();
@@ -152,8 +159,9 @@ export const SchemaView: FC = () => {
 
   const scenarioId = appMode.scenario ?? session.scenario ?? null;
   const scenario = scenarioId ? byId(scenarioId) : null;
-  const manifestSchema = scenario?.manifest.extractionSchema ?? null;
-  const sampleValues = scenario?.manifest.sampleExtractionValues ?? [];
+  // WF-12 — prefer the live schema/values passed from ExtractView; manifest is the fallback.
+  const manifestSchema = liveSchema ?? scenario?.manifest.extractionSchema ?? null;
+  const sampleValues = liveValues ?? scenario?.manifest.sampleExtractionValues ?? [];
 
   const activeChatSession = chatState.activeSessionId
     ? chatState.sessions.get(chatState.activeSessionId)

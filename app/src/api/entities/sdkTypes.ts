@@ -103,6 +103,24 @@ export interface GroundXDocument {
   [key: string]: unknown;
 }
 
+/** WF-03 — native page-pixel corners of a chunk's region on a page. */
+export interface SearchResultBoundingBox {
+  pageNumber: number;
+  topLeftX: number;
+  topLeftY: number;
+  bottomRightX: number;
+  bottomRightY: number;
+  corrected?: boolean;
+}
+
+/** WF-03 — rendered page image + native pixel dims for bbox scaling. */
+export interface SearchResultPage {
+  number: number;
+  width: number;
+  height: number;
+  imageUrl?: string;
+}
+
 export interface SearchResult {
   text?: string;
   suggestedText?: string;
@@ -113,9 +131,9 @@ export interface SearchResult {
   sourceUrl?: string;
   chunkId?: string;
   bucketId?: number;
-  boundingBoxes?: unknown[];
+  boundingBoxes?: SearchResultBoundingBox[];
   pageImages?: string[];
-  pages?: unknown[];
+  pages?: SearchResultPage[];
   multimodalUrl?: string;
   searchData?: Metadata;
 }

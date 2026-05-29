@@ -69,7 +69,10 @@ Workflow (for any new view under `app/src/views/Onboarding/`):
 2. Implement the view.
 3. Wire into `OnboardingShell.tsx`'s `canvasContent` switch if it's
    a new frame.
-4. Verify in browser via `npm run dev`.
+4. Verify in browser via `npm run dev`. **When the `chrome-devtools`
+   MCP is attached, prefer it for verification** (DOM measurement,
+   network bodies, console) over eyeballing screenshots — see
+   `discipline.md` §4b. Measure, don't eyeball.
 
 Useful patterns to lift from existing views:
 - `IngestView` (F1): scenario picker grid, BYO tile.

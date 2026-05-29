@@ -9,6 +9,13 @@ this is **the** chat surface. `OnboardingShell` and `SteadyShell` both
 mount it; they differ only in the `mode` prop and the host shell's
 header/nav slots.
 
+## What it does
+
+Owns the chat surface end-to-end: header chrome, scripted onboarding
+decorations (when `mode="onboarding"`), live-turn rendering, persisted
+thread hydration, send path, and orchestrator integration for
+chip-driven LLM intents (Phase 1+5 widget-llm-integration).
+
 ## Props
 
 | Prop | Type | Default | Purpose |
@@ -48,6 +55,49 @@ header/nav slots.
   `chatErrorToUserCopy`.
 - `<LoadingDots>` "thinking" bubble while `sending`.
 - `<LiveChatInputBar>` text input at the bottom (disabled while sending).
+
+## Locked affordances under `mode="onboarding"`
+
+- Scripted `ThinkingStream` reveal — only renders when the scenario
+  manifest supplies notes.
+- Sample-switcher subline + scenario header — onboarding-only chrome.
+- Pick-a-view pills — onboarding's F2 → F3 hand-off.
+
+Under `mode="steady"`, all of the above are dropped. The conversation
+shell, hydration, send path, and orchestrator dispatch stay shared.
+
+## Events
+
+- POSTs `/api/chat/messages` via `sendChatMessage` on user submit.
+- Calls `enqueueFieldProposal` (ChatStore) when the reply carries a
+  `proposedSchemaField`.
+- Dispatches each `reply.intents[]` entry via the canvas orchestrator
+  (Phase 5).
+- Dispatches `suggested-intent` chip clicks via the orchestrator
+  (Phase 1).
+- Auto-advances the onboarding frame when the user types a real turn
+  while sitting in F2/F3/F3a/F4.
+
+## How to mount
+
+```tsx
+import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
+
+// Onboarding shell:
+<ChatColumn mode="onboarding" />
+
+// Steady shell (UI-05):
+<ChatColumn mode="steady" />
+```
+
+`OnboardingShell` and `SteadyShell` are the only production callers.
+
+## LLM tools
+
+See [`no-llm.md`](./no-llm.md). The chat column is the chat surface
+itself — tools live on the widgets it composes
+(`SuggestedActionChips`, `ProposeSchemaFieldCard`, the future
+`BookingStatusCard` book_call tool, etc.).
 
 ## Why the file lives here
 

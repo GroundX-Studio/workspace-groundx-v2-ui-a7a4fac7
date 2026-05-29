@@ -226,3 +226,66 @@ ships in-repo at `openspec/wireframes/`. No fetch needed.
 
 Old docs / commit messages may still reference the `/tmp/` path — translate
 mentally to `openspec/wireframes/source/`.
+
+## GroundX data API / MCP
+
+### Large `getxray` / `search` MCP outputs save to a tool-result file — verify it's the right doc
+
+`document_getxray` and `search_content` responses (~200KB+) exceed the inline token limit and get
+written to a tool-result file. Two large calls back-to-back can land the SAME bytes in both files
+(the second file captured the first's content). This is a **file-save artifact, not an MCP caching
+bug** — a fresh call returns correct per-`documentId` data. Always `jq` the saved file's `fileName`
+/`sourceUrl` and confirm they match the doc you asked for. For X-Ray, prefer fetching the public
+`xrayUrl` (from `document_get`) directly — no API key needed.
+
+### Don't re-query an unfamiliar documentId to "verify" it
+
+If a search surfaces a documentId you don't recognize, treat it as suspect data. Calling
+`document_get`/`getxray` with that id just echoes it back (you asked for it) — it proves nothing and
+re-surfaces the bad id. Inspect the legitimate **bucket** instead (`search_content(bucketId)`) and
+flag the anomaly. (A stray duplicate ingest once shadowed the real sample doc in bucket 28454's
+search ranking; the fix was deleting it server-side, not re-querying it.)
+
+### `bucket_get` can 403/400 "no access" for a real bucket
+
+Under a partner/cross-customer credential context, `bucket_get(id)` may deny even when the bucket
+exists and is searchable. Infer bucket existence from `document_get(...).bucketId`, not `bucket_get`.
+
+### Search results carry citation geometry directly (read it off the result)
+
+For layout-ingested docs, `search_content`/`search_documents` results carry `boundingBoxes` +
+`pages` + `searchData` (verbosity 2). Read citation page+bbox off the result; the X-Ray join is the
+fallback for docs that lack it. The chatRouter mapper bug (reads a nonexistent top-level
+`r.pageNumber`, drops `boundingBoxes`/`pages`) is what WF-03 fixes. Full shape in
+`groundx-real-api-shapes.md`.
+
+### MCP `document_getextract` MATCHES the middleware `get_extract` — beware stale tool-result files
+
+**Locked 2026-05-29 after a multi-hour false "schema mismatch" chase.** For doc `c3bfff49`, the MCP
+`document_getextract` and the app's middleware `GET /v1/ingest/document/extract/{id}` return the
+**SAME** shape — `addressee`/`balance_payable`/`line_amount`/`meter_id` (matching workflow
+`9910308e`); NO `amount_due`/`recipient_name`. There is **no vocab discrepancy**. The phantom
+`amount_due`/`recipient_name` shape that triggered the chase was a **stale / cross-contaminated MCP
+tool-result file-save artifact** (a large output whose result file picked up a prior call's bytes —
+same artifact class as the getxray file collision). **Always confirm a large MCP result's content
+matches the requested id before trusting it; re-call if in doubt.** F3 schema(workflow)+values
+(get_extract) match and populate live (`addressee="KWIK TRIP (1147)"`, `balance_payable=7613.2`).
+
+### Workflow id ≠ document id (the extract endpoint 406s on a workflow id)
+
+`9910308e-…` is a WORKFLOW id, not a document id. Passing it (or its short prefix `9910308e`) to
+`/v1/ingest/document/extract/{id}` returns **406 invalid documentId**. Never feed a workflow id to a
+document endpoint — that was a contributor to the phantom-mismatch confusion.
+
+### Canonical REST path for get_extract / get_xray (harness doc corrected 2026-05-29)
+
+`/v1/ingest/document/extract/{documentId}` and `/v1/ingest/document/xray/{documentId}`. A stale
+harness doc previously pointed agents at the wrong path; the source + generated plugin mirrors were
+fixed.
+
+### `document.extracted` is a format flag, not a workflow-run signal
+
+`document_get(...).extracted` indicates whether the doc was extracted from an Office archive
+(docx/pptx/xlsx), NOT whether a workflow extraction ran. A native PDF shows `extracted: false` even
+when fully processed (`status: complete`, `processLevel: full`) and a workflow extraction exists.
+Don't infer "workflow never ran" from `extracted: false`.

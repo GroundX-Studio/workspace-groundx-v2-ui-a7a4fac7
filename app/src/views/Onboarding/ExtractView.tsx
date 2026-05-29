@@ -12,6 +12,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC, type Synthe
 import { useSearchParams } from "react-router-dom";
 
 import { ExtractionSchemaApiError, saveExtractionSchema } from "@/api/extractionSchemas";
+import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
+import { extractToValues, workflowToSchema } from "@/api/extractLiveData";
+import { fetchFieldGeometry, type ResolvedFieldGeometry } from "@/api/fieldGeometry";
 import {
   BODY_TEXT,
   BORDER,
@@ -37,8 +40,10 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import { useDocumentsContext } from "@/contexts/DocumentsContext";
+import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { track } from "@/lib/analytics";
-import type { ExtractedFieldValue } from "@/types/scenarios";
+import type { ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { SchemaView } from "./SchemaView";
 
@@ -154,7 +159,61 @@ export const ExtractView: FC = () => {
   const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
   const { byId } = useScenarioRegistry();
   const scenario = byId(scenarioId);
-  const schema = scenario?.manifest.extractionSchema;
+  // WF-12 — live schema/values: getDocument → filter.workflow_id →
+  // getGroundXWorkflow (schema) + getDocumentExtract (values). The scenario
+  // manifest is the fallback (placeholder ids, pre-resolve, BYO, or errors) so
+  // existing tests + the BYO branch keep working.
+  const { getDocument, getDocumentExtract } = useDocumentsContext();
+  const [liveSchema, setLiveSchema] = useState<ExtractionSchemaDef | null>(null);
+  const [liveValues, setLiveValues] = useState<Record<string, string | number | boolean | null>>({});
+  // WF-05 — per-field source geometry resolved from the X-Ray (getextract
+  // carries none). Keyed by fieldId; absent → field-click highlight degrades.
+  const [liveGeometry, setLiveGeometry] = useState<Map<string, ResolvedFieldGeometry>>(new Map());
+  const liveDocId = scenario?.documents?.[0]?.documentId;
+  useEffect(() => {
+    if (!liveDocId || !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(liveDocId)) return; // skip placeholder ids
+    let cancelled = false;
+    void (async () => {
+      try {
+        const doc = await getDocument(liveDocId);
+        const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
+        if (typeof workflowId !== "string") return;
+        const wf = await getGroundXWorkflow(workflowId);
+        const live = workflowToSchema(wf.workflow as unknown as Record<string, unknown>);
+        if (cancelled || !live) return;
+        setLiveSchema(live);
+        const ex = await getDocumentExtract(liveDocId);
+        if (cancelled || !ex.response) return;
+        const values = extractToValues(ex.response as Record<string, unknown>, live);
+        setLiveValues(values);
+        // WF-05 — resolve each field's source region from the X-Ray (the
+        // extract carries no geometry). Best-effort: misses ship null.
+        const queries = live.categories.flatMap((cat) =>
+          cat.fields
+            .filter((f) => f.id in values)
+            .map((f) => ({ fieldId: f.id, value: values[f.id], label: f.name })),
+        );
+        const geos = await fetchFieldGeometry(
+          liveDocId,
+          queries.map(({ value, label }) => ({ value, label })),
+        );
+        if (cancelled) return;
+        const geoMap = new Map<string, ResolvedFieldGeometry>();
+        queries.forEach((q, i) => {
+          const g = geos[i];
+          if (g) geoMap.set(q.fieldId, g);
+        });
+        setLiveGeometry(geoMap);
+      } catch {
+        /* fall back to the manifest schema */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [liveDocId, getDocument, getDocumentExtract]);
+
+  const schema = liveSchema ?? scenario?.manifest.extractionSchema;
 
   // Topbar Save state (hoisted from SchemaView — F3a Design surface no
   // longer owns chrome). Save state is shared across F3/F3a/F4 because
@@ -202,7 +261,7 @@ export const ExtractView: FC = () => {
   // slot; until then the URL param is the source of truth.
   const handleSave = useCallback(async () => {
     if (!hasUnsavedChanges || saveStatus === "saving") return;
-    if (!scenario?.manifest.extractionSchema) return;
+    if (!schema) return;
     if (!templateIdRef.current) {
       templateIdRef.current = mintTemplateId();
     }
@@ -213,10 +272,10 @@ export const ExtractView: FC = () => {
       // SchemaView body already applies overlays at render time; we
       // re-build here because ExtractView is the surface that owns
       // Save now and needs the same merge logic visible to it.
-      const merged = mergeOverlayForSave(scenario.manifest.extractionSchema, overlay ?? null);
+      const merged = mergeOverlayForSave(schema, overlay ?? null);
       await saveExtractionSchema({
         id: templateIdRef.current,
-        name: `${scenario.manifest.extractionSchema.name} (custom)`,
+        name: `${schema.name} (custom)`,
         schema: merged,
       });
       setSaveStatus("saved");
@@ -224,7 +283,7 @@ export const ExtractView: FC = () => {
       // annotation + a chat agent message. Anonymous flow attaches
       // AFTER the gate completes (see the gate-watch effect below).
       if (templateIdRef.current) {
-        const schemaName = `${scenario.manifest.extractionSchema.name} (custom)`;
+        const schemaName = `${schema.name} (custom)`;
         pushStep({
           kind: "ingest-picker",
           attachedSchema: { schemaId: templateIdRef.current, name: schemaName },
@@ -263,17 +322,17 @@ export const ExtractView: FC = () => {
     if (gate.cause !== "save-schema") return;
     if (postCommitConsumedRef.current) return;
     postCommitConsumedRef.current = true;
-    if (!scenario?.manifest.extractionSchema) return;
+    if (!schema) return;
     if (!templateIdRef.current) {
       templateIdRef.current = mintTemplateId();
     }
     setSaveStatus("saving");
     (async () => {
       try {
-        const merged = mergeOverlayForSave(scenario.manifest.extractionSchema!, overlay ?? null);
+        const merged = mergeOverlayForSave(schema!, overlay ?? null);
         await saveExtractionSchema({
           id: templateIdRef.current!,
-          name: `${scenario.manifest.extractionSchema!.name} (custom)`,
+          name: `${schema!.name} (custom)`,
           schema: merged,
         });
         setSaveStatus("saved");
@@ -282,7 +341,7 @@ export const ExtractView: FC = () => {
         // attachment annotation on top so the F1 banner reads the
         // annotation off the latest step. Also append a chat agent
         // message so the conversation history records the attachment.
-        const schemaName = `${scenario.manifest.extractionSchema!.name} (custom)`;
+        const schemaName = `${schema!.name} (custom)`;
         advanceFrame("f1");
         pushStep({
           kind: "ingest-picker",
@@ -300,11 +359,25 @@ export const ExtractView: FC = () => {
   // extraction will replace the values lookup, schema stays as-is.
   const valuesByFieldId = useMemo(() => {
     const map = new Map<string, ExtractedFieldValue>();
-    for (const v of scenario?.manifest.sampleExtractionValues ?? []) {
-      map.set(v.fieldId, v);
+    if (liveSchema) {
+      // WF-12 — live values from getDocumentExtract. WF-05 — attach the
+      // X-Ray-resolved source geometry as the field's citation so a field
+      // click highlights its region on the PDF (getextract carries no bbox).
+      for (const [fieldId, value] of Object.entries(liveValues)) {
+        const geo = liveGeometry.get(fieldId);
+        const citations =
+          geo && geo.bbox && liveDocId
+            ? [{ documentId: liveDocId, page: geo.page, bbox: geo.bbox }]
+            : [];
+        map.set(fieldId, { fieldId, value, citations });
+      }
+    } else {
+      for (const v of scenario?.manifest.sampleExtractionValues ?? []) {
+        map.set(v.fieldId, v);
+      }
     }
     return map;
-  }, [scenario]);
+  }, [scenario, liveSchema, liveValues, liveGeometry, liveDocId]);
 
   // ?focus=<categoryId> from the F2 Pick-a-view pill → select the first
   // field in that category so the right-side preview opens to the
@@ -417,7 +490,18 @@ export const ExtractView: FC = () => {
           flexWrap: "wrap",
         }}
       >
-        <Stack direction="row" alignItems="center" spacing={1.5} sx={{ minWidth: 0, flex: "1 1 auto" }}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1.5}
+          // WF-01 C6 (2026-05-28). minWidth:0 lets the title block
+          // shrink properly when the canvas pane is narrow; overflow
+          // hidden + nowrap + flexShrink:1 prevents the title from
+          // overlapping the actions stack at narrow widths. Before this
+          // change the topbar text stacked on top of itself at common
+          // pane widths (974px viewport ÷ 280px chat = 694px canvas).
+          sx={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden" }}
+        >
           {/* ← back returns to F3. On F3 the link is rendered but
               advancing to F3 is a no-op; keeping it always-present
               keeps the topbar geometry stable across F3 ↔ F3a. */}
@@ -436,6 +520,7 @@ export const ExtractView: FC = () => {
               fontSize: FONT_SIZE_LABEL,
               fontWeight: FONT_WEIGHT_LABEL,
               padding: 0,
+              flexShrink: 0,
               "&:hover": { textDecoration: "underline" },
             }}
           >
@@ -446,7 +531,18 @@ export const ExtractView: FC = () => {
           <Typography
             variant="body1"
             data-testid="extract-topbar-title"
-            sx={{ color: NAVY, fontWeight: FONT_WEIGHT_HEADLINE, fontSize: FONT_SIZE_LABEL, letterSpacing: 0.2 }}
+            sx={{
+              color: NAVY,
+              fontWeight: FONT_WEIGHT_HEADLINE,
+              fontSize: FONT_SIZE_LABEL,
+              letterSpacing: 0.2,
+              // Truncate gracefully when the canvas pane is narrow.
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              minWidth: 0,
+              flexShrink: 1,
+            }}
           >
             Designing&nbsp;
             <Box component="span" sx={{ fontFamily: "monospace" }}>
@@ -468,6 +564,8 @@ export const ExtractView: FC = () => {
               fontSize: FONT_SIZE_LABEL,
               fontWeight: FONT_WEIGHT_LABEL,
               fontFamily: "monospace",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
             }}
           >
             v1 · draft
@@ -553,7 +651,8 @@ export const ExtractView: FC = () => {
       {/* Body — Design (F3a) vs Results (F3, F4 fallback). */}
       {isDesignSurface ? (
         <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-          <SchemaView />
+          {/* WF-12 — hand the live schema + values down so F3a edits the live schema, not the manifest. */}
+          <SchemaView schema={schema} values={Array.from(valuesByFieldId.values())} />
         </Box>
       ) : (
         <Box
@@ -583,12 +682,269 @@ export const ExtractView: FC = () => {
         </Stack>
       ) : null}
 
-      <Box sx={{ overflow: "auto" }}>
+      {/* WF-01 C6 (2026-05-28). PDF viewer on the LEFT, fields panel
+          on the RIGHT — per `spec-flow.jsx Flow_Peek`. The viewer pane
+          uses the scenario's first document; when an extraction-schema
+          field is hovered/clicked, the highlight bbox + active page
+          are forwarded to the viewer (wired via local state below). */}
+      <Box
+        data-testid="extract-doc-pane"
+        sx={{
+          minHeight: 0,
+          overflow: "hidden",
+          border: `1px solid ${BORDER}`,
+          borderRadius: BORDER_RADIUS_CARD,
+          backgroundColor: WHITE,
+          display: "flex",
+        }}
+      >
+        {scenario?.documents?.[0]?.documentId ? (
+          (() => {
+            // WF-01b C (2026-05-28). When a field is selected, surface
+            // its first-citation page + bbox to the viewer so the
+            // user sees the cross-link visually. Falls back to default
+            // (page 1, no highlight) when nothing is selected.
+            const firstCite = selectedField && selectedValue ? selectedValue.citations?.[0] : null;
+            return (
+              <PdfViewerWidget
+                documentId={scenario.documents[0].documentId}
+                mode="onboarding"
+                targetPage={firstCite?.page ?? undefined}
+                highlightBbox={firstCite?.bbox ?? null}
+              />
+            );
+          })()
+        ) : (
+          <Stack spacing={1} sx={{ p: 2 }}>
+            <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
+              SOURCE
+            </Typography>
+            <Typography variant="body2" sx={{ color: BODY_TEXT }}>
+              No source document is attached to this scenario yet.
+            </Typography>
+          </Stack>
+        )}
+      </Box>
+
+      {selectedField ? (
+        // WF-01 C9 (2026-05-28). F4 provenance panel — replaces the
+        // fields list when a field is selected. Sections are FIELD /
+        // SOURCE / WHY MATCHED / CONFIDENCE / NEIGHBORS per
+        // `spec-flow.jsx Flow_Extract`. WHY MATCHED is heuristic-derived
+        // here (we don't have model-side rationale yet); CONFIDENCE
+        // displays the raw value when present, else "—".
+        <Box data-testid="field-provenance-panel" sx={{ overflow: "auto", p: 1 }}>
+          {/* Breadcrumb stays inside the right pane (the spec puts it
+              above both panes, but our grid uses gridTemplateRows:
+              "auto 1fr" with the topbar already filling row 1). For
+              this change the breadcrumb lives just above the panel
+              content; revisit if the layout grows a dedicated breadcrumb
+              row. */}
+          <Stack
+            data-testid="extract-breadcrumb"
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            sx={{ mb: 1.5, fontSize: FONT_SIZE_LABEL, color: NAVY }}
+          >
+            <Box
+              component="button"
+              type="button"
+              data-testid="extract-breadcrumb-collapse"
+              onClick={() => setSelectedFieldId(null)}
+              aria-label="Collapse to all fields"
+              sx={{
+                border: "none",
+                background: "none",
+                color: NAVY,
+                fontFamily: "inherit",
+                fontSize: FONT_SIZE_LABEL,
+                fontWeight: FONT_WEIGHT_LABEL,
+                cursor: "pointer",
+                padding: 0,
+                "&:hover": { textDecoration: "underline" },
+              }}
+            >
+              ▴ ← all fields
+            </Box>
+            <Box component="span" sx={{ color: MUTED_ON_LIGHT }}>›</Box>
+            <Box component="span" sx={{ fontFamily: "monospace" }}>
+              {schema.categories.find((c) => c.fields.some((f) => f.id === selectedField.id))?.name ?? "—"}
+            </Box>
+            <Box component="span" sx={{ color: MUTED_ON_LIGHT }}>›</Box>
+            <Box component="span" sx={{ fontFamily: "monospace", fontWeight: FONT_WEIGHT_HEADLINE }}>
+              {selectedField.id}
+            </Box>
+          </Stack>
+
+          <Stack spacing={2}>
+            <Box>
+              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
+                FIELD
+              </Typography>
+              <Typography variant="body2" sx={{ fontFamily: "monospace", color: NAVY, mt: 0.5 }}>
+                {selectedField.id}
+              </Typography>
+              <Typography variant="caption" sx={{ color: BODY_TEXT }}>
+                {selectedField.name} · {selectedField.type}
+              </Typography>
+              <Typography variant="h6" sx={{ color: NAVY, mt: 0.5, fontFamily: "monospace" }}>
+                {selectedValue?.value === undefined || selectedValue?.value === null
+                  ? "—"
+                  : String(selectedValue.value)}
+              </Typography>
+            </Box>
+
+            <Box>
+              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
+                SOURCE
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                {(selectedValue?.citations ?? []).map((c, idx) => (
+                  <Box
+                    key={idx}
+                    sx={{
+                      p: 1,
+                      borderRadius: BORDER_RADIUS_SM,
+                      border: `1px solid ${BORDER}`,
+                      fontSize: FONT_SIZE_LABEL,
+                      color: NAVY,
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    page {c.page}
+                    {c.snippet ? (
+                      <Box component="span" sx={{ color: BODY_TEXT, ml: 0.5 }}>
+                        — {c.snippet.slice(0, 60)}
+                      </Box>
+                    ) : null}
+                  </Box>
+                ))}
+                {(selectedValue?.citations ?? []).length === 0 ? (
+                  <Typography variant="caption" sx={{ color: BODY_TEXT }}>
+                    No source citations on this field.
+                  </Typography>
+                ) : null}
+              </Stack>
+            </Box>
+
+            <Box>
+              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
+                WHY MATCHED
+              </Typography>
+              <Typography variant="body2" sx={{ color: BODY_TEXT, mt: 0.5 }}>
+                {selectedField.description}
+              </Typography>
+            </Box>
+
+            <Box>
+              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
+                CONFIDENCE
+              </Typography>
+              <Typography variant="body2" sx={{ color: NAVY, mt: 0.5, fontFamily: "monospace" }}>
+                {/* The sample `ExtractedFieldValue` fixtures don't carry a
+                    confidence score; show "—". Live extraction can populate
+                    this once the value shape gains a confidence field. */}
+                —
+              </Typography>
+            </Box>
+
+            <Box>
+              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
+                NEIGHBORS
+              </Typography>
+              <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+                {(() => {
+                  const cat = schema.categories.find((c) => c.fields.some((f) => f.id === selectedField.id));
+                  const neighbors = (cat?.fields ?? []).filter((f) => f.id !== selectedField.id).slice(0, 3);
+                  if (neighbors.length === 0) {
+                    return (
+                      <Typography variant="caption" sx={{ color: BODY_TEXT }}>
+                        No neighbors in this category.
+                      </Typography>
+                    );
+                  }
+                  return neighbors.map((n) => (
+                    <Typography
+                      key={n.id}
+                      variant="caption"
+                      sx={{ color: NAVY, fontFamily: "monospace", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
+                      onClick={() => setSelectedFieldId(n.id)}
+                    >
+                      {n.id} · {valuesByFieldId.get(n.id)?.value === undefined ? "—" : String(valuesByFieldId.get(n.id)?.value)}
+                    </Typography>
+                  ));
+                })()}
+              </Stack>
+            </Box>
+          </Stack>
+        </Box>
+      ) : (
+      <Box data-testid="extract-fields-panel" sx={{ overflow: "auto" }}>
         {/* Fields-panel header — hamburger menu opens Save schema… /
             Edit schema… per the F3a entry-point spec. The hamburger
             renders only when a real schema is present; F4-only flows
             keep their topbar-driven navigation. */}
         <FieldsPanelMenu />
+        {/* WF-01 C7 (2026-05-28). Category tabs row — one tab per
+            category in the active schema, label = `{name} · {n}`. The
+            click handler scrolls the corresponding category Card into
+            view; we don't hide siblings (matches the spec's "tabs as
+            jump-links" behavior on a single scrolling fields list). */}
+        {!supportsJsonRender && schema.categories.length > 1 ? (
+          <Box
+            data-testid="extract-category-tabs"
+            sx={{
+              display: "flex",
+              gap: 0.5,
+              flexWrap: "wrap",
+              mb: 1.5,
+              borderBottom: `1px solid ${BORDER}`,
+              pb: 0.75,
+            }}
+          >
+            {schema.categories.map((category) => (
+              <Box
+                key={category.id}
+                role="button"
+                tabIndex={0}
+                data-testid={`extract-category-tab-${category.id}`}
+                onClick={() => {
+                  const target = document.querySelector(`[aria-label="${category.name}"]`);
+                  if (target && "scrollIntoView" in target) {
+                    (target as HTMLElement).scrollIntoView({ behavior: "smooth", block: "start" });
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    (event.target as HTMLElement).click();
+                  }
+                }}
+                sx={{
+                  px: 1.25,
+                  py: 0.5,
+                  borderRadius: BORDER_RADIUS_PILL,
+                  border: `1px solid ${alpha(NAVY, 0.18)}`,
+                  cursor: "pointer",
+                  color: NAVY,
+                  fontSize: FONT_SIZE_LABEL,
+                  fontWeight: FONT_WEIGHT_LABEL,
+                  whiteSpace: "nowrap",
+                  "&:hover": { backgroundColor: alpha(GREEN, 0.08) },
+                }}
+              >
+                <Box component="span" sx={{ fontFamily: "monospace" }}>{category.name}</Box>
+                <Box
+                  component="span"
+                  sx={{ color: MUTED_ON_LIGHT, ml: 0.75, fontFamily: "monospace" }}
+                >
+                  · {category.fields.length}
+                </Box>
+              </Box>
+            ))}
+          </Box>
+        ) : null}
         {supportsJsonRender && renderMode === "json" ? (
           <Box
             component="pre"
@@ -654,19 +1010,26 @@ export const ExtractView: FC = () => {
                     }}
                   >
                     <Stack spacing={0.25}>
-                      <Typography variant="body2" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
-                        {field.name}
+                      {/* WF-01 C8 (2026-05-28). Per canonical, field rows
+                          show the snake_case key in monospace as the
+                          primary identifier; the human-readable label
+                          and description trail as secondary text. */}
+                      <Typography
+                        variant="body2"
+                        sx={{ color: NAVY, fontWeight: FONT_WEIGHT_HEADLINE, fontFamily: "monospace" }}
+                      >
+                        {field.id}
                       </Typography>
                       <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-                        {field.description}
+                        {field.name} — {field.description}
                       </Typography>
                     </Stack>
                     <Stack direction="row" spacing={0.5} alignItems="center">
-                      <Typography variant="body2" sx={{ fontFamily: "monospace", color: NAVY }}>
+                      <Typography variant="body2" sx={{ fontFamily: "monospace", color: NAVY, fontWeight: FONT_WEIGHT_HEADLINE }}>
                         {value === undefined || value === null ? "—" : String(value)}
                       </Typography>
                       {citations.map((c, idx) => (
-                        <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} />
+                        <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} color="coral" />
                       ))}
                     </Stack>
                   </Box>
@@ -703,65 +1066,53 @@ export const ExtractView: FC = () => {
           </Box>
         </Stack>
       </Box>
+      )}
 
-      <Box
-        data-testid="extract-preview"
-        sx={{
-          border: `1px solid ${BORDER}`,
-          borderRadius: BORDER_RADIUS_CARD,
-          p: 2,
-          backgroundColor: WHITE,
-          overflow: "auto",
-        }}
-        aria-label="Citation preview"
-      >
-        {selectedField ? (
-          <>
-            <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
-              CITATION PEEK
-            </Typography>
-            <Typography variant="h6" sx={{ mt: 1 }}>
-              {selectedField.name}
-            </Typography>
-            <Typography variant="body2" sx={{ mt: 1, color: BODY_TEXT }}>
-              {selectedField.description}
-            </Typography>
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-                Source pages
-              </Typography>
-              <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: "wrap" }}>
-                {(selectedValue?.citations ?? []).map((c, idx) => (
-                  <Box key={idx} sx={{ p: 1, borderRadius: BORDER_RADIUS_SM, border: `1px solid ${BORDER}` }}>
-                    <Typography variant="caption" sx={{ color: NAVY }}>
-                      {c.documentId} · page {c.page}
-                    </Typography>
-                    {c.snippet ? (
-                      <Typography variant="body2" sx={{ color: BODY_TEXT, mt: 0.25 }}>
-                        "{c.snippet}"
-                      </Typography>
-                    ) : null}
-                  </Box>
-                ))}
-                {(selectedValue?.citations ?? []).length === 0 ? (
-                  <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-                    No citations on this field.
-                  </Typography>
-                ) : null}
-              </Stack>
+      {/* WF-01 C6 (2026-05-28). The separate `extract-preview` pane was
+          removed in this change. The PDF viewer in the left pane is now
+          the live source-preview surface; selected-field provenance
+          (F4) will swap the fields panel itself rather than rendering
+          alongside in a third column. */}
+          {/* WF-01 C7 (2026-05-28). Sign-in unlock banner — pinned
+              below the panes, spanning both columns. For anonymous
+              users only; signed-in users skip it. Click → opens the
+              gate (F6). */}
+          {!isAuthed ? (
+            <Box
+              data-testid="extract-unlock-banner"
+              role="button"
+              tabIndex={0}
+              onClick={() => openGate("save")}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openGate("save");
+                }
+              }}
+              sx={{
+                gridColumn: "1 / -1",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 2,
+                px: 2,
+                py: 1.25,
+                borderRadius: BORDER_RADIUS_2X,
+                border: `1px solid ${alpha(NAVY, 0.18)}`,
+                backgroundColor: alpha(GREEN, 0.06),
+                color: NAVY,
+                cursor: "pointer",
+                "&:hover": { backgroundColor: alpha(GREEN, 0.12) },
+              }}
+            >
+              <Box component="span" sx={{ fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_LABEL }}>
+                🔒 Locked behind sign-in: locked fields · CSV / JSON export · save · upload your own docs
+              </Box>
+              <Box component="span" sx={{ fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_HEADLINE, color: GREEN }}>
+                Sign in to unlock →
+              </Box>
             </Box>
-          </>
-        ) : (
-          <Stack spacing={1}>
-            <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
-              PREVIEW
-            </Typography>
-            <Typography variant="body2" sx={{ color: BODY_TEXT }}>
-              Click a field on the left to see its source pages and snippets.
-            </Typography>
-          </Stack>
-        )}
-      </Box>
+          ) : null}
         </Box>
       )}
     </Box>

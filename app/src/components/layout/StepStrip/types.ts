@@ -33,6 +33,11 @@ export interface StepStripProps {
   /** Fires when a clickable pill is activated. Disabled pills do not call. */
   onStepClick?: (id: StepId) => void;
   /**
+   * Fires when a clickable sub-pill (Extract / Interact / Report) is
+   * activated. Disabled sub-pills do not call. WF-01 C3 (2026-05-28).
+   */
+  onSubstepClick?: (id: AnalyzeSubstep) => void;
+  /**
    * Compact mode for tablet + mobile. Renders a thin progress bar with the
    * current step label inline (e.g. "Step 1 / 4 · Ingest") instead of the
    * full pill + Analyze bracket. The strip stays visible — collapsing the

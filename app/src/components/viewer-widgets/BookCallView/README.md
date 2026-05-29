@@ -46,6 +46,25 @@ opens this widget in the viewer + `BookingStatusCard` in the chat, and
 the gate only commits when the user actually completes a booking
 (Calendly fires the `calendly.event_scheduled` postMessage).
 
+## How to mount
+
+```tsx
+import { BookCallView } from "@/components/viewer-widgets/BookCallView/BookCallView";
+
+// OnboardingShell mounts this in the viewer pane while ?bookCall=1
+// is present in the URL.
+<BookCallView mode="onboarding" />
+```
+
+The chat-side `BookingStatusCard` is mounted in parallel by the same
+shell so the user has a back-out affordance.
+
+## LLM tools
+
+See [`no-llm.md`](./no-llm.md). The booking action happens inside a
+third-party iframe (Calendly); the widget itself has no in-app
+surface beyond mounting/unmounting.
+
 ## Tests
 
 `BookCallView.test.tsx`. Covers: iframe URL/src, a11y title, fallback

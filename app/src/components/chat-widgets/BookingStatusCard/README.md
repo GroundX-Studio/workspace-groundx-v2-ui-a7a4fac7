@@ -53,6 +53,38 @@ the URL, in tandem with the `BookCallView` viewer widget.
 Without this guard a malicious page in an iframe could fire a fake
 `calendly.event_scheduled` to commit the gate.
 
+## How to mount
+
+```tsx
+import { BookingStatusCard } from "@/components/chat-widgets/BookingStatusCard/BookingStatusCard";
+
+// OnboardingShell mounts this in the chat column while ?bookCall=1
+// is present in the URL.
+<BookingStatusCard mode="onboarding" />
+```
+
+The viewer-side `BookCallView` (the Calendly iframe) is mounted in
+parallel by the same shell.
+
+## LLM tools
+
+`BookingStatusCard.tools.ts` exposes one mutate-category tool
+(widget-llm-integration follow-up B.3, 2026-05-28):
+
+- `book_call()` — open the Calendly booking surface. Use when the
+  user signals they want a human-assisted path forward (uncertainty
+  about fit, complex documents, evaluation questions).
+
+Mutate-category routing surfaces this as a confirmable chip on
+`reply.suggestedActions[]`. The orchestrator handler sets
+`?bookCall=1` on the URL; the OnboardingShell already watches that
+param to mount `BookCallView` in the viewer + `BookingStatusCard`
+in the chat. The user clicks the chip to actually open the iframe —
+no surprise context switches.
+
+The Calendly `event_scheduled` postMessage still commits the gate
+to `engineer-call`. That path is untouched by this upgrade.
+
 ## Tests
 
 `BookingStatusCard.test.tsx`. Covers: BOOKING IN PROGRESS rendering,

@@ -11,7 +11,7 @@ import { IconButton } from "./IconButton";
 
 describe("IconButton primitive — defaults", () => {
   it("defaults to a Close glyph and aria-label='close'", () => {
-    render(<IconButton />);
+    render(<IconButton noTool="test fixture" />);
     const btn = screen.getByRole("button", { name: /close/i });
     expect(btn).toBeInTheDocument();
     expect(btn.getAttribute("data-button-variant")).toBe("icon");
@@ -20,24 +20,24 @@ describe("IconButton primitive — defaults", () => {
   });
 
   it("default size is 'small' (MUI applies the corresponding sizeSmall class)", () => {
-    render(<IconButton />);
+    render(<IconButton noTool="test fixture" />);
     expect(screen.getByRole("button").className).toMatch(/MuiIconButton-sizeSmall/);
   });
 });
 
 describe("IconButton primitive — custom icon + label", () => {
   it("accepts a custom icon", () => {
-    render(<IconButton icon={<span data-testid="custom-glyph">✕</span>} />);
+    render(<IconButton noTool="test fixture" icon={<span data-testid="custom-glyph">✕</span>} />);
     expect(screen.getByTestId("custom-glyph")).toBeInTheDocument();
   });
 
   it("respects an explicit aria-label", () => {
-    render(<IconButton aria-label="dismiss notification" />);
+    render(<IconButton noTool="test fixture" aria-label="dismiss notification" />);
     expect(screen.getByRole("button", { name: /dismiss notification/i })).toBeInTheDocument();
   });
 
   it("respects an explicit size", () => {
-    render(<IconButton size="large" />);
+    render(<IconButton noTool="test fixture" size="large" />);
     expect(screen.getByRole("button").className).toMatch(/MuiIconButton-sizeLarge/);
   });
 });
@@ -45,14 +45,14 @@ describe("IconButton primitive — custom icon + label", () => {
 describe("IconButton primitive — interaction", () => {
   it("fires onClick", () => {
     const onClick = vi.fn();
-    render(<IconButton onClick={onClick} />);
+    render(<IconButton noTool="test fixture" onClick={onClick} />);
     fireEvent.click(screen.getByRole("button"));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it("does not fire onClick when disabled", () => {
     const onClick = vi.fn();
-    render(<IconButton disabled onClick={onClick} />);
+    render(<IconButton noTool="test fixture" disabled onClick={onClick} />);
     fireEvent.click(screen.getByRole("button"));
     expect(onClick).not.toHaveBeenCalled();
   });

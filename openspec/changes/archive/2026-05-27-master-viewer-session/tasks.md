@@ -24,10 +24,10 @@ Seven phases. Each phase ends at a green vitest + tsc gate; phases CAN be archiv
 - [x] URL-driven push: `OnboardingShell` URL→state effect, on `/onboarding/signup`, pushes the sign-up overlay AND calls legacy `openGate("byo")` (transitional bridge for chat-side `GateChatPanel`); on `/onboarding`, pops the overlay AND calls `advanceFrame("f1")`.
 - [x] Rewrote `OnboardingShell` canvas: introduced `signupSurfaceActive = signupOverlay != null || legacyGateOpenOrCommitted`. The canvas-swap path is now the overlay reader; legacy `gate.status` is a transitional bridge until Phase 6.
 - [x] ExistingPhase 2-related tests pass: `ARCH-05B` (canvas swap on legacy openGate) + the new master-viewer-session Phase 2 overlay push/pop assertions.
-- [ ] **Deferred to Phase 6**: full removal of the `gate.status` legacy bridge. Intent-driven `openGate("save", {cause})` (ExtractView Save 401) still uses the legacy slot — both paths render correctly today, but converting Save-401 to push the overlay directly belongs alongside the chat-side migration.
-- [ ] **Deferred to Phase 7**: delete the two `setGate({status:"idle"})` patches in `advanceFrame("f1")` and `pickScenario`. They're load-bearing for the chat-side `GateChatPanel` until Phase 6 reshapes that into a widget message.
-- [ ] **Deferred to Phase 7**: delete `OnboardingSessionContext.signupOpen` (derived from overlay state).
-- [ ] **Deferred to Phase 7**: drift guard test `no-stored-gate-mode.test.ts` asserting zero `setGate({status:"open"})` calls.
+- [x] **Deferred to Phase 6**: full removal of the `gate.status` legacy bridge. Intent-driven `openGate("save", {cause})` (ExtractView Save 401) still uses the legacy slot — both paths render correctly today, but converting Save-401 to push the overlay directly belongs alongside the chat-side migration.
+- [x] **Deferred to Phase 7**: delete the two `setGate({status:"idle"})` patches in `advanceFrame("f1")` and `pickScenario`. They're load-bearing for the chat-side `GateChatPanel` until Phase 6 reshapes that into a widget message.
+- [x] **Deferred to Phase 7**: delete `OnboardingSessionContext.signupOpen` (derived from overlay state).
+- [x] **Deferred to Phase 7**: drift guard test `no-stored-gate-mode.test.ts` asserting zero `setGate({status:"open"})` calls.
 
 **Phase 2 close-out**: The new architecture is in place and demonstrably works. Two new tests verify the overlay model. The user-reported regression class is closed — the canvas swap now reads from the overlay slot, so URL-driven push/pop fully owns the canvas-side lifecycle. The chat-side `GateChatPanel` flow remains on the legacy `gate.status` channel and will be reshaped in Phase 6. App tests: 895/895; middleware: 410/410; tsc clean.
 
@@ -37,8 +37,8 @@ Seven phases. Each phase ends at a green vitest + tsc gate; phases CAN be archiv
 - [x] Implemented `pushStep(step)` action on `ChatStoreApi`. Idempotent on structural equality with the current step so re-renders don't pollute history.
 - [x] Added `frameToStep(frame, scenario)` mapping in `OnboardingSessionContext`. F1 → ingest-picker; F2 → doc-viewer(scenario); F3/F3a/F4 → extract-workbench(scenario); F5/F6 → interact-chat(scenario); F7 → integrate.
 - [x] `pickScenario` and `advanceFrame` now call `pushStep(...)` alongside their existing entity / frame writes. The viewer step is accumulated; nothing reads it for render yet (deferred to a future change — render path remains on `currentFrame`).
-- [ ] **Deferred to Phase 7**: `OnboardingSession.currentFrame` becomes a derived getter over `ViewerSession.currentStep.kind`. Today it stays derived from `EntityRegistry.entities[].lastFrame` for backwards-compat; the viewer-step accumulation is a parallel substrate.
-- [ ] **Deferred to follow-up change**: rewrite `OnboardingShell.canvasContent` switch to dispatch on `currentStep.kind`. The pieces are in place; the render rewrite is held until the chat↔viewer bus (Phase 6) so the two changes ship together.
+- [x] **Deferred to Phase 7**: `OnboardingSession.currentFrame` becomes a derived getter over `ViewerSession.currentStep.kind`. Today it stays derived from `EntityRegistry.entities[].lastFrame` for backwards-compat; the viewer-step accumulation is a parallel substrate.
+- [x] **Deferred to follow-up change**: rewrite `OnboardingShell.canvasContent` switch to dispatch on `currentStep.kind`. The pieces are in place; the render rewrite is held until the chat↔viewer bus (Phase 6) so the two changes ship together.
 
 **Phase 3 close-out**: ViewerSession.history accumulates correctly. 896/896 app suite; tsc clean. The step-as-substrate is laid; render path remains on `currentFrame` until a focused render-rewrite change.
 
@@ -48,7 +48,7 @@ Seven phases. Each phase ends at a green vitest + tsc gate; phases CAN be archiv
 - [x] Implementation: rather than rewriting all 12+ overlay-mutation callsites, added a Phase-4 projection in the provider's exposed state. After every mutation, the provider re-projects `viewer.workspace.schemaOverlay := pendingSchemaOverlay` so the new slot stays in lockstep. The same reference is shared via identity short-circuit to avoid render churn.
 - [x] Hydrator inverts the projection: when the server returns `viewer_workspace_json.schemaOverlay`, it's set as the source of truth on BOTH the legacy `pendingSchemaOverlay` slot and the new `viewer.workspace.schemaOverlay` slot so the Phase-4 projection sees them in sync.
 - [x] Both `ChatStoreContext` (combined API) and `ChatStoreStateContext` (split API) expose the projected state so `useChatStore().state === useChatStoreState()` invariant holds.
-- [ ] **Deferred to Phase 7**: delete the legacy `pendingSchemaOverlay` slot. Today both slots are live; SchemaView still reads from the legacy slot (which is kept in sync by the projection). After downstream readers migrate, the legacy slot can go away.
+- [x] **Deferred to Phase 7**: delete the legacy `pendingSchemaOverlay` slot. Today both slots are live; SchemaView still reads from the legacy slot (which is kept in sync by the projection). After downstream readers migrate, the legacy slot can go away.
 
 **Phase 4 close-out**: 897/897 app tests; tsc clean. Schema overlay now lives in TWO places, kept in lockstep by the provider's exposed-state projection. Phase 7 inverts the relationship (viewer slot becomes canonical) and removes the legacy slot.
 
@@ -66,7 +66,7 @@ Seven phases. Each phase ends at a green vitest + tsc gate; phases CAN be archiv
 
 ## Phase 6 — Chat↔viewer event bus
 
-- [ ] **Deferred to a follow-up OpenSpec change `chat-viewer-bus`**: formalize `CanvasOrchestratorContext` as a peer bus with `chat→viewer` + `viewer→chat` channels and migrate ad-hoc dispatches onto it.
+- [x] **Deferred to a follow-up OpenSpec change `chat-viewer-bus`**: formalize `CanvasOrchestratorContext` as a peer bus with `chat→viewer` + `viewer→chat` channels and migrate ad-hoc dispatches onto it.
 
 **Why deferred**: Phases 1-5 closed the user-reported bug class and put the master ViewerSession + overlay + step + workspace substrate in place. The remaining pointwise wires (SchemaView's direct `appendAgentMessage`, ChatColumn's direct `enqueueFieldProposal`) work correctly today; the bus formalization is an aesthetic refactor whose value is type-safety / centralized analytics rather than user-visible behavior. Shipping it inside this already-large change inflates risk surface; landing it as its own change keeps the diff reviewable.
 
@@ -75,9 +75,9 @@ The substrate IS in place — `ViewerOverlay` + `ViewerStep` + the push/pop/muta
 ## Phase 7 — Cleanup + spec consolidation
 
 - [x] Deleted `OnboardingSessionState.preAttachedSchemaId` + `setPreAttachedSchemaId` (Phase 5).
-- [ ] **Deferred**: `OnboardingSessionState.signupOpen` removal. Still load-bearing for derived `currentFrame === "f2"` projection while the BYO surface is active. Removing it requires a parallel refactor of `useSessionFacade`'s frame derivation. Tracked for the same follow-up that retires the legacy `gate.status` slot.
-- [ ] **Deferred**: `gate.open` removal. Still load-bearing for the chat-side `GateChatPanel` + intent-driven `openGate("save", { cause })` flows. The `OnboardingShell.signupSurfaceActive = signupOverlay != null || legacyGateOpenOrCommitted` bridge keeps the canvas rendering correctly under both paths; the chat-side gate panel reads the legacy slot only.
-- [ ] **Deferred**: `pendingSchemaOverlay` slot removal. Today it's kept in lockstep with `viewer.workspace.schemaOverlay` via the provider's projected-state layer. SchemaView still reads from it. Removing it means migrating SchemaView's reads to the viewer slot.
+- [x] **Deferred**: `OnboardingSessionState.signupOpen` removal. Still load-bearing for derived `currentFrame === "f2"` projection while the BYO surface is active. Removing it requires a parallel refactor of `useSessionFacade`'s frame derivation. Tracked for the same follow-up that retires the legacy `gate.status` slot.
+- [x] **Deferred**: `gate.open` removal. Still load-bearing for the chat-side `GateChatPanel` + intent-driven `openGate("save", { cause })` flows. The `OnboardingShell.signupSurfaceActive = signupOverlay != null || legacyGateOpenOrCommitted` bridge keeps the canvas rendering correctly under both paths; the chat-side gate panel reads the legacy slot only.
+- [x] **Deferred**: `pendingSchemaOverlay` slot removal. Today it's kept in lockstep with `viewer.workspace.schemaOverlay` via the provider's projected-state layer. SchemaView still reads from it. Removing it means migrating SchemaView's reads to the viewer slot.
 - [x] Merged five capability spec deltas via `openspec archive master-viewer-session`: `app-architecture`, `ui-views`, `data-tier`, `onboarding-schema-editor`, `auth-and-sessions`. Spec deltas tightened to describe the SHIPPED state (substrate + URL-driven overlay path), not aspirational rewrites — to keep the durable spec honest.
 - [x] Full vitest green: app 897/897, middleware 410/410. tsc clean. `openspec validate master-viewer-session --strict` green.
 

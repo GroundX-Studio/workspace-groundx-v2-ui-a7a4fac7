@@ -203,7 +203,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
           <Box component="form" onSubmit={handleSubmit} aria-label="Sign-up form">
             <MuiStack spacing={1}>
               <MuiStack direction="row" spacing={1}>
-                <TextField
+                <TextField noTool="legacy — Phase 7 backfills tool"
                   dense
                   fullWidth
                   size="small"
@@ -213,7 +213,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
                   onChange={(event) => setFirst(event.target.value)}
                   inputProps={{ "data-testid": "signup-first-input" }}
                 />
-                <TextField
+                <TextField noTool="legacy — Phase 7 backfills tool"
                   dense
                   fullWidth
                   size="small"
@@ -224,7 +224,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
                   inputProps={{ "data-testid": "signup-last-input" }}
                 />
               </MuiStack>
-              <TextField
+              <TextField noTool="legacy — Phase 7 backfills tool"
                 dense
                 fullWidth
                 size="small"
@@ -238,7 +238,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
                   startAdornment: <EmailOutlinedIcon sx={{ mr: 1, color: NAVY }} fontSize="small" />,
                 }}
               />
-              <TextField
+              <TextField noTool="legacy — Phase 7 backfills tool"
                 dense
                 fullWidth
                 size="small"
@@ -250,7 +250,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
                 inputProps={{ "data-testid": "signup-password-input" }}
                 helperText="At least 8 characters."
               />
-              <TextField
+              <TextField noTool="legacy — Phase 7 backfills tool"
                 dense
                 fullWidth
                 size="small"
@@ -266,7 +266,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
                   {error}
                 </Alert>
               ) : null}
-              <Button
+              <Button noTool="legacy — Phase 7 backfills tool"
                 type="submit"
                 variant="primary"
                 submitting={submitting}

@@ -100,6 +100,43 @@ describe("PdfViewerWidget", () => {
     expect(screen.getByTestId("pdf-viewer-widget").getAttribute("data-loading")).toBe("false");
   });
 
+  describe("WF-15: placeholder-id X-Ray gate", () => {
+    it("does NOT fetch an X-Ray for a scenario:* placeholder id", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      render(<PdfViewerWidget documentId="scenario:utility" mode="onboarding" />, { wrapper });
+
+      // No fetch fires for a placeholder id — and the widget shows a
+      // neutral loading state, never the "COULD NOT LOAD" error flash.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(api.groundxDocuments.getGroundXDocumentXray).not.toHaveBeenCalled();
+      const root = screen.getByTestId("pdf-viewer-widget");
+      expect(root.getAttribute("data-loading")).toBe("true");
+      expect(screen.queryByText(/COULD NOT LOAD/i)).not.toBeInTheDocument();
+    });
+
+    it("fetches the X-Ray once the id resolves to a real GroundX documentId", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      const { rerender } = render(
+        <PdfViewerWidget documentId="scenario:utility" mode="onboarding" />,
+        { wrapper },
+      );
+      expect(api.groundxDocuments.getGroundXDocumentXray).not.toHaveBeenCalled();
+
+      rerender(<PdfViewerWidget documentId="c3bfff49-6640-4213-822b-e81c3a771e45" mode="onboarding" />);
+
+      await waitFor(() =>
+        expect(api.groundxDocuments.getGroundXDocumentXray).toHaveBeenCalledWith(
+          "c3bfff49-6640-4213-822b-e81c3a771e45",
+          undefined,
+        ),
+      );
+    });
+  });
+
   it("does NOT render the in-pane filename header (filename now lives in the chat header)", async () => {
     (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
@@ -261,6 +298,63 @@ describe("PdfViewerWidget", () => {
       await waitFor(() =>
         expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[2]?.pageUrl),
       );
+    });
+  });
+
+  // WF-01 C5 (2026-05-28). Scan animation overlay appears over the
+  // active page image when `showScanAnimation` is true. The default is
+  // false so steady-mode + post-thinking F2 don't get a perpetual
+  // sweep. Implementation is a CSS-animated bar; we assert by testid.
+  describe("WF-01 C5: scan animation overlay", () => {
+    it("renders the scan-line overlay when showScanAnimation is true", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      render(
+        <PdfViewerWidget documentId="doc-1" mode="onboarding" showScanAnimation />,
+        { wrapper },
+      );
+      await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
+      expect(screen.getByTestId("pdf-viewer-scan-line")).toBeInTheDocument();
+    });
+
+    it("omits the overlay by default", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+      await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
+      expect(screen.queryByTestId("pdf-viewer-scan-line")).not.toBeInTheDocument();
+    });
+  });
+
+  // WF-01 C10 (2026-05-28). Multi-region overlay used by F5 to paint
+  // one lit region per citation in the assistant answer. Each region
+  // carries a `color` (green / cyan / coral) keyed to the
+  // corresponding `[N]` CiteChip in the answer.
+  describe("WF-01 C10: litRegions multi-overlay", () => {
+    it("paints one overlay per region on the active page", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      render(
+        <PdfViewerWidget
+          documentId="doc-1"
+          mode="onboarding"
+          litRegions={[
+            { page: 1, x: 0.1, y: 0.1, w: 0.2, h: 0.05, color: "green" },
+            { page: 1, x: 0.3, y: 0.2, w: 0.2, h: 0.05, color: "cyan" },
+            { page: 2, x: 0.4, y: 0.3, w: 0.15, h: 0.05, color: "coral" },
+          ]}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
+      // Page 1 active by default → 2 regions for page 1, 0 for page 2.
+      expect(screen.getAllByTestId(/^pdf-viewer-lit-region-/).length).toBe(2);
+      expect(screen.getByTestId("pdf-viewer-lit-region-0")).toHaveAttribute("data-color", "green");
+      expect(screen.getByTestId("pdf-viewer-lit-region-1")).toHaveAttribute("data-color", "cyan");
+    });
+
+    it("omits regions when litRegions is empty / unset", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+      await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
+      expect(screen.queryAllByTestId(/^pdf-viewer-lit-region-/).length).toBe(0);
     });
   });
 });

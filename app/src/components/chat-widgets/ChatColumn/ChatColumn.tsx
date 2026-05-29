@@ -35,11 +35,20 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEv
 import { useNavigate } from "react-router-dom";
 
 import { chatErrorToUserCopy, listChatMessages, sendChatMessage } from "@/api/chatSessions";
-import type { ChatCitation, ProposedSchemaField } from "@/api/chatSessions";
+import { useLiveExtractionSchema } from "@/api/useLiveExtractionSchema";
+import type {
+  ChatCitation,
+  ChatDispatchedIntent,
+  ChatSuggestedAction,
+  ProposedSchemaField,
+} from "@/api/chatSessions";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
+import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
 import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
+import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { captureException } from "@/lib/sentry";
 
@@ -136,6 +145,19 @@ const ChatColumnInner: FC<ChatColumnInnerProps> = ({ overrideScenarioId, overrid
   const { state: session } = useOnboardingSession();
   const { byId } = useScenarioRegistry();
 
+  const currentFrame = overrideFrame ?? session.currentFrame;
+  const scenarioId =
+    overrideScenarioId !== undefined
+      ? overrideScenarioId
+      : appMode.scenario ?? session.scenario;
+  const scenario = scenarioId ? byId(scenarioId) : undefined;
+  // WF-17 — the F2 Pick-a-view pills derive from the LIVE workflow schema,
+  // not `manifest.extractionSchema`. The hook must run unconditionally
+  // (before the gate early-return) per the Rules of Hooks; it returns null
+  // for placeholder ids / failures so `derivePickViews` falls back to the
+  // manifest until WF-08 strips it.
+  const liveSchema = useLiveExtractionSchema(scenario?.documents?.[0]?.documentId);
+
   // Gate takes over the chat column when active — preserves the existing
   // F6 typing-indicator + GateView flow.
   const gateActive =
@@ -143,14 +165,8 @@ const ChatColumnInner: FC<ChatColumnInnerProps> = ({ overrideScenarioId, overrid
     session.gate.status === "committed";
   if (gateActive) return <GateChatPanel />;
 
-  const currentFrame = overrideFrame ?? session.currentFrame;
   const isF1 = currentFrame === "f1";
   const isF2 = currentFrame === "f2";
-  const scenarioId =
-    overrideScenarioId !== undefined
-      ? overrideScenarioId
-      : appMode.scenario ?? session.scenario;
-  const scenario = scenarioId ? byId(scenarioId) : undefined;
 
   // 2026-05-27 update: chat conversation stays mounted across the
   // F2→F5 onboarding journey so auto-advance (ThinkingStream done →
@@ -172,7 +188,7 @@ const ChatColumnInner: FC<ChatColumnInnerProps> = ({ overrideScenarioId, overrid
         scenarioName={scenario.manifest.hero?.title ?? scenarioId ?? "Sample"}
         fileName={scenario.documents[0]?.fileName ?? "sample.pdf"}
         thinkingScript={scenario.manifest.thinkingScript ?? []}
-        pickViews={derivePickViews(scenario)}
+        pickViews={derivePickViews(scenario, liveSchema)}
       />
     );
   }
@@ -246,9 +262,18 @@ const SteadyConversationFlow: FC = () => {
   // Scroll-to-bottom ref — see effect below.
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
+  const { dispatch: dispatchIntent } = useCanvasOrchestrator();
 
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [sending, setSending] = useState(false);
+
+  const handleSuggestedAction = useCallback(
+    (action: ChatSuggestedAction) => {
+      const intent = suggestedActionToIntent(action);
+      if (intent) dispatchIntent(intent, "agent");
+    },
+    [dispatchIntent],
+  );
 
   // RT-01 hydration — identical to F2ConversationFlow's effect. The
   // chat handler writes every turn to chat_messages; without this the
@@ -299,6 +324,13 @@ const SteadyConversationFlow: FC = () => {
       }
       setSending(true);
       try {
+        // widget-llm-integration Phase 5 — surface the user's current
+        // ViewerStep kind to the middleware so the LLM tool catalog
+        // is scoped to relevant tools. Falls back to undefined when
+        // the session hasn't seeded a step yet.
+        const stepIdx = activeChatSession?.viewer.currentStep.stepIndex ?? -1;
+        const activeStepKind =
+          stepIdx >= 0 ? activeChatSession?.viewer.history[stepIdx]?.kind ?? null : null;
         const result = await sendChatMessage({
           chatSessionId,
           newUserMessage: trimmed,
@@ -308,6 +340,7 @@ const SteadyConversationFlow: FC = () => {
             onboardingSessionId: chatSessionId,
             activeEntityKey: activeChatSession?.activeEntityKey ?? null,
           },
+          activeStepKind,
         });
         setLiveTurns((cur) => [
           ...cur,
@@ -320,8 +353,17 @@ const SteadyConversationFlow: FC = () => {
             // onto the LiveTurn so CiteChips render alongside the
             // bubble.
             citations: result.reply.citations ?? [],
+            // widget-llm-integration Phase 1 — thread suggestedActions
+            // so the SuggestedActionChips widget renders below the bubble.
+            suggestedActions: result.reply.suggestedActions ?? [],
           },
         ]);
+        // widget-llm-integration Phase 5 — dispatch every
+        // server-validated LLM tool call through the canvas
+        // orchestrator. Each entry on `reply.intents[]` is a
+        // CanvasIntent shape constructed by the server tool's
+        // `intentBuilder`.
+        dispatchReplyIntents(result.reply.intents, dispatchIntent);
         // F3a wireframe-fix: also enqueue the proposal onto the
         // canvas-side ProposalCard queue so SchemaView's "above the
         // list" surface fires. The chat propose-card stays as a
@@ -349,7 +391,7 @@ const SteadyConversationFlow: FC = () => {
         setSending(false);
       }
     },
-    [sending, chatSessionId, activeChatSession, enqueueFieldProposal],
+    [sending, chatSessionId, activeChatSession, enqueueFieldProposal, dispatchIntent],
   );
 
   // Scroll the conversation body to the newest message whenever a
@@ -363,7 +405,15 @@ const SteadyConversationFlow: FC = () => {
 
   return (
     <Box data-testid="steady-chat-conversation" sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: "auto", py: 1.5, display: "flex", flexDirection: "column", gap: 1.25 }}>
+      {/* DBG-01 B: reserve a scrollbar gutter (inline style — not a brand
+          token) + right padding so the scrollbar never paints over the
+          message bubbles. */}
+      <Box
+        ref={scrollRef}
+        data-testid="steady-chat-scroll"
+        style={{ scrollbarGutter: "stable" }}
+        sx={{ flex: 1, minHeight: 0, overflow: "auto", py: 1.5, pr: 1, display: "flex", flexDirection: "column", gap: 1.25 }}
+      >
         {liveTurns.length === 0 && !sending && (
           <BotBubble testid="steady-chat-empty">
             Ask anything about your documents.
@@ -378,15 +428,24 @@ const SteadyConversationFlow: FC = () => {
                 </UserBubble>
               ) : (
                 <Stack key={turn.id} spacing={1}>
-                  <BotBubble testid="steady-chat-live-assistant">
-                    {turn.content}
-                  </BotBubble>
+                  {turn.content.trim().length > 0 && (
+                    <BotBubble testid="steady-chat-live-assistant">
+                      {turn.content}
+                    </BotBubble>
+                  )}
                   {turn.citations && turn.citations.length > 0 && (
                     <Stack direction="row" spacing={0.5} sx={{ pl: 0.25, flexWrap: "wrap" }}>
                       {turn.citations.map((c, idx) => (
                         <CiteChip key={`${turn.id}-cite-${idx}`} citation={c} index={idx + 1} />
                       ))}
                     </Stack>
+                  )}
+                  {turn.suggestedActions && turn.suggestedActions.length > 0 && (
+                    <SuggestedActionChips
+                      actions={turn.suggestedActions}
+                      mode="steady"
+                      onAction={handleSuggestedAction}
+                    />
                   )}
                   {turn.proposedSchemaField && (
                     <ProposeSchemaFieldCard
@@ -433,12 +492,20 @@ interface F2ConversationFlowProps {
  * Interact + Report only) get a single "Show me chat" pill that
  * jumps to F5.
  */
-function derivePickViews(scenario: NonNullable<ReturnType<ReturnType<typeof useScenarioRegistry>["byId"]>>): PickViewOption[] {
+function derivePickViews(
+  scenario: NonNullable<ReturnType<ReturnType<typeof useScenarioRegistry>["byId"]>>,
+  liveSchema?: import("@/types/scenarios").ExtractionSchemaDef | null,
+): PickViewOption[] {
   // Per realign-f3a-entry-point (openspec): F2's Pick-a-view bubble
   // SHALL contain only category-scope pills (statement / meters /
   // charges) plus interact. F3a is reached from F3's fields-panel
   // hamburger menu, not from a chat pill.
-  const schema = scenario.manifest.extractionSchema;
+  //
+  // WF-17 — the LIVE workflow schema is the source of truth; the
+  // manifest is the fallback (placeholder ids, pre-resolve, BYO, or
+  // until WF-08 strips it). This keeps the pills correct once the
+  // manifest fixtures are removed.
+  const schema = liveSchema ?? scenario.manifest.extractionSchema;
   if (!schema) return [{ key: "interact", label: "Show me chat" }];
   return schema.categories.map((c) => ({ key: c.id, label: c.name }));
 }
@@ -462,6 +529,69 @@ interface LiveTurn {
    * undefined so callers can map unconditionally.
    */
   citations?: ChatCitation[];
+  /**
+   * widget-llm-integration Phase 1 — `reply.suggestedActions[]` from
+   * the chat router (chips offered beneath the assistant bubble).
+   * Empty/undefined → the SuggestedActionChips widget renders nothing.
+   */
+  suggestedActions?: ChatSuggestedAction[];
+}
+
+/**
+ * widget-llm-integration Phase 1 — map a clicked SuggestedAction onto
+ * a `CanvasIntent` the orchestrator can dispatch. Today's mapping is
+ * intentionally minimal (just `suggested-intent` with the known
+ * `show-extract` payload); Phase 3 retires this in favor of the
+ * declarative tool registry, where each chip carries its own intent
+ * payload directly.
+ */
+function suggestedActionToIntent(action: ChatSuggestedAction): CanvasIntent | null {
+  // widget-llm-integration Phase 8 — `tool:<name>` chips carry the
+  // server-validated, server-constructed CanvasIntent on
+  // `detail.intent`. The chat router (`chatRouter.ts`) routes
+  // mutate-category tool calls to `suggestedActions[]` per
+  // design.md §C, so the user's click here is the confirmation gate.
+  if (action.key.startsWith("tool:")) {
+    const intent = action.detail?.intent;
+    if (intent && typeof intent === "object" && typeof (intent as { kind?: unknown }).kind === "string") {
+      return intent as CanvasIntent;
+    }
+    return null;
+  }
+  // Phase 1 — legacy `suggested-intent` chip with a string intent
+  // label (fenced-JSON path). Phase 8 migration deferred: a follow-up
+  // change will retire this branch once the LLM prompt swaps to a
+  // `suggest_intent` mutate tool.
+  if (action.key === "suggested-intent") {
+    const intent = action.detail?.intent;
+    if (intent === "show-extract") return { kind: "switchFrame", frame: "f3" };
+    if (intent === "show-report") return { kind: "switchFrame", frame: "f4" };
+    if (intent === "show-interact") return { kind: "switchFrame", frame: "f5" };
+  }
+  return null;
+}
+
+/**
+ * widget-llm-integration Phase 5 — narrow + dispatch each LLM tool
+ * call carried on `reply.intents[]`. The middleware validated args
+ * against the server tool catalog already; we just dispatch the
+ * constructed `intent` payload through the canvas orchestrator. The
+ * runtime guard on `kind` is defensive — a future server catalog
+ * change shouldn't blow up the app if it emits an unknown kind.
+ *
+ * Known kinds today: `highlightCitation`, `jumpToPage` (the two
+ * PdfViewer tools shipped in Phase 4). Future tools land here as
+ * the catalog grows.
+ */
+function dispatchReplyIntents(
+  intents: ChatDispatchedIntent[] | undefined,
+  dispatchIntent: (intent: CanvasIntent, source?: "user" | "agent" | "tour") => unknown,
+): void {
+  for (const dispatched of intents ?? []) {
+    const intent = dispatched.intent as CanvasIntent;
+    if (typeof intent?.kind !== "string") continue;
+    dispatchIntent(intent, "agent");
+  }
 }
 
 const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
@@ -480,6 +610,15 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
   const chatSessionId = chatState.activeSessionId;
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
   const navigate = useNavigate();
+  const { dispatch: dispatchIntent } = useCanvasOrchestrator();
+
+  const handleSuggestedAction = useCallback(
+    (action: ChatSuggestedAction) => {
+      const intent = suggestedActionToIntent(action);
+      if (intent) dispatchIntent(intent, "agent");
+    },
+    [dispatchIntent],
+  );
 
   // CF-18: live ad-hoc chat turns that follow the scripted thinking flow.
   // Owned here (not by ChatInputBar) so they render in the conversation
@@ -595,6 +734,11 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
 
       setSending(true);
       try {
+        // widget-llm-integration Phase 5 — surface the user's
+        // current ViewerStep kind so the LLM tool catalog is scoped.
+        const stepIdx = activeChatSession?.viewer.currentStep.stepIndex ?? -1;
+        const activeStepKind =
+          stepIdx >= 0 ? activeChatSession?.viewer.history[stepIdx]?.kind ?? null : null;
         const result = await sendChatMessage({
           chatSessionId,
           newUserMessage: trimmed,
@@ -612,6 +756,7 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             fileName,
             scenarioTitle: scenarioName,
           },
+          activeStepKind,
         });
         setLiveTurns((cur) => [
           ...cur,
@@ -624,8 +769,15 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             // onto the LiveTurn so CiteChips render alongside the
             // bubble.
             citations: result.reply.citations ?? [],
+            // widget-llm-integration Phase 1 — thread suggestedActions
+            // so the SuggestedActionChips widget renders below the bubble.
+            suggestedActions: result.reply.suggestedActions ?? [],
           },
         ]);
+        // widget-llm-integration Phase 5 — dispatch every
+        // server-validated LLM tool call through the canvas
+        // orchestrator.
+        dispatchReplyIntents(result.reply.intents, dispatchIntent);
         // F3a wireframe-fix: also enqueue the proposal onto the
         // canvas-side ProposalCard queue so SchemaView's "above the
         // list" surface fires. The chat propose-card stays as a
@@ -885,7 +1037,14 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
       )}
 
       {/* Bubble stream */}
-      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: "auto", py: 1.5, display: "flex", flexDirection: "column", gap: 1.25 }}>
+      {/* DBG-01 B: reserve a scrollbar gutter + right padding so the
+          scrollbar never paints over the message bubbles. */}
+      <Box
+        ref={scrollRef}
+        data-testid="onboarding-chat-scroll"
+        style={{ scrollbarGutter: "stable" }}
+        sx={{ flex: 1, minHeight: 0, overflow: "auto", py: 1.5, pr: 1, display: "flex", flexDirection: "column", gap: 1.25 }}
+      >
         <UserBubble testid="onboarding-chat-user-bubble">{scenarioName}</UserBubble>
         <BotBubble testid="onboarding-chat-bot-lead">
           <Box component="span" sx={{ fontWeight: FONT_WEIGHT_HEADLINE }}>
@@ -972,15 +1131,24 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
                 </UserBubble>
               ) : (
                 <Stack key={turn.id} spacing={1}>
-                  <BotBubble testid="onboarding-chat-live-assistant">
-                    {turn.content}
-                  </BotBubble>
+                  {turn.content.trim().length > 0 && (
+                    <BotBubble testid="onboarding-chat-live-assistant">
+                      {turn.content}
+                    </BotBubble>
+                  )}
                   {turn.citations && turn.citations.length > 0 && (
                     <Stack direction="row" spacing={0.5} sx={{ pl: 0.25, flexWrap: "wrap" }}>
                       {turn.citations.map((c, idx) => (
                         <CiteChip key={`${turn.id}-cite-${idx}`} citation={c} index={idx + 1} />
                       ))}
                     </Stack>
+                  )}
+                  {turn.suggestedActions && turn.suggestedActions.length > 0 && (
+                    <SuggestedActionChips
+                      actions={turn.suggestedActions}
+                      mode="onboarding"
+                      onAction={handleSuggestedAction}
+                    />
                   )}
                   {turn.proposedSchemaField && (
                     <ProposeSchemaFieldCard

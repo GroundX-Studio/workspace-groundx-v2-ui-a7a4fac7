@@ -52,6 +52,36 @@ interface Chunk {
 - Use `documentPages[].width / .height` to scale bbox coordinates to the rendered image.
 - The xray response is ~224KB for a 3-page PDF — fetch once, cache.
 
+## `POST /v1/search/{id}` + `POST /v1/search/documents` — search result shape (added 2026-05-28)
+
+The RAG + citation data source. Verified on `c3bfff49` (bucket 28454) both bucket-scoped
+(`search_content(28454)`) and doc-scoped (`search_documents([c3bfff49])`).
+
+```ts
+interface SearchResult {
+  documentId: string;
+  bucketId: number;
+  fileName: string;
+  score: number;
+  sourceUrl: string;
+  text: string;                 // OCR layout text for this chunk
+  suggestedText: string;        // LLM rewrite — prefer for LLM context, NOT word-mappable
+  processId: string;            // + documentId → builds the -118-map URL (below)
+  boundingBoxes: Array<{ pageNumber; topLeftX; topLeftY; bottomRightX; bottomRightY; corrected }>;
+  pages: Array<{ number; imageUrl; width; height }>;
+  searchData?: { documentSummary; sectionSummary; fullTitle; publisher };  // verbosity 2 only
+  multimodalUrl?: string;       // table/figure clipping, when the chunk is a visual element
+}
+```
+
+- **`verbosity`**: `0` = no `results` array (only `search.text`); `1` = results without `searchData`; `2` = results **with** `searchData`. Use `2` for source-view UIs.
+- **Citation geometry is read straight off the result** (WF-03): `pageOf` = `boundingBoxes[0].pageNumber`; group boxes by `pageNumber` (a chunk can carry many / span pages — never union across pages); union the cited page's boxes; normalize px ÷ `pages[].width/height` → 0-1 `{x,y,w,h}`.
+- **The chatRouter bug WF-03 fixes:** the mapper reads a nonexistent top-level `r.pageNumber` and ignores `boundingBoxes`/`pages`, so every citation defaults to page 1 / no bbox. Forward the real fields instead.
+- **Fallback:** if a result lacks `boundingBoxes`, resolve via the X-Ray (snippet → match `chunks[].text` → box). Cache the X-Ray per doc.
+- **Word-level precision** (WF-05 extract values, WF-06 exact-tier attribution): the OCR map at
+  `https://upload.eyelevel.ai/layout/processed/{processId}/{documentId}-118-map.json` (no API key)
+  gives per-atom (word) boxes. Unstable schema — "use X-Ray for production" (source-view guide §10).
+
 ## `GET /v1/ingest/document/extract/{documentId}`
 
 The extract-values data source.

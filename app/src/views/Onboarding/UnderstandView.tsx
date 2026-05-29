@@ -59,9 +59,15 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
   if (!scenario) return <UnderstandPlaceholder kind="byo" />;
   const documentId = scenario.documents[0]?.documentId;
   if (!documentId) return <UnderstandPlaceholder kind="no-doc" />;
+  // WF-01 C5 (2026-05-28). While the chat is on F2 (Understand /
+  // mid-thinking), paint a scan-line overlay so the canvas shows the
+  // "GroundX is reading the doc" visual signal the spec calls for.
+  // Once the chat auto-advances to F3 on the Done bubble, the overlay
+  // drops — matches the wireframe's "done → fields" beat.
+  const isF2 = session.currentFrame === "f2";
   return (
     <Box data-testid="understand-canvas" sx={{ height: "100%", width: "100%" }}>
-      <PdfViewerWidget documentId={documentId} mode="onboarding" />
+      <PdfViewerWidget documentId={documentId} mode="onboarding" showScanAnimation={isF2} />
     </Box>
   );
 };

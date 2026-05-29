@@ -20,7 +20,7 @@ import {
   WHITE,
 } from "@/constants";
 
-import type { StepDescriptor, StepPillState, StepStripProps } from "./types";
+import type { AnalyzeSubstep, StepDescriptor, StepPillState, StepStripProps } from "./types";
 
 /**
  * Step strip — implements the wireframe shape from
@@ -148,12 +148,37 @@ const Pill: FC<{
   );
 };
 
-const SubPill: FC<{ id: string; label: string; state: StepPillState }> = ({ label, state }) => {
+const SubPill: FC<{
+  id: AnalyzeSubstep;
+  label: string;
+  state: StepPillState;
+  onClick?: (id: AnalyzeSubstep) => void;
+}> = ({ id, label, state, onClick }) => {
   const active = state === "active";
   const disabled = state === "disabled";
+  // WF-01 C3 (2026-05-28). Sub-pills are role=button + keyboard-reachable
+  // when their state allows navigation. Active is technically the current
+  // surface but we still let the user click it (idempotent dispatch is
+  // fine and keeps focus stable). Disabled = aria-disabled + tabindex=-1
+  // + no handler so keyboard Tab + click both no-op.
+  const interactive = !disabled && Boolean(onClick);
   return (
     <Box
+      role={interactive || disabled ? "button" : undefined}
+      aria-disabled={disabled || undefined}
+      tabIndex={interactive ? 0 : disabled ? -1 : undefined}
       title={disabled ? "Available after sign-in" : undefined}
+      onClick={interactive ? () => onClick!(id) : undefined}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick!(id);
+              }
+            }
+          : undefined
+      }
       sx={{
         padding: "3px 12px",
         borderRadius: BORDER_RADIUS_PILL,
@@ -163,7 +188,11 @@ const SubPill: FC<{ id: string; label: string; state: StepPillState }> = ({ labe
         fontSize: FONT_SIZE_LABEL,
         fontWeight: active ? FONT_WEIGHT_HEADLINE : FONT_WEIGHT_MEDIUM,
         opacity: disabled ? 0.75 : 1,
-        cursor: disabled ? "not-allowed" : "default",
+        cursor: disabled ? "not-allowed" : interactive ? "pointer" : "default",
+        outline: "none",
+        "&:focus-visible": interactive
+          ? { boxShadow: `0 0 0 2px ${alpha(NAVY, 0.4)}` }
+          : undefined,
       }}
     >
       {label}
@@ -249,10 +278,11 @@ export const STEP_STRIP_CONTAINER_COMPACT_THRESHOLD = 660;
  * Internal full pill strip — the `[1 Ingest]──[2 Understand]──┌ANALYZE…┐──[4 Integrate]`
  * layout. Lives behind StepStrip's container-aware compact switch.
  */
-const FullStrip: FC<{ steps: StepDescriptor[]; onStepClick?: StepStripProps["onStepClick"] }> = ({
-  steps,
-  onStepClick,
-}) => (
+const FullStrip: FC<{
+  steps: StepDescriptor[];
+  onStepClick?: StepStripProps["onStepClick"];
+  onSubstepClick?: StepStripProps["onSubstepClick"];
+}> = ({ steps, onStepClick, onSubstepClick }) => (
   <Box
     sx={{
       display: "flex",
@@ -317,7 +347,13 @@ const FullStrip: FC<{ steps: StepDescriptor[]; onStepClick?: StepStripProps["onS
                   ANALYZE
                 </Box>
                 {step.substeps?.map((s) => (
-                  <SubPill key={s.id} id={s.id} label={s.label} state={s.state} />
+                  <SubPill
+                    key={s.id}
+                    id={s.id}
+                    label={s.label}
+                    state={s.state}
+                    onClick={onSubstepClick}
+                  />
                 ))}
               </Box>
             ) : (
@@ -342,7 +378,7 @@ const FullStrip: FC<{ steps: StepDescriptor[]; onStepClick?: StepStripProps["onS
   </Box>
 );
 
-export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = false }) => {
+export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, onSubstepClick, compact = false }) => {
   // Container-aware fallback to compact mode. We measure the outer
   // wrapper's own bounding box (which always fills the parent's
   // available width) and switch to compact when it dips below the
@@ -385,7 +421,7 @@ export const StepStrip: FC<StepStripProps> = ({ steps, onStepClick, compact = fa
       {effectiveCompact ? (
         <CompactStrip steps={steps} />
       ) : (
-        <FullStrip steps={steps} onStepClick={onStepClick} />
+        <FullStrip steps={steps} onStepClick={onStepClick} onSubstepClick={onSubstepClick} />
       )}
     </Box>
   );

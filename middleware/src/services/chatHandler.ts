@@ -64,6 +64,12 @@ export interface HandleChatMessageRequest {
     fileName?: string | null;
     scenarioTitle?: string | null;
   };
+  /**
+   * widget-llm-integration Phase 5 — active ViewerStep kind. Threaded
+   * through to the chat router so the LLM tool catalog is filtered
+   * to tools relevant on the user's current surface.
+   */
+  activeStepKind?: string | null;
 }
 
 export interface HandleChatMessageResponse {
@@ -370,6 +376,7 @@ export async function handleChatMessage(
     currentIntent: session.currentIntent,
     intent: request.intent ?? null,
     scopeHint: request.scopeHint,
+    activeStepKind: request.activeStepKind,
   };
 
   let reply: ChatRouterResponse;
@@ -456,6 +463,38 @@ export async function handleChatMessage(
     errorCode: null,
     createdAt: new Date(),
   });
+
+  // widget-llm-integration Phase 5 — persist every dispatched tool
+  // call into `intent_log` (UI-10b's existing table). Source is
+  // `agent` since these intents originated from an LLM tool call
+  // rather than a user click. Failures are NOT persisted as intents
+  // (they didn't dispatch); failures surface on the chat reply for
+  // the frontend to render.
+  for (const dispatched of reply.intents) {
+    const intent = dispatched.intent;
+    const intentKind = typeof intent.kind === "string" ? intent.kind : "unknown";
+    try {
+      await deps.repository.appendIntentLog({
+        id: idGen(),
+        chatSessionId: request.chatSessionId,
+        timestamp: Date.now(),
+        source: "agent",
+        intentKind,
+        intentJson: JSON.stringify(intent),
+      });
+    } catch (logErr) {
+      // Fire-and-forget — a failed intent_log write must not break
+      // the chat reply.
+      logger.warn(
+        {
+          err: logErr,
+          chatSessionId: request.chatSessionId,
+          toolName: dispatched.name,
+        },
+        "intent_log persist failed (agent tool call)",
+      );
+    }
+  }
 
   return {
     userMessageId,

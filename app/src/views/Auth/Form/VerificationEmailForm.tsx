@@ -29,7 +29,7 @@ export const VerificationEmailForm: FC<VerificationEmailFormProps> = ({ values, 
   return (
     <form style={{ width: "100%" }} onSubmit={(event) => { event.preventDefault(); formik.handleSubmit(); }}>
       <TextField fullWidth id="email" name="email" label="Email" value={formik.values.email} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.email && Boolean(formik.errors.email)} helperText={formik.touched.email && formik.errors.email} sx={{ mt: 3, input: { background: WHITE } }} />
-      <Button variant="primary" type="submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
+      <Button noTool="pre-app auth (not agent-driven)" variant="primary" type="submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>
         Submit
       </Button>
     </form>

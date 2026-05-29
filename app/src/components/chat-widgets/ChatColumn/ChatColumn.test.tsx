@@ -1,6 +1,9 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 
 // jsdom has no matchMedia, so framer-motion's useReducedMotion() returns
 // true there and short-circuits the streaming timer. Pin it to false so
@@ -28,6 +31,15 @@ vi.mock("@/api/chatSessions", async () => {
 });
 import { ChatApiError, listChatMessages, sendChatMessage } from "@/api/chatSessions";
 
+// WF-17: the F2 pick-view pills now read the live workflow schema via this
+// hook. Mock it so tests are deterministic (no workflow fetch). Default
+// null → `derivePickViews` falls back to the manifest, keeping the
+// existing fixture-based pill assertions valid.
+vi.mock("@/api/useLiveExtractionSchema", () => ({
+  useLiveExtractionSchema: vi.fn(() => null),
+}));
+import { useLiveExtractionSchema } from "@/api/useLiveExtractionSchema";
+
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -40,6 +52,8 @@ beforeEach(() => {
   // Default: no persisted thread (empty array). Individual tests
   // can override to assert RT-01 hydration behavior.
   vi.mocked(listChatMessages).mockResolvedValue([]);
+  // WF-17 — default to manifest fallback; the precedence test overrides.
+  vi.mocked(useLiveExtractionSchema).mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -52,6 +66,20 @@ describe("ChatColumn", () => {
   // clean slate so the stream always plays.
   beforeEach(() => {
     if (typeof window !== "undefined") window.sessionStorage.clear();
+  });
+
+  // DBG-01 B (2026-05-28). The chat scroll container must reserve a
+  // scrollbar gutter so the bar doesn't paint over the message bubbles.
+  it("DBG-01 B: onboarding chat scroll container reserves a scrollbar gutter", () => {
+    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    const scroll = screen.getByTestId("onboarding-chat-scroll");
+    expect(scroll.style.scrollbarGutter).toBe("stable");
+  });
+
+  it("DBG-01 B: steady chat scroll container reserves a scrollbar gutter", () => {
+    renderWithOnboardingProviders(<ChatColumn mode="steady" />, { initialFrame: "f2", initialScenario: "utility" });
+    const scroll = screen.getByTestId("steady-chat-scroll");
+    expect(scroll.style.scrollbarGutter).toBe("stable");
   });
 
   it("on F1 (no scenario picked), shows the idle placeholder", () => {
@@ -189,6 +217,32 @@ describe("ChatColumn", () => {
     expect(screen.queryByTestId("onboarding-chat-pick-view-edit-schema")).not.toBeInTheDocument();
   });
 
+  it("WF-17: pick-view pills derive from the LIVE workflow schema, overriding the manifest", () => {
+    vi.useFakeTimers();
+    // The live schema carries `charges` — a category the utility MANIFEST
+    // does NOT have (manifest = statement + meters only). If the pills
+    // derive from live data, the charges pill MUST appear.
+    vi.mocked(useLiveExtractionSchema).mockReturnValue({
+      id: "wf-1",
+      name: "Utility Bill",
+      categories: [
+        { id: "statement", type: "statement", name: "Statement", fields: [] },
+        { id: "meters", type: "meters", name: "Meters", fields: [] },
+        { id: "charges", type: "charges", name: "Charges", fields: [] },
+      ],
+    });
+    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    for (let i = 0; i < 12; i += 1) {
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+    }
+    // Live-only category present → pills come from the live schema, not the manifest.
+    expect(screen.getByTestId("onboarding-chat-pick-view-charges")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-chat-pick-view-statement")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-chat-pick-view-meters")).toBeInTheDocument();
+  });
+
   it("on a schemaless scenario (Solar), surfaces a single 'show me chat' pill that jumps to F5", () => {
     vi.useFakeTimers();
     let lastFrame = "";
@@ -288,6 +342,8 @@ describe("ChatColumn", () => {
           citations: [],
           suggestedActions: [],
           tools: [],
+          intents: [],
+          toolFailures: [],
           proposedSchemaField: null,
         },
         compressionRan: false,
@@ -520,6 +576,8 @@ describe("ChatColumn", () => {
           citations: [],
           suggestedActions: [],
           tools: [],
+          intents: [],
+          toolFailures: [],
           proposedSchemaField: null,
         },
         compressionRan: false,
@@ -576,6 +634,8 @@ describe("ChatColumn", () => {
           ],
           suggestedActions: [],
           tools: [],
+          intents: [],
+          toolFailures: [],
           proposedSchemaField: null,
         },
         compressionRan: false,
@@ -612,6 +672,8 @@ describe("ChatColumn", () => {
           citations: [{ documentId: "doc-B", page: 3, snippet: "tax 42" }],
           suggestedActions: [],
           tools: [],
+          intents: [],
+          toolFailures: [],
           proposedSchemaField: null,
         },
         compressionRan: false,
@@ -781,6 +843,8 @@ describe("ChatColumn", () => {
           citations: [],
           suggestedActions: [],
           tools: [],
+          intents: [],
+          toolFailures: [],
           proposedSchemaField: null,
         },
         compressionRan: false,
@@ -819,7 +883,7 @@ describe("ChatColumn", () => {
       vi.mocked(sendChatMessage).mockResolvedValueOnce({
         userMessageId: "u",
         assistantMessageId: "a",
-        reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [], proposedSchemaField: null },
+        reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [], intents: [], toolFailures: [], proposedSchemaField: null },
         compressionRan: false,
       });
       const user = userEvent.setup();
@@ -829,6 +893,288 @@ describe("ChatColumn", () => {
       await waitFor(() => {
         expect(screen.queryByTestId("steady-chat-empty")).not.toBeInTheDocument();
       });
+    });
+  });
+
+  // widget-llm-integration Phase 1 — render the middleware's
+  // `suggestedActions[]` as a chip row beneath each assistant bubble.
+  // Pre-Phase-1 the array shipped on the reply and was silently
+  // dropped. These tests pin the contract: chips render, carry a
+  // stable testid, and clicking a high-confidence `suggested-intent`
+  // chip routes through the canvas orchestrator (the chat→canvas
+  // bridge for LLM-proposed navigations).
+  describe("SuggestedActionChips integration (widget-llm-integration Phase 1)", () => {
+    it("onboarding: assistant reply carrying suggestedActions renders one chip per action under the bubble", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-sa-1",
+        assistantMessageId: "a-sa-1",
+        reply: {
+          mode: "rag",
+          answer: "Sure — here's what I found.",
+          citations: [],
+          suggestedActions: [
+            { key: "show-source", label: "Show source" },
+            { key: "open-samples", label: "Open samples" },
+          ],
+          tools: [],
+          intents: [],
+          toolFailures: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "find anything?");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("suggested-action-chip-show-source")).toBeInTheDocument();
+        expect(screen.getByTestId("suggested-action-chip-open-samples")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("suggested-action-chip-show-source")).toHaveTextContent(
+        /Show source/i,
+      );
+    });
+
+    it("steady: assistant reply carrying suggestedActions renders chips under the bubble", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-sa-s",
+        assistantMessageId: "a-sa-s",
+        reply: {
+          mode: "rag",
+          answer: "Steady reply with suggestions.",
+          citations: [],
+          suggestedActions: [{ key: "show-source", label: "Show source" }],
+          tools: [],
+          intents: [],
+          toolFailures: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "anything?");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("suggested-action-chip-show-source")).toBeInTheDocument();
+      });
+    });
+
+    it("Phase 8 — clicking a tool:<name> chip dispatches detail.intent via the orchestrator", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-t8",
+        assistantMessageId: "a-t8",
+        reply: {
+          mode: "rag",
+          answer: "Mutate-tool chip arrived.",
+          citations: [],
+          suggestedActions: [
+            { key: "show-source", label: "Show source" },
+            {
+              key: "tool:accept_proposal",
+              label: "Accept the proposed field",
+              detail: {
+                name: "accept_proposal",
+                arguments: { fieldId: "f-1" },
+                intent: { kind: "switchFrame", frame: "f3" },
+              },
+            },
+          ],
+          tools: [],
+          intents: [],
+          toolFailures: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const dispatched: Array<Record<string, unknown>> = [];
+      const Harness = () => {
+        const { registerAdapter } = useCanvasOrchestrator();
+        useEffect(() => {
+          return registerAdapter({
+            kind: "switchFrame",
+            apply: (intent) => {
+              dispatched.push(intent);
+            },
+          });
+        }, [registerAdapter]);
+        return <ChatColumn />;
+      };
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<Harness />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "accept that field");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("suggested-action-chip-tool:accept_proposal")).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId("suggested-action-chip-tool:accept_proposal"));
+
+      await waitFor(() => {
+        expect(dispatched.length).toBeGreaterThan(0);
+      });
+      // The chip's server-emitted intent dispatched verbatim.
+      expect(dispatched[0]).toMatchObject({ kind: "switchFrame", frame: "f3" });
+    });
+
+    it("clicking the high-confidence suggested-intent chip dispatches a CanvasIntent via the orchestrator", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-si",
+        assistantMessageId: "a-si",
+        reply: {
+          mode: "rag",
+          answer: "Take a look at the extract.",
+          citations: [],
+          suggestedActions: [
+            { key: "show-source", label: "Show source" },
+            {
+              key: "suggested-intent",
+              label: "Open the extract to compare line items",
+              detail: { intent: "show-extract", confidence: 0.91 },
+            },
+          ],
+          tools: [],
+          intents: [],
+          toolFailures: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const dispatched: Array<Record<string, unknown>> = [];
+      const Harness = () => {
+        const { registerAdapter } = useCanvasOrchestrator();
+        // Register a `switchFrame` adapter so the click's dispatch
+        // lands somewhere observable. Phase 1's pragmatic mapping
+        // for `suggested-intent` with detail.intent === "show-extract"
+        // is a switchFrame → f3 (the extract surface). Phase 3 will
+        // replace this with the declarative tool registry.
+        useEffect(() => {
+          return registerAdapter({
+            kind: "switchFrame",
+            apply: (intent) => {
+              dispatched.push(intent);
+            },
+          });
+        }, [registerAdapter]);
+        return <ChatColumn />;
+      };
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<Harness />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "explain the totals");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("suggested-action-chip-suggested-intent")).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId("suggested-action-chip-suggested-intent"));
+
+      await waitFor(() => {
+        expect(dispatched.length).toBeGreaterThan(0);
+      });
+      expect(dispatched[0]).toMatchObject({ kind: "switchFrame", frame: "f3" });
+    });
+
+    // Empty-bubble guard (2026-05-28). When the LLM emits a tool_call
+    // with no text answer, `reply.answer === ""`. Rendering an empty
+    // <BotBubble/> above the chip row looks like a UI glitch (white
+    // blob). The bubble must be suppressed in that case; the chips
+    // still render.
+    it("onboarding: empty answer with chips suppresses the bot bubble but keeps the chip", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-empty",
+        assistantMessageId: "a-empty",
+        reply: {
+          mode: "rag",
+          answer: "",
+          citations: [],
+          suggestedActions: [
+            {
+              key: "tool:book_call",
+              label: "Open the Calendly booking surface",
+              detail: { name: "book_call", arguments: {}, intent: { kind: "openBookCall" } },
+            },
+          ],
+          tools: [],
+          intents: [],
+          toolFailures: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<ChatColumn />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "book me a call");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("suggested-action-chip-tool:book_call")).toBeInTheDocument();
+      });
+      // The empty bot bubble must not render alongside the chip.
+      expect(screen.queryByTestId("onboarding-chat-live-assistant")).not.toBeInTheDocument();
+    });
+
+    it("steady: empty answer with chips suppresses the bot bubble but keeps the chip", async () => {
+      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+        userMessageId: "u-empty-s",
+        assistantMessageId: "a-empty-s",
+        reply: {
+          mode: "rag",
+          answer: "",
+          citations: [],
+          suggestedActions: [{ key: "show-source", label: "Show source" }],
+          tools: [],
+          intents: [],
+          toolFailures: [],
+          proposedSchemaField: null,
+        },
+        compressionRan: false,
+      });
+
+      const user = userEvent.setup();
+      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      await user.type(input, "look at it");
+      await user.click(screen.getByTestId("onboarding-chat-send"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("suggested-action-chip-show-source")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("steady-chat-live-assistant")).not.toBeInTheDocument();
     });
   });
 });

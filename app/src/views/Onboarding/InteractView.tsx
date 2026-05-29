@@ -7,12 +7,13 @@ import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useState, type FC, type FormEvent } from "react";
 
-import { chatErrorToUserCopy, sendChatMessage } from "@/api/chatSessions";
+import { chatErrorToUserCopy, listChatMessages, sendChatMessage } from "@/api/chatSessions";
 import {
   BODY_TEXT,
   BORDER,
   BORDER_RADIUS_2X,
   BORDER_RADIUS_PILL,
+  BORDER_RADIUS_SM,
   CYAN,
   EYEBROW_ON_LIGHT,
   FONT_SIZE_CAPTION,
@@ -27,6 +28,8 @@ import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import type { ScenarioCitation, SampleChatTurn } from "@/types/scenarios";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
+import { litRegionsFromCitations } from "./litRegions";
 
 /**
  * F5 InteractView — grounded chat with citation chips.
@@ -46,17 +49,46 @@ export const InteractView: FC = () => {
   const chatSessionId = chatState.activeSessionId;
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
 
-  const initialTurns: SampleChatTurn[] = scenario?.manifest.sampleChatScript ?? [];
-  const [turns, setTurns] = useState<SampleChatTurn[]>(initialTurns);
+  // WF-13 (2026-05-29). F5 turns are LIVE — never seeded from
+  // `manifest.sampleChatScript`. Start empty; the RT-01 hydration
+  // effect below fills `turns` from the persisted chat thread (shared
+  // with F2's ChatColumn) so a refresh — or arriving on F5 after
+  // chatting in F2 — shows the real conversation with real citations.
+  const [turns, setTurns] = useState<SampleChatTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
-  // Re-seed when the active scenario changes (e.g. user backs out to F1
-  // and picks a different sample). Without this, the initial useState
-  // captures the first scenario's chat forever.
+  // RT-01 hydration — same pattern as ChatColumn. Read the persisted
+  // thread for the active chat session on mount and project each row
+  // (with its citations + bbox) onto a SampleChatTurn. Race rule: only
+  // seed when `turns` is still empty so an optimistic send mid-fetch
+  // wins. Errors are non-fatal (empty thread is a valid render).
   useEffect(() => {
-    setTurns(scenario?.manifest.sampleChatScript ?? []);
-  }, [scenario]);
+    if (!chatSessionId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const messages = await listChatMessages(chatSessionId);
+        if (cancelled || messages.length === 0) return;
+        const hydrated: SampleChatTurn[] = messages
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            citations: m.citations.length
+              ? m.citations.map((c) => ({ documentId: c.documentId, page: c.page, snippet: c.snippet, bbox: c.bbox }))
+              : undefined,
+          }));
+        setTurns((cur) => (cur.length === 0 ? hydrated : cur));
+      } catch {
+        // best-effort; leave turns as-is
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatSessionId]);
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -107,8 +139,10 @@ export const InteractView: FC = () => {
               }
             : undefined,
         });
+        // WF-13 — thread the WF-03 `bbox` through so the canvas
+        // litRegions use real source geometry instead of a fallback band.
         const replyCitations: ScenarioCitation[] | undefined = result.reply.citations.length
-          ? result.reply.citations.map((c) => ({ documentId: c.documentId, page: c.page, snippet: c.snippet }))
+          ? result.reply.citations.map((c) => ({ documentId: c.documentId, page: c.page, snippet: c.snippet, bbox: c.bbox }))
           : undefined;
         setTurns((current) => [
           ...current,
@@ -137,11 +171,22 @@ export const InteractView: FC = () => {
     [draft, sending, chatSessionId, activeChatSession],
   );
 
+  // WF-01b B (2026-05-28). Derive lit regions from the latest assistant
+  // turn's citations. Each citation maps to a single lit region on the
+  // PdfViewer, color-keyed: idx 0 = green (primary), middle = cyan,
+  // last = coral (anomaly / contrast). When a citation lacks an
+  // explicit bbox, render a thin band near the top of the page as a
+  // best-effort default until the upstream API surfaces real coords.
+  const lastAssistantTurn = [...turns].reverse().find((t) => t.role === "assistant");
+  const litCitations = lastAssistantTurn?.citations ?? [];
+  const litRegions = litRegionsFromCitations(litCitations);
+  const canvasDocumentId = scenario?.documents?.[0]?.documentId ?? null;
+
   return (
     <Box
       sx={{
         display: "grid",
-        gridTemplateRows: "auto 1fr auto",
+        gridTemplateRows: "auto auto 1fr auto",
         gap: 1,
         p: { xs: 2, md: 3 },
         height: "100%",
@@ -158,6 +203,23 @@ export const InteractView: FC = () => {
           Every answer cites the page it came from.
         </Typography>
       </Stack>
+
+      {/* WF-01b B (2026-05-28). PdfViewerWidget hosts the source doc.
+          Lit regions trail the latest assistant turn's citations so the
+          user can scan from "[1]" in chat to its colored region on the
+          page. Onboarding mode locks editor-only affordances. */}
+      {canvasDocumentId ? (
+        <Box sx={{ minHeight: 240, maxHeight: 360, overflow: "hidden", border: `1px solid ${BORDER}`, borderRadius: BORDER_RADIUS_SM }}>
+          <PdfViewerWidget
+            documentId={canvasDocumentId}
+            mode="onboarding"
+            litRegions={litRegions}
+            targetPage={litCitations[0]?.page ?? undefined}
+          />
+        </Box>
+      ) : (
+        <Box />
+      )}
 
       <Box sx={{ overflow: "auto", pr: 1 }} aria-live="polite">
         <Stack spacing={1.5}>
