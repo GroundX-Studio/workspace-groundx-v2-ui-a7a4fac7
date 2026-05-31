@@ -197,6 +197,16 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // Soft-fail in the steady tree (no OnboardingSessionProvider):
         // these report frames are onboarding-only, matching the gate block
         // above.
+        // 2026-05-30-onboarding-shell-shared-view Phase 3a — the
+        // `show_extraction` canvas-dispatch tool MOVES the canvas to the
+        // extraction workbench (frame f3). This is the SAME `advanceFrame`
+        // the Extract step-strip sub-pill calls, so the tool drives the
+        // identical canvas move as the on-screen control. Soft-fail in the
+        // steady tree (no OnboardingSessionProvider), matching the report
+        // frames above.
+        if (intent.kind === "showExtract") {
+          onboardingSession.advanceFrame("f3");
+        }
         if (intent.kind === "showReport") {
           onboardingSession.advanceFrame("f4");
         }

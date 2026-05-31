@@ -84,6 +84,11 @@ export default tseslint.config(
       "src/widgets/scopedViewerWidgetRegistryProduction.ts",
       // Each widget's own test mounts its component directly (allowed).
       "src/components/viewer-widgets/PdfViewer/*.test.{ts,tsx}",
+      "src/components/viewer-widgets/Extract/*.test.{ts,tsx}",
+      // The Extract workbench composes <PdfViewerWidget> as its source pane
+      // (a sub-pane, not a canvas dispatch) — the same internal compose the
+      // legacy ExtractView did. Exempt the widget's own .tsx from the ban.
+      "src/components/viewer-widgets/Extract/Extract.tsx",
       "src/components/viewer-widgets/SmartReportRender/*.test.{ts,tsx}",
       "src/components/viewer-widgets/SmartReportBuilder/*.test.{ts,tsx}",
       // ── GRANDFATHERED, pending step-20 retirement/alignment ──
@@ -112,6 +117,8 @@ export default tseslint.config(
               group: [
                 "@/components/viewer-widgets/PdfViewer/PdfViewerWidget",
                 "**/viewer-widgets/PdfViewer/PdfViewerWidget",
+                "@/components/viewer-widgets/Extract/Extract",
+                "**/viewer-widgets/Extract/Extract",
                 "@/components/viewer-widgets/SmartReportRender/SmartReportRender",
                 "**/viewer-widgets/SmartReportRender/SmartReportRender",
                 "@/components/viewer-widgets/SmartReportBuilder/SmartReportBuilder",

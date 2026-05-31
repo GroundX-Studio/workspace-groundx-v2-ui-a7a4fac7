@@ -299,6 +299,32 @@ const reportRenderAsEnum = z
   .enum(["PARAGRAPH", "BULLETS", "TABLE"])
   .describe("How the section body renders: PARAGRAPH (¶) / BULLETS (•) / TABLE (▦).");
 
+const showExtraction: ServerTool = {
+  name: "show_extraction",
+  description:
+    "Move the canvas to the extraction workbench (frame f3) for a scope. Use when " +
+    "the user asks to see the extracted fields, says \"show the extraction\", or you've " +
+    "reasoned the structured-field view is the natural next surface for what they're analyzing.",
+  category: "read",
+  inputSchema: z.object({
+    scope: z
+      .object({})
+      .passthrough()
+      .describe("The ContentScope the workbench extracts over (documents / bucket+filter / group)."),
+    schema_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional extraction template id; defaults to the active draft template when omitted."),
+  }),
+  availableSteps: ["extract-workbench", "doc-viewer", "interact-chat", "report"],
+  intentBuilder: (input) => ({
+    kind: "showExtract",
+    scope: (input as { scope: unknown }).scope,
+    schemaId: (input as { schema_id?: string }).schema_id ?? "draft",
+  }),
+};
+
 const showSmartReportRender: ServerTool = {
   name: "show_smart_report_render",
   description:
@@ -488,6 +514,9 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   commitGate,
   dismissGate,
   bookCall,
+  // onboarding-shell-shared-view Phase 3a — extract canvas-dispatch tool
+  // (mirror of the app-side Extract widget's show_extraction).
+  showExtraction,
   // smart-report Phase 5 — report tool surface (mirror of the app-side
   // SmartReportRender / SmartReportBuilder / PinToReportAction tools).
   showSmartReportRender,

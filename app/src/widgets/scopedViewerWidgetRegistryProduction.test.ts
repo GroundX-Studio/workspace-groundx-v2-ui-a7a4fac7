@@ -4,9 +4,10 @@
  * 2026-05-30-onboarding-shell-shared-view Phase 1. This is the module
  * that DISCHARGES the core-data "base is ORPHANED" ticket: it stands up
  * the production registry from the shipped `createScopedViewerWidgetRegistry`
- * factory, holding the three real descriptors (PdfViewer · SmartReportRender ·
+ * factory, holding the real descriptors (PdfViewer · Extract · SmartReportRender ·
  * SmartReportBuilder), and asserts the Direction-1 invariant — exactly one
- * descriptor per DECLARED `CanvasKind`.
+ * descriptor per DECLARED `CanvasKind`. (Extract joined in
+ * 2026-05-30-onboarding-shell-shared-view Phase 3a.)
  *
  * TDD: failing-first. The module under test does not exist yet.
  */
@@ -20,13 +21,15 @@ import {
 } from "./scopedViewerWidgetRegistryProduction";
 
 describe("scopedViewerWidgetRegistry (production singleton)", () => {
-  it("holds the three real viewer-widget mounts (descriptor + component)", () => {
+  it("holds the real viewer-widget mounts (descriptor + component)", () => {
     expect(
       scopedViewerWidgetRegistry
         .all()
         .map((m) => m.descriptor.id)
         .sort(),
-    ).toEqual(["pdf-viewer", "smart-report-builder", "smart-report-render"].sort());
+    ).toEqual(
+      ["extract-workbench", "pdf-viewer", "smart-report-builder", "smart-report-render"].sort(),
+    );
     // Each catalog entry carries its mountable component — the catalog is the
     // single source of truth for BOTH the descriptor and the component.
     for (const mount of scopedViewerWidgetRegistry.all()) {
@@ -52,6 +55,7 @@ describe("scopedViewerWidgetRegistry (production singleton)", () => {
     const idForKind = (kind: CanvasKind) =>
       scopedViewerWidgetRegistry.all().find((m) => m.descriptor.kind === kind)!.descriptor.id;
     expect(idForKind("doc-viewer")).toBe("pdf-viewer");
+    expect(idForKind("extract-workbench")).toBe("extract-workbench");
     expect(idForKind("report")).toBe("smart-report-render");
     expect(idForKind("report-builder")).toBe("smart-report-builder");
   });

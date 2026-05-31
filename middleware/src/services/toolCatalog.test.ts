@@ -23,6 +23,8 @@ const EXPECTED_NAMES = [
   "commit_gate",
   "dismiss_gate",
   "book_call",
+  // 2026-05-30-onboarding-shell-shared-view Phase 3a — extract canvas-dispatch.
+  "show_extraction",
   // 2026-05-29-smart-report-screen Phase 5 — report tool surface.
   "show_smart_report_render",
   "show_smart_report_edit",
@@ -90,6 +92,9 @@ describe("server tool catalog", () => {
         "pin_to_report",
         "propose_schema_field",
         "reject_proposal",
+        // onboarding-shell-shared-view Phase 3a — show_extraction is reachable
+        // from the doc-viewer (the user can ask to see the extraction).
+        "show_extraction",
         "show_smart_report_render",
         "suggest_intent",
       ],
@@ -106,6 +111,8 @@ describe("server tool catalog", () => {
       "pin_to_report",
       "propose_report_section",
       "reject_report_section",
+      // onboarding-shell-shared-view Phase 3a — show_extraction lists `report`.
+      "show_extraction",
       "show_smart_report_edit",
       "show_smart_report_render",
       "suggest_intent",

@@ -3,9 +3,12 @@
  *
  * `<ScopedCanvas>` is the SOLE canvas mount path: it resolves a `ViewerStep`
  * to its `CanvasKind`, looks the widget up in the production registry, and
- * mounts it with the active `scope` + `role`. For any not-yet-declared step
- * kind (extract-workbench / integrate / ingest-picker — no built widget) it
- * renders a labelled "not yet available" placeholder, NOT a crash.
+ * mounts it with the active `scope` + `role`. As of
+ * 2026-05-30-onboarding-shell-shared-view Phase 3a `extract-workbench` is a
+ * BUILT kind (the packaged Extract workbench widget) and `interact-chat`
+ * resolves to the doc-viewer mount (its canvas is doc-only). Only genuinely
+ * future kinds (`integrate` — next step — / `ingest-picker` — the F1 overlay)
+ * resolve to the labelled "not yet available" placeholder, NOT a crash.
  *
  * This is the runtime mount test the tasks.md "Runtime mount test + import
  * ban" line calls for: every DECLARED CanvasKind mounts a real widget that
@@ -72,12 +75,32 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
       <ScopedCanvas scope={DOC_SCOPE} step={step} role="member" />,
     );
     expect(screen.getByTestId("pdf-viewer-widget")).toBeInTheDocument();
+    expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
+  });
+
+  it("extract-workbench step → the packaged Extract workbench, fed the scope (Phase 3a)", () => {
+    // The extract workbench resolves the live doc + workflow from the scope's
+    // documentIds[0]; the Utility test scenario's placeholder id falls back to
+    // the manifest schema so the workbench renders without a network round-trip.
+    const step: ViewerStep = { kind: "extract-workbench", scenarioId: "utility" };
+    const utilityDocScope: ContentScope = {
+      type: "documents",
+      documentIds: ["utility-bill-2026-04"],
+    };
+    renderWithOnboardingProviders(
+      <ScopedCanvas scope={utilityDocScope} step={step} role="member" />,
+      { initialFrame: "f3", initialScenario: "utility" },
+    );
+    const widget = screen.getByTestId("extract-workbench");
+    expect(widget).toBeInTheDocument();
+    expect(widget).toHaveAttribute("data-role", "member");
+    // The real workbench, NOT the "not yet available" placeholder.
+    expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
   });
 });
 
 describe("ScopedCanvas — undeclared kinds hit the placeholder (no crash)", () => {
   it.each<ViewerStep>([
-    { kind: "extract-workbench", scenarioId: "utility" },
     { kind: "integrate" },
     { kind: "ingest-picker" },
   ])("renders a labelled placeholder for $kind", (step) => {
@@ -89,5 +112,6 @@ describe("ScopedCanvas — undeclared kinds hit the placeholder (no crash)", () 
     // No viewer widget mounted for an undeclared kind.
     expect(screen.queryByTestId("pdf-viewer-widget")).not.toBeInTheDocument();
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
   });
 });

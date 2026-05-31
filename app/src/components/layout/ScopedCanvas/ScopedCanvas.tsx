@@ -19,10 +19,10 @@
  * `never` default (compiler) and the registry guarantees exactly one
  * descriptor + component per declared kind — so every DECLARED kind
  * provably resolves to a widget. When it returns `null` (an unbuilt /
- * unknown step kind — `extract-workbench`, `integrate`, `ingest-picker`),
- * the canvas renders a labelled "not yet available" placeholder rather
- * than crashing. (Gate / book-call surfaces are widget mounts the shell
- * handles, NOT views routed through here.)
+ * unknown step kind — `integrate` (next step), `ingest-picker` (the F1
+ * overlay)), the canvas renders a labelled "not yet available" placeholder
+ * rather than crashing. (Gate / book-call surfaces are widget mounts the
+ * shell handles, NOT views routed through here.)
  */
 import Box from "@mui/material/Box";
 import type { FC } from "react";
@@ -55,12 +55,13 @@ export interface ScopedCanvasProps {
  * Map a `ViewerStep` to the `CanvasKind` of the widget that renders it,
  * or `null` when no built widget exists for that step kind.
  *
- *   • doc-viewer      → "doc-viewer"   (PdfViewer)
- *   • interact-chat   → "doc-viewer"   (canvas shows the cited source;
- *                                       the conversation is the chat slot)
- *   • report          → "report" | "report-builder" (render vs builder)
- *   • extract-workbench / integrate / ingest-picker → null (no widget yet;
- *                                       placeholder)
+ *   • doc-viewer        → "doc-viewer"       (PdfViewer)
+ *   • interact-chat     → "doc-viewer"       (canvas shows the cited source;
+ *                                             the conversation is the chat slot)
+ *   • extract-workbench → "extract-workbench" (the packaged Extract workbench)
+ *   • report            → "report" | "report-builder" (render vs builder)
+ *   • integrate / ingest-picker → null (no widget yet — integrate joins next
+ *                                       step; ingest-picker = the F1 overlay)
  */
 export function stepToCanvasKind(
   step: ViewerStep,
@@ -70,15 +71,16 @@ export function stepToCanvasKind(
     case "doc-viewer":
     case "interact-chat":
       return "doc-viewer";
+    case "extract-workbench":
+      return "extract-workbench";
     case "report":
       return reportSurface === "builder" ? "report-builder" : "report";
-    case "extract-workbench":
     case "integrate":
     case "ingest-picker":
       // No built ScopedViewerWidget for these surfaces yet — the canvas
-      // renders the placeholder. They join `CanvasKind` when their
-      // widgets are built (extract-workbench / integrate) or are handled
-      // by the F1 overlay (ingest-picker).
+      // renders the placeholder. `integrate` joins `CanvasKind` when its
+      // widget is built (next execution-order step); `ingest-picker` is
+      // handled by the F1 overlay.
       return null;
     default: {
       // Exhaustiveness over `ViewerStep["kind"]`: a new step kind must be
@@ -135,6 +137,7 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({ scope, step, role, reportS
   let Widget: ReturnType<typeof componentForKind>;
   switch (kind) {
     case "doc-viewer":
+    case "extract-workbench":
     case "report":
     case "report-builder":
       Widget = componentForKind(kind);

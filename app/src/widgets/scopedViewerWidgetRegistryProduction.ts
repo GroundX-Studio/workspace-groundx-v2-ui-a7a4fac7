@@ -34,6 +34,8 @@ import type { FC } from "react";
 
 import { canvasKindSchema, type CanvasKind, type ContentScope, type WidgetRole } from "@groundx/shared";
 
+import { Extract } from "@/components/viewer-widgets/Extract/Extract";
+import { descriptor as extractDescriptor } from "@/components/viewer-widgets/Extract/Extract.tools";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { descriptor as pdfViewerDescriptor } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget.tools";
 import { SmartReportRender } from "@/components/viewer-widgets/SmartReportRender/SmartReportRender";
@@ -71,6 +73,7 @@ export interface ScopedViewerWidgetMount {
 /** The production mount set (insertion order = catalog order). */
 const mounts: readonly ScopedViewerWidgetMount[] = [
   { descriptor: pdfViewerDescriptor, component: PdfViewerWidget },
+  { descriptor: extractDescriptor, component: Extract },
   { descriptor: smartReportRenderDescriptor, component: SmartReportRender },
   { descriptor: smartReportBuilderDescriptor, component: SmartReportBuilder },
 ];

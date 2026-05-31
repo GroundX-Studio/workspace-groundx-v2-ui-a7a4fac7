@@ -428,13 +428,20 @@ export type ViewerStepKind = z.infer<typeof viewerStepKindSchema>;
 //   • `<ScopedCanvas>`'s `switch` over CanvasKind gets a `never` default —
 //     adding a CanvasKind value WITHOUT a registered widget fails to compile.
 //
-// Therefore extract-workbench / integrate are NOT listed: declaring them
-// here with no widget would break the total-registry construction + the
-// exhaustive switch. They join when their widgets are built. `report` and
-// `report-builder` are SEPARATE kinds (render surface vs builder surface),
-// each backed by its own widget (SmartReportRender / SmartReportBuilder).
+// `extract-workbench` joined the set in 2026-05-30-onboarding-shell-shared-view
+// Phase 3a (the packaged Extract workbench widget). `integrate` is NOT yet
+// listed — declaring it here with no widget would break the total-registry
+// construction + the exhaustive switch; it joins when its widget is built (the
+// NEXT execution-order step). `report` and `report-builder` are SEPARATE kinds
+// (render surface vs builder surface), each backed by its own widget
+// (SmartReportRender / SmartReportBuilder).
 // ──────────────────────────────────────────────────────────────────────
-export const canvasKindSchema = z.enum(["doc-viewer", "report", "report-builder"]);
+export const canvasKindSchema = z.enum([
+  "doc-viewer",
+  "extract-workbench",
+  "report",
+  "report-builder",
+]);
 export type CanvasKind = z.infer<typeof canvasKindSchema>;
 
 // ──────────────────────────────────────────────────────────────────────

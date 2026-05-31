@@ -1036,6 +1036,39 @@ describe("OnboardingShell", () => {
     expect(within(surface).getByText(/billing summary/i)).toBeInTheDocument();
   });
 
+  // ── 2026-05-30-onboarding-shell-shared-view Phase 3a ──────────────
+  //
+  // The extract (f3) + interact (f5) canvases are NOT placeholders: f3
+  // mounts the packaged Extract workbench, f5 mounts the production
+  // PdfViewer (the Interact canvas is doc-only; the conversation is the
+  // ChatExperience in the chat slot). Neither hits the "not yet available"
+  // placeholder.
+  it("Phase 3a: F3 renders the packaged Extract workbench through <ScopedCanvas> (no placeholder)", async () => {
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    expect(await screen.findByTestId("extract-workbench")).toBeInTheDocument();
+    expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
+      "data-canvas-kind",
+      "extract-workbench",
+    );
+    expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
+  });
+
+  it("Phase 3a: F5 (Interact) renders the production doc viewer through <ScopedCanvas> (no placeholder)", async () => {
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f5",
+      initialScenario: "utility",
+    });
+    expect(await screen.findByTestId("pdf-viewer-widget")).toBeInTheDocument();
+    expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
+      "data-canvas-kind",
+      "doc-viewer",
+    );
+    expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
+  });
+
   // Regression: clicking a citation while on F3 pushes a doc-viewer
   // ViewerStep — canvas swaps to UnderstandView, but the StepStrip
   // pill was reading `session.currentFrame` directly, so the nav
@@ -1079,9 +1112,15 @@ describe("OnboardingShell", () => {
 
     // Before the click — the active step is the "Analyze" bracket's
     // Extract SubPill, which doesn't expose aria-current. On F3 the
-    // extract-workbench step has no built widget, so <ScopedCanvas>
-    // shows its placeholder (NOT the doc-viewer canvas).
-    expect(screen.queryByTestId("scoped-canvas-unavailable")).toBeInTheDocument();
+    // extract-workbench step now mounts the packaged Extract workbench
+    // through <ScopedCanvas> (Phase 3a) — the extract-workbench CanvasKind,
+    // NOT the placeholder, NOT the doc-viewer canvas.
+    expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
+    expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
+      "data-canvas-kind",
+      "extract-workbench",
+    );
+    expect(screen.getByTestId("extract-workbench")).toBeInTheDocument();
     expect(activeStepLabel()).toBe(""); // no aria-current node
 
     // Fire the citation-click side effect (the orchestrator's

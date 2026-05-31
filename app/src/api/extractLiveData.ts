@@ -11,6 +11,9 @@
  * The three group keys map 1:1 to `SchemaCategoryDef.type`.
  */
 
+import type { Citation, ExtractedFieldValue } from "@groundx/shared";
+
+import type { ResolvedFieldGeometry } from "@/api/fieldGeometry";
 import type { ExtractionSchemaDef, SchemaCategoryDef, SchemaFieldDef } from "@/types/scenarios";
 
 type Loose = Record<string, unknown>;
@@ -115,4 +118,42 @@ export function extractToValues(
     }
   }
   return out;
+}
+
+/**
+ * Build the `fieldId → ExtractedFieldValue` map for the LIVE extract path:
+ * each live value gets its X-Ray-resolved source region attached as a
+ * `Citation` (the extract response carries no geometry; WF-05 resolves it
+ * from the X-Ray). Lifting this out of the widget keeps the `documentId:`
+ * citation literal out of the widget's `.tsx` — the widget contract bans raw
+ * id PROPS, and a regex can't tell a prop annotation from an object-literal
+ * key, so the construction lives in this `.ts` helper.
+ */
+/**
+ * Project a field's citations to the `{ documentId, page }` shape the Extract
+ * workbench's JSON render mode emits. Lifted out of the widget for the same
+ * reason as {@link liveValuesToFieldValues}: the widget contract bans a raw
+ * `documentId:` prop and a regex can't tell that from an object-literal key.
+ */
+export function citationsForJson(
+  citations: ReadonlyArray<{ documentId: string; page: number }> | undefined,
+): Array<{ documentId: string; page: number }> {
+  return (citations ?? []).map((c) => ({ documentId: c.documentId, page: c.page }));
+}
+
+export function liveValuesToFieldValues(
+  documentId: string,
+  liveValues: Record<string, string | number | boolean | null>,
+  liveGeometry: ReadonlyMap<string, ResolvedFieldGeometry>,
+): Map<string, ExtractedFieldValue> {
+  const map = new Map<string, ExtractedFieldValue>();
+  for (const [fieldId, value] of Object.entries(liveValues)) {
+    const geo = liveGeometry.get(fieldId);
+    const citations: Citation[] =
+      geo && geo.bbox
+        ? [{ documentId, page: geo.page, bbox: geo.bbox }]
+        : [];
+    map.set(fieldId, { fieldId, value, citations });
+  }
+  return map;
 }

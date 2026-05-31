@@ -35,6 +35,7 @@ Roles today: `anonymous` (uncommitted / pre-sign-up) · `member` (signed in).
 | SuggestedActionChips | ✅ | ✅ | cosmetic → drop |
 | BookCallView | ✅ | ✅ | `mode` = layout chrome → re-source from layout, NOT role |
 | PdfViewer | ✅ | ✅ | cosmetic → drop |
+| Extract | ✅ | ✅ | **ScopedViewerWidget** (extraction workbench, f3/f3a/f4). Available to both roles; export / Save are locked-for-anonymous (topbar 🔒 + the server 401 → gate handoff) — a DISABLED affordance, not a hidden control. The same widget the authenticated experience uses (`feedback_no_onboarding_duplicates`). (2026-05-30-onboarding-shell-shared-view Phase 3a) |
 | SmartReportRender | ✅ | ✅ | **ScopedViewerWidget** (Report render, f4/S3). Available to both roles; export / Save are locked-for-anonymous as a DISABLED affordance (`widgetRoleCanEdit`) + `preview_only` badge, not a hidden control. (2026-05-29-smart-report-screen Phase 3) |
 | SmartReportBuilder | ✅ | ✅ | **ScopedViewerWidget** (Report builder, f4a/S3a). Available to both roles; Save is sign-in-gated — anonymous Save opens the gate (`commitGate`), member Save persists (Phase 6); export is locked-for-anonymous (`widgetRoleCanEdit`), a DISABLED `🔒` affordance not a hidden control. Reuses the F3a schema-editor chrome; drives the `report`-kind `reportOverlay` sibling of the Extract schema overlay. (2026-05-29-smart-report-screen Phase 4) |
 | PinToReportAction | ✅ | ✅ | chat-widget (`📌 pin to report`) on every assistant turn. Available to both roles; the only lock is DISABLED-mid-stream (queues the click) — not role-driven. Pins the turn's literal text as a report section via `pinToReport` (existing-or-new UX, no auto-create). (2026-05-29-smart-report-screen Phase 5) |
@@ -49,7 +50,7 @@ ScopedViewerWidgets take a real `ContentScope`; everything else declares `{ type
 | Widget | scope | source |
 |---|---|---|
 | PdfViewer | **ContentScope** (`documents` for a single doc, or `bucket`/`group` `+ filter`) | active experience scope / `ScopedCanvas`; **replaces the raw `documentId` prop** |
-| Extract (unbuilt) | **ContentScope** | active experience scope |
+| Extract | **ContentScope** (`documents` for the single-doc demo case, or `bucket`/`group` `+ filter`) | active experience scope / `ScopedCanvas`; the primary `documentId` is `scope.documentIds[0]`, derived FROM scope (NOT scenario context) |
 | SmartReportRender | **ContentScope** (the demos open on `bucket + project filter`; doc-count-agnostic so `group` renders the same) | render-time scope inherited from the transition surface (Extract / Interact / Report pill) — recorded on the result, NOT stored on the template |
 | SmartReportBuilder | **ContentScope** (the demos open on `bucket + project filter`; the template is scope-independent so the scope only selects which template's sections to seed) | active experience scope inherited from the transition surface (the render scope is supplied at render time, NOT stored on the template) |
 | Integrate (unbuilt) | **ContentScope** | active experience scope |
@@ -88,6 +89,7 @@ added here and asserted by the owning widget's test.
 | jump_to_page | PdfViewer | read | all roles | viewing is open |
 | open_template | _template | read | all roles | viewing a template is open |
 | **edit_template** | _template | mutate | **`["member"]`** | editing a *saved* template requires a signed-in member — the only role-restricted tool |
+| show_extraction | Extract | read | all roles | navigating to the extraction workbench is open (the canvas-dispatch `show_` verb); Save / export are gated at the Save boundary, not the tool |
 | show_smart_report_render | SmartReportRender | read | all roles | navigating to the render surface is open (the canvas-dispatch `show_` verb) |
 | show_smart_report_edit | SmartReportBuilder | read | all roles | opening the builder is open; *persisting* a Save is gated at the Save boundary, not the tool |
 | pin_to_report | PinToReportAction | mutate | all roles | anonymous may pin into the draft report (existing-or-new, no auto-create); Save is gated, not the pin |
