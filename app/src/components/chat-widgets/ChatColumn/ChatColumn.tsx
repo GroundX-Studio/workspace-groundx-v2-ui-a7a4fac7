@@ -31,16 +31,11 @@ import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FC, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { chatErrorToUserCopy, listChatMessages, sendChatMessage } from "@/api/chatSessions";
 import { useLiveExtractionSchema } from "@/api/useLiveExtractionSchema";
-import type {
-  ChatDispatchedIntent,
-  ChatSuggestedAction,
-  ProposedSchemaField,
-} from "@/api/chatSessions";
+import type { ChatSuggestedAction } from "@/api/chatSessions";
 import type { Citation, WidgetRole, WidgetScope } from "@groundx/shared";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
@@ -48,10 +43,12 @@ import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionC
 import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
 import { Markdown } from "@/components/primitives/Markdown/Markdown";
-import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
-import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
+// 2026-05-30-unified-conversation-flow Phase 1 — the durable engine +
+// shared LiveTurn type live in `conversation/useConversation`. Both flow
+// components below point at it (pure dedup); the engine owns liveTurns,
+// send, handleSuggestedAction, and the hydrate/agent projection effects.
+import { useConversation, type LiveTurn } from "@/conversation/useConversation";
 import { useChatStore } from "@/contexts/ChatStoreContext";
-import { captureException } from "@/lib/sentry";
 
 import {
   BODY_TEXT,
@@ -279,189 +276,20 @@ const ByoChatPlaceholder: FC = () => (
  * (the scripted intro). Steady mode renders only the production
  * surface. Same code path, same data, same persistence.
  */
-/**
- * Build the `highlightCitation` CanvasIntent for a "show source" click /
- * `[n]` chip. Extracted so the two conversation surfaces (steady +
- * onboarding) share one definition instead of duplicating the object
- * literal.
- *
- * NB: the document-id field is assigned via a computed key
- * (`{ ["documentId"]: ... }`) on purpose. The widget-contract drift
- * guard forbids a raw document-id PROP declaration in a widget's main
- * `.tsx` (raw ids collapse into `scope`); a plain document-id object
- * key would false-positive on that regex. ChatColumn's scope is
- * `{ type: "none" }` — this is an intent payload field, not a widget
- * prop — so the computed key sidesteps the guard without weakening it.
- */
-function citationToHighlightIntent(c: Citation): CanvasIntent {
-  return {
-    kind: "highlightCitation",
-    ["documentId"]: c.documentId,
-    page: c.page,
-    ...(c.bbox ? { bbox: c.bbox } : {}),
-    ...(c.tier ? { tier: c.tier } : {}),
-  };
-}
-
 const SteadyConversationFlow: FC = () => {
-  const { state: chatState, enqueueFieldProposal, appendMessage } = useChatStore();
+  const { state: chatState } = useChatStore();
   const chatSessionId = chatState.activeSessionId;
   // Scroll-to-bottom ref — see effect below.
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
-  const { dispatch: dispatchIntent } = useCanvasOrchestrator();
   const widgetRole = useWidgetRole();
 
-  const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
-  const [sending, setSending] = useState(false);
-
-  const handleSuggestedAction = useCallback(
-    (action: ChatSuggestedAction, citations?: Citation[]) => {
-      // "Show source" carries no intent of its own — it opens/highlights the
-      // answer's primary citation, same as clicking the [1] chip. (Previously
-      // this fell through to a null intent and did nothing.)
-      if (action.key === "show-source") {
-        const c = citations?.[0];
-        if (c) {
-          dispatchIntent(citationToHighlightIntent(c), "user");
-        }
-        return;
-      }
-      const intent = suggestedActionToIntent(action);
-      if (intent) dispatchIntent(intent, "agent");
-    },
-    [dispatchIntent],
-  );
-
-  // RT-01 hydration — identical to F2ConversationFlow's effect. The
-  // chat handler writes every turn to chat_messages; without this the
-  // visible thread vanishes on refresh.
-  useEffect(() => {
-    if (!chatSessionId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const messages = await listChatMessages(chatSessionId);
-        if (cancelled || messages.length === 0) return;
-        const turns: LiveTurn[] = messages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            // clickable-citations Phase 2 — RT-01 hydrate carries
-            // `citations` per row; project onto LiveTurn so chips
-            // re-render after a refresh.
-            citations: m.citations ?? [],
-          }));
-        setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
-      } catch (err) {
-        captureException(err, {
-          route: "/api/chat-sessions/:id/messages",
-          chatSessionId,
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [chatSessionId]);
-
-  const handleSend = useCallback(
-    async (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed || sending) return;
-      const userTurn: LiveTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
-      setLiveTurns((cur) => [...cur, userTurn]);
-      if (!chatSessionId) {
-        setLiveTurns((cur) => [
-          ...cur,
-          { id: `a-${Date.now()}`, role: "assistant", content: "No active chat session — please refresh and try again." },
-        ]);
-        return;
-      }
-      setSending(true);
-      try {
-        // widget-llm-integration Phase 5 — surface the user's current
-        // ViewerStep kind to the middleware so the LLM tool catalog
-        // is scoped to relevant tools. Falls back to undefined when
-        // the session hasn't seeded a step yet.
-        const stepIdx = activeChatSession?.viewer.currentStep.stepIndex ?? -1;
-        const activeStepKind =
-          stepIdx >= 0 ? activeChatSession?.viewer.history[stepIdx]?.kind ?? null : null;
-        const result = await sendChatMessage({
-          chatSessionId,
-          newUserMessage: trimmed,
-          sessionMeta: {
-            title: activeChatSession?.title ?? "Steady chat",
-            isOnboarding: false,
-            onboardingSessionId: chatSessionId,
-            activeEntityKey: activeChatSession?.activeEntityKey ?? null,
-          },
-          activeStepKind,
-        });
-        setLiveTurns((cur) => [
-          ...cur,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content: result.reply.answer,
-            proposedSchemaField: result.reply.proposedSchemaField,
-            // clickable-citations Phase 2 — thread reply citations
-            // onto the LiveTurn so CiteChips render alongside the
-            // bubble.
-            citations: result.reply.citations ?? [],
-            // widget-llm-integration Phase 1 — thread suggestedActions
-            // so the SuggestedActionChips widget renders below the bubble.
-            suggestedActions: result.reply.suggestedActions ?? [],
-          },
-        ]);
-        // core-data-model-hardening item 6 — also write the assistant
-        // turn (with citations) into the shared ChatStore so canvas
-        // consumers (InteractView litRegions / CiteChip / report-pin)
-        // read it off the in-memory session instead of re-fetching the
-        // thread. The server already persists the row; this is the
-        // in-memory mirror.
-        appendMessage({
-          role: "assistant",
-          content: result.reply.answer,
-          citations: result.reply.citations ?? [],
-        });
-        // widget-llm-integration Phase 5 — dispatch every
-        // server-validated LLM tool call through the canvas
-        // orchestrator. Each entry on `reply.intents[]` is a
-        // CanvasIntent shape constructed by the server tool's
-        // `intentBuilder`.
-        dispatchReplyIntents(result.reply.intents, dispatchIntent);
-        // F3a wireframe-fix: also enqueue the proposal onto the
-        // canvas-side ProposalCard queue so SchemaView's "above the
-        // list" surface fires. The chat propose-card stays as a
-        // mirror; canvas + chat both show the same proposal until
-        // either surface accepts/dismisses it.
-        if (result.reply.proposedSchemaField) {
-          enqueueFieldProposal({
-            categoryId: result.reply.proposedSchemaField.categoryId,
-            name: result.reply.proposedSchemaField.name,
-            type: result.reply.proposedSchemaField.type,
-            description: result.reply.proposedSchemaField.description,
-            // proposal-envelope-provenance: forward the Zod parse
-            // provenance so the canvas ProposalCard surfaces the
-            // `envelope verified` label.
-            provenance: result.reply.proposedSchemaField.provenance,
-          });
-        }
-      } catch (err) {
-        const mapped = chatErrorToUserCopy(err);
-        setLiveTurns((cur) => [
-          ...cur,
-          { id: `a-${Date.now()}`, role: "assistant", content: mapped.message },
-        ]);
-      } finally {
-        setSending(false);
-      }
-    },
-    [sending, chatSessionId, activeChatSession, enqueueFieldProposal, dispatchIntent],
-  );
+  // 2026-05-30-unified-conversation-flow Phase 1 — the durable engine owns
+  // liveTurns, send, handleSuggestedAction, and the hydrate/agent
+  // projection effects. `isOnboarding` is read from the session inside the
+  // engine (a steady session is flagged false), so the steady surface no
+  // longer hardcodes it.
+  const conv = useConversation(chatSessionId, { title: "Steady chat" });
+  const { liveTurns, sending, send: handleSend, handleSuggestedAction } = conv;
 
   // Scroll the conversation body to the newest message whenever a
   // turn is appended or the thinking indicator appears. The body
@@ -542,33 +370,6 @@ function derivePickViews(
   return schema.categories.map((c) => ({ key: c.id, label: c.name }));
 }
 
-interface LiveTurn {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  /**
-   * UI-01 Phase 2a — non-null when the grounded LLM proposed adding a
-   * schema field on this turn. The chat scroll renders an inline
-   * `<ProposeSchemaFieldCard>` beneath the assistant bubble so the
-   * user can Accept (→ `addSchemaField`) or Reject without leaving
-   * the conversation.
-   */
-  proposedSchemaField?: ProposedSchemaField | null;
-  /**
-   * clickable-citations Phase 2 — the citations array returned by the
-   * chat router (RAG/hybrid replies). Rendered as `<CiteChip>` rows
-   * beneath the assistant bubble. Empty array = no chips, never
-   * undefined so callers can map unconditionally.
-   */
-  citations?: Citation[];
-  /**
-   * widget-llm-integration Phase 1 — `reply.suggestedActions[]` from
-   * the chat router (chips offered beneath the assistant bubble).
-   * Empty/undefined → the SuggestedActionChips widget renders nothing.
-   */
-  suggestedActions?: ChatSuggestedAction[];
-}
-
 /**
  * The live ad-hoc turn list — user/assistant bubbles + the answer-source footer
  * (CiteChips + SuggestedActionChips) + propose-card + the "thinking" indicator.
@@ -647,63 +448,6 @@ function LiveTurnList({
   );
 }
 
-/**
- * widget-llm-integration Phase 1 — map a clicked SuggestedAction onto
- * a `CanvasIntent` the orchestrator can dispatch. Today's mapping is
- * intentionally minimal (just `suggested-intent` with the known
- * `show-extract` payload); Phase 3 retires this in favor of the
- * declarative tool registry, where each chip carries its own intent
- * payload directly.
- */
-function suggestedActionToIntent(action: ChatSuggestedAction): CanvasIntent | null {
-  // widget-llm-integration Phase 8 — `tool:<name>` chips carry the
-  // server-validated, server-constructed CanvasIntent on
-  // `detail.intent`. The chat router (`chatRouter.ts`) routes
-  // mutate-category tool calls to `suggestedActions[]` per
-  // design.md §C, so the user's click here is the confirmation gate.
-  if (action.key.startsWith("tool:")) {
-    const intent = action.detail?.intent;
-    if (intent && typeof intent === "object" && typeof (intent as { kind?: unknown }).kind === "string") {
-      return intent as CanvasIntent;
-    }
-    return null;
-  }
-  // Phase 1 — legacy `suggested-intent` chip with a string intent
-  // label (fenced-JSON path). Phase 8 migration deferred: a follow-up
-  // change will retire this branch once the LLM prompt swaps to a
-  // `suggest_intent` mutate tool.
-  if (action.key === "suggested-intent") {
-    const intent = action.detail?.intent;
-    if (intent === "show-extract") return { kind: "switchFrame", frame: "f3" };
-    if (intent === "show-report") return { kind: "switchFrame", frame: "f4" };
-    if (intent === "show-interact") return { kind: "switchFrame", frame: "f5" };
-  }
-  return null;
-}
-
-/**
- * widget-llm-integration Phase 5 — narrow + dispatch each LLM tool
- * call carried on `reply.intents[]`. The middleware validated args
- * against the server tool catalog already; we just dispatch the
- * constructed `intent` payload through the canvas orchestrator. The
- * runtime guard on `kind` is defensive — a future server catalog
- * change shouldn't blow up the app if it emits an unknown kind.
- *
- * Known kinds today: `highlightCitation`, `jumpToPage` (the two
- * PdfViewer tools shipped in Phase 4). Future tools land here as
- * the catalog grows.
- */
-function dispatchReplyIntents(
-  intents: ChatDispatchedIntent[] | undefined,
-  dispatchIntent: (intent: CanvasIntent, source?: "user" | "agent" | "tour") => unknown,
-): void {
-  for (const dispatched of intents ?? []) {
-    const intent = dispatched.intent as CanvasIntent;
-    if (typeof intent?.kind !== "string") continue;
-    dispatchIntent(intent, "agent");
-  }
-}
-
 const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
   scenarioId,
   scenarioName,
@@ -712,43 +456,50 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
   pickViews,
 }) => {
   const { advanceFrame, state: onboardingState } = useOnboardingSession();
-  const { state: appMode } = useAppMode();
   // 2026-05-30-widget-role-access: role for child widgets (ThinkingStream,
   // ProposeSchemaFieldCard) is the auth axis, NOT the conversation flow.
   const widgetRole = useWidgetRole();
   const currentFrameRef = useRef(onboardingState.currentFrame);
-  // Keep ref synced for handleSend's gated auto-advance check.
+  // Keep ref synced for the first-send gated auto-advance check.
   currentFrameRef.current = onboardingState.currentFrame;
   const { state: registryState } = useScenarioRegistry();
-  const { state: chatState, enqueueFieldProposal, appendMessage } = useChatStore();
+  const { state: chatState } = useChatStore();
   const chatSessionId = chatState.activeSessionId;
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
   const navigate = useNavigate();
-  const { dispatch: dispatchIntent } = useCanvasOrchestrator();
 
-  const handleSuggestedAction = useCallback(
-    (action: ChatSuggestedAction, citations?: Citation[]) => {
-      // "Show source" carries no intent of its own — it opens/highlights the
-      // answer's primary citation, same as clicking the [1] chip. (Previously
-      // this fell through to a null intent and did nothing.)
-      if (action.key === "show-source") {
-        const c = citations?.[0];
-        if (c) {
-          dispatchIntent(citationToHighlightIntent(c), "user");
-        }
-        return;
+  // 2026-05-30-unified-conversation-flow Phase 1 — the durable engine owns
+  // liveTurns, send, handleSuggestedAction, and the hydrate/agent
+  // projection effects (the bodies that used to be duplicated here). The
+  // onboarding-only CHOREOGRAPHY stays inline: `onFirstUserSend` advances
+  // the nav to Interact (F5), and the ThinkingStream `onDone` advances to
+  // Extract (F3) below. `isOnboarding` is read from the session inside the
+  // engine. `scopeHint` threads the scenario file/title into the prompt.
+  const conv = useConversation(chatSessionId, {
+    title: activeChatSession?.title ?? "Onboarding",
+    scopeHint: { fileName, scenarioTitle: scenarioName },
+    onFirstUserSend: () => {
+      // 2026-05-27: a real user-typed turn means they're moving past
+      // browsing the canvas — auto-advance the nav to Interact (F5).
+      // Guard: only advance if currently on F2/F3/F3a/F4 (the
+      // pre-Interact part of the journey). If the user is already
+      // at/past F5 (e.g. clicked "Show me chat" pill), don't bounce.
+      //
+      // unified-conversation-flow Phase 1: this is the engine's
+      // `onFirstUserSend` (fires ONCE per hook instance, per design.md
+      // §4 "advanceFrame(f5) on first send"). The pre-refactor code ran
+      // this guard on EVERY send, but after the first qualifying send
+      // the frame is f5 so the guard fails on later sends anyway — the
+      // dominant forward-only flow is identical. The only divergence is
+      // the back-navigate-then-resend edge (no test pins it); once-
+      // semantics is the intended model.
+      const frame = currentFrameRef.current;
+      if (frame === "f2" || frame === "f3" || frame === "f3a" || frame === "f4") {
+        advanceFrame("f5");
       }
-      const intent = suggestedActionToIntent(action);
-      if (intent) dispatchIntent(intent, "agent");
     },
-    [dispatchIntent],
-  );
-
-  // CF-18: live ad-hoc chat turns that follow the scripted thinking flow.
-  // Owned here (not by ChatInputBar) so they render in the conversation
-  // scroll body alongside thinking notes + Pick-a-view.
-  const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
-  const [sending, setSending] = useState(false);
+  });
+  const { liveTurns, sending, send: handleSend, handleSuggestedAction } = conv;
   // Scroll-to-bottom ref for the conversation body.
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -760,193 +511,6 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [liveTurns, sending]);
-
-  // RT-01: hydrate liveTurns from the persisted thread on mount.
-  // The chat handler writes every user + assistant turn to the
-  // chat_messages table, but `liveTurns` lives only in component
-  // state — without this fetch, a page refresh drops the visible
-  // conversation even though the DB rows are intact.
-  //
-  // Race rule: only seed when `liveTurns` is still empty. If the
-  // user has somehow typed + received a reply in the few ms it
-  // takes the fetch to resolve, the optimistic state wins; the
-  // hydrated fetch already covered those rows so nothing is lost.
-  //
-  // Errors are non-fatal: a failed hydrate just renders the empty
-  // thread and lets the user start a new turn. The server-side row
-  // still exists; future sends + their hydrates will work.
-  useEffect(() => {
-    if (!chatSessionId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const messages = await listChatMessages(chatSessionId);
-        if (cancelled || messages.length === 0) return;
-        const turns: LiveTurn[] = messages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            // clickable-citations Phase 2 — RT-01 hydrate carries
-            // `citations` per row; project onto LiveTurn so chips
-            // re-render after a refresh.
-            citations: m.citations ?? [],
-          }));
-        setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
-      } catch (err) {
-        captureException(err, {
-          route: "/api/chat-sessions/:id/messages",
-          chatSessionId,
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [chatSessionId]);
-
-  // `schema-agent-chat-affordances`: project ChatStore-emitted agent
-  // messages (id prefix `agent-`) into the rendered live-turns list.
-  // The Schema-Agent's confidence-delta narration is appended via
-  // `appendAgentMessage` from SchemaView's rerun handler; without this
-  // projection it would land in `ChatSession.messages` but never reach
-  // the rendered conversation surface.
-  useEffect(() => {
-    if (!activeChatSession) return;
-    setLiveTurns((cur) => {
-      const seen = new Set(cur.map((t) => t.id));
-      const projected: LiveTurn[] = activeChatSession.messages
-        .filter((m) => m.id.startsWith("agent-") && !seen.has(m.id))
-        .map((m) => ({ id: m.id, role: "assistant", content: m.content }));
-      if (projected.length === 0) return cur;
-      return [...cur, ...projected];
-    });
-  }, [activeChatSession?.messages, activeChatSession]);
-
-  const handleSend = useCallback(
-    async (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed || sending) return;
-      const userTurn: LiveTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
-      setLiveTurns((cur) => [...cur, userTurn]);
-
-      // 2026-05-27: a real user-typed turn means they're moving past
-      // browsing the canvas — auto-advance the nav to Interact (F5).
-      // Guard: only advance if currently on F2/F3/F3a/F4 (the
-      // pre-Interact part of the journey). If the user is already
-      // at/past F5 (e.g. clicked "Show me chat" pill), don't bounce.
-      const frame = currentFrameRef.current;
-      if (frame === "f2" || frame === "f3" || frame === "f3a" || frame === "f4") {
-        advanceFrame("f5");
-      }
-
-      if (!chatSessionId) {
-        // EntityRegistry seeds a chat session on mount; if we got here
-        // without one something has broken upstream. Fall back to a
-        // polite assistant turn rather than crashing.
-        setLiveTurns((cur) => [
-          ...cur,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content: "No active chat session — please refresh and try again.",
-          },
-        ]);
-        return;
-      }
-
-      setSending(true);
-      try {
-        // widget-llm-integration Phase 5 — surface the user's
-        // current ViewerStep kind so the LLM tool catalog is scoped.
-        const stepIdx = activeChatSession?.viewer.currentStep.stepIndex ?? -1;
-        const activeStepKind =
-          stepIdx >= 0 ? activeChatSession?.viewer.history[stepIdx]?.kind ?? null : null;
-        const result = await sendChatMessage({
-          chatSessionId,
-          newUserMessage: trimmed,
-          sessionMeta: {
-            title: activeChatSession?.title ?? "Onboarding",
-            isOnboarding: activeChatSession?.isOnboardingSession ?? true,
-            onboardingSessionId: chatSessionId,
-            activeEntityKey: activeChatSession?.activeEntityKey ?? null,
-          },
-          // Threaded into the grounded LLM prompt so the model knows
-          // what doc the user is currently looking at — even when
-          // GroundX search comes back empty for off-topic queries
-          // (greetings, "what can you help with", etc.).
-          scopeHint: {
-            fileName,
-            scenarioTitle: scenarioName,
-          },
-          activeStepKind,
-        });
-        setLiveTurns((cur) => [
-          ...cur,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content: result.reply.answer,
-            proposedSchemaField: result.reply.proposedSchemaField,
-            // clickable-citations Phase 2 — thread reply citations
-            // onto the LiveTurn so CiteChips render alongside the
-            // bubble.
-            citations: result.reply.citations ?? [],
-            // widget-llm-integration Phase 1 — thread suggestedActions
-            // so the SuggestedActionChips widget renders below the bubble.
-            suggestedActions: result.reply.suggestedActions ?? [],
-          },
-        ]);
-        // core-data-model-hardening item 6 — mirror the assistant turn
-        // (with citations) into the shared ChatStore so the canvas
-        // (InteractView litRegions / CiteChip / report-pin) reads it off
-        // the in-memory session instead of polling the thread. Minted
-        // with the `m-` id prefix so the `agent-` projection effect
-        // above does NOT re-render it into liveTurns.
-        appendMessage({
-          role: "assistant",
-          content: result.reply.answer,
-          citations: result.reply.citations ?? [],
-        });
-        // widget-llm-integration Phase 5 — dispatch every
-        // server-validated LLM tool call through the canvas
-        // orchestrator.
-        dispatchReplyIntents(result.reply.intents, dispatchIntent);
-        // F3a wireframe-fix: also enqueue the proposal onto the
-        // canvas-side ProposalCard queue so SchemaView's "above the
-        // list" surface fires. The chat propose-card stays as a
-        // mirror.
-        if (result.reply.proposedSchemaField) {
-          enqueueFieldProposal({
-            categoryId: result.reply.proposedSchemaField.categoryId,
-            name: result.reply.proposedSchemaField.name,
-            type: result.reply.proposedSchemaField.type,
-            description: result.reply.proposedSchemaField.description,
-            // proposal-envelope-provenance: forward the Zod parse
-            // provenance so the canvas ProposalCard surfaces the
-            // `envelope verified` label.
-            provenance: result.reply.proposedSchemaField.provenance,
-          });
-        }
-      } catch (err) {
-        // CF-08: branch the user-facing copy on the upstream status
-        // so 401 / 501 / 504 / 5xx / 400 each say the right thing.
-        const mapped = chatErrorToUserCopy(err);
-        setLiveTurns((cur) => [
-          ...cur,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content: mapped.message,
-          },
-        ]);
-      } finally {
-        setSending(false);
-      }
-    },
-    [sending, chatSessionId, activeChatSession, advanceFrame, fileName, scenarioName, enqueueFieldProposal],
-  );
 
   // Sample switcher dropdown anchor + state.
   const switcherAnchorRef = useRef<HTMLSpanElement | null>(null);

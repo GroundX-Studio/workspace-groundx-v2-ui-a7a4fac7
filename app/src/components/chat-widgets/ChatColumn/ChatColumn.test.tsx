@@ -43,9 +43,27 @@ import { useLiveExtractionSchema } from "@/api/useLiveExtractionSchema";
 import type { WidgetRole } from "@groundx/shared";
 
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
 import { ChatColumn } from "./ChatColumn";
+
+/**
+ * 2026-05-30-unified-conversation-flow Phase 1 — a real STEADY mount sits
+ * on a non-onboarding chat session (`newSession` defaults
+ * `isOnboardingSession:false`, like SteadyShell's SessionSwitcher). The
+ * onboarding harness seeds an onboarding-flagged session, so steady tests
+ * that care about `isOnboarding` flip to a fresh steady session first.
+ * The durable engine reads `isOnboarding` from the active session (no
+ * longer hardcoded per surface), so the session flag is the contract.
+ */
+function SteadySessionMount(props: Parameters<typeof ChatColumn>[0]) {
+  const { newSession } = useChatStore();
+  useEffect(() => {
+    newSession({ title: "Untitled" });
+  }, [newSession]);
+  return <ChatColumn {...props} />;
+}
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -920,7 +938,9 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
+      // Mount on a genuine steady (non-onboarding) session so the engine's
+      // session-sourced `isOnboarding` reflects a real steady surface.
+      renderWithOnboardingProviders(<SteadySessionMount surface="steady" role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -934,7 +954,8 @@ describe("ChatColumn", () => {
           "Steady reply.",
         );
       });
-      // Steady sends should NOT carry isOnboarding=true.
+      // Steady sends should NOT carry isOnboarding=true — the active
+      // session is a steady (non-onboarding) one.
       const sendCall = vi.mocked(sendChatMessage).mock.calls[0][0];
       expect(sendCall.sessionMeta.isOnboarding).toBe(false);
     });
