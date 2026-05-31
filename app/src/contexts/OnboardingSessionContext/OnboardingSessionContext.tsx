@@ -34,8 +34,14 @@ function frameToStepStandalone(
       return { kind: "doc-viewer", documentId: scenario ? `scenario:${scenario}` : "scenario:unknown" };
     case "f3":
     case "f3a":
-    case "f4":
       return { kind: "extract-workbench", scenarioId: scenario ?? "unknown" };
+    // 2026-05-29-smart-report-screen Phase 1 — f4 = Report render (S3),
+    // f4a = Report builder (S3a). Both project to the `report` ViewerStep
+    // kind (the render surface reads the active scenario's scope); f4 used
+    // to mis-route to `extract-workbench` (the bug this change fixes).
+    case "f4":
+    case "f4a":
+      return { kind: "report" };
     case "f5":
     case "f6":
       return { kind: "interact-chat", scenarioId: scenario ?? "unknown" };

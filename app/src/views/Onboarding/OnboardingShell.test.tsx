@@ -878,6 +878,122 @@ describe("OnboardingShell", () => {
     });
   });
 
+  // ── 2026-05-29-smart-report-screen Phase 0 — failing user-visible test ──
+  //
+  // The Report step-strip pill is the Analyze sub-pill that was hard-disabled
+  // (`reportActive = false`) and `f4` mis-routed to the extract workbench.
+  // Phase 0 forcing function: with the Utility scenario, clicking the Report
+  // sub-pill must (a) advance the canvas to `f4` and (b) render the single-doc
+  // IC-brief report render surface — fixture sections + CiteChips — NOT the
+  // extract workbench. Red before Phases 1-3 land.
+  it("Phase 0: Utility → clicking the Report pill advances to f4 and renders the report surface", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+
+    // Pre-condition: on F3 the canvas is the extract workbench (Report not yet shown).
+    expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
+
+    // Click the Report sub-pill (now reachable for all scenarios).
+    await user.click(screen.getByText("Report"));
+
+    // The canvas advances to f4 and mounts the report render surface.
+    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
+    // The extract workbench is no longer the canvas content.
+    expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
+
+    // The fixture sections render with their headings.
+    const surface = within(screen.getByTestId("smart-report-render"));
+    expect(surface.getByText(/billing summary/i)).toBeInTheDocument();
+    expect(surface.getByText(/charge breakdown/i)).toBeInTheDocument();
+    expect(surface.getByText(/anomalies/i)).toBeInTheDocument();
+    expect(surface.getByText(/recommendation/i)).toBeInTheDocument();
+
+    // At least one CiteChip is present in a rendered section body.
+    expect(surface.getByTestId("cite-chip-1")).toBeInTheDocument();
+  });
+
+  // ── 2026-05-29-smart-report-screen Phase 1 — frame/nav wiring ──────
+
+  it("Phase 1: the Report pill is reachable (not disabled) for an anonymous viewer", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      initialAuthState: "anonymous",
+    });
+    const reportPill = screen.getByText("Report").closest('[role="button"]');
+    expect(reportPill).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("Phase 1: anon previews the report render surface (export/Save locked)", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      initialAuthState: "anonymous",
+    });
+    await user.click(screen.getByText("Report"));
+    const surface = await screen.findByTestId("smart-report-render");
+    expect(surface).toHaveAttribute("data-role", "anonymous");
+    expect(within(surface).getByTestId("smart-report-export")).toHaveTextContent("🔒");
+  });
+
+  it("Phase 1: Report pill is reachable on the Loan scenario too (not chapter-gated)", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f3",
+      initialScenario: "loan",
+    });
+    await user.click(screen.getByText("Report"));
+    // Loan has no fixture → the surface mounts in its empty state (still f4,
+    // not the extract workbench).
+    const surface = await screen.findByTestId("smart-report-render");
+    expect(within(surface).getByTestId("smart-report-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
+  });
+
+  it("Phase 1: f4 → f4a edit affordance routes to the builder; f4a → f4 back returns to render", async () => {
+    const user = userEvent.setup();
+    let snapshot = { sessionId: null as string | null, frame: "" };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SessionProbe onSnapshot={(next) => (snapshot = next)} />
+      </>,
+      { initialFrame: "f4", initialScenario: "utility" },
+    );
+
+    // f4 render surface is up.
+    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
+
+    // ✎ edit §1 → f4a builder.
+    await user.click(screen.getByTestId("report-section-edit-billing_summary"));
+    expect(await screen.findByTestId("report-builder-view")).toBeInTheDocument();
+    await waitFor(() => expect(snapshot.frame).toBe("f4a"));
+    expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
+
+    // ← back → f4 render.
+    await user.click(screen.getByTestId("report-builder-back"));
+    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
+    await waitFor(() => expect(snapshot.frame).toBe("f4"));
+  });
+
+  it("Phase 1: Extract → Report carries the source ContentScope (bucket+project filter, no re-pick)", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    await user.click(screen.getByText("Report"));
+    // The Utility fixture only resolves for a bucket+project:"utility" scope —
+    // its presence proves the render scope was the source surface's scope, not
+    // a re-picked default.
+    const surface = await screen.findByTestId("smart-report-render");
+    expect(within(surface).getByText(/billing summary/i)).toBeInTheDocument();
+  });
+
   // Regression: clicking a citation while on F3 pushes a doc-viewer
   // ViewerStep — canvas swaps to UnderstandView, but the StepStrip
   // pill was reading `session.currentFrame` directly, so the nav

@@ -205,6 +205,9 @@ const FRAME_ORDER: Record<FFrame, number> = {
   f3: 3,
   f3a: 3,
   f4: 4,
+  // f4a = Report builder, a side branch of the Report render frame f4 (mirrors
+  // f3/f3a) — same rank for "highest reached" purposes.
+  f4a: 4,
   f5: 5,
   f6: 6,
   f7: 7,

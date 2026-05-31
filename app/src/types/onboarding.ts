@@ -12,7 +12,10 @@ export type AppMode = "onboarding" | "steady";
 
 export type Scenario = "utility" | "loan" | "solar";
 
-export type FFrame = "f1" | "f2" | "f3" | "f3a" | "f4" | "f5" | "f6" | "f7";
+// `f4` = Report render (S3), `f4a` = Report builder (S3a) — mirrors the
+// Extract `f3`/`f3a` render/builder split (2026-05-29-smart-report-screen
+// Phase 1 / design.md D1).
+export type FFrame = "f1" | "f2" | "f3" | "f3a" | "f4" | "f4a" | "f5" | "f6" | "f7";
 
 export type GateTrigger = "save" | "export" | "byo" | "threshold";
 

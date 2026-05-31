@@ -36,6 +36,8 @@ import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { IntegrateView } from "./IntegrateView";
 import { InteractView } from "./InteractView";
 import { NavDebugOverlay } from "./NavDebugOverlay";
+import { ReportBuilderView } from "./ReportBuilderView";
+import { ReportRenderView } from "./ReportRenderView";
 import { UnderstandView } from "./UnderstandView";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ const FRAME_TO_STEP: Record<FFrame, StepId> = {
   f3: "analyze",
   f3a: "analyze",
   f4: "analyze",
+  f4a: "analyze",
   f5: "analyze",
   f6: "analyze",
   f7: "integrate",
@@ -104,13 +107,19 @@ function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["subst
   // P1 (2026-05-29): while the sign-up gate is open the strip sits on
   // Understand, so the Analyze bracket shows no active sub-step (otherwise
   // both Understand and Interact would read as active at once).
-  const extractActive = !gateOpen && (frame === "f3" || frame === "f3a" || frame === "f4");
+  // 2026-05-29-smart-report-screen Phase 1 — f4/f4a are the Report render +
+  // builder frames; the extract workbench is f3/f3a only (f4 no longer routes
+  // there).
+  const extractActive = !gateOpen && (frame === "f3" || frame === "f3a");
   const interactActive = !gateOpen && (frame === "f5" || frame === "f6");
-  const reportActive = false;
+  // The Report pill is reachable for ALL scenarios (not chapter-gated, not
+  // auth-gated) — `reportActive = false` removed. Anon previews the render
+  // surface (export/Save locked). Active on the Report frames.
+  const reportActive = !gateOpen && (frame === "f4" || frame === "f4a");
   return [
     { id: "extract", label: "Extract", state: extractActive ? "active" : "reachable-todo" },
     { id: "interact", label: "Interact", state: interactActive ? "active" : "reachable-todo" },
-    { id: "report", label: "Report", state: reportActive ? "active" : "disabled" },
+    { id: "report", label: "Report", state: reportActive ? "active" : "reachable-todo" },
   ];
 }
 
@@ -333,16 +342,17 @@ export const OnboardingShell: FC = () => {
   );
 
   // WF-01 C3 (2026-05-28). Sub-pill clicks (Extract / Interact / Report)
-  // route directly to the corresponding F-frame. Report stays disabled
-  // until the user signs in (canonical onboarding never visits it), so
-  // it never reaches this handler.
+  // route directly to the corresponding F-frame.
+  // 2026-05-29-smart-report-screen Phase 1 — Report is now reachable for all
+  // scenarios and routes to f4 (the render surface), no longer mis-routed to
+  // f7 (Integrate).
   const handleSubstepClick = useCallback(
     (subId: "extract" | "interact" | "report") => {
       if (session.scenario == null) return;
       const frameBySub: Record<typeof subId, FFrame> = {
         extract: "f3",
         interact: "f5",
-        report: "f7",
+        report: "f4",
       };
       advanceFrame(frameBySub[subId]);
     },
@@ -408,8 +418,13 @@ export const OnboardingShell: FC = () => {
         return "doc-viewer";
       case "f3":
       case "f3a":
-      case "f4":
         return "extract-workbench";
+      // 2026-05-29-smart-report-screen Phase 1 — f4 = Report render,
+      // f4a = Report builder. Both project to the `report` step kind (was
+      // mis-routed to extract-workbench).
+      case "f4":
+      case "f4a":
+        return "report";
       case "f5":
       case "f6":
         return "interact-chat";
@@ -449,12 +464,18 @@ export const OnboardingShell: FC = () => {
         return <ExtractView />;
       case "interact-chat":
         return <InteractView />;
+      case "report":
+        // 2026-05-29-smart-report-screen Phase 1/3 — `report` is the step kind
+        // for BOTH f4 (render) and f4a (builder). Disambiguate by the active
+        // frame: f4a → the builder route (placeholder, Phase 4), else → the
+        // production render surface (f4 / S3).
+        return session.currentFrame === "f4a" ? <ReportBuilderView /> : <ReportRenderView />;
       case "integrate":
         return <IntegrateView />;
       default:
         return null;
     }
-  }, [bookCallActive, signupSurfaceActive, effectiveStepKind]);
+  }, [bookCallActive, signupSurfaceActive, effectiveStepKind, session.currentFrame]);
 
   // Theme-driven breakpoint detection. Compact step strip activates below
   // md (900 = MUI default; iPad-portrait-to-landscape divide). Phones +
