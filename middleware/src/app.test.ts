@@ -857,3 +857,236 @@ describe("middleware scaffold", () => {
     });
   });
 });
+
+describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)", () => {
+  // The samples bucket the Utility report scope sits in. A scope on this
+  // bucket is a sample preview; any other bucket is BYO → gate (#10).
+  const SAMPLES_BUCKET = 28454;
+
+  function renderSetup() {
+    const repository = new MemoryAppRepository();
+    const partnerClient = new FakePartnerClient();
+    const groundxClient = new FakeGroundXClient();
+    const llmClient = new FakeLlmClient();
+    const scenarioRegistry = new FakeScenarioRegistry();
+    const mockEnv = { ...testEnv, MOCK_MODE: true, GROUNDX_SAMPLES_BUCKET_ID: SAMPLES_BUCKET };
+    const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+    return { app, repository };
+  }
+
+  async function ownedAgent(app: ReturnType<typeof createApp>) {
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    await agent
+      .post("/api/chat-sessions")
+      .send({ id: "chat-1", title: "Onboarding", isOnboarding: true })
+      .expect(200);
+    return agent;
+  }
+
+  const utilityScope = { type: "bucket", bucketId: SAMPLES_BUCKET, filter: { project: "utility" } };
+
+  function renderBody(overrides: Record<string, unknown> = {}) {
+    return {
+      template_id: "rt-utility-ic-brief",
+      scope: utilityScope,
+      variables: {},
+      section_ids: null,
+      chat_session_id: "chat-1",
+      parent_message_id: null,
+      ...overrides,
+    };
+  }
+
+  it("rejects requests without a session cookie", async () => {
+    const { app } = renderSetup();
+    await request(app)
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody())
+      .expect(401);
+  });
+
+  it("returns 400 for a malformed payload (missing template_id / bad scope)", async () => {
+    const { app } = renderSetup();
+    const agent = await ownedAgent(app);
+    await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ template_id: undefined }))
+      .expect(400, { error: "invalid_payload" });
+    await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ scope: { type: "nope" } }))
+      .expect(400, { error: "invalid_payload" });
+  });
+
+  it("404 when the chat session row doesn't exist; 403 when not owned", async () => {
+    const { app } = renderSetup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    // No chat-1 row created → 404.
+    await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody())
+      .expect(404);
+    // Owner-A creates chat-1; owner-B (fresh anon) can't render it → 403.
+    const ownerA = await ownedAgent(app);
+    void ownerA;
+    const ownerB = request.agent(app);
+    await ownerB.post("/api/onboarding/session").expect(200);
+    await ownerB
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody())
+      .expect(403);
+  });
+
+  it("returns the four ordered Utility sections (snake_case wire), preview_only", async () => {
+    const { app } = renderSetup();
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody())
+      .expect(200);
+    expect(res.body.status).toBe("complete");
+    expect(res.body.preview_only).toBe(true);
+    expect(res.body.template_id).toBe("rt-utility-ic-brief");
+    expect(res.body.sections.map((s: { name: string }) => s.name)).toEqual([
+      "billing_summary",
+      "charge_breakdown",
+      "anomalies",
+      "recommendation",
+    ]);
+    expect(res.body.sections[0]).toHaveProperty("render_as");
+    expect(res.body.sections[0]).toHaveProperty("cites");
+    expect(res.body.sections[0].cites[0].documentId).toBe("utility-bill-2026-04");
+  });
+
+  it("section_ids subset scopes a re-render to those sections only", async () => {
+    const { app } = renderSetup();
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ section_ids: ["anomalies"] }))
+      .expect(200);
+    expect(res.body.sections.map((s: { name: string }) => s.name)).toEqual(["anomalies"]);
+  });
+
+  it("a BYO scope returns the gate envelope (#10), not a render", async () => {
+    const { app } = renderSetup();
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ scope: { type: "bucket", bucketId: 70001 } }))
+      .expect(200);
+    expect(res.body.gated).toBe(true);
+    expect(res.body.gate).toBe("byo");
+  });
+
+  it("a multi-doc group ContentScope renders (fixture-backed shape; live search is Phase 7)", async () => {
+    const { app } = renderSetup();
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ template_id: "rt-solar-portfolio", scope: { type: "group", groupId: 9001 } }))
+      .expect(200);
+    expect(res.body.status).toBe("complete");
+    expect(res.body.sections.length).toBeGreaterThan(0);
+  });
+
+  it("edge case: unresolved variable keeps {var} + a 'bind it' warning", async () => {
+    const { app } = renderSetup();
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ template_id: "rt-utility-unbound-variable" }))
+      .expect(200);
+    const section = res.body.sections.find((s: { name: string }) => s.name === "billing_summary");
+    expect(section.body).toContain("{billing_period}");
+    expect(section.warnings.some((w: string) => /bind it/i.test(w))).toBe(true);
+  });
+
+  it("edge case: no-source section renders an em-dash + low-confidence flag", async () => {
+    const { app } = renderSetup();
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ template_id: "rt-utility-no-source" }))
+      .expect(200);
+    const section = res.body.sections.find((s: { name: string }) => s.name === "unsupported_claim");
+    expect(section.body).toBe("—");
+    expect(section.cites).toHaveLength(0);
+    expect(section.confidence).toBeLessThan(0.5);
+    expect(section.warnings.some((w: string) => /no support/i.test(w))).toBe(true);
+  });
+});
+
+describe("POST /api/widgets/smart-report/reports (smart-report Phase 6 — Save)", () => {
+  function saveSetup() {
+    const repository = new MemoryAppRepository();
+    const partnerClient = new FakePartnerClient();
+    const groundxClient = new FakeGroundXClient();
+    const llmClient = new FakeLlmClient();
+    const scenarioRegistry = new FakeScenarioRegistry();
+    const mockEnv = { ...testEnv, MOCK_MODE: true };
+    const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+    return { app, repository };
+  }
+
+  const template = {
+    id: "rt-utility-ic-brief",
+    name: "Utility IC Brief",
+    format: "ic-brief",
+    sections: [
+      {
+        id: "billing_summary",
+        name: "billing_summary",
+        renderAs: "PARAGRAPH",
+        question: "Summarize the billing period and total.",
+        variables: [],
+        instructions: "Cite the total",
+      },
+    ],
+  };
+
+  it("401 for an anonymous caller (Save is sign-in gated)", async () => {
+    const { app } = saveSetup();
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    await agent
+      .post("/api/widgets/smart-report/reports")
+      .send({ template })
+      .expect(401);
+  });
+
+  it("persists the report template for a signed-in member via the shared saveTemplate API", async () => {
+    const { app, repository } = saveSetup();
+    const agent = request.agent(app);
+    await agent
+      .post("/api/auth/register")
+      .set("Authorization", `Basic ${Buffer.from("pat@example.com:secret").toString("base64")}`)
+      .send({ customer: { first: "Pat" } })
+      .expect(200);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports")
+      .send({ template })
+      .expect(200);
+    expect(res.body.id).toBe("rt-utility-ic-brief");
+    const saved = await repository.getTemplate("rt-utility-ic-brief");
+    expect(saved).toBeTruthy();
+    expect(saved!.kind).toBe("report");
+    expect(saved!.name).toBe("Utility IC Brief");
+  });
+
+  it("400 for a malformed template body", async () => {
+    const { app } = saveSetup();
+    const agent = request.agent(app);
+    await agent
+      .post("/api/auth/register")
+      .set("Authorization", `Basic ${Buffer.from("pat@example.com:secret").toString("base64")}`)
+      .send({ customer: { first: "Pat" } })
+      .expect(200);
+    await agent
+      .post("/api/widgets/smart-report/reports")
+      .send({ template: { id: "x" } })
+      .expect(400, { error: "invalid_payload" });
+  });
+});

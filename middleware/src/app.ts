@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
-import { parseCitations, templateSaveInputSchema } from "@groundx/shared";
+import { contentScopeSchema, parseCitations, templateSaveInputSchema } from "@groundx/shared";
 
 import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
@@ -19,6 +19,13 @@ import { ScenarioRegistry } from "./scenarios/registry.js";
 import { ChatHandlerError, deriveRagContentScope, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
 import { resolveFieldGeometry } from "./services/citationGeometry.js";
 import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
+import {
+  renderReport,
+  reportTemplateToSaveInput,
+  type ReportSection,
+  type ReportSectionRenderAs,
+  type ReportTemplate,
+} from "./services/reportRenderer.js";
 import { sendUpstreamResponse } from "./services/http.js";
 import { fetchDocumentXray } from "./services/xrayCache.js";
 import type {
@@ -71,6 +78,53 @@ function parseMetadataPatch(body: unknown): { onboardingState?: string | null } 
   }
 
   return { onboardingState: input.onboardingState ?? null };
+}
+
+/** The valid section `renderAs` glyphs. */
+const REPORT_RENDER_AS = new Set<ReportSectionRenderAs>(["PARAGRAPH", "BULLETS", "TABLE"]);
+
+/**
+ * Validate an untrusted Save body into a typed `ReportTemplate`, or `null`. The
+ * bridge output is re-validated through the shared `templateSaveInputSchema`,
+ * but we still gate the inbound app shape here so a malformed body 400s before
+ * the bridge. (Light hand-rolled validation — the durable wire contract is the
+ * shared report-kind `TemplateSaveInput` the bridge produces.)
+ */
+function parseReportTemplate(body: unknown): ReportTemplate | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const template = (body as Record<string, unknown>).template;
+  if (!template || typeof template !== "object" || Array.isArray(template)) return null;
+  const t = template as Record<string, unknown>;
+  if (typeof t.id !== "string" || typeof t.name !== "string" || typeof t.format !== "string") {
+    return null;
+  }
+  if (!Array.isArray(t.sections)) return null;
+  const sections: ReportSection[] = [];
+  for (const raw of t.sections) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const s = raw as Record<string, unknown>;
+    if (
+      typeof s.id !== "string" ||
+      typeof s.name !== "string" ||
+      typeof s.renderAs !== "string" ||
+      !REPORT_RENDER_AS.has(s.renderAs as ReportSectionRenderAs) ||
+      typeof s.question !== "string" ||
+      !Array.isArray(s.variables) ||
+      !s.variables.every((v) => typeof v === "string")
+    ) {
+      return null;
+    }
+    sections.push({
+      id: s.id,
+      name: s.name,
+      renderAs: s.renderAs as ReportSectionRenderAs,
+      question: s.question,
+      variables: s.variables as string[],
+      ...(typeof s.instructions === "string" ? { instructions: s.instructions } : {}),
+      ...(typeof s.pinnedFromTurnId === "string" ? { pinnedFromTurnId: s.pinnedFromTurnId } : {}),
+    });
+  }
+  return { id: t.id, name: t.name, format: t.format, sections };
 }
 
 export interface AppDependencies {
@@ -1141,6 +1195,128 @@ export function createApp({
           },
         );
         res.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // ── Smart Report (smart-report Phase 6) ──────────────────────────
+  //
+  // Render: run a report Template over a `ContentScope` and return ordered,
+  // cited sections. MOCK_MODE returns the Utility fixture; a `section_ids`
+  // subset scopes a re-render; the sample renders `preview_only`; a BYO scope
+  // returns the gate envelope (#10). Live multi-doc render (search + grounded
+  // generation) is Phase 7 / WF-10 — not wired here.
+  //
+  // Auth: `requireSession` (anon can preview the sample, mirroring Extract +
+  // the chat surface). Ownership: the chat_session row must be owned by the
+  // caller (same trust model as /api/extract-field).
+  app.post(
+    "/api/widgets/smart-report/reports/render",
+    apiLimiter,
+    requireSession,
+    async (req, res, next) => {
+      try {
+        const body = requestBodyObject(req);
+        const templateId = typeof body.template_id === "string" ? body.template_id : null;
+        const chatSessionId = typeof body.chat_session_id === "string" ? body.chat_session_id : null;
+        const scopeParsed = contentScopeSchema.safeParse(body.scope);
+        const variables = stringRecord(body.variables) as Record<string, string>;
+        const sectionIds = Array.isArray(body.section_ids)
+          ? (body.section_ids.filter((s): s is string => typeof s === "string"))
+          : body.section_ids === null || body.section_ids === undefined
+            ? null
+            : "invalid";
+        if (
+          !templateId ||
+          !chatSessionId ||
+          !scopeParsed.success ||
+          sectionIds === "invalid"
+        ) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+
+        const chatSession = await repository.getChatSession(chatSessionId);
+        if (!chatSession) {
+          res.status(404).json({ error: "chat_session_not_found" });
+          return;
+        }
+        const reqSession = req.session!;
+        const ownedByUser =
+          reqSession.groundxUsername && chatSession.ownerUserId === reqSession.groundxUsername;
+        const ownedByAnon = !reqSession.groundxUsername && chatSession.ownerAnonId === reqSession.id;
+        if (!ownedByUser && !ownedByAnon) {
+          res.status(403).json({ error: "not_session_owner" });
+          return;
+        }
+
+        const result = renderReport(
+          {
+            templateId,
+            scope: scopeParsed.data,
+            variables,
+            sectionIds,
+            chatSessionId,
+            parentMessageId:
+              typeof body.parent_message_id === "string" ? body.parent_message_id : null,
+          },
+          {
+            mockMode: env.MOCK_MODE,
+            samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
+          },
+        );
+        res.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // Save: persist a report Template via the shared `saveTemplate` repo API
+  // (the same persistence Extract schemas use; reportTemplateToSaveInput is the
+  // report-kind bridge). Sign-in gated (`requireAuthenticatedUser`) — anon Save
+  // is the client-side `commitGate` path. Ownership is SERVER-assigned from the
+  // session (never trusted from the body).
+  app.post(
+    "/api/widgets/smart-report/reports",
+    apiLimiter,
+    requireAuthenticatedUser,
+    async (req, res, next) => {
+      try {
+        const session = req.session!;
+        const groundxUsername = session.groundxUsername;
+        if (!groundxUsername) {
+          res.status(401).json({ error: "no_signed_in_user" });
+          return;
+        }
+        const parsed = parseReportTemplate(req.body);
+        if (!parsed) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        // Bridge the app-owned ReportTemplate → the shared report-kind
+        // TemplateSaveInput, then validate it through the same boundary schema
+        // the /api/templates route uses (defense-in-depth on the bridge output).
+        const saveInput = reportTemplateToSaveInput(parsed);
+        const validated = templateSaveInputSchema.safeParse(saveInput);
+        if (!validated.success || validated.data.name.trim().length === 0) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        const input = validated.data;
+        const now = new Date();
+        await repository.saveTemplate({
+          id: input.id,
+          kind: input.kind,
+          groundxUsername, // from the session — NOT the request body
+          name: input.name,
+          bodyJson: JSON.stringify(input.body),
+          createdAt: now,
+          updatedAt: now,
+        });
+        res.status(200).json({ id: input.id, name: input.name, updatedAt: now.toISOString() });
       } catch (error) {
         next(error);
       }
