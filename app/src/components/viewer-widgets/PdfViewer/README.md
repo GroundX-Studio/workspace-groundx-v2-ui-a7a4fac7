@@ -7,9 +7,10 @@ GroundX document.
 
 ## What it does
 
-Reads a `documentId`, calls `DocumentsContext.getDocumentXray` to fetch
-the parsed-document payload (which includes `documentPages[]` with
-pre-rasterized `pageUrl` images), and renders the active page +
+Reads a `scope: ContentScope`, resolves the target document from it
+(single-doc → `documentIds[0]`), calls `DocumentsContext.getDocumentXray`
+to fetch the parsed-document payload (which includes `documentPages[]`
+with pre-rasterized `pageUrl` images), and renders the active page +
 thumbnail strip below.
 
 Pages are pre-rasterized server-side by GroundX, so the widget renders
@@ -21,10 +22,20 @@ just images that scale to the viewer pane via `object-fit: contain`.
 
 ```ts
 interface PdfViewerWidgetProps {
-  /** GroundX document UUID. The widget fetches its xray on mount. */
-  documentId: string;
-  /** Locked-affordance gate (widget contract). */
-  mode: "onboarding" | "steady";
+  /**
+   * The document set to view (ScopedViewerWidget contract). Single-doc —
+   * the only shape rendered today — is
+   * `{ type: "documents", documentIds: [id] }`; the widget fetches the
+   * xray for `documentIds[0]` on mount. `bucket`/`group` scopes resolve
+   * to no document and hold the neutral loading state.
+   */
+  scope: ContentScope;
+  /**
+   * Widget-contract authorization role (`anonymous` / `member`). Gates
+   * editable affordances — none today; the viewer is read-only for both
+   * roles. Surfaced via `data-role` on the root.
+   */
+  role: WidgetRole;
   /** 1-indexed initial page. Defaults to 1 (uncontrolled). */
   initialPage?: number;
   /**
@@ -47,12 +58,25 @@ interface PdfViewerWidgetProps {
 }
 ```
 
-## Locked affordances under `mode="onboarding"`
+## Scope
 
-Currently identical to `mode="steady"`. Future iterations will lock
-annotation / highlight / save-citation controls behind `mode="steady"`.
-The `data-mode` attribute on the widget root surfaces the value for
-test introspection.
+PdfViewer is a **ScopedViewerWidget** (per the 2026-05-30 widget access
+matrix, `docs/agents/widget-access-matrix.md` §1b): it takes a real
+`scope: ContentScope`, NOT a raw `documentId`. The only scope shape it
+renders today is the single-doc
+`{ type: "documents", documentIds: [id] }`; `bucket`/`group` scopes
+resolve to no document and hold the neutral loading state (a multi-doc
+picker is future work). The active scope is sourced from the experience
+scope / `ScopedCanvas` at the mount site.
+
+## Locked affordances (read-only roles)
+
+Available to BOTH `anonymous` + `member` with **no role-gated affordance
+today** — the viewer is read-only for either role. The `role` prop
+satisfies the widget contract and is forward-looking: future iterations
+may lock annotation / highlight / save-citation controls behind a
+mutating role (`widgetRoleCanEdit`). The `data-role` attribute on the
+widget root surfaces the value for test introspection.
 
 ## Events
 
@@ -66,12 +90,15 @@ None today. The viewer is read-only — citation-jump flows in via
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 
 // Uncontrolled (onboarding F2 default).
-<PdfViewerWidget documentId={scenario.documents[0].documentId} mode="onboarding" />
+<PdfViewerWidget
+  scope={{ type: "documents", documentIds: [scenario.documents[0].documentId] }}
+  role={role}
+/>
 
 // Controlled by a doc-viewer ViewerStep (citation-jump flow).
 <PdfViewerWidget
-  documentId={step.documentId}
-  mode="steady"
+  scope={{ type: "documents", documentIds: [step.documentId] }}
+  role={role}
   targetPage={step.highlight?.page ?? step.page ?? null}
   highlightBbox={step.highlight?.bbox ?? null}
 />
@@ -90,7 +117,7 @@ painted to canvas. Was unused after the SCEN-06 real-API rewire.
 ## LLM tools
 
 `PdfViewerWidget.tools.ts` exposes two read-category tools (both
-available in onboarding + steady; scoped to the
+available to all roles; scoped to the
 `doc-viewer` / `interact-chat` / `extract-workbench` ViewerSteps):
 
 - `open_document(documentId, page?)` — produces a `highlightCitation`

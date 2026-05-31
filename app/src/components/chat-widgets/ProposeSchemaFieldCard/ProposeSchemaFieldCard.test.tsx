@@ -42,7 +42,7 @@ const sampleField: ProposedSchemaField = {
 describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
   it("renders the field name + type badge + description + Accept/Reject controls", () => {
     renderWithOnboardingProviders(
-      <ProposeSchemaFieldCard proposedField={sampleField} />,
+      <ProposeSchemaFieldCard proposedField={sampleField} role="anonymous" scope={{ type: "none" }} />,
       { initialFrame: "f3a", initialScenario: "utility" },
     );
     expect(screen.getByTestId("propose-schema-field-card")).toBeInTheDocument();
@@ -61,6 +61,8 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
     renderWithOnboardingProviders(
       <ProposeSchemaFieldCard
         proposedField={{ ...sampleField, provenance: { version: "v1", verified: true } }}
+        role="anonymous"
+        scope={{ type: "none" }}
       />,
       { initialFrame: "f3a", initialScenario: "utility" },
     );
@@ -70,26 +72,47 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
 
   it("omits the provenance label when provenance is absent (defensive)", () => {
     renderWithOnboardingProviders(
-      <ProposeSchemaFieldCard proposedField={sampleField} />,
+      <ProposeSchemaFieldCard proposedField={sampleField} role="anonymous" scope={{ type: "none" }} />,
       { initialFrame: "f3a", initialScenario: "utility" },
     );
     expect(screen.queryByTestId("propose-schema-field-provenance")).not.toBeInTheDocument();
   });
 
-  it("widget contract: declares slot + mode via data-attributes", () => {
+  it("widget contract: declares slot + role via data-attributes", () => {
     renderWithOnboardingProviders(
-      <ProposeSchemaFieldCard proposedField={sampleField} mode="steady" />,
+      <ProposeSchemaFieldCard proposedField={sampleField} role="member" scope={{ type: "none" }} />,
       { initialFrame: "f3a", initialScenario: "utility" },
     );
     const card = screen.getByTestId("propose-schema-field-card");
     expect(card.getAttribute("data-widget")).toBe("propose-schema-field-card");
-    expect(card.getAttribute("data-mode")).toBe("steady");
+    expect(card.getAttribute("data-role")).toBe("member");
   });
+
+  // 2026-05-30-widget-role-access — matrix row: ProposeSchemaFieldCard is
+  // available to ALL roles (anonymous ✅ / member ✅) and locks no
+  // affordance by role. The card mounts + renders its editable controls
+  // identically under both roles.
+  it.each(["anonymous", "member"] as const)(
+    "matrix row: mounts + renders Accept/Reject under role=%s (all roles, no affordance lock)",
+    (role) => {
+      renderWithOnboardingProviders(
+        <ProposeSchemaFieldCard proposedField={sampleField} role={role} scope={{ type: "none" }} />,
+        { initialFrame: "f3a", initialScenario: "utility" },
+      );
+      const card = screen.getByTestId("propose-schema-field-card");
+      expect(card).toBeInTheDocument();
+      expect(card.getAttribute("data-role")).toBe(role);
+      // Affordance lock = NONE today: both editable controls present
+      // regardless of role.
+      expect(screen.getByTestId("propose-schema-field-accept")).toBeInTheDocument();
+      expect(screen.getByTestId("propose-schema-field-reject")).toBeInTheDocument();
+    },
+  );
 
   it("Accept dispatches addSchemaField → card swaps to a confirmation state", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(
-      <ProposeSchemaFieldCard proposedField={sampleField} />,
+      <ProposeSchemaFieldCard proposedField={sampleField} role="anonymous" scope={{ type: "none" }} />,
       { initialFrame: "f3a", initialScenario: "utility" },
     );
     await user.click(screen.getByTestId("propose-schema-field-accept"));
@@ -103,7 +126,7 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
   it("Reject swaps the card to a dismissed state without mutating the schema overlay", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(
-      <ProposeSchemaFieldCard proposedField={sampleField} />,
+      <ProposeSchemaFieldCard proposedField={sampleField} role="anonymous" scope={{ type: "none" }} />,
       { initialFrame: "f3a", initialScenario: "utility" },
     );
     await user.click(screen.getByTestId("propose-schema-field-reject"));
@@ -120,7 +143,7 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
     // and re-renders when the extraction status flips.
     renderWithOnboardingProviders(
       <>
-        <ProposeSchemaFieldCard proposedField={sampleField} />
+        <ProposeSchemaFieldCard proposedField={sampleField} role="anonymous" scope={{ type: "none" }} />
         <SchemaView />
       </>,
       { initialFrame: "f3a", initialScenario: "utility" },

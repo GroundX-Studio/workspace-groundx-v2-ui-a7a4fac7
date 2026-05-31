@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AppModeProvider } from "@/contexts/AppModeContext";
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
 import { ROUTER_PATHS } from "@/router/routerPaths";
 import { GxThemeProvider } from "@/ThemeProvider";
@@ -14,15 +15,15 @@ import { GxThemeProvider } from "@/ThemeProvider";
 // itself responds to those props.
 vi.mock("@/components/viewer-widgets/PdfViewer/PdfViewerWidget", () => ({
   PdfViewerWidget: (props: {
-    documentId: string;
-    mode: string;
+    scope: { type: string; documentIds?: string[] };
+    role: string;
     targetPage?: number | null;
     highlightBbox?: { x: number; y: number; w: number; h: number } | null;
   }) => (
     <div
       data-testid="pdf-viewer-widget-stub"
-      data-document-id={props.documentId}
-      data-mode={props.mode}
+      data-document-id={props.scope.type === "documents" ? props.scope.documentIds?.[0] ?? "" : ""}
+      data-role={props.role}
       data-target-page={props.targetPage ?? ""}
       data-highlight-bbox={props.highlightBbox ? JSON.stringify(props.highlightBbox) : ""}
     />
@@ -50,15 +51,17 @@ import { SteadyShell } from "./SteadyShell";
 function Harness({ initialUrl, children }: { initialUrl: string; children: React.ReactNode }) {
   return (
     <GxThemeProvider>
-      <ChatStoreProvider initialOwnerKey="anon-test" autoSeedDefaultSession>
-        <CanvasOrchestratorProvider>
-          <MemoryRouter initialEntries={[initialUrl]}>
-            <Routes>
-              <Route path={ROUTER_PATHS.STEADY_SESSION} element={children} />
-            </Routes>
-          </MemoryRouter>
-        </CanvasOrchestratorProvider>
-      </ChatStoreProvider>
+      <AppModeProvider initialAuthState="signed-in">
+        <ChatStoreProvider initialOwnerKey="anon-test" autoSeedDefaultSession>
+          <CanvasOrchestratorProvider>
+            <MemoryRouter initialEntries={[initialUrl]}>
+              <Routes>
+                <Route path={ROUTER_PATHS.STEADY_SESSION} element={children} />
+              </Routes>
+            </MemoryRouter>
+          </CanvasOrchestratorProvider>
+        </ChatStoreProvider>
+      </AppModeProvider>
     </GxThemeProvider>
   );
 }
@@ -159,15 +162,17 @@ describe("SteadyShell (/c/:sessionId)", () => {
     function E2EHarness({ initialUrl, children }: { initialUrl: string; children: React.ReactNode }) {
       return (
         <GxThemeProvider>
-          <ChatStoreProvider initialOwnerKey="anon-cite-e2e" autoSeedDefaultSession>
-            <CanvasOrchestratorProvider>
-              <MemoryRouter initialEntries={[initialUrl]}>
-                <Routes>
-                  <Route path={ROUTER_PATHS.STEADY_SESSION} element={children} />
-                </Routes>
-              </MemoryRouter>
-            </CanvasOrchestratorProvider>
-          </ChatStoreProvider>
+          <AppModeProvider initialAuthState="signed-in">
+            <ChatStoreProvider initialOwnerKey="anon-cite-e2e" autoSeedDefaultSession>
+              <CanvasOrchestratorProvider>
+                <MemoryRouter initialEntries={[initialUrl]}>
+                  <Routes>
+                    <Route path={ROUTER_PATHS.STEADY_SESSION} element={children} />
+                  </Routes>
+                </MemoryRouter>
+              </CanvasOrchestratorProvider>
+            </ChatStoreProvider>
+          </AppModeProvider>
         </GxThemeProvider>
       );
     }
@@ -227,7 +232,7 @@ describe("SteadyShell (/c/:sessionId)", () => {
       const stub = screen.getByTestId("pdf-viewer-widget-stub");
       expect(stub.getAttribute("data-document-id")).toBe("doc-citing");
       expect(stub.getAttribute("data-target-page")).toBe("4");
-      expect(stub.getAttribute("data-mode")).toBe("steady");
+      expect(stub.getAttribute("data-role")).toBe("member");
       const bbox = JSON.parse(stub.getAttribute("data-highlight-bbox") ?? "{}");
       expect(bbox).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.05 });
       expect(screen.queryByTestId("steady-shell-canvas-placeholder")).not.toBeInTheDocument();

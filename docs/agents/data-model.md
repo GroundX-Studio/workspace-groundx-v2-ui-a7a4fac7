@@ -35,7 +35,9 @@ the planned `Template` / `ScopedViewerWidget` / `ApiError` / `Catalog<T>` bases.
 | `ScenarioHero` | — | `title, shortDesc, demonstrates, badges[], chapters{extract,interact,report}, docCount` | F1 cards, chapter gating |
 | `ExtractionSchemaDef` | composes `SchemaCategoryDef`→`SchemaFieldDef` | `categories[]` | Extract template |
 | `SchemaFieldDef` | — | `id, name, type, description` | schema rows |
-| `ExtractedFieldValue` | composes `Citation[]` | `fieldId, value, citations[]` | Extract results |
+| `ExtractedFieldValue` | re-exports `@groundx/shared`; Extract specialization of `GeneratedResult` | `fieldId, value(body), citations[], confidence?, warnings?` | Extract results |
+| `GeneratedResult` | `@groundx/shared` — Result half of Template+Scope+Results | `body, citations[], confidence?, warnings?` (+ `parseGeneratedResult`) | shared by Extract (`ExtractedFieldValue`) + Report (`RenderedSection`) |
+| `RenderedSection` | `@groundx/shared`; Report specialization of `GeneratedResult` | `sectionId, body(markdown), citations[], confidence?, warnings?` | Report sections (smart-report) |
 
 ## ChatStore object graph — `contexts/ChatStoreContext/types.ts`
 

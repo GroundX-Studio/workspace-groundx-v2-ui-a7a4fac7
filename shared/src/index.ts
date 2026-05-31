@@ -313,6 +313,90 @@ export function parseTemplate(input: unknown): Template | null {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// GeneratedResult — the Result half of Template + Scope + Results. ONE shape
+// underlies BOTH the Extract field value and the Report rendered section: a
+// generated **body** + the supporting `citations[]` + an optional `confidence`
+// + optional `warnings[]`. Extract and Report were independent one-offs
+// (`ExtractedFieldValue` = `{fieldId,value,citations}`; the report section had
+// no shared type at all); they're two specializations of this one concept and
+// must share types + lifecycle, not fork.
+// ──────────────────────────────────────────────────────────────────────
+
+/** The generated content of a result — a scalar field value (extract) or a
+ * markdown string (report section). The narrower specializations re-type this. */
+export const generatedBodySchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+]);
+export type GeneratedBody = z.infer<typeof generatedBodySchema>;
+
+/**
+ * The shared fields every generated result carries. Spread into each
+ * specialization so the citation/confidence/warning contract can't drift
+ * between Extract and Report.
+ */
+const generatedResultBaseShape = {
+  /** The supporting source citations for this result. */
+  citations: z.array(citationSchema),
+  /** Optional [0,1] confidence in the generated body. */
+  confidence: z.number().optional(),
+  /** Optional non-fatal warnings surfaced alongside the result (e.g.
+   * `low-coverage`, `unit-ambiguous`); empty/absent when clean. */
+  warnings: z.array(z.string()).optional(),
+};
+
+/**
+ * A generated result in its most general form: a `body` + the shared
+ * citation/confidence/warning contract. `ExtractedFieldValue` and
+ * `RenderedSection` narrow this.
+ */
+export const generatedResultSchema = z.object({
+  body: generatedBodySchema,
+  ...generatedResultBaseShape,
+});
+export type GeneratedResult = z.infer<typeof generatedResultSchema>;
+
+/**
+ * Extract specialization: a generated result keyed by `fieldId` whose body is
+ * the scalar field value. The persisted/wire alias for the body is `value`
+ * (the legacy `{fieldId,value,citations}` fixture shape) — kept so existing
+ * scenario fixtures and the `/api/extract-field` path round-trip unchanged.
+ */
+export const extractedFieldValueSchema = z.object({
+  fieldId: z.string(),
+  /** The extracted scalar value — the generated `body` of this result. */
+  value: generatedBodySchema,
+  ...generatedResultBaseShape,
+});
+export type ExtractedFieldValue = z.infer<typeof extractedFieldValueSchema>;
+
+/**
+ * Report specialization: a generated result keyed by `sectionId` whose body is
+ * the section's markdown. (Reserved here loosely alongside the report Template
+ * body — `smart-report` owns the surrounding section structure; this is just
+ * the per-section *generated* result.)
+ */
+export const renderedSectionSchema = z.object({
+  sectionId: z.string(),
+  /** The section's generated markdown — the `body` of this result. */
+  body: z.string(),
+  ...generatedResultBaseShape,
+});
+export type RenderedSection = z.infer<typeof renderedSectionSchema>;
+
+/**
+ * Sanitize an untrusted value (DB-read or wire) into a typed `GeneratedResult`,
+ * or `null` if it doesn't validate. The single boundary sanitizer (parallels
+ * `parseCitations`/`parseTemplate`); unknown keys are stripped on parse.
+ */
+export function parseGeneratedResult(input: unknown): GeneratedResult | null {
+  const parsed = generatedResultSchema.safeParse(input);
+  return parsed.success ? parsed.data : null;
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // ViewerStepKind — the discriminant of the app's `ViewerStep` union. Lives
 // here so the middleware tool-catalog (`toolsForStep`) shares ONE definition
 // instead of hand-mirroring the kind set across the workspace boundary. The

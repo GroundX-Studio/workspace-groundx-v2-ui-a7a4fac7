@@ -39,6 +39,7 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { useWidgetRole } from "@/lib/widgetRole";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
@@ -261,6 +262,7 @@ export const ExtractView: FC = () => {
   //                   `/api/templates` endpoint. Reuses
   //                   SchemaView's prior save flow verbatim.
   const isAuthed = appMode.authState === "signed-in";
+  const widgetRole = useWidgetRole();
   const isDesignSurface = session.currentFrame === "f3a";
   // `← back` on F3a returns to F3 (the Results surface). On F3 it's a
   // no-op; keeping it always-present keeps the topbar geometry stable
@@ -745,8 +747,8 @@ export const ExtractView: FC = () => {
             const firstCite = selectedField && selectedValue ? selectedValue.citations?.[0] : null;
             return (
               <PdfViewerWidget
-                documentId={scenario.documents[0].documentId}
-                mode="onboarding"
+                scope={{ type: "documents", documentIds: [scenario.documents[0].documentId] }}
+                role={widgetRole}
                 targetPage={firstCite?.page ?? undefined}
                 highlightBbox={firstCite?.bbox ?? null}
               />

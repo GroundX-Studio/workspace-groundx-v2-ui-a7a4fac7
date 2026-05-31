@@ -4,7 +4,7 @@ import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
 // module (type-only → erased → cycle-free with the orchestrator's runtime
 // dependency on ChatStore). Re-exported below for back-compat consumers.
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
-import type { NormalizedBbox } from "@groundx/shared";
+import type { Citation, NormalizedBbox } from "@groundx/shared";
 
 /**
  * Chat session foundation — see /memory/project_chat_session_model.md.
@@ -31,8 +31,16 @@ export interface ChatMessage {
    * replay but excluded from LLM requests.
    */
   compressedIntoSummaryId?: string | null;
+  /**
+   * Source citations attached to an assistant turn. The server already
+   * persists these (`chatHandler.ts`) and projects them on hydrate
+   * (`app.ts`); this is the in-memory declaration so consumers
+   * (InteractView litRegions / `CiteChip` / report-pin) read them off
+   * the ChatStore instead of re-fetching the thread. Empty/absent on
+   * non-assistant turns.
+   */
+  citations?: Citation[];
   // Future expansions:
-  // citations?: Citation[];
   // toolCalls?: ToolCall[];
   // attachments?: Attachment[];
 }
@@ -375,6 +383,8 @@ export interface ChatStoreState {
 export interface NewMessageInput {
   role: ChatMessage["role"];
   content: string;
+  /** Source citations for an assistant turn (optional). */
+  citations?: Citation[];
 }
 
 export interface ChatStoreApi {

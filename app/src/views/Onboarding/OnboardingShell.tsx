@@ -16,6 +16,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useWidgetRole } from "@/lib/widgetRole";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
@@ -133,6 +134,7 @@ function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["subst
  */
 export const OnboardingShell: FC = () => {
   const { state: appMode } = useAppMode();
+  const widgetRole = useWidgetRole();
   const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate } = useOnboardingSession();
   const { state: scenarioRegistry } = useScenarioRegistry();
   // ChatStore is read up here so the StepStrip pill state below can
@@ -420,11 +422,15 @@ export const OnboardingShell: FC = () => {
   const effectiveStepKind = latestViewerStep?.kind ?? stepKindFallback;
 
   const canvasContent = useMemo(() => {
-    if (bookCallActive) return <BookCallView />;
+    // 2026-05-30-widget-role-access: gate/book-call canvas widgets are
+    // anonymous-context (pre-signup) and not document-scoped → role
+    // "anonymous" + scope { type: "none" } satisfy the widget contract.
+    if (bookCallActive) return <BookCallView role="anonymous" scope={{ type: "none" }} />;
     // P1 (2026-05-29): the sign-up DOORS moved into the chat rail
     // (GateChatRail). The canvas now pitches the value prop instead of
     // hosting the account form. See GateValueProp + GateChatRail.
-    if (signupSurfaceActive) return <GateValueProp />;
+    if (signupSurfaceActive)
+      return <GateValueProp role="anonymous" scope={{ type: "none" }} />;
     switch (effectiveStepKind) {
       case "ingest-picker":
         // ARCH-06B (2026-05-26): IngestView is rendered ONLY inside
@@ -595,7 +601,17 @@ export const OnboardingShell: FC = () => {
       }}
       aria-label="Chat column"
     >
-      {bookCallActive ? <BookingStatusCard /> : <ChatColumn />}
+      {/* 2026-05-30-widget-role-access: ChatColumn is all-roles and
+          locks no affordance by role today; `role` is sourced from the
+          auth state (uncommitted onboarding → `anonymous`, signed-in →
+          `member`), NEVER from the conversation flow. Chat is
+          session-scoped → `scope: { type: "none" }`. The onboarding
+          shell leaves `surface` at its default ("onboarding"). */}
+      {bookCallActive ? (
+        <BookingStatusCard role={widgetRole} scope={{ type: "none" }} />
+      ) : (
+        <ChatColumn role={widgetRole} scope={{ type: "none" }} />
+      )}
     </Box>
   );
 

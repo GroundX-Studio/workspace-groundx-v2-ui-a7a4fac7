@@ -2,9 +2,8 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useCallback, useEffect, useState, type FC } from "react";
+import { useCallback, type FC } from "react";
 
-import { listChatMessages } from "@/api/chatSessions";
 import {
   BORDER,
   BORDER_RADIUS_PILL,
@@ -17,31 +16,11 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { useWidgetRole } from "@/lib/widgetRole";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
-import type { Citation } from "@groundx/shared";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
-import { litRegionsFromCitations, type LitRegion } from "./litRegions";
-
-// TODO(WF-05): TEMP demo hard-code — remove once word-level geometry lands.
-// The utility sample is extract-workflow-indexed, so its search citations are
-// BARE (no bbox), and we don't yet join X-Ray word boxes to light the exact
-// answer span. Until then, the "what is the total amount due" answer lights a
-// hand-placed box over the Remittance "Amount Due $7,613.20" line on page 1.
-// Color = cyan to match the citation chip in the chat answer.
-// NOTE: these are wrapper-relative coords. The page image overflows its
-// clipping wrapper (page taller than the pane shows only the top portion),
-// so the vertical value bakes in the clip ratio for the current pane aspect
-// rather than being a clean page-normalized fraction. This is one reason the
-// proper fix (WF-05) positions highlights against the image, not the wrapper.
-const UTILITY_AMOUNT_DUE_REGION: LitRegion = {
-  page: 1,
-  x: 0.548,
-  y: 0.218,
-  w: 0.4,
-  h: 0.046,
-  color: "cyan",
-};
+import { litRegionsFromCitations } from "./litRegions";
 
 /**
  * F5 InteractView — the CANVAS (viewer-slot) half of Interact.
@@ -56,13 +35,15 @@ const UTILITY_AMOUNT_DUE_REGION: LitRegion = {
  * What it does now:
  *   • Mounts the production `PdfViewerWidget` for the active sample doc.
  *   • Lights citation regions on the page that trail the latest
- *     assistant turn in the shared chat thread (read via
- *     `listChatMessages`, re-read when the session updates).
+ *     assistant turn in the shared chat thread — read straight off the
+ *     ChatStore (`ChatMessage.citations`, which ChatColumn writes on
+ *     append). No API poll: the in-memory store is the source.
  *   • Keeps the "Save 🔒" affordance (top-right) that opens the F6 gate
  *     — the only interactive control here.
  */
 export const InteractView: FC = () => {
   const { state: appMode } = useAppMode();
+  const widgetRole = useWidgetRole();
   const { state: session, advanceFrame, openGate } = useOnboardingSession();
   const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
   const { byId } = useScenarioRegistry();
@@ -70,71 +51,20 @@ export const InteractView: FC = () => {
   const { state: chatState } = useChatStore();
   const chatSessionId = chatState.activeSessionId;
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
-  // Re-read the thread when the shared chat session changes so the lit
-  // regions trail the latest answer. We key on BOTH updatedAt AND the
-  // in-memory message count — appending a turn always bumps the count, so
-  // this fires even if updatedAt doesn't change for a same-tick append
-  // (which left the highlight stale until a remount).
-  const sessionUpdatedAt = activeChatSession?.updatedAt;
-  const messageCount = activeChatSession?.messages.length ?? 0;
 
   // Lit-region source — the citations on the latest assistant turn in the
-  // shared chat thread (the same thread ChatColumn writes to). Read-only;
-  // sending happens in ChatColumn, not here.
-  const [litCitations, setLitCitations] = useState<Citation[]>([]);
+  // shared chat session (the same session ChatColumn writes to via
+  // `appendMessage`). Read straight off the in-memory ChatStore; no poll.
+  const litCitations =
+    [...(activeChatSession?.messages ?? [])]
+      .reverse()
+      .find((m) => m.role === "assistant" && (m.citations?.length ?? 0) > 0)?.citations ?? [];
 
-  useEffect(() => {
-    if (!chatSessionId) return;
-    let cancelled = false;
-    const readOnce = async () => {
-      try {
-        const messages = await listChatMessages(chatSessionId);
-        if (cancelled) return;
-        const lastAssistant = [...messages]
-          .reverse()
-          .find((m) => m.role === "assistant" && m.citations.length > 0);
-        setLitCitations(
-          lastAssistant
-            ? lastAssistant.citations.map((c) => ({
-                documentId: c.documentId,
-                page: c.page,
-                snippet: c.snippet,
-                bbox: c.bbox,
-                tier: c.tier,
-              }))
-            : [],
-        );
-      } catch {
-        // best-effort — no citations to light is a valid state
-      }
-    };
-    void readOnce();
-    // ChatColumn persists turns to the server without bumping this
-    // ChatStore session's in-memory state, so neither updatedAt nor the
-    // message count changes here when an answer arrives. Poll the thread
-    // while mounted so the lit regions trail the latest answer live (not
-    // only after a remount). Cheap; the thread is small.
-    const poll = setInterval(() => void readOnce(), 1500);
-    return () => {
-      cancelled = true;
-      clearInterval(poll);
-    };
-  }, [chatSessionId, sessionUpdatedAt, messageCount]);
-
-  // TODO(WF-05): TEMP demo override. The utility "amount due" citation DOES
-  // carry a bbox from the WF-03 X-Ray join, but it's coarse and lands on the
-  // wrong chunk (the payment-stub barcode, not the "Amount Due" line). Until
-  // word-level geometry (WF-05) tightens it, force the hand-placed amount-due
-  // box (cyan, to match the citation chip) whenever the utility answer cites
-  // the "Amount Due" line on page 1. Keyed on the citation snippet so other
-  // answers still use their real geometry.
-  const isUtilityAmountDue =
-    scenarioId === "utility" &&
-    litCitations.some((c) => c.page === 1 && /amount\s*due/i.test(c.snippet ?? ""));
-  const litRegions = isUtilityAmountDue
-    ? [UTILITY_AMOUNT_DUE_REGION]
-    : litRegionsFromCitations(litCitations);
-  const highlightTargetPage = isUtilityAmountDue ? 1 : (litCitations[0]?.page ?? undefined);
+  // The lit regions render each citation's REAL bbox (WF-03 X-Ray join).
+  // If a box is too coarse for a clean highlight, the fix is word-level
+  // geometry (WF-05 `-118-map`), tracked separately — NOT a hardcoded box.
+  const litRegions = litRegionsFromCitations(litCitations);
+  const highlightTargetPage = litCitations[0]?.page ?? undefined;
   const canvasDocumentId = scenario?.documents?.[0]?.documentId ?? null;
 
   const handleSave = useCallback(() => {
@@ -200,8 +130,8 @@ export const InteractView: FC = () => {
           }}
         >
           <PdfViewerWidget
-            documentId={canvasDocumentId}
-            mode="onboarding"
+            scope={{ type: "documents", documentIds: [canvasDocumentId] }}
+            role={widgetRole}
             litRegions={litRegions}
             targetPage={highlightTargetPage}
           />

@@ -29,17 +29,32 @@ swaps the chat card to a "Call booked" confirmation.
 
 ```ts
 interface BookingStatusCardProps {
-  /** Locked-affordance gate (widget contract). */
-  mode?: "onboarding" | "steady";  // defaults to "onboarding"
+  /** Widget-contract authorization role. Available to BOTH roles. */
+  role: WidgetRole;       // "anonymous" | "member"
+  /** Widget-contract scope. Not document-scoped → { type: "none" }. */
+  scope: WidgetScope;     // { type: "none" }
 }
 ```
 
-## Locked affordances under `mode="onboarding"`
+The retired binary `mode: "onboarding" | "steady"` was cosmetic-only
+for this widget (it gated no affordance) and was dropped in
+`2026-05-30-widget-role-access` Phase 2b. Behavior is identical across
+roles.
 
-In onboarding the back-to-sign-in pill clears `?bookCall=1` and the
-chat column reverts to the gate's main chat rail. In steady mode the
-same back-out is allowed but the surrounding chat continues to operate
-normally rather than gating the rest of the flow.
+## Locked affordances (read-only roles)
+
+**None.** BookingStatusCard is available to both `anonymous` and
+`member` and locks no affordance by role (matrix
+`docs/agents/widget-access-matrix.md` §1 + §2). The back-to-sign-in
+pill clears `?bookCall=1` for every role; `role` is accepted only to
+satisfy the widget contract.
+
+## Scope
+
+`{ type: "none" }` — this is the chat-side mirror of the booking
+status, not a document/bucket/group view, so it declares the
+no-scope sentinel (matrix §1b). It takes no `documentId`/`bucketId`/
+`projectId`.
 
 ## Activation
 
@@ -53,14 +68,27 @@ the URL, in tandem with the `BookCallView` viewer widget.
 Without this guard a malicious page in an iframe could fire a fake
 `calendly.event_scheduled` to commit the gate.
 
+## Events
+
+- **`book_call` (LLM tool)** — this card is the chat-side surface of the
+  `book_call` tool; activating it opens the Calendly booking surface
+  (`BookCallView` in the viewer / `?bookCall=1`).
+- **Back control** — exposes a "back" affordance that returns the user to the
+  prior sign-in surface (local navigation only, no tool).
+- On a completed booking the card swaps to a "Call booked" confirmation surface.
+
+No `on*` callback props: the card drives the flow through the `book_call` tool
+catalog, not lifted callbacks.
+
 ## How to mount
 
 ```tsx
 import { BookingStatusCard } from "@/components/chat-widgets/BookingStatusCard/BookingStatusCard";
 
 // OnboardingShell mounts this in the chat column while ?bookCall=1
-// is present in the URL.
-<BookingStatusCard mode="onboarding" />
+// is present in the URL. `role` comes from useWidgetRole() (Phase 3);
+// `scope` is the no-scope sentinel for this chat-side card.
+<BookingStatusCard role={role} scope={{ type: "none" }} />
 ```
 
 The viewer-side `BookCallView` (the Calendly iframe) is mounted in
@@ -88,6 +116,8 @@ to `engineer-call`. That path is untouched by this upgrade.
 ## Tests
 
 `BookingStatusCard.test.tsx`. Covers: BOOKING IN PROGRESS rendering,
-back-to-sign-in clears URL param, What-We'll-Cover bullets present,
-"doesn't sign you in" copy, widget-contract data attributes,
-postMessage commits gate, untrusted-origin postMessage dropped.
+availability with no affordance lock for both roles (`anonymous` +
+`member`), back-to-sign-in clears URL param, What-We'll-Cover bullets
+present, "doesn't sign you in" copy, widget-contract slot attribute
+(and that the retired `data-mode` attribute is gone), postMessage
+commits gate, untrusted-origin postMessage dropped.

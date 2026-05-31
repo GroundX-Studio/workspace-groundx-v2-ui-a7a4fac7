@@ -10,19 +10,43 @@
  * OnboardingShell swap the viewer to the form so the surface is
  * coherent.
  *
+ * 2026-05-30 (widget-role-access Phase 2b): migrated to the role+scope
+ * contract. The retired `mode: "onboarding" | "steady"` prop is gone.
+ *   - `role: WidgetRole` ("anonymous" | "member") satisfies the widget
+ *     contract; it is forward-looking and does NOT gate any affordance
+ *     here today (no affordance is role-locked).
+ *   - `scope: WidgetScope` is `{ type: "none" }` — sign-up is not a
+ *     document-scoped widget.
+ *   - The gate-commit side effect + the committed-state celebration are
+ *     RE-SOURCED from gate-state (`useOnboardingSession`), NOT from a
+ *     mode/role prop. A real gate awaiting commit (open/dismissed) gets
+ *     `commitGate("register")`; an already-committed gate renders the
+ *     celebration; no gate (idle) registers + promotes but never touches
+ *     the gate.
+ *
+ * Matrix row (`docs/agents/widget-access-matrix.md`): availability is
+ * anonymous ✅ / member ❌ — enforced at the MOUNT SITE, not inside this
+ * widget. So this widget renders identically under both roles; the test
+ * asserts that (no role-locked affordance), which is the matrix row's
+ * affordance stance ("none today").
+ *
  * These tests pin the contract:
  *   - Renders the four required form fields (first/last/email/password).
  *   - Validates passwords match before submit.
  *   - Calls register() → claimAnonymousChat() → promoteToSignedIn() →
- *     commitGate("register") in that order on a happy-path submit.
+ *     commitGate("register") in that order on a happy-path submit when a
+ *     gate is awaiting commit.
  *   - Surfaces server errors inline without losing typed values.
- *   - Accepts the widget-contract `mode` prop (default "onboarding";
- *     "steady" doesn't render the gate-commit side effects).
+ *   - Renders identically under role "anonymous" and "member" (no
+ *     role-locked affordance).
+ *   - Re-sources the gate-commit from gate-state: an idle gate does NOT
+ *     commitGate even on a successful register.
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 vi.mock("@/api/entities/customerEntity", () => ({
   register: vi.fn(),
@@ -71,7 +95,22 @@ import { SignUpWidget } from "./SignUpWidget";
 const mockedRegister = vi.mocked(register);
 const mockedClaim = vi.mocked(claimAnonymousChat);
 
-const renderWidget = (ui: ReactNode = <SignUpWidget />) => render(ui);
+const NONE_SCOPE: WidgetScope = { type: "none" };
+
+const renderWidget = (role: WidgetRole = "anonymous", scope: WidgetScope = NONE_SCOPE): ReturnType<typeof render> =>
+  render(<SignUpWidget role={role} scope={scope} />);
+
+const fillForm = (overrides?: { confirm?: string; password?: string }) => {
+  fireEvent.change(screen.getByTestId("signup-first-input"), { target: { value: "Pat" } });
+  fireEvent.change(screen.getByTestId("signup-last-input"), { target: { value: "Lee" } });
+  fireEvent.change(screen.getByTestId("signup-email-input"), { target: { value: "pat@example.com" } });
+  fireEvent.change(screen.getByTestId("signup-password-input"), {
+    target: { value: overrides?.password ?? "longenoughpw" },
+  });
+  fireEvent.change(screen.getByTestId("signup-confirm-input"), {
+    target: { value: overrides?.confirm ?? overrides?.password ?? "longenoughpw" },
+  });
+};
 
 describe("SignUpWidget", () => {
   beforeEach(() => {
@@ -92,13 +131,21 @@ describe("SignUpWidget", () => {
     expect(screen.getByTestId("signup-submit")).toBeInTheDocument();
   });
 
+  it("renders the same form under role 'anonymous' and 'member' (no role-locked affordance)", () => {
+    const { unmount } = renderWidget("anonymous");
+    expect(screen.getByTestId("signup-submit")).not.toBeDisabled();
+    expect(screen.getByTestId("signup-first-input")).toBeInTheDocument();
+    unmount();
+
+    renderWidget("member");
+    // Matrix: affordance locks "none today" — the form is identical.
+    expect(screen.getByTestId("signup-submit")).not.toBeDisabled();
+    expect(screen.getByTestId("signup-first-input")).toBeInTheDocument();
+  });
+
   it("blocks submit and shows inline error when passwords don't match", async () => {
     renderWidget();
-    fireEvent.change(screen.getByTestId("signup-first-input"), { target: { value: "Pat" } });
-    fireEvent.change(screen.getByTestId("signup-last-input"), { target: { value: "Lee" } });
-    fireEvent.change(screen.getByTestId("signup-email-input"), { target: { value: "pat@example.com" } });
-    fireEvent.change(screen.getByTestId("signup-password-input"), { target: { value: "longenoughpw" } });
-    fireEvent.change(screen.getByTestId("signup-confirm-input"), { target: { value: "different" } });
+    fillForm({ confirm: "different" });
     fireEvent.click(screen.getByTestId("signup-submit"));
     expect(await screen.findByTestId("signup-error")).toHaveTextContent(/match/i);
     expect(mockedRegister).not.toHaveBeenCalled();
@@ -106,11 +153,7 @@ describe("SignUpWidget", () => {
 
   it("blocks submit and shows inline error when password is too short", async () => {
     renderWidget();
-    fireEvent.change(screen.getByTestId("signup-first-input"), { target: { value: "Pat" } });
-    fireEvent.change(screen.getByTestId("signup-last-input"), { target: { value: "Lee" } });
-    fireEvent.change(screen.getByTestId("signup-email-input"), { target: { value: "pat@example.com" } });
-    fireEvent.change(screen.getByTestId("signup-password-input"), { target: { value: "short" } });
-    fireEvent.change(screen.getByTestId("signup-confirm-input"), { target: { value: "short" } });
+    fillForm({ password: "short" });
     fireEvent.click(screen.getByTestId("signup-submit"));
     expect(await screen.findByTestId("signup-error")).toHaveTextContent(/8 characters/i);
     expect(mockedRegister).not.toHaveBeenCalled();
@@ -120,11 +163,7 @@ describe("SignUpWidget", () => {
     mockedRegister.mockResolvedValueOnce({} as Awaited<ReturnType<typeof register>>);
     mockedClaim.mockResolvedValueOnce(undefined as unknown as Awaited<ReturnType<typeof claimAnonymousChat>>);
     renderWidget();
-    fireEvent.change(screen.getByTestId("signup-first-input"), { target: { value: "Pat" } });
-    fireEvent.change(screen.getByTestId("signup-last-input"), { target: { value: "Lee" } });
-    fireEvent.change(screen.getByTestId("signup-email-input"), { target: { value: "pat@example.com" } });
-    fireEvent.change(screen.getByTestId("signup-password-input"), { target: { value: "longenoughpw" } });
-    fireEvent.change(screen.getByTestId("signup-confirm-input"), { target: { value: "longenoughpw" } });
+    fillForm();
     fireEvent.click(screen.getByTestId("signup-submit"));
 
     await waitFor(() => expect(mockedRegister).toHaveBeenCalledTimes(1));
@@ -141,14 +180,22 @@ describe("SignUpWidget", () => {
     await waitFor(() => expect(commitGate).toHaveBeenCalledWith("register"));
   });
 
+  it("commits the gate from gate-state regardless of role (member role, open gate)", async () => {
+    mockedRegister.mockResolvedValueOnce({} as Awaited<ReturnType<typeof register>>);
+    mockedClaim.mockResolvedValueOnce(undefined as unknown as Awaited<ReturnType<typeof claimAnonymousChat>>);
+    renderWidget("member");
+    fillForm();
+    fireEvent.click(screen.getByTestId("signup-submit"));
+
+    // Gate-commit is sourced from gate-state (status "open"), NOT role —
+    // so even the "member" role commits when a gate is awaiting commit.
+    await waitFor(() => expect(commitGate).toHaveBeenCalledWith("register"));
+  });
+
   it("surfaces server-side error inline without clearing typed values", async () => {
     mockedRegister.mockRejectedValueOnce({ response: { data: { error: "Email is already in use." } } });
     renderWidget();
-    fireEvent.change(screen.getByTestId("signup-first-input"), { target: { value: "Pat" } });
-    fireEvent.change(screen.getByTestId("signup-last-input"), { target: { value: "Lee" } });
-    fireEvent.change(screen.getByTestId("signup-email-input"), { target: { value: "pat@example.com" } });
-    fireEvent.change(screen.getByTestId("signup-password-input"), { target: { value: "longenoughpw" } });
-    fireEvent.change(screen.getByTestId("signup-confirm-input"), { target: { value: "longenoughpw" } });
+    fillForm();
     fireEvent.click(screen.getByTestId("signup-submit"));
 
     expect(await screen.findByTestId("signup-error")).toHaveTextContent(/already in use/i);
@@ -166,20 +213,17 @@ describe("SignUpWidget", () => {
     expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
   });
 
-  it("in steady mode, does NOT call commitGate after a successful register", async () => {
+  it("does NOT commitGate when there is no active gate (idle) — gate-state, not role", async () => {
+    mockGate = { status: "idle" };
     mockedRegister.mockResolvedValueOnce({} as Awaited<ReturnType<typeof register>>);
     mockedClaim.mockResolvedValueOnce(undefined as unknown as Awaited<ReturnType<typeof claimAnonymousChat>>);
-    renderWidget(<SignUpWidget mode="steady" />);
-    fireEvent.change(screen.getByTestId("signup-first-input"), { target: { value: "Pat" } });
-    fireEvent.change(screen.getByTestId("signup-last-input"), { target: { value: "Lee" } });
-    fireEvent.change(screen.getByTestId("signup-email-input"), { target: { value: "pat@example.com" } });
-    fireEvent.change(screen.getByTestId("signup-password-input"), { target: { value: "longenoughpw" } });
-    fireEvent.change(screen.getByTestId("signup-confirm-input"), { target: { value: "longenoughpw" } });
+    renderWidget();
+    fillForm();
     fireEvent.click(screen.getByTestId("signup-submit"));
 
     await waitFor(() => expect(promoteToSignedIn).toHaveBeenCalledTimes(1));
-    // Steady mode: still promotes (account is real), but doesn't commit
-    // the onboarding gate because there isn't one here.
+    // No gate awaiting commit → register + promote run, but the gate is
+    // not touched.
     expect(commitGate).not.toHaveBeenCalled();
   });
 });

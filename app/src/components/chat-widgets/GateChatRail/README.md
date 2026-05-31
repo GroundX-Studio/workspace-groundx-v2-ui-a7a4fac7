@@ -22,9 +22,15 @@ form INSTEAD of leaving the sample in place.
 
 ## Props
 
-| Prop   | Type                          | Default        | Notes                                                                                  |
-| ------ | ----------------------------- | -------------- | -------------------------------------------------------------------------------------- |
-| `mode` | `"onboarding"` \| `"steady"`  | `"onboarding"` | Onboarding shows the Continue-to-Integrate CTA on committed; steady omits it.          |
+| Prop    | Type          | Required | Notes                                                                                              |
+| ------- | ------------- | :------: | -------------------------------------------------------------------------------------------------- |
+| `role`  | `WidgetRole`  |   yes    | Widget access role (`"anonymous"` \| `"member"`). Present for the role+scope contract. No affordance is locked by role here — availability is anonymous-only and enforced at the mount site (see below). |
+| `scope` | `WidgetScope` |   yes    | Always `{ type: "none" }` — this widget is session/gate-scoped, not document-scoped.               |
+
+The committed-state **Continue-to-Integrate** nav CTA is NOT a prop — it is
+onboarding-FLOW chrome re-sourced from gate-state (`state.currentFrame === "f6"`,
+the gate frame). A steady re-encounter of the gate is off that frame, so the
+nav CTA is absent (2026-05-30-widget-role-access).
 
 ## What this widget owns
 
@@ -61,16 +67,25 @@ form INSTEAD of leaving the sample in place.
 | ------------- | ------------------------------------------------------------------- |
 | `idle`        | `null`                                                              |
 | `open`        | Eyebrow + preamble + book-a-call + dismiss                          |
-| `committed`   | Success card (varies by `method`) + Continue CTA (onboarding only)  |
+| `committed`   | Success card (varies by `method`) + Continue CTA (only on the gate frame `f6`)  |
 | `dismissed`   | `null`                                                              |
 
-## Locked affordances under `mode="onboarding"`
+## Locked affordances (read-only roles)
 
-Onboarding mode is the default; both `onboarding` and `steady` share
-the same rendering rules today. Future steady-mode affordances may
-diverge (e.g. a "swap signed-in account" affordance that doesn't
-belong in the onboarding gate). The prop exists so the divergence
-has a clean home when it lands.
+**None.** No affordance in this widget is locked or hidden by `role`
+today. The widget is **anonymous-only by AVAILABILITY** — the
+OnboardingShell mounts it only in the gate (anonymous) context, so a
+signed-in `member` never sees it; that constraint is enforced at the
+mount site, not by a prop inside this widget. The `role` prop is
+present for the role+scope contract and for forward-looking roles
+(e.g. `viewer`/`editor`); should a future role need a divergent
+affordance, the lock lands here and is asserted by this widget's test.
+
+## Scope
+
+`{ type: "none" }` — GateChatRail is session/gate-scoped, not
+document-scoped, so it declares the explicit `none` scope (it is not
+one of the four ScopedViewerWidgets that take a real `ContentScope`).
 
 ## Events
 
@@ -80,16 +95,18 @@ has a clean home when it lands.
 - "← Keep exploring" link → calls `dismissGate()` from
   `OnboardingSessionContext`. ESC at the shell level fires the same
   action.
-- Continue-to-Integrate CTA (committed state, onboarding only) →
-  advances the frame via `advanceFrame("f7")`.
+- Continue-to-Integrate CTA (committed state, only while the
+  onboarding flow is on the gate frame `f6`) → advances the frame via
+  `advanceFrame("f7")`.
 
 ## How to mount
 
 ```tsx
 import { GateChatRail } from "@/components/chat-widgets/GateChatRail/GateChatRail";
 
-// OnboardingShell mounts this whenever gate.status !== "idle".
-<GateChatRail mode="onboarding" />
+// OnboardingShell mounts this whenever gate.status !== "idle", and only
+// in the anonymous gate context (availability is enforced here).
+<GateChatRail role="anonymous" scope={{ type: "none" }} />
 ```
 
 The composing animation that precedes the rail appearing lives in

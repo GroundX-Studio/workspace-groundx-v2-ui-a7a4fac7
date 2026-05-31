@@ -32,6 +32,8 @@ import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState, type FC } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
+
 import {
   BODY_TEXT,
   BORDER,
@@ -59,20 +61,27 @@ import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
  */
 const TRUSTED_CALENDLY_ORIGINS = /^https:\/\/([a-z0-9-]+\.)?calendly\.com$/i;
 
-export type BookingStatusCardMode = "onboarding" | "steady";
-
 export interface BookingStatusCardProps {
   /**
-   * Locked-affordance gate per the widget contract. In onboarding, the
-   * "back to sign-in" dismissal still works (it just clears the URL
-   * param); in steady mode the dismissal is still allowed but the
-   * surrounding chat continues to operate normally rather than gating
-   * the rest of the flow.
+   * Widget-contract authorization role (`anonymous` | `member`).
+   * BookingStatusCard is available to BOTH roles and locks NO
+   * affordance by role (matrix row, docs/agents/widget-access-matrix.md
+   * §1). Accepted to satisfy the contract; behavior is identical across
+   * roles. The retired binary onboarding/steady phase prop was
+   * cosmetic-only here and was dropped in
+   * 2026-05-30-widget-role-access Phase 2b.
    */
-  mode?: BookingStatusCardMode;
+  role: WidgetRole;
+  /**
+   * Widget-contract scope. This chat-side status card is not
+   * document-scoped, so it declares `{ type: "none" }` (matrix §1b).
+   */
+  scope: WidgetScope;
 }
 
-export const BookingStatusCard: FC<BookingStatusCardProps> = ({ mode = "onboarding" }) => {
+export const BookingStatusCard: FC<BookingStatusCardProps> = ({ role, scope }) => {
+  void role;
+  void scope;
   const navigate = useNavigate();
   const location = useLocation();
   const { commitGate } = useOnboardingSession();
@@ -130,7 +139,6 @@ export const BookingStatusCard: FC<BookingStatusCardProps> = ({ mode = "onboardi
       <Box
         data-testid="book-call-confirmed"
         data-widget="booking-status-card"
-        data-mode={mode}
         sx={{
           p: 2.5,
           borderRadius: BORDER_RADIUS_2X,
@@ -187,7 +195,6 @@ export const BookingStatusCard: FC<BookingStatusCardProps> = ({ mode = "onboardi
       spacing={1.5}
       aria-label="Book a call · status"
       data-widget="booking-status-card"
-      data-mode={mode}
     >
       <Box
         component="button"

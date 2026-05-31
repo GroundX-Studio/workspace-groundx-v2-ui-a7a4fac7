@@ -27,9 +27,12 @@ viewer flips to the form INSTEAD of leaving the sample in place.
 
 ## Props
 
-| Prop   | Type                          | Default        | Notes                                                                             |
-| ------ | ----------------------------- | -------------- | --------------------------------------------------------------------------------- |
-| `mode` | `"onboarding"` \| `"steady"`  | `"onboarding"` | Onboarding fires `commitGate("register")` on success; steady promotes auth only.  |
+| Prop    | Type                       | Required | Notes                                                                                                       |
+| ------- | -------------------------- | :------: | ----------------------------------------------------------------------------------------------------------- |
+| `role`  | `WidgetRole`               |    ✅    | `"anonymous"` \| `"member"`. Widget-contract prop, forward-looking. Locks NO affordance here (see below).    |
+| `scope` | `WidgetScope`              |    ✅    | Always `{ type: "none" }` — sign-up is not document-scoped. Declared for the contract; never read.           |
+
+`WidgetRole` / `WidgetScope` come from `@groundx/shared`.
 
 ## Submit pipeline
 
@@ -42,9 +45,12 @@ In this exact order on a happy-path submit:
 3. `promoteToSignedIn()` (from `AppModeContext`) — flips the in-app
    auth state.
 4. `commitGate("register")` (from `OnboardingSessionContext`) — only
-   in `mode="onboarding"`; tells the gate state machine the user
-   committed via the register path so the `GateChatRail` shows the
-   "WELCOME — YOU'RE SIGNED IN" success card.
+   when a gate is **awaiting commit** (`gate.status === "open"` or
+   `"dismissed"`); tells the gate state machine the user committed via
+   the register path so the `GateChatRail` shows the "WELCOME — YOU'RE
+   SIGNED IN" success card. When the gate is `idle`, register + promote
+   still run but the gate is untouched. **Sourced from gate-state, not
+   from `role`** — see "Locked affordances" below.
 
 ## What this widget intentionally does NOT do
 
@@ -60,19 +66,37 @@ In this exact order on a happy-path submit:
   `gate.status === "committed"`, the OnboardingShell unmounts this
   widget (the user doesn't need to re-see the form they just submitted).
 
-## Locked affordances under `mode="onboarding"`
+## Scope
 
-- `commitGate("register")` fires on successful sign-up to drive the
-  gate state machine to `committed`. Steady mode skips this (the auth
-  promotion is enough — no gate to commit).
-- Otherwise both modes render the same form. Identity actions are
-  user-driven by definition; the mode prop is for the post-submit
-  side effect.
+`scope` is always `{ type: "none" }`. Sign-up is not a
+ScopedViewerWidget — it operates on identity, not a document set. The
+prop is declared to satisfy the widget contract and is never read.
+
+## Locked affordances (read-only roles)
+
+**None.** No affordance in this widget is gated by `role`. Per the
+access matrix (`docs/agents/widget-access-matrix.md`), this widget's
+affordance-lock stance is "none today"; the form renders identically
+for `"anonymous"` and `"member"`. Identity actions are user-driven by
+definition.
+
+Note the two role concerns this widget does NOT mix up:
+
+- **Availability** (a signed-in `member` never sees sign-up) is
+  **anonymous-only** and enforced at the **mount site** (the view /
+  gate-state decides whether to mount), NOT by a prop inside this
+  widget.
+- **The gate-commit side effect** is sourced from **gate-state**
+  (`gate.status`), NOT from `role`. A gate `open`/`dismissed` →
+  `commitGate("register")` on success; a gate `idle` → no commit;
+  `committed` → render the celebration card. This is the "re-source,
+  don't rename" rule (the retired `mode` did NOT mean a role).
 
 ## Events
 
-- Form submit → register → claim → promote → (onboarding) commitGate.
-  See § "Submit pipeline" above for the exact order + failure routing.
+- Form submit → register → claim → promote → (gate awaiting commit)
+  commitGate. See § "Submit pipeline" above for the exact order +
+  failure routing.
 - Validation failures stay local to the form; no host callback fires.
 
 ## How to mount
@@ -80,8 +104,9 @@ In this exact order on a happy-path submit:
 ```tsx
 import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
 
-// OnboardingShell mounts this in the viewer pane while gate.status === "open".
-<SignUpWidget mode="onboarding" />
+// OnboardingShell mounts this in the viewer pane while gate.status === "open"
+// (anonymous-only — availability is decided here, at the mount site).
+<SignUpWidget role="anonymous" scope={{ type: "none" }} />
 ```
 
 The chat-side `GateChatRail` is mounted in parallel by the same shell.

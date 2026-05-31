@@ -9,22 +9,34 @@
  * Contract per `scaffold/docs/agents/widget-contract.md`:
  *   - Lives at `components/viewer-widgets/SignUpWidget/`.
  *   - Ships README + sibling .test.tsx.
- *   - Accepts a `mode` prop (`onboarding` | `steady`).
+ *   - Accepts a `role: WidgetRole` prop AND a `scope: WidgetScope` prop.
  *
- * Mode semantics:
- *   - `onboarding` — happy-path submit commits the session-level gate
- *     via `commitGate("register")` so the chat rail flips to its
- *     "WELCOME — YOU'RE SIGNED IN" success state.
- *   - `steady` — promotes the in-app auth state but does NOT touch
- *     the onboarding gate (it's already committed or never existed
- *     in steady mode). Allows the same form to be reused inside a
- *     steady-mode settings drawer if needed.
+ * Role + scope (2026-05-30, widget-role-access Phase 2b):
+ *   - `role` ("anonymous" | "member") satisfies the widget contract and
+ *     is forward-looking. It does NOT gate any affordance here today —
+ *     the matrix records "no role-locked affordance" for this widget.
+ *     Availability (this widget is anonymous-only — a signed-in member
+ *     never sees sign-up) is enforced at the MOUNT SITE, not by this
+ *     prop.
+ *   - `scope` is `{ type: "none" }` — sign-up is not a document-scoped
+ *     widget. Declared for the contract; unused by the form.
+ *
+ * Gate behavior is RE-SOURCED from gate-state, NOT from role/mode:
+ *   - On a successful register, the session-level gate is committed via
+ *     `commitGate("register")` ONLY when a gate is actively awaiting
+ *     commit (`status === "open" | "dismissed"`). That flips the chat
+ *     rail to its "WELCOME — YOU'RE SIGNED IN" success state.
+ *   - When no gate is awaiting commit (`status === "idle"`) the form
+ *     still registers + promotes auth, but does NOT touch the gate
+ *     (mirrors the retired "steady" reuse case).
+ *   - The committed-state celebration renders whenever the gate is
+ *     already `committed`.
  *
  * Side effects on submit, in this order:
  *   1. POST /api/auth/register (sets the session cookie)
  *   2. POST /api/chat-sessions/claim (best-effort; re-keys anon rows)
  *   3. promoteToSignedIn() (in-app auth state)
- *   4. commitGate("register") (onboarding only)
+ *   4. commitGate("register") (only when a gate is awaiting commit)
  *
  * The book-a-call CTA and the "← keep exploring" dismiss link
  * intentionally live in the chat-side `GateChatRail`, not here. This
@@ -37,6 +49,7 @@ import Card from "@mui/material/Card";
 import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
 import MuiStack from "@mui/material/Stack";
 import { useCallback, useState, type FC, type FormEvent } from "react";
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import { register } from "@/api/entities/customerEntity";
 import { claimAnonymousChat } from "@/api/claimAnonymousChat";
@@ -54,21 +67,35 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { captureException } from "@/lib/sentry";
 
-export type SignUpWidgetMode = "onboarding" | "steady";
-
 export interface SignUpWidgetProps {
   /**
-   * Locked-affordance gate per the widget contract.
-   * - `onboarding` (default): submit fires `commitGate("register")`
-   *   so the chat rail flips to its committed-state success card.
-   * - `steady`: register + promote run; gate is not touched.
+   * Widget access role (widget contract). Forward-looking — does NOT
+   * gate any affordance in this widget today (see the access matrix:
+   * "no role-locked affordance"). Availability (anonymous-only) is
+   * enforced at the mount site, not here.
    */
-  mode?: SignUpWidgetMode;
+  role: WidgetRole;
+  /**
+   * Required by the widget contract. Sign-up is not document-scoped, so
+   * this is always `{ type: "none" }`. Declared, never read by the form.
+   */
+  scope: WidgetScope;
 }
 
-export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => {
+// `role` and `scope` are intentionally not destructured for use — they
+// satisfy the widget contract. Role is forward-looking (no affordance is
+// role-locked here); scope is always `{ type: "none" }`. Gate behavior is
+// sourced from gate-state below.
+export const SignUpWidget: FC<SignUpWidgetProps> = () => {
   const { promoteToSignedIn } = useAppMode();
   const { state: session, commitGate } = useOnboardingSession();
+  // RE-SOURCED gate behavior: a gate is "awaiting commit" when it is open
+  // or was dismissed (re-openable). We commit it on a successful register
+  // so the chat rail flips to its success state. When idle, registering
+  // does not touch the gate.
+  const gateAwaitingCommit =
+    session.gate.status === "open" || session.gate.status === "dismissed";
+  const gateCommitted = session.gate.status === "committed";
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [email, setEmail] = useState("");
@@ -120,7 +147,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
           });
         }
         promoteToSignedIn();
-        if (mode === "onboarding") {
+        if (gateAwaitingCommit) {
           commitGate("register");
         }
       } catch (err) {
@@ -129,7 +156,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
         setSubmitting(false);
       }
     },
-    [first, last, email, password, confirmPassword, submitting, mode, commitGate, promoteToSignedIn],
+    [first, last, email, password, confirmPassword, submitting, gateAwaitingCommit, commitGate, promoteToSignedIn],
   );
 
   // Committed-state celebration. The chat-side `GateChatRail` shows
@@ -137,11 +164,10 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
   // success so the user isn't left staring at the form they just
   // submitted while the chat says "Welcome." Kept deliberately quiet
   // — the chat rail is the call-to-action.
-  if (mode === "onboarding" && session.gate.status === "committed") {
+  if (gateCommitted) {
     return (
       <Box
         data-widget="sign-up"
-        data-mode={mode}
         data-state="committed"
         sx={{
           display: "flex",
@@ -175,7 +201,6 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({ mode = "onboarding" }) => 
   return (
     <Box
       data-widget="sign-up"
-      data-mode={mode}
       sx={{
         display: "flex",
         alignItems: "center",

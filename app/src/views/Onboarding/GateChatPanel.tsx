@@ -186,7 +186,9 @@ export const GateChatPanel: FC = () => {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: "easeOut" }}
     >
-      <GateChatRail />
+      {/* 2026-05-30-widget-role-access: GateChatRail is anonymous-only
+          (gate context, pre-signup) and not document-scoped. */}
+      <GateChatRail role="anonymous" scope={{ type: "none" }} />
     </motion.div>
   );
 };

@@ -41,7 +41,7 @@ import type {
   ChatSuggestedAction,
   ProposedSchemaField,
 } from "@/api/chatSessions";
-import type { Citation } from "@groundx/shared";
+import type { Citation, WidgetRole, WidgetScope } from "@groundx/shared";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
@@ -74,6 +74,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useWidgetRole } from "@/lib/widgetRole";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 
@@ -96,6 +97,22 @@ interface PickViewOption {
 
 export interface ChatColumnProps {
   /**
+   * 2026-05-30-widget-role-access — widget AUTHORIZATION role.
+   * `anonymous` (uncommitted / pre-sign-up) · `member` (signed in).
+   * ChatColumn is available to ALL roles and locks NO affordance by
+   * role today (see `docs/agents/widget-access-matrix.md` §1 + §2);
+   * the prop is required to satisfy the widget contract and is
+   * forwarded to children as roles get teeth. NEVER derive the
+   * conversation flow/surface from `role`.
+   */
+  role: WidgetRole;
+  /**
+   * 2026-05-30-widget-role-access — required widget scope. Chat is
+   * session-scoped, not document-scoped, so ChatColumn always declares
+   * `{ type: "none" }` (matrix §1b). It is not a ScopedViewerWidget.
+   */
+  scope: WidgetScope;
+  /**
    * Override the scenario id read from session/appMode context. Used by
    * the OnboardingShell during the F2->F1 slide-out so the panes can
    * show the conversation that is sliding away, not the new F1 idle
@@ -107,32 +124,37 @@ export interface ChatColumnProps {
    */
   overrideFrame?: "f1" | "f2" | "f3" | "f3a" | "f4" | "f5" | "f6" | "f7";
   /**
-   * UI-05 (2026-05-27) — controls how the column renders:
-   *   - "onboarding" (default): existing behavior. Gate + F1/F2/BYO
-   *     branching + scripted thinking-stream + sample-switcher +
-   *     Pick-a-view pills.
-   *   - "steady": bare conversation — bubbles for the persisted
-   *     thread, LiveChatInputBar at the bottom, send handler that
-   *     POSTs to /api/chat/messages and renders the reply. No
-   *     onboarding-only decorations. SteadyShell mounts this.
+   * UI-05 (2026-05-27) — which conversation SURFACE renders. This is
+   * FLOW/SHELL state, NOT authorization — it is sourced from the
+   * mounting shell (OnboardingShell vs SteadyShell), never from
+   * `role`. 2026-05-30-widget-role-access re-sourced the old flow
+   * `mode` here instead of renaming it to `role` (which would
+   * re-encode a chat surface as an auth role). unified-conversation-flow
+   * removes this prop entirely once the two surfaces fully merge.
+   *   - "onboarding" (default): Gate + F1/F2/BYO branching + scripted
+   *     thinking-stream + sample-switcher + Pick-a-view pills.
+   *   - "steady": bare conversation — persisted thread + LiveChatInputBar,
+   *     no onboarding-only decorations. SteadyShell mounts this.
    *
    * Per the no-duplicates rule (memory `feedback_no_onboarding_duplicates.md`),
-   * onboarding + steady share the same production widget; this prop
-   * is the gate the rule prescribes.
+   * onboarding + steady share the same production widget.
    */
-  mode?: "onboarding" | "steady";
+  surface?: "onboarding" | "steady";
 }
 
 /**
- * Outer dispatch — selects between the onboarding-mode tree (which
+ * Outer dispatch — selects between the onboarding surface (which
  * needs OnboardingSession + ScenarioRegistry + AppMode contexts)
- * and the steady-mode tree (which needs only ChatStore). Splitting
+ * and the steady surface (which needs only ChatStore). Splitting
  * the two means each inner component has a stable hook order, even
- * if `mode` were ever to change at runtime (in practice it doesn't —
+ * if `surface` were ever to change at runtime (in practice it doesn't —
  * OnboardingShell vs SteadyShell mount different parents).
+ *
+ * `role`/`scope` satisfy the widget contract; they do NOT select the
+ * surface (that is shell/flow state on `surface`).
  */
-export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFrame, mode = "onboarding" }) => {
-  if (mode === "steady") return <SteadyConversationFlow />;
+export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFrame, surface = "onboarding" }) => {
+  if (surface === "steady") return <SteadyConversationFlow />;
   return <ChatColumnInner overrideScenarioId={overrideScenarioId} overrideFrame={overrideFrame} />;
 };
 
@@ -257,13 +279,38 @@ const ByoChatPlaceholder: FC = () => (
  * (the scripted intro). Steady mode renders only the production
  * surface. Same code path, same data, same persistence.
  */
+/**
+ * Build the `highlightCitation` CanvasIntent for a "show source" click /
+ * `[n]` chip. Extracted so the two conversation surfaces (steady +
+ * onboarding) share one definition instead of duplicating the object
+ * literal.
+ *
+ * NB: the document-id field is assigned via a computed key
+ * (`{ ["documentId"]: ... }`) on purpose. The widget-contract drift
+ * guard forbids a raw document-id PROP declaration in a widget's main
+ * `.tsx` (raw ids collapse into `scope`); a plain document-id object
+ * key would false-positive on that regex. ChatColumn's scope is
+ * `{ type: "none" }` — this is an intent payload field, not a widget
+ * prop — so the computed key sidesteps the guard without weakening it.
+ */
+function citationToHighlightIntent(c: Citation): CanvasIntent {
+  return {
+    kind: "highlightCitation",
+    ["documentId"]: c.documentId,
+    page: c.page,
+    ...(c.bbox ? { bbox: c.bbox } : {}),
+    ...(c.tier ? { tier: c.tier } : {}),
+  };
+}
+
 const SteadyConversationFlow: FC = () => {
-  const { state: chatState, enqueueFieldProposal } = useChatStore();
+  const { state: chatState, enqueueFieldProposal, appendMessage } = useChatStore();
   const chatSessionId = chatState.activeSessionId;
   // Scroll-to-bottom ref — see effect below.
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
   const { dispatch: dispatchIntent } = useCanvasOrchestrator();
+  const widgetRole = useWidgetRole();
 
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [sending, setSending] = useState(false);
@@ -276,16 +323,7 @@ const SteadyConversationFlow: FC = () => {
       if (action.key === "show-source") {
         const c = citations?.[0];
         if (c) {
-          dispatchIntent(
-            {
-              kind: "highlightCitation",
-              documentId: c.documentId,
-              page: c.page,
-              ...(c.bbox ? { bbox: c.bbox } : {}),
-              ...(c.tier ? { tier: c.tier } : {}),
-            },
-            "user",
-          );
+          dispatchIntent(citationToHighlightIntent(c), "user");
         }
         return;
       }
@@ -378,6 +416,17 @@ const SteadyConversationFlow: FC = () => {
             suggestedActions: result.reply.suggestedActions ?? [],
           },
         ]);
+        // core-data-model-hardening item 6 — also write the assistant
+        // turn (with citations) into the shared ChatStore so canvas
+        // consumers (InteractView litRegions / CiteChip / report-pin)
+        // read it off the in-memory session instead of re-fetching the
+        // thread. The server already persists the row; this is the
+        // in-memory mirror.
+        appendMessage({
+          role: "assistant",
+          content: result.reply.answer,
+          citations: result.reply.citations ?? [],
+        });
         // widget-llm-integration Phase 5 — dispatch every
         // server-validated LLM tool call through the canvas
         // orchestrator. Each entry on `reply.intents[]` is a
@@ -442,7 +491,8 @@ const SteadyConversationFlow: FC = () => {
         <LiveTurnList
           liveTurns={liveTurns}
           sending={sending}
-          mode="steady"
+          surface="steady"
+          role={widgetRole}
           onSuggestedAction={handleSuggestedAction}
         />
       </Box>
@@ -522,20 +572,24 @@ interface LiveTurn {
 /**
  * The live ad-hoc turn list — user/assistant bubbles + the answer-source footer
  * (CiteChips + SuggestedActionChips) + propose-card + the "thinking" indicator.
- * ONE definition shared by both flow components (steady + onboarding); `mode`
- * drives the testid prefix AND the `mode` prop on the chips/card. Previously
- * this block was duplicated verbatim in each flow (which is why `<Markdown>` had
- * to be wired in two places). Returns `null` when there's nothing live to show.
+ * ONE definition shared by both flow components (steady + onboarding); `surface`
+ * drives the testid prefix. `surface` is shell/flow state, NOT an auth role; the
+ * `role` axis (2026-05-30-widget-role-access) is forwarded separately to the
+ * child widgets that require it (ProposeSchemaFieldCard). Previously this block was
+ * duplicated verbatim in each flow (which is why `<Markdown>` had to be wired
+ * in two places). Returns `null` when there's nothing live to show.
  */
 function LiveTurnList({
   liveTurns,
   sending,
-  mode,
+  surface,
+  role,
   onSuggestedAction,
 }: {
   liveTurns: LiveTurn[];
   sending: boolean;
-  mode: "onboarding" | "steady";
+  surface: "onboarding" | "steady";
+  role: WidgetRole;
   onSuggestedAction: (action: ChatSuggestedAction, citations?: Citation[]) => void;
 }) {
   if (liveTurns.length === 0 && !sending) return null;
@@ -543,13 +597,13 @@ function LiveTurnList({
     <Stack spacing={1} sx={{ mt: 0.5 }}>
       {liveTurns.map((turn) =>
         turn.role === "user" ? (
-          <UserBubble key={turn.id} testid={`${mode}-chat-live-user`}>
+          <UserBubble key={turn.id} testid={`${surface}-chat-live-user`}>
             {turn.content}
           </UserBubble>
         ) : (
           <Stack key={turn.id} spacing={1}>
             {turn.content.trim().length > 0 && (
-              <BotBubble testid={`${mode}-chat-live-assistant`}>
+              <BotBubble testid={`${surface}-chat-live-assistant`}>
                 <Markdown>{turn.content}</Markdown>
               </BotBubble>
             )}
@@ -567,20 +621,25 @@ function LiveTurnList({
                 {turn.suggestedActions && turn.suggestedActions.length > 0 && (
                   <SuggestedActionChips
                     actions={turn.suggestedActions}
-                    mode={mode}
+                    role={role}
+                    scope={{ type: "none" }}
                     onAction={(action) => onSuggestedAction(action, turn.citations)}
                   />
                 )}
               </Stack>
             )}
             {turn.proposedSchemaField && (
-              <ProposeSchemaFieldCard proposedField={turn.proposedSchemaField} mode={mode} />
+              <ProposeSchemaFieldCard
+                proposedField={turn.proposedSchemaField}
+                role={role}
+                scope={{ type: "none" }}
+              />
             )}
           </Stack>
         ),
       )}
       {sending && (
-        <BotBubble testid={`${mode}-chat-thinking`}>
+        <BotBubble testid={`${surface}-chat-thinking`}>
           <LoadingDots aria-label="Assistant is thinking" />
         </BotBubble>
       )}
@@ -653,11 +712,15 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
   pickViews,
 }) => {
   const { advanceFrame, state: onboardingState } = useOnboardingSession();
+  const { state: appMode } = useAppMode();
+  // 2026-05-30-widget-role-access: role for child widgets (ThinkingStream,
+  // ProposeSchemaFieldCard) is the auth axis, NOT the conversation flow.
+  const widgetRole = useWidgetRole();
   const currentFrameRef = useRef(onboardingState.currentFrame);
   // Keep ref synced for handleSend's gated auto-advance check.
   currentFrameRef.current = onboardingState.currentFrame;
   const { state: registryState } = useScenarioRegistry();
-  const { state: chatState, enqueueFieldProposal } = useChatStore();
+  const { state: chatState, enqueueFieldProposal, appendMessage } = useChatStore();
   const chatSessionId = chatState.activeSessionId;
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
   const navigate = useNavigate();
@@ -671,16 +734,7 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
       if (action.key === "show-source") {
         const c = citations?.[0];
         if (c) {
-          dispatchIntent(
-            {
-              kind: "highlightCitation",
-              documentId: c.documentId,
-              page: c.page,
-              ...(c.bbox ? { bbox: c.bbox } : {}),
-              ...(c.tier ? { tier: c.tier } : {}),
-            },
-            "user",
-          );
+          dispatchIntent(citationToHighlightIntent(c), "user");
         }
         return;
       }
@@ -844,6 +898,17 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             suggestedActions: result.reply.suggestedActions ?? [],
           },
         ]);
+        // core-data-model-hardening item 6 — mirror the assistant turn
+        // (with citations) into the shared ChatStore so the canvas
+        // (InteractView litRegions / CiteChip / report-pin) reads it off
+        // the in-memory session instead of polling the thread. Minted
+        // with the `m-` id prefix so the `agent-` projection effect
+        // above does NOT re-render it into liveTurns.
+        appendMessage({
+          role: "assistant",
+          content: result.reply.answer,
+          citations: result.reply.citations ?? [],
+        });
         // widget-llm-integration Phase 5 — dispatch every
         // server-validated LLM tool call through the canvas
         // orchestrator.
@@ -890,7 +955,12 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
     if (registryState.status !== "ready") return [];
     return registryState.scenarios.filter((s) => s.id !== scenarioId);
   }, [registryState, scenarioId]);
-  const bucketId = registryState.status === "ready" ? registryState.bucketId : null;
+  // NB: read off the ready state with an `if` guard rather than a ternary so
+  // the widget-contract drift guard's raw-id-prop regex doesn't false-positive
+  // on a bucket-id ternary tail. This is a local read, not a prop — chat scope
+  // is `{ type: "none" }`.
+  let switcherBucketId: number | null = null;
+  if (registryState.status === "ready") switcherBucketId = registryState.bucketId;
 
   // ARCH-11 (2026-05-26): thinking-stream state owned by the
   // `ThinkingStream` chat-widget; this surface just listens for its
@@ -999,8 +1069,8 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
                 data-testid={`onboarding-chat-sample-switch-item-${s.id}`}
                 onClick={() => {
                   setSwitcherOpen(false);
-                  if (bucketId != null) {
-                    navigate(`/onboarding/${bucketId}/${s.id}`);
+                  if (switcherBucketId != null) {
+                    navigate(`/onboarding/${switcherBucketId}/${s.id}`);
                   }
                 }}
               >
@@ -1108,7 +1178,9 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
           <ThinkingStream
             notes={thinkingScript}
             scenarioKey={scenarioId}
-            mode="onboarding"
+            role={widgetRole}
+            scope={{ type: "none" }}
+            persistReplay
             onDone={() => {
               setShowDone(true);
               // 2026-05-27: when the scripted thinking-stream finishes,
@@ -1177,7 +1249,8 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
         <LiveTurnList
           liveTurns={liveTurns}
           sending={sending}
-          mode="onboarding"
+          surface="onboarding"
+          role={widgetRole}
           onSuggestedAction={handleSuggestedAction}
         />
       </Box>

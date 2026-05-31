@@ -6,11 +6,12 @@
  * one shell, different widget bundle.
  *
  * UI-05 (2026-05-27): chat slot now mounts the production chat widget
- * (`<ChatColumn mode="steady" />` — same widget that powers F2-F5
+ * (`<ChatColumn surface="steady" … />` — same widget that powers F2-F5
  * onboarding) instead of the SessionSwitcher placeholder. Per
  * the no-duplicates rule, onboarding + steady share the same widget;
- * the `mode` prop locks the onboarding-only decorations (scripted
- * intro, Pick-a-view pills, sample-switcher). Persistence + hydration
+ * the `surface` prop (re-sourced from the old flow `mode` by
+ * 2026-05-30-widget-role-access) drops the onboarding-only decorations
+ * (scripted intro, Pick-a-view pills, sample-switcher). Persistence + hydration
  * come for free via RT-01..05. Canvas slot still placeholder until
  * the steady-mode PdfViewer wire-up exists (separate ticket).
  *
@@ -44,12 +45,14 @@ import {
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { SessionSwitcher } from "@/views/Steady/SteadyShell/SessionSwitcher";
+import { useWidgetRole } from "@/lib/widgetRole";
 
 export const SteadyShell: FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const { state, switchTo } = useChatStore();
   const [navCollapsed, setNavCollapsed] = useOnboardingNavCollapsed();
   const navigate = useNavigate();
+  const widgetRole = useWidgetRole();
 
   useEffect(() => {
     if (!sessionId) return;
@@ -114,7 +117,12 @@ export const SteadyShell: FC = () => {
         <SessionSwitcher hideOnboardingSession={false} />
       </Box>
       <Box sx={{ flex: 1, minHeight: 0, px: 2, pb: 2 }}>
-        <ChatColumn mode="steady" />
+        {/* 2026-05-30-widget-role-access: the conversation SURFACE is
+            sourced from the mounting shell (steady), NOT from `role`.
+            `role` is the auth-derived `WidgetRole` (the steady shell is
+            usually `member` but an anonymous session can reach it — never
+            hardcode); chat is session-scoped (`{ type: "none" }`). */}
+        <ChatColumn surface="steady" role={widgetRole} scope={{ type: "none" }} />
       </Box>
     </Box>
   );
@@ -138,8 +146,8 @@ export const SteadyShell: FC = () => {
         aria-label="Canvas"
       >
         <PdfViewerWidget
-          documentId={activeStep.documentId}
-          mode="steady"
+          scope={{ type: "documents", documentIds: [activeStep.documentId] }}
+          role={widgetRole}
           targetPage={activeStep.highlight?.page ?? activeStep.page ?? null}
           highlightBbox={activeStep.highlight?.bbox ?? null}
           highlightTier={activeStep.highlight?.tier}

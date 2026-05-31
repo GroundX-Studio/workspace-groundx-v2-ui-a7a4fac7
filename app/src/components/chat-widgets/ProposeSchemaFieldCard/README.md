@@ -42,22 +42,50 @@ On Reject:
 interface ProposeSchemaFieldCardProps {
   /** Server-validated propose-field payload. */
   proposedField: ProposedSchemaField;
-  /** Widget-contract mode flag. */
-  mode?: "onboarding" | "steady";  // defaults to "onboarding"
+  /** Widget-contract authorization role (anonymous | member). */
+  role: WidgetRole;
+  /** Widget-contract scope — always `{ type: "none" }` here. */
+  scope: WidgetScope;
 }
 ```
 
-## Locked affordances
+## Scope
 
-The widget is mode-flagged for contract conformance; today its
-behavior is identical in both modes. Future locking (e.g. "in steady
-mode, Reject requires double-confirm") attaches here.
+`{ type: "none" }`. The card operates on the **draft template**
+(`pendingSchemaOverlay.addedFields`), not a document set, so it is not
+a ScopedViewerWidget and declares the `none` scope variant. See
+`docs/agents/widget-access-matrix.md` §1b.
+
+## Locked affordances (read-only roles)
+
+**None.** Per the access matrix this card is available to ALL roles
+(`anonymous` ✅ / `member` ✅) and locks no affordance by role —
+both Accept and Reject render identically regardless of role. The
+`role` prop is for contract conformance + forward-looking roles (e.g.
+a read-only `viewer`); when such a role lands, its affordance row gets
+added to the matrix and asserted by this widget's sibling test.
 
 ## Activation
 
 Mounted by `chat-widgets/ChatColumn/ChatColumn` whenever an assistant
 live-turn carries a non-null `proposedSchemaField`. The card sits
 inline within the assistant bubble — sibling to the answer text.
+
+## Events
+
+- **Inbound** — rendered when an assistant turn carries a non-null
+  `reply.proposedSchemaField` (the `propose_schema_field` tool / legacy fenced
+  block).
+- **Accept** (`propose-schema-field-accept`) → calls `useChatStore().addSchemaField()`
+  (lands in `pendingSchemaOverlay.addedFields`), fires the fire-and-forget
+  `POST /api/extract-field`, and swaps the card to its accepted-confirmation
+  surface (accept/reject controls unmount so it can't double-fire).
+- **Reject** (`propose-schema-field-reject`) → swaps to the dismissed surface;
+  **no** state mutation.
+
+No `on*` callback props: the card drives its outcome through `ChatStore` mutators
+directly. The sibling `accept_proposal` / `reject_proposal` LLM tools are the
+*agentic* auto-apply path (see "LLM tools"), distinct from these button clicks.
 
 ## How to mount
 
@@ -67,7 +95,11 @@ import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaF
 // ChatColumn mounts this inline within each assistant bubble that
 // carries a non-null reply.proposedSchemaField:
 {turn.proposedSchemaField && (
-  <ProposeSchemaFieldCard proposedField={turn.proposedSchemaField} mode="onboarding" />
+  <ProposeSchemaFieldCard
+    proposedField={turn.proposedSchemaField}
+    role={role}
+    scope={{ type: "none" }}
+  />
 )}
 ```
 

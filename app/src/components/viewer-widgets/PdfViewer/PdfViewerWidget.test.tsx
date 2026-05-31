@@ -1,6 +1,8 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
+import type { ContentScope, WidgetRole } from "@groundx/shared";
+
 import { api } from "@/api";
 import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
@@ -9,16 +11,20 @@ import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarConte
 /**
  * PdfViewerWidget — the production PDF viewer.
  *
- * Used identically in onboarding (F2) and steady-mode source viewer.
- * Reads `documentId` + `mode` props; pulls real xray data from
- * GroundX via DocumentsContext; renders pre-rasterized page images
- * from `xray.documentPages[].pageUrl`.
+ * Used identically by anonymous + member surfaces. Reads a
+ * `scope: ContentScope` (a single doc is
+ * `{ type: "documents", documentIds: [id] }`) + a `role: WidgetRole`;
+ * pulls real xray data from GroundX via DocumentsContext; renders
+ * pre-rasterized page images from `xray.documentPages[].pageUrl`.
  *
  * Per the no-onboarding-duplicates rule
  * (`memory/feedback_no_onboarding_duplicates.md`): this is the one
- * production widget for PDF rendering. The onboarding view
- * (`UnderstandView`) is a thin layout wrapper that mounts this with
- * `mode="onboarding"`.
+ * production widget for PDF rendering — the onboarding views are thin
+ * layout wrappers that mount it. Per the 2026-05-30 widget access
+ * matrix (`docs/agents/widget-access-matrix.md`) PdfViewer is a
+ * **ScopedViewerWidget**: available to BOTH `anonymous` + `member`
+ * (no affordance lock today) and takes a real `ContentScope` rather
+ * than a raw `documentId`.
  */
 
 vi.mock("@/api", () => ({
@@ -48,6 +54,9 @@ beforeEach(() => {
 });
 
 import { PdfViewerWidget } from "./PdfViewerWidget";
+
+/** Single-doc scope helper — the canonical ScopedViewerWidget shape for one document. */
+const docScope = (id: string): ContentScope => ({ type: "documents", documentIds: [id] });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <LoadingProvider>
@@ -80,7 +89,7 @@ describe("PdfViewerWidget", () => {
       }),
     );
 
-    render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+    render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
     // While the call is in flight the widget surfaces loading via a
     // data-attribute on the root (the prior visible "DOCUMENT" + file
@@ -100,11 +109,44 @@ describe("PdfViewerWidget", () => {
     expect(screen.getByTestId("pdf-viewer-widget").getAttribute("data-loading")).toBe("false");
   });
 
+  // 2026-05-30 widget access matrix — PdfViewer is available to BOTH
+  // roles with NO affordance lock today. Mount under each role and
+  // assert it renders identically (its matrix row: ✅ anonymous, ✅
+  // member; no role-gated control).
+  describe("widget access matrix (role availability)", () => {
+    const ROLES: WidgetRole[] = ["anonymous", "member"];
+    for (const role of ROLES) {
+      it(`mounts and renders for role="${role}" (available to both roles, no affordance lock)`, async () => {
+        (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+        render(<PdfViewerWidget scope={docScope("doc-1")} role={role} />, { wrapper });
+
+        // Widget mounts for the role, fetches its xray, and exposes the
+        // full read-only affordance set (page image + thumbnail strip).
+        await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
+        expect(screen.getByTestId("pdf-viewer-thumb-1")).toBeInTheDocument();
+        // No control is gated by role — the thumbnail strip (the only
+        // interactive affordance) is present for both roles.
+        expect(screen.getByTestId("pdf-viewer-thumb-2")).toBeInTheDocument();
+      });
+    }
+  });
+
+  it("resolves the single-doc scope to the document id and fetches its xray", async () => {
+    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+    render(<PdfViewerWidget scope={docScope("some-doc-uuid")} role="member" />, { wrapper });
+
+    await waitFor(() =>
+      expect(api.groundxDocuments.getGroundXDocumentXray).toHaveBeenCalledWith("some-doc-uuid", undefined),
+    );
+  });
+
   describe("WF-15: placeholder-id X-Ray gate", () => {
-    it("does NOT fetch an X-Ray for a scenario:* placeholder id", async () => {
+    it("does NOT fetch an X-Ray for a scenario:* placeholder id in scope", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
-      render(<PdfViewerWidget documentId="scenario:utility" mode="onboarding" />, { wrapper });
+      render(<PdfViewerWidget scope={docScope("scenario:utility")} role="anonymous" />, { wrapper });
 
       // No fetch fires for a placeholder id — and the widget shows a
       // neutral loading state, never the "COULD NOT LOAD" error flash.
@@ -117,16 +159,16 @@ describe("PdfViewerWidget", () => {
       expect(screen.queryByText(/COULD NOT LOAD/i)).not.toBeInTheDocument();
     });
 
-    it("fetches the X-Ray once the id resolves to a real GroundX documentId", async () => {
+    it("fetches the X-Ray once the scope resolves to a real GroundX documentId", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
       const { rerender } = render(
-        <PdfViewerWidget documentId="scenario:utility" mode="onboarding" />,
+        <PdfViewerWidget scope={docScope("scenario:utility")} role="anonymous" />,
         { wrapper },
       );
       expect(api.groundxDocuments.getGroundXDocumentXray).not.toHaveBeenCalled();
 
-      rerender(<PdfViewerWidget documentId="c3bfff49-6640-4213-822b-e81c3a771e45" mode="onboarding" />);
+      rerender(<PdfViewerWidget scope={docScope("c3bfff49-6640-4213-822b-e81c3a771e45")} role="anonymous" />);
 
       await waitFor(() =>
         expect(api.groundxDocuments.getGroundXDocumentXray).toHaveBeenCalledWith(
@@ -140,7 +182,7 @@ describe("PdfViewerWidget", () => {
   it("does NOT render the in-pane filename header (filename now lives in the chat header)", async () => {
     (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
-    render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+    render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
     // Wait for xray to resolve so we don't race the assertion against
     // a still-loading widget.
@@ -158,7 +200,7 @@ describe("PdfViewerWidget", () => {
     // when xray data hasn't propagated through DocumentsContext yet.
     (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
-    render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+    render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
     await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
     const root = screen.getByTestId("pdf-viewer-widget");
@@ -168,28 +210,18 @@ describe("PdfViewerWidget", () => {
   it("renders one thumbnail per documentPage with the real pageUrls", async () => {
     (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
-    render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+    render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
     await waitFor(() => expect(screen.getByTestId("pdf-viewer-thumb-1")).toBeInTheDocument());
     expect(screen.getByTestId("pdf-viewer-thumb-2")).toBeInTheDocument();
     expect(screen.getByTestId("pdf-viewer-thumb-3")).toBeInTheDocument();
   });
 
-  it("calls getGroundXDocumentXray with the supplied documentId on mount", async () => {
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
-
-    render(<PdfViewerWidget documentId="some-doc-uuid" mode="onboarding" />, { wrapper });
-
-    await waitFor(() =>
-      expect(api.groundxDocuments.getGroundXDocumentXray).toHaveBeenCalledWith("some-doc-uuid", undefined),
-    );
-  });
-
   it("clicking a thumbnail switches the main image to that page", async () => {
     (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
     const user = (await import("@testing-library/user-event")).default.setup();
 
-    render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+    render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
     const thumb2 = await screen.findByTestId("pdf-viewer-thumb-2");
     await user.click(thumb2);
@@ -202,23 +234,9 @@ describe("PdfViewerWidget", () => {
   it("renders an error state if the xray call fails", async () => {
     (api.groundxDocuments.getGroundXDocumentXray as Mock).mockRejectedValue(new Error("boom"));
 
-    render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+    render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
     await waitFor(() => expect(screen.getByTestId("pdf-viewer-error")).toBeInTheDocument());
-  });
-
-  it("data-mode attribute reflects the mode prop (so locked-feature CSS / tests can branch)", async () => {
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
-
-    const { rerender } = render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-mode", "onboarding"),
-    );
-
-    rerender(<PdfViewerWidget documentId="doc-1" mode="steady" />);
-    await waitFor(() =>
-      expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-mode", "steady"),
-    );
   });
 
   // ── clickable-citations Phase 4 — controlled targetPage + bbox overlay
@@ -226,7 +244,7 @@ describe("PdfViewerWidget", () => {
     it("mounts at targetPage when supplied (overrides default initialPage)", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
-      render(<PdfViewerWidget documentId="doc-1" mode="steady" targetPage={3} />, { wrapper });
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={3} />, { wrapper });
       await waitFor(() =>
         expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[2]?.pageUrl),
       );
@@ -235,12 +253,12 @@ describe("PdfViewerWidget", () => {
     it("re-renders with a new targetPage jumps the page image", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
-      const { rerender } = render(<PdfViewerWidget documentId="doc-1" mode="steady" targetPage={1} />, { wrapper });
+      const { rerender } = render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />, { wrapper });
       await waitFor(() =>
         expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[0]?.pageUrl),
       );
 
-      rerender(<PdfViewerWidget documentId="doc-1" mode="steady" targetPage={2} />);
+      rerender(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={2} />);
       await waitFor(() =>
         expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[1]?.pageUrl),
       );
@@ -251,8 +269,8 @@ describe("PdfViewerWidget", () => {
 
       render(
         <PdfViewerWidget
-          documentId="doc-1"
-          mode="steady"
+          scope={docScope("doc-1")}
+          role="member"
           targetPage={1}
           highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
         />,
@@ -278,8 +296,8 @@ describe("PdfViewerWidget", () => {
 
       render(
         <PdfViewerWidget
-          documentId="doc-1"
-          mode="steady"
+          scope={docScope("doc-1")}
+          role="member"
           targetPage={1}
           highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
           highlightTier="exact"
@@ -298,8 +316,8 @@ describe("PdfViewerWidget", () => {
 
       render(
         <PdfViewerWidget
-          documentId="doc-1"
-          mode="steady"
+          scope={docScope("doc-1")}
+          role="member"
           targetPage={1}
           highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
           highlightTier="paraphrase"
@@ -319,8 +337,8 @@ describe("PdfViewerWidget", () => {
 
       render(
         <PdfViewerWidget
-          documentId="doc-1"
-          mode="steady"
+          scope={docScope("doc-1")}
+          role="member"
           targetPage={1}
           highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
           highlightTier="ambient"
@@ -336,14 +354,14 @@ describe("PdfViewerWidget", () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 
       const { rerender } = render(
-        <PdfViewerWidget documentId="doc-1" mode="steady" targetPage={1} />,
+        <PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />,
         { wrapper },
       );
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
       expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
 
       rerender(
-        <PdfViewerWidget documentId="doc-1" mode="steady" targetPage={1} highlightBbox={null} />,
+        <PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} highlightBbox={null} />,
       );
       expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
     });
@@ -352,7 +370,7 @@ describe("PdfViewerWidget", () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
       const user = (await import("@testing-library/user-event")).default.setup();
 
-      render(<PdfViewerWidget documentId="doc-1" mode="steady" targetPage={1} />, { wrapper });
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />, { wrapper });
 
       await waitFor(() =>
         expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[0]?.pageUrl),
@@ -373,7 +391,7 @@ describe("PdfViewerWidget", () => {
     it("renders the scan-line overlay when showScanAnimation is true", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
       render(
-        <PdfViewerWidget documentId="doc-1" mode="onboarding" showScanAnimation />,
+        <PdfViewerWidget scope={docScope("doc-1")} role="anonymous" showScanAnimation />,
         { wrapper },
       );
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
@@ -382,7 +400,7 @@ describe("PdfViewerWidget", () => {
 
     it("omits the overlay by default", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
-      render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
       expect(screen.queryByTestId("pdf-viewer-scan-line")).not.toBeInTheDocument();
     });
@@ -397,8 +415,8 @@ describe("PdfViewerWidget", () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
       render(
         <PdfViewerWidget
-          documentId="doc-1"
-          mode="onboarding"
+          scope={docScope("doc-1")}
+          role="anonymous"
           litRegions={[
             { page: 1, x: 0.1, y: 0.1, w: 0.2, h: 0.05, color: "green" },
             { page: 1, x: 0.3, y: 0.2, w: 0.2, h: 0.05, color: "cyan" },
@@ -416,7 +434,7 @@ describe("PdfViewerWidget", () => {
 
     it("omits regions when litRegions is empty / unset", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
-      render(<PdfViewerWidget documentId="doc-1" mode="onboarding" />, { wrapper });
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
       expect(screen.queryAllByTestId(/^pdf-viewer-lit-region-/).length).toBe(0);
     });

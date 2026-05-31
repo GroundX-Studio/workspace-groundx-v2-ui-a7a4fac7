@@ -21,16 +21,30 @@ status.
 
 ```ts
 interface BookCallViewProps {
-  /** Locked-affordance gate (widget contract). */
-  mode?: "onboarding" | "steady";  // defaults to "onboarding"
+  /** Widget access role (widget contract). REQUIRED. */
+  role: WidgetRole;             // "anonymous" | "member"
+  /** Required scope (widget contract). Always { type: "none" }. */
+  scope: WidgetScope;
 }
 ```
 
-## Locked affordances under `mode="onboarding"`
+## Locked affordances (read-only roles)
 
-Currently identical to `mode="steady"`. The iframe is the same Calendly
-booking surface in both modes; the difference is that the host renders
-different chrome around it (chat panel vs settings drawer).
+**None.** BookCallView is available to ALL roles (anonymous + member,
+per `docs/agents/widget-access-matrix.md`) and locks no affordance by
+role — the Calendly booking surface renders identically for both. The
+`role` prop is carried for widget-contract conformance and future roles.
+
+The surrounding chrome (close button, breadcrumbs, canvas pane vs.
+settings drawer) is the **host's** concern, driven by layout/flow — this
+was the old `mode` prop's only job and was deliberately re-sourced to the
+host rather than renamed to `role`.
+
+## Scope
+
+`{ type: "none" }`. BookCallView is **not** a ScopedViewerWidget — it
+operates on no document set, so it always declares the explicit "none"
+scope required by the widget contract.
 
 ## Activation
 
@@ -46,14 +60,25 @@ opens this widget in the viewer + `BookingStatusCard` in the chat, and
 the gate only commits when the user actually completes a booking
 (Calendly fires the `calendly.event_scheduled` postMessage).
 
+## Events
+
+This widget emits **no app-level events**. Booking happens entirely inside the
+embedded Calendly iframe (Calendly posts back to its own service); the widget
+neither lifts an `on*` callback nor dispatches a tool, and it does not itself
+listen for Calendly's `event_scheduled` postMessage. The chat-side status of a
+booking is owned by **BookingStatusCard** (the `book_call` tool). When
+`VITE_CALENDLY_URL` is unset the widget renders an inline empty-state instead of
+the iframe — still no event.
+
 ## How to mount
 
 ```tsx
 import { BookCallView } from "@/components/viewer-widgets/BookCallView/BookCallView";
 
 // OnboardingShell mounts this in the viewer pane while ?bookCall=1
-// is present in the URL.
-<BookCallView mode="onboarding" />
+// is present in the URL. `role` comes from the session (useWidgetRole);
+// `scope` is always the explicit "none" scope.
+<BookCallView role={role} scope={{ type: "none" }} />
 ```
 
 The chat-side `BookingStatusCard` is mounted in parallel by the same
@@ -67,6 +92,8 @@ surface beyond mounting/unmounting.
 
 ## Tests
 
-`BookCallView.test.tsx`. Covers: iframe URL/src, a11y title, fallback
-placeholder when env unset, widget-contract data attributes (mode
-propagation).
+`BookCallView.test.tsx`. Mounts under both roles (`anonymous` +
+`member`) and asserts the matrix row: iframe URL/src, a11y title,
+fallback placeholder when env unset, widget-contract data attributes
+(`data-role` propagation), and identical render across roles (no
+affordance lock).

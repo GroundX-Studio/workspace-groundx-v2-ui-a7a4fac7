@@ -15,11 +15,19 @@ import userEvent from "@testing-library/user-event";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
+
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
 import { BookingStatusCard } from "./BookingStatusCard";
 
 const UTILITY = "utility" as const;
+
+// BookingStatusCard matrix row (docs/agents/widget-access-matrix.md):
+//   availability — anonymous ✅ / member ✅ (all roles)
+//   scope        — { type: "none" } (chat-side status card, not document-scoped)
+const NONE_SCOPE: WidgetScope = { type: "none" };
+const ROLES: WidgetRole[] = ["anonymous", "member"];
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -32,13 +40,25 @@ afterEach(() => {
 
 describe("BookingStatusCard (chat)", () => {
   it("renders the BOOKING IN PROGRESS status card per wireframe", () => {
-    renderWithOnboardingProviders(<BookingStatusCard mode="onboarding" />, {
+    renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
       initialFrame: "f2",
       initialScenario: UTILITY,
     });
     const card = screen.getByTestId("book-call-chat-status");
     expect(card).toBeInTheDocument();
     expect(card.textContent ?? "").toMatch(/booking in progress/i);
+  });
+
+  // Matrix row: available to BOTH roles, identical surface (no
+  // affordance lock today). The status card renders unchanged for
+  // anonymous and member.
+  it.each(ROLES)("is available with no affordance lock for role=%s", (role) => {
+    renderWithOnboardingProviders(<BookingStatusCard role={role} scope={NONE_SCOPE} />, {
+      initialFrame: "f2",
+      initialScenario: UTILITY,
+    });
+    expect(screen.getByTestId("book-call-chat-status")).toBeInTheDocument();
+    expect(screen.getByTestId("book-call-back")).toBeInTheDocument();
   });
 
   it("offers a back-to-sign-in affordance that clears ?bookCall=1", async () => {
@@ -51,7 +71,7 @@ describe("BookingStatusCard (chat)", () => {
     };
     renderWithOnboardingProviders(
       <>
-        <BookingStatusCard mode="onboarding" />
+        <BookingStatusCard role="anonymous" scope={NONE_SCOPE} />
         <LocationProbe />
       </>,
       {
@@ -71,7 +91,7 @@ describe("BookingStatusCard (chat)", () => {
   });
 
   it("includes the wireframe's What we'll cover bullets", () => {
-    renderWithOnboardingProviders(<BookingStatusCard mode="onboarding" />, {
+    renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
       initialFrame: "f2",
       initialScenario: UTILITY,
     });
@@ -83,7 +103,7 @@ describe("BookingStatusCard (chat)", () => {
   });
 
   it("clarifies that booking does not sign the user in", () => {
-    renderWithOnboardingProviders(<BookingStatusCard mode="onboarding" />, {
+    renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
       initialFrame: "f2",
       initialScenario: UTILITY,
     });
@@ -91,30 +111,23 @@ describe("BookingStatusCard (chat)", () => {
     expect(panel.textContent ?? "").toMatch(/doesn[''′]?t sign you in|still send a magic link|booking.*not.*sign/i);
   });
 
-  // Widget contract — slot/mode attribute introspection.
-  it("emits the widget-contract data attributes (slot + mode)", () => {
-    renderWithOnboardingProviders(<BookingStatusCard mode="onboarding" />, {
+  // Widget contract — slot attribute introspection. (The retired
+  // `data-mode` attribute is gone: `mode` was cosmetic-only for this
+  // widget and is dropped by 2026-05-30-widget-role-access Phase 2b.)
+  it("emits the widget-contract slot data attribute", () => {
+    renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
       initialFrame: "f2",
       initialScenario: UTILITY,
     });
     const root = document.querySelector('[data-widget="booking-status-card"]');
     expect(root).not.toBeNull();
-    expect(root?.getAttribute("data-mode")).toBe("onboarding");
-  });
-
-  it("respects an explicit mode prop", () => {
-    renderWithOnboardingProviders(<BookingStatusCard mode="steady" />, {
-      initialFrame: "f2",
-      initialScenario: UTILITY,
-    });
-    const root = document.querySelector('[data-widget="booking-status-card"]');
-    expect(root?.getAttribute("data-mode")).toBe("steady");
+    expect(root?.getAttribute("data-mode")).toBeNull();
   });
 });
 
 describe("BookingStatusCard — postMessage from Calendly", () => {
   it("commits the gate when Calendly fires calendly.event_scheduled", async () => {
-    renderWithOnboardingProviders(<BookingStatusCard mode="onboarding" />, {
+    renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
       initialFrame: "f2",
       initialScenario: UTILITY,
     });
@@ -133,7 +146,7 @@ describe("BookingStatusCard — postMessage from Calendly", () => {
   });
 
   it("ignores postMessage from non-Calendly origins (security guard)", async () => {
-    renderWithOnboardingProviders(<BookingStatusCard mode="onboarding" />, {
+    renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
       initialFrame: "f2",
       initialScenario: UTILITY,
     });

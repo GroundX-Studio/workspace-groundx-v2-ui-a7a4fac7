@@ -3,12 +3,14 @@
  *
  * Per `memory/feedback_no_onboarding_duplicates.md`: no onboarding-
  * specific PDF viewer exists. This view resolves the active scenario's
- * documentId and mounts `PdfViewerWidget` with `mode="onboarding"`
- * (which locks editing affordances). Empty-state copy moved into
+ * documentId and mounts `PdfViewerWidget` with a single-doc
+ * `scope` + the auth `role` (2026-05-30-widget-role-access; no widget
+ * locks an affordance by role today). Empty-state copy moved into
  * `UnderstandPlaceholder` in ARCH-10 (2026-05-26).
  */
 
 import Box from "@mui/material/Box";
+import { useWidgetRole } from "@/lib/widgetRole";
 import type { FC } from "react";
 
 import { isResolvedDocumentId } from "@/api/documentId";
@@ -45,6 +47,10 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
   const scenario = scenarioId ? byId(scenarioId) : undefined;
   const scenarioDocId = scenario?.documents?.[0]?.documentId ?? null;
 
+  // 2026-05-30-widget-role-access: PdfViewerWidget now takes a
+  // `scope: ContentScope` (single doc → documents scope) + `role`.
+  const widgetRole = useWidgetRole();
+
   // Citation-click case: a doc-viewer step with a RESOLVED documentId (real
   // GroundX UUID) → render it directly with its highlight, no scan.
   //
@@ -58,8 +64,8 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
     return (
       <Box data-testid="understand-canvas" sx={{ height: "100%", width: "100%" }}>
         <PdfViewerWidget
-          documentId={stepDocViewer.documentId}
-          mode="onboarding"
+          scope={{ type: "documents", documentIds: [stepDocViewer.documentId] }}
+          role={widgetRole}
           targetPage={stepDocViewer.highlight?.page ?? stepDocViewer.page ?? null}
           highlightBbox={stepDocViewer.highlight?.bbox ?? null}
           highlightTier={stepDocViewer.highlight?.tier}
@@ -76,7 +82,11 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
   const isF2 = session.currentFrame === "f2";
   return (
     <Box data-testid="understand-canvas" sx={{ height: "100%", width: "100%" }}>
-      <PdfViewerWidget documentId={scenarioDocId} mode="onboarding" showScanAnimation={isF2} />
+      <PdfViewerWidget
+        scope={{ type: "documents", documentIds: [scenarioDocId] }}
+        role={widgetRole}
+        showScanAnimation={isF2}
+      />
     </Box>
   );
 };

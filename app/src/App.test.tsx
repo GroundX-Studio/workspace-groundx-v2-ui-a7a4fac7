@@ -129,7 +129,10 @@ describe("App provider tree (smoke)", () => {
     await act(async () => {
       render(
         <AppProviders>
-          <PdfViewerWidget documentId="probe-doc" mode="onboarding" />
+          <PdfViewerWidget
+            scope={{ type: "documents", documentIds: ["probe-doc"] }}
+            role="anonymous"
+          />
         </AppProviders>,
       );
     });

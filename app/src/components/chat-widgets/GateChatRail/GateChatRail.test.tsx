@@ -19,6 +19,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 const dismissGate = vi.fn();
 const commitGate = vi.fn();
@@ -26,10 +27,14 @@ let mockGate: { status: "open" | "committed" | "dismissed" | "idle"; trigger?: s
   status: "open",
   trigger: "byo",
 };
+// The onboarding-flow signal that drives the committed "Continue to
+// Integrate" CTA — re-sourced from session/gate-state (`currentFrame`),
+// NOT from a widget `mode`/`role` prop.
+let mockCurrentFrame = "f6";
 
 vi.mock("@/contexts/OnboardingSessionContext", () => ({
   useOnboardingSession: () => ({
-    state: { gate: mockGate, currentFrame: "f6" },
+    state: { gate: mockGate, currentFrame: mockCurrentFrame },
     commitGate,
     dismissGate,
     advanceFrame,
@@ -40,12 +45,14 @@ const advanceFrame = vi.fn();
 
 import { GateChatRail } from "./GateChatRail";
 
+const NONE_SCOPE: WidgetScope = { type: "none" };
+
 const LocationProbe = () => {
   const loc = useLocation();
   return <div data-testid="location">{`${loc.pathname}${loc.search}`}</div>;
 };
 
-const renderWidget = (ui: ReactNode = <GateChatRail />, initialUrl = "/onboarding/signup") =>
+const renderWidget = (ui: ReactNode = <GateChatRail role="anonymous" scope={NONE_SCOPE} />, initialUrl = "/onboarding/signup") =>
   render(
     <MemoryRouter initialEntries={[initialUrl]}>
       <Routes>
@@ -60,6 +67,7 @@ describe("GateChatRail", () => {
     advanceFrame.mockReset();
     commitGate.mockReset();
     mockGate = { status: "open", trigger: "byo" };
+    mockCurrentFrame = "f6";
   });
 
   // P1 — the gate's three doors live in the chat rail (wireframe Flow_Gate):
@@ -158,9 +166,44 @@ describe("GateChatRail", () => {
     expect(container.querySelector('[data-widget="gate-chat-rail"]')).toBeNull();
   });
 
-  it("in steady mode, does not render the Continue-to-Integrate CTA even when committed", () => {
+  // RE-SOURCE (2026-05-30-widget-role-access): the committed-state
+  // "Continue to Integrate" nav CTA is onboarding-FLOW chrome, not a
+  // role affordance. It is driven by the onboarding-flow signal
+  // (`currentFrame === "f6"`, the gate frame), NOT by a widget prop.
+  it("does not render the Continue-to-Integrate CTA when off the onboarding gate frame, even when committed", () => {
     mockGate = { status: "committed", method: "register" };
-    renderWidget(<GateChatRail mode="steady" />);
+    mockCurrentFrame = "f7"; // already advanced past the gate / steady re-encounter
+    renderWidget();
     expect(screen.queryByTestId("gate-rail-continue-integrate")).not.toBeInTheDocument();
+  });
+
+  // ── Role + scope contract (2026-05-30-widget-role-access) ─────────────
+  // Matrix row: availability anonymous ✅ / member ❌ (enforced at the
+  // MOUNT SITE, not inside the widget); scope `{ type: "none" }`; NO
+  // affordance is locked by role today, so the rendered widget is identical
+  // for both roles when mounted.
+  describe("role + scope contract", () => {
+    it.each<WidgetRole>(["anonymous", "member"])(
+      "mounts under role=%s with a none scope and renders the open gate identically",
+      (role) => {
+        renderWidget(<GateChatRail role={role} scope={NONE_SCOPE} />);
+        // No role-locked affordance: every door + CTA renders for both roles.
+        expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
+        expect(screen.getByTestId("gate-rail-send-magic-link")).toBeInTheDocument();
+        expect(screen.getByTestId("gate-rail-sso")).toBeInTheDocument();
+        expect(screen.getByTestId("gate-rail-dismiss")).toBeInTheDocument();
+      },
+    );
+
+    it.each<WidgetRole>(["anonymous", "member"])(
+      "commit + dismiss affordances work under role=%s (no role lock)",
+      (role) => {
+        renderWidget(<GateChatRail role={role} scope={NONE_SCOPE} />);
+        fireEvent.click(screen.getByTestId("gate-rail-sso"));
+        expect(commitGate).toHaveBeenCalledWith("sso");
+        fireEvent.click(screen.getByTestId("gate-rail-dismiss"));
+        expect(dismissGate).toHaveBeenCalledTimes(1);
+      },
+    );
   });
 });

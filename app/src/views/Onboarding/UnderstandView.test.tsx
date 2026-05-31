@@ -64,7 +64,7 @@ describe("UnderstandView (F2 canvas)", () => {
     renderWithOnboardingProviders(<UnderstandView />, { initialFrame: "f2", initialScenario: "utility" });
     expect(screen.getByTestId("understand-canvas")).toBeInTheDocument();
     const widget = await screen.findByTestId("pdf-viewer-widget");
-    expect(widget).toHaveAttribute("data-mode", "onboarding");
+    expect(widget).toHaveAttribute("data-role", "anonymous");
   });
 
   it("calls getGroundXDocumentXray with the active document id (real data wiring)", async () => {

@@ -120,6 +120,54 @@ describe("widget contract drift guard", () => {
         ).toBe(true);
       });
 
+      // 2026-05-30-widget-role-access rule 3: the README SHALL contain
+      // section headers — "enforce header presence, not just file
+      // presence" (spec scenario "Drift guard fires when the README is
+      // missing a required section header"). Previously this guard only
+      // ran existsSync, so the scenario was unimplemented and missing
+      // headers passed silently. Each entry is [canonical name, regex of
+      // accepted header spellings]. `_template/README.md` is the exemplar
+      // and carries all of them.
+      it("README declares the required section headers (rule 3)", () => {
+        const readme = join(widget.absPath, "README.md");
+        if (!existsSync(readme)) return; // covered by the existence test above
+        const src = readFileSync(readme, "utf8");
+        const required: Array<[string, RegExp]> = [
+          ["What it does", /^##\s+What it does\b/m],
+          ["Props", /^##\s+Props\b/m],
+          ["Scope", /^##\s+Scope\b/m],
+          ["Locked affordances", /^##\s+Locked affordances\b/m],
+          ["Events", /^##\s+(?:Events|Callbacks)\b/m],
+          ["How to mount", /^##\s+(?:How to mount|Usage|Integration)\b/m],
+        ];
+        const missing = required.filter(([, re]) => !re.test(src)).map(([name]) => name);
+        expect(
+          missing.length === 0,
+          `${readme} is missing required README section header(s): ${missing.join(", ")}. ` +
+            `Required (rule 3): ${required.map(([n]) => n).join(", ")}. ` +
+            `See docs/agents/widget-contract.md and components/_template/README.md.`,
+        ).toBe(true);
+      });
+
+      // The .tsx guard rejects `role?:`/`scope?:` (required by the contract),
+      // but the README's Props block is a parallel surface that drifted stale
+      // (it kept documenting `role?: WidgetRole // Defaults to "anonymous"`
+      // after the .tsx made role required). Mirror the .tsx rule in the README
+      // so the doc can't contradict the contract.
+      it("README does not document role/scope as optional (rule 3 accuracy)", () => {
+        const readme = join(widget.absPath, "README.md");
+        if (!existsSync(readme)) return;
+        const src = readFileSync(readme, "utf8");
+        expect(
+          /\brole\s*\?\s*:\s*WidgetRole/.test(src),
+          `${readme} documents \`role?: WidgetRole\` (optional) — \`role\` is REQUIRED by the widget contract; update the Props block.`,
+        ).toBe(false);
+        expect(
+          /\bscope\s*\?\s*:\s*WidgetScope/.test(src),
+          `${readme} documents \`scope?: WidgetScope\` (optional) — \`scope\` is REQUIRED by the widget contract; update the Props block.`,
+        ).toBe(false);
+      });
+
       it("has a sibling *.test.tsx", () => {
         const entries = readdirSync(widget.absPath);
         const hasTest = entries.some((e) => e.endsWith(".test.tsx"));
@@ -151,6 +199,19 @@ describe("widget contract drift guard", () => {
           hasScopeInProps || hasScopeDestructured,
           `${mainTsx} must accept a \`scope: WidgetScope\` prop — see widget-contract.md § "The contract" #3 (2026-05-30-widget-role-access)`,
         ).toBe(true);
+
+        // The contract says role + scope are REQUIRED. A regex can't fully
+        // introspect types, but it CAN reject an explicitly-optional prop
+        // declaration (`role?:` / `scope?:`) — which is how the contract
+        // silently regressed once (SuggestedActionChips). Catch that class.
+        expect(
+          /\brole\s*\?\s*:/.test(src),
+          `${mainTsx} declares \`role?\` (optional) — \`role: WidgetRole\` is REQUIRED by the widget contract`,
+        ).toBe(false);
+        expect(
+          /\bscope\s*\?\s*:/.test(src),
+          `${mainTsx} declares \`scope?\` (optional) — \`scope: WidgetScope\` is REQUIRED by the widget contract`,
+        ).toBe(false);
       });
 
       it("declares NO retired `mode: \"onboarding\" | \"steady\"` literal", () => {

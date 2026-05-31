@@ -194,6 +194,26 @@ describe("OnboardingShell", () => {
     expect(screen.getByTestId("onboarding-frame-f6")).toBeInTheDocument();
   });
 
+  // 2026-05-30-widget-role-access: the access matrix marks SignUpWidget /
+  // GateChatRail / GateValueProp as ANONYMOUS-ONLY. Availability is enforced
+  // at the mount site (the gate surface only opens for an uncommitted /
+  // anonymous session), NOT by a prop inside the widget. This pins the spec
+  // scenario "an anonymous-only widget does not mount for a member" — the
+  // negative case the Phase-2b sweep was supposed to assert but didn't.
+  // Contrast with the test above, where an ANON user advancing to f6 DOES
+  // surface the gate (gate-value-prop + gate-rail-* + sign-up doors).
+  it("anonymous-only availability: a signed-in member does NOT mount the gate / sign-up widgets", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f5",
+      initialScenario: "utility",
+      initialAuthState: "signed-in",
+    });
+    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("signup-celebration")).not.toBeInTheDocument();
+  });
+
   it("BUG: navigating signup → a sample URL clears the stale sign-up surface (deep-link branch must pop the overlay)", async () => {
     const user = userEvent.setup();
     // Probe that can navigate the router to a deep-link sample URL.

@@ -35,7 +35,7 @@ Roles today: `anonymous` (uncommitted / pre-sign-up) · `member` (signed in).
 | SuggestedActionChips | ✅ | ✅ | cosmetic → drop |
 | BookCallView | ✅ | ✅ | `mode` = layout chrome → re-source from layout, NOT role |
 | PdfViewer | ✅ | ✅ | cosmetic → drop |
-| SignUpWidget | ✅ | ❌ | **anonymous only** — a signed-in member never sees sign-up; `commitGate` is gate-state, not role |
+| SignUpWidget | ✅ | ❌ | **anonymous only** (the sign-up *form*) — a member never sees the form. NUANCE: the widget also renders a committed-state *celebration* (`signup-celebration`) at the anon→member boundary (`gate.status === "committed"`), driven by gate-state not role; that transient is not "a member browsing the form". `commitGate` is gate-state, not role. |
 | GateChatRail | ✅ | ❌ | **gate context** (anonymous) — gate variant re-sourced from gate-state, not role |
 | GateValueProp | ✅ | ❌ | **gate context** (anonymous) — shown beside the gate |
 

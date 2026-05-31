@@ -29,8 +29,10 @@ behavior:
 ```ts
 interface SuggestedActionChipsProps {
   actions: SuggestedAction[];
-  /** Locked-affordance gate (widget contract). Defaults to "onboarding". */
-  mode?: "onboarding" | "steady";
+  /** Authorization role (widget contract). REQUIRED. */
+  role: WidgetRole; // "anonymous" | "member"
+  /** Content scope (widget contract). REQUIRED. Always `{ type: "none" }` here. */
+  scope: WidgetScope;
   /** Click handler. Host translates the action into orchestrator behavior. */
   onAction?: (action: SuggestedAction) => void;
 }
@@ -42,13 +44,22 @@ interface SuggestedAction {
 }
 ```
 
-## Locked affordances under `mode="onboarding"`
+## Locked affordances (read-only roles)
 
-No mode-specific locks yet. The prop exists to satisfy the widget
-contract and to absorb future onboarding-only behavior (e.g. dimming
-destructive actions during a guided step) without an API change.
-Steady mode is reserved for future steady-only chips (e.g. a settings
-shortcut) that don't apply in onboarding.
+**None.** Per the widget access matrix this widget is available to ALL
+roles (`anonymous` + `member`) and locks NO affordance by role — the
+chips render identically for both. `role` exists to satisfy the widget
+contract and to reserve space for future role-conditional locks (e.g.
+dimming destructive actions for a read-only role) without an API change.
+It replaces the retired `mode: "onboarding" | "steady"` prop, which was
+purely cosmetic here and is dropped.
+
+## Scope
+
+`{ type: "none" }`. This is a display/actions widget, not a
+ScopedViewerWidget (PdfViewer / Extract / SmartReport / Integrate), so
+it does not target a `ContentScope`. The `scope` prop is required by the
+widget contract and defaults to `{ type: "none" }`.
 
 ## Events
 
@@ -60,7 +71,8 @@ shortcut) that don't apply in onboarding.
 ```tsx
 <SuggestedActionChips
   actions={turn.suggestedActions ?? []}
-  mode={isOnboarding ? "onboarding" : "steady"}
+  role={role} // from useWidgetRole(): "anonymous" | "member"
+  scope={{ type: "none" }}
   onAction={handleSuggestedAction}
 />
 ```
@@ -81,7 +93,9 @@ into the orchestrator; no first-class action belongs on this widget.
 `SuggestedActionChips.test.tsx`. Covers:
 
 - One chip per action with stable testid
-- `data-mode` reflects the mode prop (widget-contract drift guard input)
+- Mounts under `role="anonymous"` and `role="member"`, reflecting it on
+  `data-role` (widget access matrix row: all roles)
+- Chips render identically for both roles (matrix: no affordance lock)
 - Click fires `onAction` with the full action object
 - Empty array renders nothing
 - Keyboard Enter activates a chip

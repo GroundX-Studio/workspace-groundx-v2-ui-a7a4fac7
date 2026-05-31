@@ -23,7 +23,7 @@
 
 ## Phase 2a · Access matrix (AUTHORED & REVIEWED — `docs/agents/widget-access-matrix.md`, locked 2026-05-30)
 - [x] Matrix authored + reviewed with product. Three axes: **(0) scope** — every widget declares required `scope: WidgetScope`; ScopedViewerWidgets (PdfViewer/Extract/SmartReport/Integrate) take a real `ContentScope`, all others `{ type: "none" }` (PdfViewer's raw `documentId` prop is removed); **(1) widget availability** by role — gate/sign-up widgets are **anonymous-only**, everything else all-roles; **(2) affordance locks** — **none today**. Tools: all-roles except `edit_template` → `["member"]`. See `docs/agents/widget-access-matrix.md` §1b for the scope column.
-- [ ] **Failing test:** a coverage test enumerates every widget dir + every `*.tools.ts` and FAILS if any widget/tool is absent from the matrix (no silent omissions). Keep the matrix in sync when widgets/tools are added.
+- [x] **Failing test:** a coverage test enumerates every widget dir + every `*.tools.ts` and FAILS if any widget/tool is absent from the matrix (no silent omissions). Keep the matrix in sync when widgets/tools are added. → `app/src/test/widget-access-matrix.test.ts`
 
 ## Phase 2b · Per-widget sweep (WORKFLOW-OK — one agent per widget, after Phase 1 + 2a green)
 > Explicit checklist (all 10 + the reference template). Each migrates to match its matrix row. NOTE: no

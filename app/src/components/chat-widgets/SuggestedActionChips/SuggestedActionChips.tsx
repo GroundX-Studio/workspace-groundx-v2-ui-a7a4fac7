@@ -15,21 +15,26 @@
  * For now the host owns the mapping so we can ship this floor without
  * the full registry.
  *
- * Mode semantics:
- *   • `onboarding` (default): same chip rendering; reserved for future
- *     onboarding-only locks (e.g. dimming destructive actions during
- *     guided steps).
- *   • `steady`: same chips; reserved for future steady-only affordances
- *     (e.g. a settings shortcut chip).
- *   The two modes render identically today — the prop exists for the
- *   widget contract and to absorb future mode-conditional behavior
- *   without changing the API.
+ * Role + scope (2026-05-30-widget-role-access):
+ *   • `role: WidgetRole` — authorization, not a chat phase. Per the
+ *     widget access matrix this widget is available to ALL roles
+ *     (`anonymous` + `member`) and locks NO affordance by role — the
+ *     chips render identically. The prop satisfies the widget contract
+ *     and reserves space for future role-conditional locks (e.g. dimming
+ *     destructive actions for a read-only role) without an API change.
+ *     This replaces the retired binary `mode` prop, which was cosmetic
+ *     here, so it is simply dropped.
+ *   • `scope: WidgetScope` — required by the contract. This is a
+ *     display/actions widget, not a ScopedViewerWidget, so it always
+ *     takes `{ type: "none" }`.
  */
 
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import { alpha } from "@mui/material/styles";
 import { type FC } from "react";
+
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import {
   BORDER,
@@ -48,15 +53,25 @@ export interface SuggestedAction {
 
 export interface SuggestedActionChipsProps {
   actions: SuggestedAction[];
-  /** Locked-affordance gate (widget contract). Defaults to "onboarding". */
-  mode?: "onboarding" | "steady";
+  /**
+   * Authorization role (widget contract). All roles see this widget and
+   * no affordance is locked by role today — see the access matrix.
+   */
+  role: WidgetRole;
+  /**
+   * Content scope (widget contract, REQUIRED). This is a display/actions
+   * widget, not a ScopedViewerWidget, so the host always passes
+   * `{ type: "none" }`.
+   */
+  scope: WidgetScope;
   /** Click handler. Host translates the action into orchestrator behavior. */
   onAction?: (action: SuggestedAction) => void;
 }
 
 export const SuggestedActionChips: FC<SuggestedActionChipsProps> = ({
   actions,
-  mode = "onboarding",
+  role,
+  scope: _scope,
   onAction,
 }) => {
   if (actions.length === 0) return null;
@@ -65,7 +80,7 @@ export const SuggestedActionChips: FC<SuggestedActionChipsProps> = ({
       direction="row"
       spacing={0.5}
       data-testid="suggested-action-chips"
-      data-mode={mode}
+      data-role={role}
       sx={{ pl: 0.25, flexWrap: "wrap", rowGap: 0.5 }}
     >
       {actions.map((action) => (

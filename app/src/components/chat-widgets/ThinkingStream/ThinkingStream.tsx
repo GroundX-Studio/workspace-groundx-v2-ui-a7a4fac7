@@ -22,20 +22,32 @@
  *     a string[] of notes and passes them in. The widget is purely
  *     presentational + state-keeping.
  *
- * Mode semantics:
- *   • `onboarding` (default): persists doneness in sessionStorage so
- *     a remount (compact-mode toggle on viewport resize, etc.) skips
- *     the reveal. Cadence: 1500-2800ms per note + 1200ms done delay.
- *   • `steady`: same visual + cadence, but does NOT persist doneness
- *     since each real upload is a unique event with its own progress
- *     stream. Future: pass real progress events as `notes` updates
- *     and the widget will reveal them as they arrive (push instead of
- *     pull cadence). For now the timer drives both modes.
+ * Role + scope contract (2026-05-30-widget-role-access):
+ *   • `role: WidgetRole` — required by the widget contract. ThinkingStream
+ *     is an all-roles display widget (matrix §1: anonymous ✅ / member ✅)
+ *     and locks NO affordance by role. The prop is forward-looking +
+ *     satisfies the contract; it does NOT drive behavior here.
+ *   • `scope: WidgetScope` — required; always `{ type: "none" }` (matrix
+ *     §1b). The widget renders notes, not a document set.
+ *
+ * Replay semantics (`persistReplay`):
+ *   The old `mode` prop conflated a chat phase with a replay concern.
+ *   The replay/remount guard is RE-SOURCED to its own `persistReplay`
+ *   flag, driven by the host's replay concern — NOT by role:
+ *   • `persistReplay` true: persists doneness in sessionStorage so a
+ *     remount (compact-mode toggle on viewport resize, etc.) skips the
+ *     reveal. The onboarding experience sets this for its scripted,
+ *     play-once-per-scenario notes.
+ *   • `persistReplay` false (default): does NOT persist doneness — each
+ *     real upload is a unique event with its own progress stream.
+ *   Cadence is identical either way: 1500-2800ms per note + 1200ms done
+ *   delay. Future: push real progress events in as `notes` updates.
  */
 
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState, type FC } from "react";
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import { BODY_TEXT, BORDER } from "@/constants";
 
@@ -59,8 +71,6 @@ function nextThinkingPause(): number {
   );
 }
 
-export type ThinkingStreamMode = "onboarding" | "steady";
-
 export interface ThinkingStreamProps {
   /** Notes to stream, one bubble per entry, in reveal order. */
   notes: string[];
@@ -71,12 +81,24 @@ export interface ThinkingStreamProps {
    */
   scenarioKey: string;
   /**
-   * Locked-affordance gate per the widget contract.
-   * - `onboarding` (default): persists doneness in sessionStorage so
-   *   remounts don't replay.
-   * - `steady`: doesn't persist (each real upload is unique).
+   * Widget-contract role (2026-05-30-widget-role-access). ThinkingStream
+   * is all-roles and locks no affordance by role — this prop satisfies
+   * the contract and is forward-looking; it does NOT drive behavior.
    */
-  mode?: ThinkingStreamMode;
+  role: WidgetRole;
+  /**
+   * Widget-contract scope. Always `{ type: "none" }` for ThinkingStream
+   * (a display widget — matrix §1b). Required by the contract.
+   */
+  scope: WidgetScope;
+  /**
+   * Replay/remount guard — RE-SOURCED from the retired `mode` prop. When
+   * true, persists doneness in sessionStorage so a remount skips the
+   * reveal (the onboarding experience's scripted, play-once notes). When
+   * false/omitted, persists nothing (each real upload is unique). NOT
+   * derived from role.
+   */
+  persistReplay?: boolean;
   /** Fires once when the stream finishes (after DONE_REVEAL_DELAY_MS). */
   onDone?: () => void;
 }
@@ -84,10 +106,12 @@ export interface ThinkingStreamProps {
 export const ThinkingStream: FC<ThinkingStreamProps> = ({
   notes,
   scenarioKey,
-  mode = "onboarding",
+  role: _role,
+  scope: _scope,
+  persistReplay = false,
   onDone,
 }) => {
-  const persist = mode === "onboarding";
+  const persist = persistReplay;
   const storageKey = `${STORAGE_KEY_PREFIX}${scenarioKey}`;
 
   // On mount: check the persisted flag (onboarding only). If set,
@@ -149,7 +173,7 @@ export const ThinkingStream: FC<ThinkingStreamProps> = ({
   if (visibleNotes.length === 0) return null;
 
   return (
-    <Stack spacing={0.75} sx={{ pl: 0.5 }} data-widget="thinking-stream" data-mode={mode}>
+    <Stack spacing={0.75} sx={{ pl: 0.5 }} data-widget="thinking-stream">
       {visibleNotes.map((note, i) => (
         <Typography
           key={i}

@@ -9,9 +9,12 @@
  * `pendingSchemaOverlay.addedFields` on the active session. SchemaView
  * picks the addition up automatically via its `applyOverlay` merge.
  *
- * Widget-contract requirements (per ARCH epic / project_widget_contract.md):
+ * Widget-contract requirements (per ARCH epic / project_widget_contract.md
+ * + 2026-05-30-widget-role-access):
  *   - Slot: `chat-widgets/` (declared via data-widget attribute)
- *   - `mode: "onboarding" | "steady"` prop
+ *   - `role: WidgetRole` prop (authorization, not a chat phase)
+ *   - `scope: WidgetScope` prop — `{ type: "none" }` here: the card
+ *     operates on the draft template, not a document set
  *   - Sibling test + README
  *
  * Phase 2c will wire per-field extraction on Accept (re-run a focused
@@ -23,6 +26,8 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useState, type FC } from "react";
+
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import type { ProposedSchemaField } from "@/api/chatSessions";
 import { ExtractFieldApiError, extractField } from "@/api/extractField";
@@ -47,8 +52,6 @@ import {
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 
-export type ProposeSchemaFieldCardMode = "onboarding" | "steady";
-
 export interface ProposeSchemaFieldCardProps {
   /**
    * The well-formed `proposedSchemaField` extracted from the grounded
@@ -58,12 +61,18 @@ export interface ProposeSchemaFieldCardProps {
    */
   proposedField: ProposedSchemaField;
   /**
-   * Widget-contract mode flag. The card's behavior is identical in
-   * both modes today (both surfaces dispatch `addSchemaField`); the
-   * prop exists for contract conformance + future locking of e.g. the
-   * Reject control in steady mode.
+   * Widget-contract authorization role (2026-05-30-widget-role-access).
+   * Per the access matrix this card is available to ALL roles and locks
+   * NO affordance by role today — both Accept and Reject render
+   * identically for `anonymous` and `member`. The prop satisfies the
+   * widget contract + is forward-looking for future roles.
    */
-  mode?: ProposeSchemaFieldCardMode;
+  role: WidgetRole;
+  /**
+   * Widget-contract scope. This card operates on the draft template,
+   * not a document set, so it always declares `{ type: "none" }`.
+   */
+  scope: WidgetScope;
 }
 
 /** Generate a stable-enough field id for the overlay. */
@@ -78,7 +87,10 @@ function mintFieldId(name: string): string {
 
 export const ProposeSchemaFieldCard: FC<ProposeSchemaFieldCardProps> = ({
   proposedField,
-  mode = "onboarding",
+  role,
+  // scope is contract-required (`{ type: "none" }` for this card); it has
+  // no render effect because the card operates on the draft template.
+  scope: _scope,
 }) => {
   const { state: chatState, addSchemaField, setSchemaFieldExtraction } = useChatStore();
   // Local UI state: "pending" → user hasn't decided; "accepted" /
@@ -140,7 +152,7 @@ export const ProposeSchemaFieldCard: FC<ProposeSchemaFieldCardProps> = ({
     <Box
       data-testid="propose-schema-field-card"
       data-widget="propose-schema-field-card"
-      data-mode={mode}
+      data-role={role}
       aria-label="Add field proposal"
       sx={{
         p: 2,

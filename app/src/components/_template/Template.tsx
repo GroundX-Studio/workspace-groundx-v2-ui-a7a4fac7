@@ -9,20 +9,31 @@
  * starting with `_` so this file is exempt by placement.
  *
  * Mandatory contract surfaces are exercised here so a fresh agent
- * can see them in one place:
+ * can see them in one place (2026-05-30-widget-role-access):
  *
- *   • `mode: "onboarding" | "steady"` prop
- *   • Locked affordance under `mode="onboarding"` (the demo button)
- *   • `data-mode` attribute for visual + drift-guard inspection
+ *   • `role: WidgetRole` prop (authorization — `anonymous` | `member`)
+ *   • required `scope: WidgetScope` prop (this reference template is
+ *     not document-scoped → `{ type: "none" }`; the four
+ *     ScopedViewerWidgets take a real `ContentScope` instead)
+ *   • `data-role` attribute for visual + drift-guard inspection
  *   • Stable testids of the form `template-<slug>`
  *
- * See `Template.test.tsx` for the canonical three tests and
+ * NOTE on affordance locks: no widget locks an affordance by role
+ * today (see the access matrix). The demo Edit button therefore
+ * renders for EVERY role; whether the edit *persists* is gated at the
+ * tool / save boundary (`edit_template` is `availableIn: ["member"]`),
+ * not by hiding the control. When a future read-only role lands, gate
+ * the affordance on `widgetRoleCanEdit(role)` and add a matrix row.
+ *
+ * See `Template.test.tsx` for the canonical tests and
  * `Template.tools.ts` for the read + mutate tool declaration.
  */
 
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import { type FC } from "react";
+
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import {
   BODY_TEXT,
@@ -38,27 +49,40 @@ import {
 
 export interface TemplateProps {
   /**
-   * Locked-affordance gate. `onboarding` HIDES the demo edit button;
-   * `steady` exposes it. Mirror this pattern when adding a new widget:
-   * any edit / save / destructive control is conditional on
-   * `mode === "steady"`.
+   * Authorization role of the current viewer (`anonymous` = pre-sign-up,
+   * `member` = signed in). REQUIRED by the widget contract. Forward-
+   * looking: no widget locks an affordance by role today, so this
+   * reference template renders identically for both. When a read-only
+   * role lands, gate edit controls on `widgetRoleCanEdit(role)`.
    */
-  mode?: "onboarding" | "steady";
+  role: WidgetRole;
+  /**
+   * REQUIRED scope the widget targets. This reference template is not
+   * document-scoped, so it declares `{ type: "none" }`. The four
+   * ScopedViewerWidgets (PdfViewer / Extract / SmartReport / Integrate)
+   * pass a real `ContentScope` here instead — never a raw
+   * `documentId` / `bucketId` / `projectId`.
+   */
+  scope: WidgetScope;
   /** Display label (replace with real widget props). */
   label?: string;
-  /** Fired when the demo edit button activates (steady mode only). */
+  /** Fired when the demo edit button activates. */
   onEdit?: () => void;
 }
 
 export const Template: FC<TemplateProps> = ({
-  mode = "onboarding",
+  role,
+  // `scope` is part of the required contract surface. This reference
+  // template doesn't read it (it is not document-scoped); a real
+  // ScopedViewerWidget would drive its data fetch from `scope`.
+  scope: _scope,
   label = "Hello, widget.",
   onEdit,
 }) => {
   return (
     <Box
       data-testid="template-root"
-      data-mode={mode}
+      data-role={role}
       sx={{
         px: 1.25,
         py: 0.75,
@@ -71,34 +95,39 @@ export const Template: FC<TemplateProps> = ({
     >
       <Stack spacing={0.75}>
         <Box data-testid="template-label">{label}</Box>
-        {mode === "steady" && (
-          <Box
-            role="button"
-            tabIndex={0}
-            data-testid="template-edit"
-            onClick={onEdit}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onEdit?.();
-              }
-            }}
-            sx={{
-              alignSelf: "flex-start",
-              px: 1,
-              py: 0.25,
-              borderRadius: BORDER_RADIUS_2X,
-              backgroundColor: GREEN,
-              color: NAVY,
-              fontSize: FONT_SIZE_LABEL,
-              fontWeight: FONT_WEIGHT_LABEL,
-              cursor: "pointer",
-              "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
-            }}
-          >
-            Edit
-          </Box>
-        )}
+        {/*
+          No role lock today: the Edit affordance renders for every
+          role. Persistence is gated at the tool / save boundary
+          (`edit_template` → `availableIn: ["member"]`), not by hiding
+          the control. A future read-only role would wrap this in
+          `widgetRoleCanEdit(role) && (...)`.
+        */}
+        <Box
+          role="button"
+          tabIndex={0}
+          data-testid="template-edit"
+          onClick={onEdit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onEdit?.();
+            }
+          }}
+          sx={{
+            alignSelf: "flex-start",
+            px: 1,
+            py: 0.25,
+            borderRadius: BORDER_RADIUS_2X,
+            backgroundColor: GREEN,
+            color: NAVY,
+            fontSize: FONT_SIZE_LABEL,
+            fontWeight: FONT_WEIGHT_LABEL,
+            cursor: "pointer",
+            "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
+          }}
+        >
+          Edit
+        </Box>
       </Stack>
     </Box>
   );

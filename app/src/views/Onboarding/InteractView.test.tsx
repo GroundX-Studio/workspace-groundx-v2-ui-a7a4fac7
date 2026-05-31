@@ -1,10 +1,12 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import type { Citation } from "@groundx/shared";
 
 import { InteractView } from "./InteractView";
 
@@ -79,6 +81,17 @@ const SessionProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { frame: string; 
   return null;
 };
 
+/**
+ * Exposes the ChatStore `appendMessage` action so a test can write an
+ * assistant turn (with citations) directly into the in-memory store —
+ * the way ChatColumn now does — without any network round-trip.
+ */
+const AppendProbe = ({ onReady }: { onReady: (append: (content: string, citations: Citation[]) => void) => void }) => {
+  const { appendMessage } = useChatStore();
+  onReady((content, citations) => appendMessage({ role: "assistant", content, citations }));
+  return null;
+};
+
 describe("InteractView (F5) — doc-only canvas", () => {
   // P3.b (2026-05-29): the F5 canvas is the source-document viewer, NOT a
   // chat. The conversation lives in the shell's ChatColumn (single chat
@@ -96,26 +109,25 @@ describe("InteractView (F5) — doc-only canvas", () => {
     expect(screen.queryByTestId("cite-chip-1")).not.toBeInTheDocument();
   });
 
-  it("lights the canvas from the latest assistant turn's citations (real bbox, not a fixture)", async () => {
-    routeFetch({
-      hydrate: [
-        { id: "m-u", chatSessionId: "x", turnIndex: 0, role: "user", content: "What is the service address?", errorCode: null, citations: [] },
-        {
-          id: "m-a",
-          chatSessionId: "x",
-          turnIndex: 1,
-          role: "assistant",
-          content: "The service address is 123 Main St.",
-          errorCode: null,
-          citations: [
-            { documentId: "c3bfff49-6640-4213-822b-e81c3a771e45", page: 1, snippet: "Service address 123 Main St", bbox: { x: 0.088, y: 0.201, w: 0.855, h: 0.319 } },
-          ],
-        },
-      ],
-    });
-    renderWithOnboardingProviders(<InteractView />, { initialFrame: "f5", initialScenario: "utility" });
+  it("lights the canvas from the latest assistant turn's citations (real bbox), no chat text leak", async () => {
+    routeFetch({ hydrate: [] });
+    let append: ((content: string, citations: Citation[]) => void) | null = null;
+    renderWithOnboardingProviders(
+      <>
+        <InteractView />
+        <AppendProbe onReady={(fn) => (append = fn)} />
+      </>,
+      { initialFrame: "f5", initialScenario: "utility" },
+    );
 
-    // The real bbox from the persisted thread threads into the canvas
+    await waitFor(() => expect(screen.getByTestId("pdf-viewer-widget")).toBeInTheDocument());
+    act(() => {
+      append?.("The service address is 123 Main St.", [
+        { documentId: "c3bfff49-6640-4213-822b-e81c3a771e45", page: 1, snippet: "Service address 123 Main St", bbox: { x: 0.088, y: 0.201, w: 0.855, h: 0.319 } },
+      ]);
+    });
+
+    // The real bbox from the appended turn threads into the canvas
     // litRegions (page 1, green primary) — no chat turns rendered here.
     await waitFor(() => {
       const regions = JSON.parse(screen.getByTestId("pdf-viewer-widget").getAttribute("data-lit-regions") ?? "[]");
@@ -124,31 +136,79 @@ describe("InteractView (F5) — doc-only canvas", () => {
     expect(screen.queryByText("The service address is 123 Main St.")).not.toBeInTheDocument();
   });
 
-  it("TODO(WF-05) TEMP: utility 'amount due' answer lights the curated cyan box (overrides the coarse X-Ray bbox)", async () => {
-    routeFetch({
-      hydrate: [
-        { id: "m-u", chatSessionId: "x", turnIndex: 0, role: "user", content: "What is the total amount due?", errorCode: null, citations: [] },
-        {
-          id: "m-a",
-          chatSessionId: "x",
-          turnIndex: 1,
-          role: "assistant",
-          content: "The total amount due is $7,613.20.",
-          errorCode: null,
-          // A bbox IS present (WF-03 join) but coarse/wrong — the temp override
-          // must replace it with the hand-placed amount-due box.
-          citations: [
-            { documentId: "c3bfff49-6640-4213-822b-e81c3a771e45", page: 1, snippet: "Amount Due        $ 7,613.20", bbox: { x: 0.088, y: 0.201, w: 0.855, h: 0.319 } },
-          ],
-        },
-      ],
+  // The demo hack (UTILITY_AMOUNT_DUE_REGION + isUtilityAmountDue regex
+  // override) is REMOVED per item 6 — the lit region now renders the answer
+  // citation's REAL bbox, even for the utility "amount due" answer. (If that
+  // box is too coarse, the fix is word-level geometry, WF-05 `-118-map`, a
+  // separate ticket — not a hardcoded box.)
+  it("utility 'amount due' answer renders the REAL citation bbox (no curated override)", async () => {
+    routeFetch({ hydrate: [] });
+    let append: ((content: string, citations: Citation[]) => void) | null = null;
+    renderWithOnboardingProviders(
+      <>
+        <InteractView />
+        <AppendProbe onReady={(fn) => (append = fn)} />
+      </>,
+      { initialFrame: "f5", initialScenario: "utility" },
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pdf-viewer-widget")).toBeInTheDocument());
+    act(() => {
+      append?.("The total amount due is $7,613.20.", [
+        { documentId: "c3bfff49-6640-4213-822b-e81c3a771e45", page: 1, snippet: "Amount Due        $ 7,613.20", bbox: { x: 0.088, y: 0.201, w: 0.855, h: 0.319 } },
+      ]);
     });
-    renderWithOnboardingProviders(<InteractView />, { initialFrame: "f5", initialScenario: "utility" });
 
     await waitFor(() => {
       const regions = JSON.parse(screen.getByTestId("pdf-viewer-widget").getAttribute("data-lit-regions") ?? "[]");
-      // Curated cyan box, NOT the coarse X-Ray bbox.
-      expect(regions).toEqual([{ page: 1, x: 0.548, y: 0.218, w: 0.4, h: 0.046, color: "cyan" }]);
+      // The REAL bbox, NOT the retired cyan curated box.
+      expect(regions).toEqual([{ page: 1, x: 0.088, y: 0.201, w: 0.855, h: 0.319, color: "green" }]);
+    });
+  });
+
+  // Item 6 (core-data-model-hardening): citations are promoted onto the
+  // in-memory ChatMessage. A citation written on append (the way ChatColumn
+  // now writes assistant turns) must be read by InteractView WITHOUT polling
+  // the API. We route the messages endpoint to ALWAYS return an empty thread,
+  // so if InteractView still depended on the poll the regions would stay [].
+  it("lights the canvas from a ChatStore-appended assistant turn, no API poll", async () => {
+    routeFetch({ hydrate: [] }); // poll, if any, yields zero citations
+    let append: ((content: string, citations: Citation[]) => void) | null = null;
+
+    renderWithOnboardingProviders(
+      <>
+        <InteractView />
+        <AppendProbe onReady={(fn) => (append = fn)} />
+      </>,
+      { initialFrame: "f5", initialScenario: "utility" },
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pdf-viewer-widget")).toBeInTheDocument());
+    // No poll has produced any region yet.
+    expect(
+      JSON.parse(screen.getByTestId("pdf-viewer-widget").getAttribute("data-lit-regions") ?? "[]"),
+    ).toEqual([]);
+
+    // Write the assistant turn + its real-bbox citation straight into
+    // ChatStore (no network).
+    act(() => {
+      append?.("The service address is 123 Main St.", [
+        {
+          documentId: "c3bfff49-6640-4213-822b-e81c3a771e45",
+          page: 1,
+          snippet: "Service address 123 Main St",
+          bbox: { x: 0.088, y: 0.201, w: 0.855, h: 0.319 },
+        },
+      ]);
+    });
+
+    // The lit region reflects the appended citation's real bbox — proving
+    // the consumer read from ChatStore, not the (empty) poll.
+    await waitFor(() => {
+      const regions = JSON.parse(
+        screen.getByTestId("pdf-viewer-widget").getAttribute("data-lit-regions") ?? "[]",
+      );
+      expect(regions).toEqual([{ page: 1, x: 0.088, y: 0.201, w: 0.855, h: 0.319, color: "green" }]);
     });
   });
 

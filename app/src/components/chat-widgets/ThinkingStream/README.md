@@ -17,12 +17,14 @@ only), and a single-fire `onDone` callback.
 
 ## Props
 
-| Prop          | Type                          | Default        | Notes                                                                |
-| ------------- | ----------------------------- | -------------- | -------------------------------------------------------------------- |
-| `notes`       | `string[]`                    | required       | The notes to stream, in reveal order. One italic bubble per entry.   |
-| `scenarioKey` | `string`                      | required       | Stable id for sessionStorage namespacing (scenario id / upload id).  |
-| `mode`        | `"onboarding"` \| `"steady"`  | `"onboarding"` | Onboarding persists doneness; steady doesn't (each upload is unique).|
-| `onDone`      | `() => void`                  | optional       | Fires once when the stream finishes (after the post-stream delay).   |
+| Prop            | Type          | Default            | Notes                                                                          |
+| --------------- | ------------- | ------------------ | ------------------------------------------------------------------------------ |
+| `notes`         | `string[]`    | required           | The notes to stream, in reveal order. One italic bubble per entry.             |
+| `scenarioKey`   | `string`      | required           | Stable id for sessionStorage namespacing (scenario id / upload id).            |
+| `role`          | `WidgetRole`  | required           | Widget-contract role. All-roles; locks nothing here. Forward-looking.          |
+| `scope`         | `WidgetScope` | required           | Always `{ type: "none" }` — display widget (see § Scope).                      |
+| `persistReplay` | `boolean`     | `false`            | Persist doneness so a remount skips the reveal. Re-sourced from the old `mode`.|
+| `onDone`        | `() => void`  | optional           | Fires once when the stream finishes (after the post-stream delay).             |
 
 ## Behavior
 
@@ -31,10 +33,11 @@ only), and a single-fire `onDone` callback.
 - **Post-stream delay:** 1200ms after the last note before `onDone`
   fires. Gives the user a beat to read the final line before any
   follow-up CTA the consumer reveals.
-- **Replay guard (onboarding only):** once the stream plays to done
-  in this tab, the persisted `sessionStorage` flag means a remount
+- **Replay guard (`persistReplay` only):** once the stream plays to
+  done in this tab, the persisted `sessionStorage` flag means a remount
   (compact-mode toggle, viewport resize) skips the reveal — all
-  notes appear immediately and `onDone` fires next tick.
+  notes appear immediately and `onDone` fires next tick. The onboarding
+  experience sets `persistReplay` for its scripted, play-once notes.
 - **Empty notes:** renders nothing; fires `onDone` immediately.
 
 ## What this widget does NOT own
@@ -58,22 +61,31 @@ the stream has played to done. Cleared by `localStorage.clear()` or
 explicit removal; survives across page navigations within the same
 tab but NOT across tab close.
 
-## Mode semantics
+## Replay semantics
 
-| Mode          | Persist done? | Cadence            | Notes                                              |
-| ------------- | ------------- | ------------------ | -------------------------------------------------- |
-| `onboarding`  | yes           | 1500-2800ms        | Scripted notes from scenario manifest              |
-| `steady`      | no            | 1500-2800ms (TBD)  | Future: real upload progress events as they arrive |
+| `persistReplay` | Persist done? | Cadence           | Notes                                              |
+| --------------- | ------------- | ----------------- | -------------------------------------------------- |
+| `true`          | yes           | 1500-2800ms       | Onboarding's scripted notes — play once per tab    |
+| `false` (def.)  | no            | 1500-2800ms (TBD) | Future: real upload progress events as they arrive |
 
-Steady mode's cadence will likely move from timer-driven to event-
-driven once the real upload-progress stream lands. Until then the
-widget treats both modes identically except for the persistence flag.
+The cadence will likely move from timer-driven to event-driven once the
+real upload-progress stream lands. Until then the widget treats both
+cases identically except for the persistence flag. `persistReplay` is a
+replay concern owned by the host — it is NOT derived from `role`.
 
-## Locked affordances under `mode="onboarding"`
+## Scope
 
-- Replay guard via sessionStorage — onboarding's scripted notes only
-  play once per scenario per tab. Steady mode persists nothing
-  (each upload is unique).
+`scope` is always `{ type: "none" }` (matrix §1b). ThinkingStream
+renders a list of notes, not a document set — it is a pure display
+widget and never targets a `ContentScope`.
+
+## Locked affordances (read-only roles)
+
+**None.** ThinkingStream is an all-roles widget (matrix §1: anonymous
+✅ / member ✅) and locks no affordance by role. `role` is required by
+the widget contract and is forward-looking; it does not change what the
+widget renders. The replay guard (`persistReplay`) is a host-owned
+replay concern, NOT a role lock.
 
 ## Events
 
@@ -88,7 +100,9 @@ import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/Thinkin
 <ThinkingStream
   notes={scenario.thinkingScript}
   scenarioKey={scenario.id}
-  mode="onboarding"
+  role={role}
+  scope={{ type: "none" }}
+  persistReplay
   onDone={() => setShowDone(true)}
 />
 ```

@@ -1,18 +1,25 @@
 /**
  * PdfViewerWidget — the production PDF viewer widget.
  *
- * Used identically in onboarding (F2 UnderstandView) and steady-mode
- * source-viewer surfaces. Reads `documentId` + `mode` props; pulls
- * real xray data from GroundX via `DocumentsContext.getDocumentXray`;
- * renders pre-rasterized page images from `xray.documentPages[]`.
+ * Used identically by anonymous + member source-viewer surfaces. Reads
+ * a `scope: ContentScope` (the single-doc case is
+ * `{ type: "documents", documentIds: [id] }`) + a `role: WidgetRole`;
+ * resolves the target documentId from the scope, pulls real xray data
+ * from GroundX via `DocumentsContext.getDocumentXray`, and renders
+ * pre-rasterized page images from `xray.documentPages[]`.
  *
  * Per the no-onboarding-duplicates rule
  * (`memory/feedback_no_onboarding_duplicates.md`): this is the one
  * production widget for PDF rendering. Onboarding views are thin
- * layout wrappers that mount this with `mode="onboarding"`.
+ * layout wrappers that mount this with the same `scope` + `role` props.
  *
- * Visible UX (parity with the spec wireframes — same in onboarding
- * and steady):
+ * Per the 2026-05-30 widget access matrix
+ * (`docs/agents/widget-access-matrix.md`) PdfViewer is a
+ * **ScopedViewerWidget**: it takes a real `ContentScope` (NOT a raw
+ * `documentId`) and is available to BOTH `anonymous` + `member` with
+ * no role-gated affordance today.
+ *
+ * Visible UX (parity with the spec wireframes — same for both roles):
  *
  *   • Main page-image area showing the currently-selected page,
  *     object-fit:contain so it never overflows the pane (no pan/zoom
@@ -28,10 +35,10 @@
  * shows. Loading + filename state is surfaced via `data-loading` and
  * `aria-label` on the widget root for the shell to consume.
  *
- * `mode` controls editable affordances (none today — placeholder for
- * future toolbar / annotation work):
- *   - "onboarding" → all editable controls hidden.
- *   - "steady"     → editable controls available.
+ * `role` is the widget-contract authorization axis (`anonymous` /
+ * `member`). It gates editable affordances — none today (placeholder
+ * for future toolbar / annotation work); the viewer is read-only for
+ * both roles. The value is surfaced via `data-role` on the root.
  */
 
 import Box from "@mui/material/Box";
@@ -42,7 +49,7 @@ import { useEffect, useState, type FC } from "react";
 
 import { isResolvedDocumentId } from "@/api/documentId";
 
-import type { NormalizedBbox } from "@groundx/shared";
+import type { ContentScope, NormalizedBbox, WidgetRole } from "@groundx/shared";
 import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity";
 import {
   BORDER,
@@ -59,13 +66,22 @@ import {
 } from "@/constants";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
 
-export type PdfViewerMode = "onboarding" | "steady";
-
 export interface PdfViewerWidgetProps {
-  /** GroundX document UUID. The widget fetches its xray on mount. */
-  documentId: string;
-  /** UI affordance lock. Onboarding mode hides editable controls. */
-  mode: PdfViewerMode;
+  /**
+   * The document set to view (ScopedViewerWidget contract). The single-doc
+   * case — the only shape the viewer renders today — is
+   * `{ type: "documents", documentIds: [id] }`; the widget fetches the xray
+   * for `documentIds[0]` on mount. `bucket`/`group` scopes resolve to no
+   * document and hold the neutral loading state (a future multi-doc picker
+   * is out of scope for this widget today).
+   */
+  scope: ContentScope;
+  /**
+   * Widget-contract authorization role (`anonymous` / `member`). Gates
+   * editable affordances — none today; the viewer is read-only for both
+   * roles. Surfaced via `data-role` on the root.
+   */
+  role: WidgetRole;
   /** 1-indexed initial page. Defaults to 1. User clicks on thumbs after that. */
   initialPage?: number;
   /**
@@ -126,8 +142,8 @@ export interface PdfViewerWidgetProps {
 }
 
 export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
-  documentId,
-  mode,
+  scope,
+  role,
   initialPage = 1,
   targetPage,
   highlightBbox,
@@ -135,6 +151,12 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   showScanAnimation = false,
   litRegions,
 }) => {
+  // Resolve the single document the viewer renders from the scope. Only the
+  // `documents` shape carries a concrete id today; any other scope (bucket /
+  // group) resolves to an empty id and holds the neutral loading state. The
+  // empty string is intentionally non-resolved (see `isResolvedDocumentId`)
+  // so the fetch is gated exactly as the prior placeholder-id path was.
+  const documentId = scope.type === "documents" ? scope.documentIds[0] ?? "" : "";
   const { getDocumentXray } = useDocumentsContext();
   const [xray, setXray] = useState<DocumentXrayResponse | null>(null);
   const [error, setError] = useState<unknown | null>(null);
@@ -190,7 +212,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   return (
     <Box
       data-testid="pdf-viewer-widget"
-      data-mode={mode}
+      data-role={role}
       data-loading={loading ? "true" : "false"}
       // WF-01b C (2026-05-28). Surface the controlled-prop values as
       // data attrs on the root so consumers + tests can assert the

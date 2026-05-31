@@ -145,6 +145,7 @@ function useGateSequencePlayed(): [boolean, () => void] {
 }
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import type { GateTrigger } from "@/types/onboarding";
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 const PREAMBLE: Record<GateTrigger, string> = {
   save: "Save your work to come back to it. One quick step.",
@@ -162,22 +163,39 @@ const PREAMBLE_BY_CAUSE: Record<"save-schema", string> = {
   "save-schema": "Sign in to save this schema",
 };
 
-export type GateChatRailMode = "onboarding" | "steady";
+/**
+ * The onboarding-flow frame at which the gate appears. When the session is
+ * on this frame, the committed-state card offers the "Continue to Integrate"
+ * nav CTA that advances the flow to F7. This is FLOW chrome, re-sourced from
+ * session/gate-state (`currentFrame`) — NOT a widget `role`/`mode` prop
+ * (2026-05-30-widget-role-access). A steady re-encounter of the gate is not
+ * on this frame, so the nav CTA is absent.
+ */
+const GATE_FRAME = "f6";
 
 export interface GateChatRailProps {
   /**
-   * Locked-affordance gate per the widget contract.
-   * - `onboarding` (default): committed-state card shows
-   *   "Continue to Integrate" so the user can advance to F7.
-   * - `steady`: same eyebrows + dismiss + book-a-call, but no
-   *   onboarding-frame nav CTA on the committed card. Useful if a
-   *   user re-encounters the gate from a steady-mode surface.
+   * Widget access role per the role+scope contract
+   * (2026-05-30-widget-role-access). GateChatRail is **anonymous-only** by
+   * AVAILABILITY — the OnboardingShell mounts it only in the gate (anonymous)
+   * context; a signed-in member never sees it. The mount site enforces that.
+   * No affordance is locked by role inside this widget today, so `role` is
+   * present for the contract and forward-looking roles.
    */
-  mode?: GateChatRailMode;
+  role: WidgetRole;
+  /**
+   * Required widget scope. GateChatRail is session/gate-scoped, not
+   * document-scoped, so it always declares `{ type: "none" }`.
+   */
+  scope: WidgetScope;
 }
 
-export const GateChatRail: FC<GateChatRailProps> = ({ mode = "onboarding" }) => {
+export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope }) => {
   const { state, dismissGate, advanceFrame, commitGate } = useOnboardingSession();
+  // FLOW chrome, re-sourced from gate-state — not from a widget prop. The
+  // committed "Continue to Integrate" nav CTA shows only while the onboarding
+  // flow is on the gate frame.
+  const onGateFrame = state.currentFrame === GATE_FRAME;
   const navigate = useNavigate();
   const location = useLocation();
   const [email, setEmail] = useState("");
@@ -262,7 +280,6 @@ export const GateChatRail: FC<GateChatRailProps> = ({ mode = "onboarding" }) => 
     return (
       <Card
         data-widget="gate-chat-rail"
-        data-mode={mode}
         data-testid="gate-rail-committed"
         sx={{ p: 3, borderRadius: BORDER_RADIUS_CARD }}
         aria-label="Gate committed"
@@ -270,7 +287,7 @@ export const GateChatRail: FC<GateChatRailProps> = ({ mode = "onboarding" }) => 
         <MuiStack spacing={1}>
           <Label sx={{ color: EYEBROW_ON_LIGHT }}>{eyebrow}</Label>
           <BodyText>{body}</BodyText>
-          {mode === "onboarding" ? (
+          {onGateFrame ? (
             <Button noTool="legacy — Phase 7 backfills tool"
               type="button"
               variant="primary"
@@ -296,7 +313,6 @@ export const GateChatRail: FC<GateChatRailProps> = ({ mode = "onboarding" }) => 
   return (
     <MuiStack
       data-widget="gate-chat-rail"
-      data-mode={mode}
       spacing={1.25}
       aria-label="Sign-in offer"
       sx={{ alignItems: "stretch" }}

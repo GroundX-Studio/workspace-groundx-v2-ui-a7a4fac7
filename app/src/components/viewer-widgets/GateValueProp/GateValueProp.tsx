@@ -13,6 +13,13 @@
  * (`no-llm.md`). Copy is product-brand-gtm aligned (F1 "documents that
  * break general-purpose AI" + F7 "ship to your stack" + the F6 free-tier
  * note).
+ *
+ * Migrated to the role+scope widget contract in 2026-05-30-widget-role-access
+ * Phase 2b. Matrix row (docs/agents/widget-access-matrix.md): **anonymous-only**
+ * availability (gate context) — enforced at the MOUNT SITE, not by a prop;
+ * no affordance lock; scope `{ type: "none" }` (not a ScopedViewerWidget).
+ * The retired cosmetic `mode` prop was dropped (identical pitch in both
+ * modes) and replaced by `role` for contract conformance.
  */
 
 import Box from "@mui/material/Box";
@@ -24,6 +31,7 @@ import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 import VerifiedOutlinedIcon from "@mui/icons-material/VerifiedOutlined";
 import { alpha } from "@mui/material/styles";
 import { type FC, type ReactNode } from "react";
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Heading } from "@/components/primitives/Heading/Heading";
@@ -42,15 +50,24 @@ import {
   WHITE,
 } from "@/constants";
 
-export type GateValuePropMode = "onboarding" | "steady";
-
 export interface GateValuePropProps {
   /**
-   * Locked-affordance gate per the widget contract. The pitch is
-   * identical in both modes; the prop exists so the canvas can mount the
-   * widget uniformly. `onboarding` (default) is the gate surface.
+   * Widget access role (widget contract). GateValueProp's matrix row is
+   * **anonymous-only** availability (gate context) — but that is enforced
+   * at the MOUNT SITE (OnboardingShell, gate-state), NOT by this prop. The
+   * widget locks no affordance by role (presentational pitch) and renders
+   * identically under any role it is handed. `role` is carried for contract
+   * conformance + future roles. Defaults to `"anonymous"`. The retired
+   * cosmetic `mode` prop was dropped — the pitch is identical in both
+   * modes, so there was nothing for it to switch.
    */
-  mode?: GateValuePropMode;
+  role: WidgetRole;
+  /**
+   * Required scope per the widget contract. GateValueProp is not a
+   * ScopedViewerWidget — it operates on no document set, so its scope is
+   * always the explicit `{ type: "none" }`.
+   */
+  scope: WidgetScope;
 }
 
 interface ValueFeature {
@@ -82,10 +99,10 @@ const FEATURES: readonly ValueFeature[] = [
   },
 ];
 
-export const GateValueProp: FC<GateValuePropProps> = ({ mode = "onboarding" }) => (
+export const GateValueProp: FC<GateValuePropProps> = ({ role }) => (
   <Box
     data-widget="gate-value-prop"
-    data-mode={mode}
+    data-role={role}
     data-testid="gate-value-prop"
     aria-label="Why GroundX"
     sx={{

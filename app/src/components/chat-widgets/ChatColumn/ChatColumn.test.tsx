@@ -40,6 +40,8 @@ vi.mock("@/api/useLiveExtractionSchema", () => ({
 }));
 import { useLiveExtractionSchema } from "@/api/useLiveExtractionSchema";
 
+import type { WidgetRole } from "@groundx/shared";
+
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -71,25 +73,69 @@ describe("ChatColumn", () => {
   // DBG-01 B (2026-05-28). The chat scroll container must reserve a
   // scrollbar gutter so the bar doesn't paint over the message bubbles.
   it("DBG-01 B: onboarding chat scroll container reserves a scrollbar gutter", () => {
-    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     const scroll = screen.getByTestId("onboarding-chat-scroll");
     expect(scroll.style.scrollbarGutter).toBe("stable");
   });
 
   it("DBG-01 B: steady chat scroll container reserves a scrollbar gutter", () => {
-    renderWithOnboardingProviders(<ChatColumn mode="steady" />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     const scroll = screen.getByTestId("steady-chat-scroll");
     expect(scroll.style.scrollbarGutter).toBe("stable");
   });
 
+  // 2026-05-30-widget-role-access Phase 2b — ChatColumn migrates from the
+  // binary `mode: "onboarding" | "steady"` to the role+scope contract.
+  // Matrix row (docs/agents/widget-access-matrix.md §1 + §1b):
+  //   · availability: ✅ anonymous · ✅ member (all roles)
+  //   · affordance locks: NONE today
+  //   · scope: `{ type: "none" }` — chat is session-scoped, not document-scoped
+  // The flow-tree selection (`surface`) is RE-SOURCED from the mounting
+  // shell, NOT renamed to `role` (per the re-source note).
+  describe("role + scope contract (widget-access-matrix)", () => {
+    const roles: WidgetRole[] = ["anonymous", "member"];
+
+    for (const role of roles) {
+      it(`mounts under role="${role}" with the all-roles onboarding surface`, () => {
+        renderWithOnboardingProviders(
+          <ChatColumn role={role} scope={{ type: "none" }} />,
+          { initialFrame: "f2", initialScenario: "utility" },
+        );
+        // All-roles: the onboarding conversation chrome renders for both
+        // anonymous and member — no affordance is locked by role.
+        expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
+        expect(screen.getByTestId("onboarding-chat-input")).toBeInTheDocument();
+      });
+
+      it(`mounts under role="${role}" with the steady surface`, () => {
+        renderWithOnboardingProviders(
+          <ChatColumn role={role} scope={{ type: "none" }} surface="steady" />,
+          { initialFrame: "f2", initialScenario: "utility" },
+        );
+        // Steady surface available to both roles; same send affordance.
+        expect(screen.getByTestId("steady-chat-conversation")).toBeInTheDocument();
+        expect(screen.getByTestId("onboarding-chat-input")).toBeInTheDocument();
+      });
+    }
+
+    it("accepts the required scope: { type: 'none' } without changing behavior", () => {
+      // Scope is session-scoped sentinel; it does not gate any rendering.
+      renderWithOnboardingProviders(
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />,
+        { initialFrame: "f1", initialScenario: null },
+      );
+      expect(screen.getByText(/Ask anything about the sample/i)).toBeInTheDocument();
+    });
+  });
+
   it("on F1 (no scenario picked), shows the idle placeholder", () => {
-    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f1", initialScenario: null });
+    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f1", initialScenario: null });
     expect(screen.getByText(/Ask anything about the sample/i)).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
   });
 
   it("on F2 with a scenario, renders the wireframe conversation chrome", () => {
-    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     // Wireframe markers: a header that shows the FILE NAME (was
     // "Conversation" pre-2026-05-25, user wanted real context), the
     // scenario name as the first user bubble, a sample-switcher
@@ -115,7 +161,7 @@ describe("ChatColumn", () => {
     };
     renderWithOnboardingProviders(
       <>
-        <ChatColumn />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <PathProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
@@ -128,7 +174,7 @@ describe("ChatColumn", () => {
 
   it("streams thinking notes into the chat one at a time, then surfaces Done + Pick-a-view", () => {
     vi.useFakeTimers();
-    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
 
     // First note is visible immediately.
     expect(screen.getAllByTestId(/thinking-note-/).length).toBe(1);
@@ -169,7 +215,7 @@ describe("ChatColumn", () => {
     }
     renderWithOnboardingProviders(
       <>
-        <ChatColumn />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <FrameProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
@@ -195,7 +241,7 @@ describe("ChatColumn", () => {
 
   it("derives Pick-a-view pills from the active scenario's extraction schema (Loan != Utility)", () => {
     vi.useFakeTimers();
-    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "loan" });
+    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "loan" });
     for (let i = 0; i < 12; i += 1) {
       act(() => {
         // Per-note pause is now randomized 1500..2800ms (2026-05-25);
@@ -231,7 +277,7 @@ describe("ChatColumn", () => {
         { id: "charges", type: "charges", name: "Charges", fields: [] },
       ],
     });
-    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     for (let i = 0; i < 12; i += 1) {
       act(() => {
         vi.advanceTimersByTime(3000);
@@ -253,7 +299,7 @@ describe("ChatColumn", () => {
     }
     renderWithOnboardingProviders(
       <>
-        <ChatColumn />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <FrameProbe />
       </>,
       { initialFrame: "f2", initialScenario: "solar" },
@@ -275,7 +321,7 @@ describe("ChatColumn", () => {
   });
 
   it("the sample switcher chip exposes the other scenarios as a menu", () => {
-    renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     const trigger = screen.getByTestId("onboarding-chat-sample-switch-trigger");
     act(() => {
       trigger.click();
@@ -293,7 +339,7 @@ describe("ChatColumn", () => {
   // ────────────────────────────────────────────────────────────────────
   describe("schema-agent-chat-affordances", () => {
     it("renders the Schema Agent header + sample switcher chip on F3a", () => {
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f3a",
         initialScenario: "utility",
       });
@@ -306,7 +352,7 @@ describe("ChatColumn", () => {
     });
 
     it("omits the Schema-Agent header on F2 (frame-conditional)", () => {
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -322,7 +368,7 @@ describe("ChatColumn", () => {
   // ────────────────────────────────────────────────────────────────────
   describe("F2 chat input (CF-18)", () => {
     it("renders a real input + send button (not the visual stub copy)", () => {
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -350,7 +396,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -382,7 +428,7 @@ describe("ChatColumn", () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Failed to fetch"));
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -402,7 +448,7 @@ describe("ChatColumn", () => {
     it("504 → renders 'took too long' copy (CF-08)", async () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("timeout", 504, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -419,7 +465,7 @@ describe("ChatColumn", () => {
     it("401 → renders 'sign in to continue' copy (CF-08)", async () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("unauth", 401, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -436,7 +482,7 @@ describe("ChatColumn", () => {
     it("501 → renders 'can't answer that yet' copy (CF-08)", async () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("nyi", 501, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -452,7 +498,7 @@ describe("ChatColumn", () => {
 
     it("empty / whitespace input does not post", async () => {
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -492,7 +538,7 @@ describe("ChatColumn", () => {
         },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -524,7 +570,7 @@ describe("ChatColumn", () => {
         },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
 
       const bubble = await screen.findByTestId("onboarding-chat-live-assistant");
       // bold renders as <strong>, code as <code> — NOT literal markup
@@ -539,7 +585,7 @@ describe("ChatColumn", () => {
         { id: "u1", chatSessionId: "rt-sys", turnIndex: 1, role: "user", content: "hi there", errorCode: null, citations: [] },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -555,7 +601,7 @@ describe("ChatColumn", () => {
       // so the test reads cleanly.
       vi.mocked(listChatMessages).mockResolvedValueOnce([]);
 
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -572,7 +618,7 @@ describe("ChatColumn", () => {
         new ChatApiError("/api/chat-sessions/rt-fail/messages failed: 500", 500, null),
       );
 
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -607,7 +653,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -665,7 +711,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -703,7 +749,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -740,7 +786,7 @@ describe("ChatColumn", () => {
         },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -769,7 +815,7 @@ describe("ChatColumn", () => {
     renderWithOnboardingProviders(
       <>
         <GateOpener />
-        <ChatColumn />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
       </>,
       { initialFrame: "f1", initialScenario: null },
     );
@@ -801,7 +847,7 @@ describe("ChatColumn", () => {
       // onboarding providers to keep ChatStore + AuthContext available;
       // the steady branch short-circuits before reading
       // OnboardingSession/ScenarioRegistry.
-      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -838,7 +884,7 @@ describe("ChatColumn", () => {
         },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -874,7 +920,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -895,7 +941,7 @@ describe("ChatColumn", () => {
 
     it("renders the empty-thread placeholder when no persisted turns exist", async () => {
       vi.mocked(listChatMessages).mockResolvedValueOnce([]);
-      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -948,7 +994,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -983,7 +1029,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -1035,7 +1081,7 @@ describe("ChatColumn", () => {
             },
           });
         }, [registerAdapter]);
-        return <ChatColumn />;
+        return <ChatColumn role="anonymous" scope={{ type: "none" }} />;
       };
 
       const user = userEvent.setup();
@@ -1100,7 +1146,7 @@ describe("ChatColumn", () => {
             },
           });
         }, [registerAdapter]);
-        return <ChatColumn />;
+        return <ChatColumn role="anonymous" scope={{ type: "none" }} />;
       };
 
       const user = userEvent.setup();
@@ -1153,7 +1199,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn />, {
+      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -1186,7 +1232,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn mode="steady" />, {
+      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });

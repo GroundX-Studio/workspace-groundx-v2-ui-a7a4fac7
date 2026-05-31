@@ -16,6 +16,7 @@
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import type { FC } from "react";
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import {
   BODY_TEXT,
@@ -41,20 +42,28 @@ function readCalendlyUrl(): string {
   return (raw ?? "").trim();
 }
 
-export type BookCallViewMode = "onboarding" | "steady";
-
 export interface BookCallViewProps {
   /**
-   * Locked-affordance gate per the widget contract. In onboarding the
-   * iframe is non-resizable and floats centered; steady mode allows
-   * the same surface to be embedded inside a settings drawer where the
-   * surrounding chrome (close button, breadcrumbs) is the steady-mode
-   * caller's concern.
+   * Widget access role (widget contract). BookCallView is available to
+   * ALL roles and locks NO affordance by role — the Calendly booking
+   * surface is identical for anonymous and member (see the access
+   * matrix). `role` is carried for contract conformance + future roles.
+   *
+   * NOTE: the surrounding chrome (close button, breadcrumbs, settings
+   * drawer vs. canvas pane) is the HOST's concern, driven by layout/flow
+   * — it was the old `mode` prop's only job and was deliberately NOT
+   * renamed to `role`.
    */
-  mode?: BookCallViewMode;
+  role: WidgetRole;
+  /**
+   * Required scope per the widget contract. BookCallView is not a
+   * ScopedViewerWidget — it operates on no document set — so it always
+   * declares `{ type: "none" }`.
+   */
+  scope: WidgetScope;
 }
 
-export const BookCallView: FC<BookCallViewProps> = ({ mode = "onboarding" }) => {
+export const BookCallView: FC<BookCallViewProps> = ({ role }) => {
   const calendlyUrl = readCalendlyUrl();
 
   if (!calendlyUrl) {
@@ -62,7 +71,7 @@ export const BookCallView: FC<BookCallViewProps> = ({ mode = "onboarding" }) => 
       <Box
         data-testid="book-call-calendly-unset"
         data-widget="book-call-view"
-        data-mode={mode}
+        data-role={role}
         sx={{
           height: "100%",
           width: "100%",
@@ -102,7 +111,7 @@ export const BookCallView: FC<BookCallViewProps> = ({ mode = "onboarding" }) => 
   return (
     <Box
       data-widget="book-call-view"
-      data-mode={mode}
+      data-role={role}
       sx={{
         height: "100%",
         width: "100%",

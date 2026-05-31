@@ -436,7 +436,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     renderWithOnboardingProviders(
       <>
         <SummariesSeeder />
-        <ChatColumn />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <ExtractView />
       </>,
       { initialFrame: "f3a", initialScenario: "utility" },
@@ -455,7 +455,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     renderWithOnboardingProviders(
       <>
         <SchemaAgentRerunSeeder />
-        <ChatColumn />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <ExtractView />
       </>,
       // `?focus=meters` so ExtractView's initial-focus effect lands on
@@ -529,7 +529,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(
       <>
-        <ChatColumn />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <ExtractView />
       </>,
       { initialFrame: "f3a", initialScenario: "utility" },
@@ -577,7 +577,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     renderWithOnboardingProviders(
       <>
         <GateCommitter />
-        <ChatColumn />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <ExtractView />
         {/* IngestView is mounted as a sibling so the banner is
             assertable after the post-commit advance to F1 — the test

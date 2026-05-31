@@ -72,14 +72,12 @@ export interface ChatSeed {
 }
 
 // A scenario fixture citation IS the shared `Citation` (`@groundx/shared`) —
-// used directly (no `ScenarioCitation` alias).
-import type { Citation } from "@groundx/shared";
+// used directly (no `ScenarioCitation` alias). `ExtractedFieldValue` is the
+// shared generated-result shape (Extract specialization): a `{fieldId, value,
+// citations}` keyed result that also carries the shared `confidence`/`warnings`.
+import type { Citation, ExtractedFieldValue } from "@groundx/shared";
 
-export interface ExtractedFieldValue {
-  fieldId: string;
-  value: string | number | boolean | null;
-  citations: Citation[];
-}
+export type { Citation, ExtractedFieldValue };
 
 export interface SampleChatTurn {
   id: string;

@@ -549,6 +549,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         content: input.content,
         timestamp: now,
         compressedIntoSummaryId: null,
+        ...(input.citations && input.citations.length > 0 ? { citations: input.citations } : {}),
       };
       const sessions = new Map(prev.sessions);
       sessions.set(prev.activeSessionId, {

@@ -12,6 +12,8 @@ describe("SuggestedActionChips", () => {
           { key: "show-source", label: "Show source" },
           { key: "open-samples", label: "Open samples" },
         ]}
+        role="anonymous"
+        scope={{ type: "none" }}
       />,
     );
     expect(screen.getByTestId("suggested-action-chip-show-source")).toHaveTextContent(
@@ -22,16 +24,38 @@ describe("SuggestedActionChips", () => {
     );
   });
 
-  it("reflects the mode prop on a data-mode attribute (widget contract)", () => {
+  // 2026-05-30-widget-role-access Phase 2b: `mode` retired → `role`
+  // (authorization) + `scope` (required, `{ type: "none" }` for this
+  // display widget). Matrix row: all roles, no affordance lock.
+  it.each(["anonymous", "member"] as const)(
+    "mounts under role=%s and reflects it on data-role (widget contract)",
+    (role) => {
+      render(
+        <SuggestedActionChips
+          actions={[{ key: "k", label: "L" }]}
+          role={role}
+          scope={{ type: "none" }}
+        />,
+      );
+      expect(screen.getByTestId("suggested-action-chips")).toHaveAttribute("data-role", role);
+    },
+  );
+
+  it("renders identical chips for anonymous and member (matrix: no affordance lock)", () => {
+    const actions = [
+      { key: "show-source", label: "Show source" },
+      { key: "open-samples", label: "Open samples" },
+    ];
     const { rerender } = render(
-      <SuggestedActionChips actions={[{ key: "k", label: "L" }]} mode="onboarding" />,
+      <SuggestedActionChips actions={actions} role="anonymous" scope={{ type: "none" }} />,
     );
-    expect(screen.getByTestId("suggested-action-chips")).toHaveAttribute(
-      "data-mode",
-      "onboarding",
-    );
-    rerender(<SuggestedActionChips actions={[{ key: "k", label: "L" }]} mode="steady" />);
-    expect(screen.getByTestId("suggested-action-chips")).toHaveAttribute("data-mode", "steady");
+    const anonChips = screen.getAllByRole("button").map((c) => c.getAttribute("data-action-key"));
+    rerender(<SuggestedActionChips actions={actions} role="member" scope={{ type: "none" }} />);
+    const memberChips = screen
+      .getAllByRole("button")
+      .map((c) => c.getAttribute("data-action-key"));
+    expect(memberChips).toEqual(anonChips);
+    expect(memberChips).toEqual(["show-source", "open-samples"]);
   });
 
   it("clicking a chip fires onAction with the underlying action object", async () => {
@@ -46,6 +70,8 @@ describe("SuggestedActionChips", () => {
             detail: { intent: "show-extract", confidence: 0.91 },
           },
         ]}
+        role="anonymous"
+        scope={{ type: "none" }}
         onAction={onAction}
       />,
     );
@@ -59,7 +85,9 @@ describe("SuggestedActionChips", () => {
   });
 
   it("empty actions array renders nothing", () => {
-    const { container } = render(<SuggestedActionChips actions={[]} />);
+    const { container } = render(
+      <SuggestedActionChips actions={[]} role="anonymous" scope={{ type: "none" }} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 
@@ -69,6 +97,8 @@ describe("SuggestedActionChips", () => {
     render(
       <SuggestedActionChips
         actions={[{ key: "show-source", label: "Show source" }]}
+        role="anonymous"
+        scope={{ type: "none" }}
         onAction={onAction}
       />,
     );

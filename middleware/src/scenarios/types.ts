@@ -60,13 +60,12 @@ export interface ChatSeed {
 // A scenario fixture citation is the shared `Citation` (`@groundx/shared`).
 // (The shared shape adds optional `tier`/`answerSpan` — harmless supersets;
 // fixtures that omit them still conform.) Used directly as `Citation` (no alias).
-import type { Citation } from "@groundx/shared";
+// `ExtractedFieldValue` is the shared generated-result shape (Extract
+// specialization): `{fieldId, value, citations}` + the shared
+// `confidence`/`warnings`.
+import type { Citation, ExtractedFieldValue } from "@groundx/shared";
 
-export interface ExtractedFieldValue {
-  fieldId: string;
-  value: string | number | boolean | null;
-  citations: Citation[];
-}
+export type { Citation, ExtractedFieldValue };
 
 export interface SampleChatTurn {
   id: string;
