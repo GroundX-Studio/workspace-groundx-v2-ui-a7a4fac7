@@ -1,5 +1,5 @@
 import type { ContentScope, Scenario } from "@/types/onboarding";
-import type { NormalizedBbox } from "@groundx/shared";
+import type { NormalizedBbox, TemplateFieldType } from "@groundx/shared";
 
 /**
  * CanvasIntent — discriminated union of every command the canvas can receive.
@@ -60,7 +60,7 @@ export type CanvasIntent =
       kind: "proposeSchemaField";
       categoryId: string;
       name: string;
-      type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+      type: TemplateFieldType;
       description: string;
     }
   /**

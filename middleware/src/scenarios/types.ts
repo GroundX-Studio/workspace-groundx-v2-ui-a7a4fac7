@@ -26,7 +26,7 @@ export interface ScenarioHero {
 export interface SchemaFieldDef {
   id: string;
   name: string;
-  type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+  type: TemplateFieldType;
   description: string;
   /** F3a required-toggle; defaults to false for pre-editor fixtures. */
   required?: boolean;
@@ -63,7 +63,7 @@ export interface ChatSeed {
 // `ExtractedFieldValue` is the shared generated-result shape (Extract
 // specialization): `{fieldId, value, citations}` + the shared
 // `confidence`/`warnings`.
-import type { Citation, ExtractedFieldValue } from "@groundx/shared";
+import type { Citation, ExtractedFieldValue, TemplateFieldType } from "@groundx/shared";
 
 export type { Citation, ExtractedFieldValue };
 

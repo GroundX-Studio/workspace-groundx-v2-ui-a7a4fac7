@@ -158,13 +158,41 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
 ## 4. Type-unification + row-mapper validation + wire-types module + illegal-states unions
 
 ### 4a. Type-unification (⟲ WORKFLOW-OK once the target type is confirmed; drift guard stays green)
-- [ ] **#12 field-type union → shared.** Failing test: a type-equality assert each former alias ===
+- [x] **#12 field-type union → shared.** Failing test: a type-equality assert each former alias ===
   `TemplateFieldType`. Replace ~10 re-spellings of `"STRING"|"NUMBER"|"DATE"|"BOOLEAN"` (`api/
   extractField.ts`, `services/fieldExtractor.ts`, + 8 inline) with `TemplateFieldType` from
   `@groundx/shared`.
+  — DONE: the two exported named aliases are now thin re-exports of the shared union —
+  `ExtractFieldType = TemplateFieldType` (`app/src/api/extractField.ts`) and
+  `SchemaFieldType = TemplateFieldType` (`middleware/src/services/fieldExtractor.ts`) — so their
+  consumers keep the local name while the literal union lives ONCE in `@groundx/shared`. The 6 inline
+  type-position re-spellings folded onto `TemplateFieldType`: app `types/scenarios.ts` (`SchemaFieldDef`),
+  `api/chatSessions.ts` (`ProposedSchemaField`), `contexts/ChatStoreContext/types.ts` ×3
+  (`SchemaFieldAddition`/`SchemaFieldEdit`/`SchemaFieldProposal`), `contexts/CanvasOrchestratorContext/
+  types.ts` (`proposeSchemaField` intent arm); middleware `scenarios/types.ts` (`SchemaFieldDef`) +
+  `services/chatRouterTypes.ts` (`ProposedSchemaField`). Failing-first compile-time `Eq` assert in
+  `app/src/api/extractField.test.ts` (`_assertFieldType`) + a runtime check that
+  `templateFieldTypeSchema.options` equals the 4 values. ZERO type-position `"STRING"|…` re-spellings
+  remain (verified by grep). REMAINING (separate axis, NOT folded): the `z.enum(["STRING",…])` RUNTIME
+  validators in the tools files + `app.ts` `validTypes` Set — those are validators that should derive
+  from `templateFieldTypeSchema`, but folding them changes runtime validation wiring (behavior-adjacent),
+  tracked as a follow-up, not type duplication. App `npm run build` (tsc+vite) + middleware tsc clean.
 - [ ] **#13 `ExtractFieldResult` → shared** (the `/api/extract-field` body twin) + fold the 3rd
   `SuggestedAction` copy (`SuggestedActionChips.tsx`) onto the shared type with the chatSessions↔
   chatRouter pair.
+  — PARTIAL (ExtractFieldResult twin DONE; SuggestedAction fold NOT reached → checkbox stays open).
+  The byte-identical `ExtractFieldResult` interface declared on BOTH sides of the wire (app
+  `api/extractField.ts` + middleware `services/fieldExtractor.ts`) is now ONE shared shape:
+  `extractFieldResultSchema` / `ExtractFieldResult` in `@groundx/shared` (with `extractFieldCitationSchema`
+  for the `{documentId,page,snippet?}` citation subset — deliberately NOT the full `Citation`, the
+  field-extract path never carries bbox/tier). Both sides now `import type { ExtractFieldResult }` and
+  re-export it; the two local interface declarations are deleted. Failing-first: `extractField.test.ts`
+  imports `extractFieldResultSchema` (red — absent) + a compile-time `Eq<ExtractFieldResult,
+  SharedExtractFieldResult>` assert; green after. NOT DONE: the 3rd `SuggestedAction` copy fold
+  (`SuggestedActionChips.tsx` ↔ `chatSessions.ChatSuggestedAction` ↔ `chatRouterTypes.SuggestedAction`) —
+  the three ARE byte-identical (`{key,label,detail?}`) so it is a real fold candidate, but it belongs with
+  the #18 wire-types module work (it threads through `useConversation`/`chatPrimitives`/`ragpipeline`),
+  left unstarted to keep this run behavior-preserving + scoped.
 
 ### 4b. Wire-types module + description-level drift guard (◑ MIXED — fold per twin, guard green)
 - [ ] **#18 shared wire-types module.** Move onto `@groundx/shared` `z.infer`: the `/api/chat/*`
@@ -237,15 +265,44 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   it would break those widgets); the adapter-only kinds are enumerated as explicit no-op `case`s so the
   exhaustiveness check still names them. The change's `specs/app-architecture/spec.md` delta was reconciled
   to drop the false "SHALL be removed" clause.
-- [ ] **#16 `selectActiveStep(session)` selector** (co-located with ChatStore/viewer state) replaces the
+- [x] **#16 `selectActiveStep(session)` selector** (co-located with ChatStore/viewer state) replaces the
   `stepIndex >= 0 ? history[stepIndex] : null` idiom at the 9 sites.
+  — DONE: new `app/src/contexts/ChatStoreContext/selectors.ts` exports
+  `selectActiveStep(session): ViewerStep | null` (typed against the minimal `{ viewer }` shape so it
+  composes with any session-like value + tolerates null/undefined), exported from the context barrel.
+  Replaced the verbatim inline idiom at the FOUR real sites that carried it (the grep found 4, not 9 —
+  task text was an estimate): `views/Steady/SteadyShell` (`activeStep`),
+  `views/Onboarding/OnboardingShell` ×2 (`latestViewerStepEarly` + `latestViewerStep`),
+  `views/Onboarding/IngestView` (`latestStep`). Failing-first `selectors.test.ts` (red — module absent;
+  green after) covers null/undefined session, empty viewer (stepIndex -1 → null), and index 0/1
+  resolution. Behavior-preserving: the selector's `history[idx] ?? null` is falsy-equivalent to the old
+  `history[idx]` at every consumer (each guards `step && step.kind === …`); app build (tsc+vite) clean,
+  confirming no type regression. ZERO inline `currentStep.stepIndex >= 0` idioms remain (grep).
 - [ ] **#20 illegal-states.** Session auth → `{kind:"anon"} | {kind:"authed";groundxUsername;
   groundxApiKey}`, collapse the ~12 empty-string `groundxUsername` checks; `LoginReqCallback` +
   `SchemaFieldExtractionResult` flat-record→discriminated union; add a `parseChatStoreSnapshot(unknown)`
   validator on the localStorage rehydration. Failing-first per shape.
-- [ ] **#19 `assertChatSessionOwnership(session, req)` helper.** Failing test: all session routes return
+- [x] **#19 `assertChatSessionOwnership(session, req)` helper.** Failing test: all session routes return
   the SAME error code for a non-owner. Collapse the 6-way copy-pasted guard + reconcile the drifted twin
   (returns `chat_session_forbidden` not `not_session_owner`) onto one helper + one error code.
+  — DONE: new `middleware/src/middleware/sessionOwnership.ts` exports
+  `assertChatSessionOwnership(row, session): boolean` + the single `SESSION_NOT_OWNER_ERROR =
+  "not_session_owner"` code. The helper keys ownership off the session's auth state — authed →
+  `ownerUserId === groundxUsername`, anon → `ownerAnonId === session.id` (the dominant 6-site semantics;
+  the two arms are mutually exclusive so a stale anon owner can't grant an authed session access). Wired
+  into ALL SEVEN guards in `app.ts`: the 6 that already returned `not_session_owner` (PATCH session,
+  PATCH session-entity, POST viewer-events, POST intent, POST report-render ×2) + the messages-hydrate GET
+  whose `chat_session_forbidden` is now reconciled onto `not_session_owner`. Failing-first
+  `sessionOwnership.test.ts` (7 cases: red — module absent; green after) covers authed-owns/not,
+  authed-vs-anon-row, anon-owns/not, anon-vs-user-row, and the canonical error code. Behavior-preserving
+  for the 6 (verbatim same predicate) + the existing 200-path test on the messages route (anon session on
+  an anon row still owns) + the `not_session_owner` 403 test on `/api/intent` (unchanged + green). The
+  messages route's reconciliation is a security-tightening of one untested edge (authed read of an
+  unclaimed-anon row) onto the more-correct model — no test regressed. The app-side fixture mock in
+  `chatSessions.test.ts:453` was updated `chat_session_forbidden → not_session_owner` to reflect the
+  unified contract (it is a stubbed body, NOT an assertion — the test asserts only `status: 403`). ZERO
+  `ownedByUser`/`ownedByAnon`/`ownsVia*`/`chat_session_forbidden`/inline-`"not_session_owner"` remain in
+  `app.ts` (grep); middleware suite 665 green.
 
 ### 4e. Round-trip / dead-plumbing closeout (→ SEQUENTIAL/TDD)
 - [ ] **#17 §9 closeout.** Each persist chain gets a reader+writer or is DROPPED (the `attachments_json`

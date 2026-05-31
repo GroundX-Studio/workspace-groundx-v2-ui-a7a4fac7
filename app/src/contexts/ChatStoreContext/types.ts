@@ -4,7 +4,7 @@ import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
 // module (type-only → erased → cycle-free with the orchestrator's runtime
 // dependency on ChatStore). Re-exported below for back-compat consumers.
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
-import type { Citation, ContentScope, NormalizedBbox } from "@groundx/shared";
+import type { Citation, ContentScope, NormalizedBbox, TemplateFieldType } from "@groundx/shared";
 
 /**
  * Chat session foundation — see /memory/project_chat_session_model.md.
@@ -144,7 +144,7 @@ export interface SchemaFieldAddition {
   /** Generated client-side; survives until template save. */
   id: string;
   name: string;
-  type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+  type: TemplateFieldType;
   description: string;
   /**
    * UI-01 Phase 2c — populated by `setSchemaFieldExtraction` after the
@@ -164,7 +164,7 @@ export interface SchemaFieldAddition {
  */
 export type SchemaFieldEdit = Partial<{
   name: string;
-  type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+  type: TemplateFieldType;
   description: string;
   required: boolean;
   instructions: string[];
@@ -244,7 +244,7 @@ export interface SchemaFieldProposal {
   id: string;
   categoryId: string;
   name: string;
-  type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+  type: TemplateFieldType;
   description: string;
   /**
    * `proposal-envelope-provenance`: forwarded from the middleware's

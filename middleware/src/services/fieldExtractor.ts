@@ -22,9 +22,12 @@ import { logger } from "../lib/logger.js";
 import type { GroundXClient, LlmClient } from "../types.js";
 
 import { searchGroundX } from "./chatRouter.js";
-import type { ContentScope } from "@groundx/shared";
+import type { ContentScope, ExtractFieldResult, TemplateFieldType } from "@groundx/shared";
 
-export type SchemaFieldType = "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+/** §4 #12 — the field-type union is single-sourced on `@groundx/shared`. */
+export type SchemaFieldType = TemplateFieldType;
+/** §4 #13 — the `/api/extract-field` result body is single-sourced too. */
+export type { ExtractFieldResult };
 
 export interface ExtractFieldRequest {
   /**
@@ -48,26 +51,6 @@ export interface ExtractFieldRequest {
    * for fallback prose / log context. Optional.
    */
   scopeHint?: { fileName?: string | null };
-}
-
-export interface ExtractFieldResult {
-  /**
-   * The extracted value coerced to the field's declared type, OR null
-   * when the snippets don't contain enough information to extract a
-   * value. The client renders both states distinctly.
-   */
-  value: string | number | boolean | null;
-  /**
-   * The LLM's self-reported confidence on the 0–1 scale. The SchemaView
-   * field card can render a low-confidence badge so the user knows to
-   * verify.
-   */
-  confidence: number;
-  /**
-   * A single best-match citation when the LLM found one in the snippet
-   * set. Same shape as chat citations so the renderer stays uniform.
-   */
-  citation?: { documentId: string; page: number; snippet?: string } | null;
 }
 
 export interface ExtractFieldDeps {

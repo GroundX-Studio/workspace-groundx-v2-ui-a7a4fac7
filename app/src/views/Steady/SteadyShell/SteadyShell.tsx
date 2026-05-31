@@ -43,7 +43,7 @@ import {
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
-import { useChatStore } from "@/contexts/ChatStoreContext";
+import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { SessionSwitcher } from "@/views/Steady/SteadyShell/SessionSwitcher";
 import { useWidgetRole } from "@/lib/widgetRole";
@@ -144,10 +144,7 @@ export const SteadyShell: FC = () => {
   // declared-kind step (steady mode starts doc-less), fall back to STEADY'S
   // OWN "pick a document" placeholder — NOT ScopedCanvas's generic "not yet
   // available" placeholder.
-  const activeStep =
-    active && active.viewer.currentStep.stepIndex >= 0
-      ? active.viewer.history[active.viewer.currentStep.stepIndex]
-      : null;
+  const activeStep = selectActiveStep(active);
   // Build the scope the canvas renders over, by the active step kind. Today
   // steady's only canvas-bearing step is `doc-viewer` (the citation sink);
   // resolve its single document into a documents scope. Steps that resolve

@@ -43,7 +43,7 @@ export interface CreateChatSessionResult {
 // `bbox` (NormalizedBbox) is threaded end-to-end for CiteChip's viewer jump;
 // `tier` drives highlight precision; both optional. Used directly as `Citation`
 // (no `ChatCitation` alias).
-import { ApiError, type Citation, type ScopeFilter } from "@groundx/shared";
+import { ApiError, type Citation, type ScopeFilter, type TemplateFieldType } from "@groundx/shared";
 
 export interface ChatSuggestedAction {
   key: string;
@@ -74,7 +74,7 @@ export interface ProposalEnvelopeProvenance {
 export interface ProposedSchemaField {
   categoryId: string;
   name: string;
-  type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+  type: TemplateFieldType;
   description: string;
   /**
    * Set by `parseGroundedAnswer` in the middleware on a successful

@@ -21,7 +21,7 @@ import type { NormalizedBbox, WordMap } from "./citationGeometry.js";
 // middleware imports (`Citation` from "./chatRouter.js") keep resolving. The
 // shared shape is identical: documentId, page, snippet?, bbox? (NormalizedBbox),
 // tier? (CitationTier), confidence?, answerSpan?.
-import { ApiError, type Citation, type ContentScope, type ScopeFilter, type WidgetRole } from "@groundx/shared";
+import { ApiError, type Citation, type ContentScope, type ScopeFilter, type TemplateFieldType, type WidgetRole } from "@groundx/shared";
 
 export type { Citation };
 
@@ -139,7 +139,7 @@ export interface ProposalEnvelopeProvenance {
 export interface ProposedSchemaField {
   categoryId: string;
   name: string;
-  type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+  type: TemplateFieldType;
   description: string;
   /**
    * `proposal-envelope-provenance`: present iff

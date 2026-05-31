@@ -18,7 +18,7 @@ export interface ScenarioHero {
 export interface SchemaFieldDef {
   id: string;
   name: string;
-  type: "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+  type: TemplateFieldType;
   /**
    * Field-level extraction prompt — the natural-language guidance the
    * focused LLM extractor uses to find this field's value in the
@@ -75,7 +75,7 @@ export interface ChatSeed {
 // used directly (no `ScenarioCitation` alias). `ExtractedFieldValue` is the
 // shared generated-result shape (Extract specialization): a `{fieldId, value,
 // citations}` keyed result that also carries the shared `confidence`/`warnings`.
-import type { Citation, ExtractedFieldValue } from "@groundx/shared";
+import type { Citation, ExtractedFieldValue, TemplateFieldType } from "@groundx/shared";
 
 export type { Citation, ExtractedFieldValue };
 

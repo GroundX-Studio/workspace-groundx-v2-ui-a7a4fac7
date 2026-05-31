@@ -10,6 +10,7 @@ export {
   EMPTY_PENDING_SCHEMA_OVERLAY,
   EMPTY_VIEWER_SESSION,
 } from "./types";
+export { selectActiveStep } from "./selectors";
 export type {
   CanvasIntent,
   ChatMessage,

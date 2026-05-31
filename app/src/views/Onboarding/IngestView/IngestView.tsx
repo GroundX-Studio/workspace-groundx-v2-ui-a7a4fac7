@@ -30,7 +30,7 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
-import { useChatStore } from "@/contexts/ChatStoreContext";
+import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { ByoTile } from "@/views/Onboarding/IngestView/ByoTile";
@@ -82,10 +82,7 @@ export const IngestView: FC = () => {
   const activeChatSession = chatStoreState.activeSessionId
     ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
     : null;
-  const latestStep =
-    activeChatSession && activeChatSession.viewer.currentStep.stepIndex >= 0
-      ? activeChatSession.viewer.history[activeChatSession.viewer.currentStep.stepIndex]
-      : null;
+  const latestStep = selectActiveStep(activeChatSession);
   const preAttachedSchemaId =
     latestStep && latestStep.kind === "ingest-picker" ? latestStep.attachedSchema?.schemaId ?? null : null;
   const navigate = useNavigate();

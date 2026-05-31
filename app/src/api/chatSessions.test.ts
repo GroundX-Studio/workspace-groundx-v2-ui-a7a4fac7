@@ -450,7 +450,7 @@ describe("listChatMessages (RT-01)", () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: false,
       status: 403,
-      json: async () => ({ error: "chat_session_forbidden" }),
+      json: async () => ({ error: "not_session_owner" }),
     });
     await expect(listChatMessages("chat-other")).rejects.toMatchObject({
       status: 403,

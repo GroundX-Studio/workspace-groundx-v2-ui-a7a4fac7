@@ -429,6 +429,38 @@ export function parseGeneratedResult(input: unknown): GeneratedResult | null {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// ExtractFieldResult — 2026-05-31-core-data-followups §4 #13. The
+// `/api/extract-field` response body. It was declared byte-identically on BOTH
+// sides of the wire (app `api/extractField.ts` + middleware
+// `services/fieldExtractor.ts`); both now import this one shape so the twin
+// cannot drift. The `citation` slot is a deliberate STRUCTURAL SUBSET of the
+// full `Citation` (just `{documentId, page, snippet?}`) — the field-extract
+// path never carries bbox/tier/confidence on the citation — so it is typed
+// narrowly here rather than reusing `citationSchema` (which would widen the
+// wire contract). Single best-match citation, or `null`.
+// ──────────────────────────────────────────────────────────────────────
+
+/** The single best-match citation on an extract-field result. */
+export const extractFieldCitationSchema = z.object({
+  documentId: z.string(),
+  page: z.number(),
+  snippet: z.string().optional(),
+});
+export type ExtractFieldCitation = z.infer<typeof extractFieldCitationSchema>;
+
+/** The `/api/extract-field` response body — one shape, both sides of the wire. */
+export const extractFieldResultSchema = z.object({
+  /** The extracted value coerced to the field's declared type, or `null`
+   * when the snippets don't contain enough information to extract one. */
+  value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  /** The LLM's self-reported confidence on the 0–1 scale. */
+  confidence: z.number(),
+  /** A single best-match citation, or `null`. */
+  citation: extractFieldCitationSchema.nullish(),
+});
+export type ExtractFieldResult = z.infer<typeof extractFieldResultSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
 // ViewerStepKind — the discriminant of the app's `ViewerStep` union. Lives
 // here so the middleware tool-catalog (`toolsForStep`) shares ONE definition
 // instead of hand-mirroring the kind set across the workspace boundary. The

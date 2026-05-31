@@ -8,13 +8,16 @@
  * session row hasn't been created yet.
  */
 
-import { ApiError } from "@groundx/shared";
+import { ApiError, type ExtractFieldResult, type TemplateFieldType } from "@groundx/shared";
 
 import { ensureServerChatSession } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
 
-export type ExtractFieldType = "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
+/** §4 #12 — the field-type union is single-sourced on `@groundx/shared`. */
+export type ExtractFieldType = TemplateFieldType;
+/** §4 #13 — the `/api/extract-field` result body is single-sourced too. */
+export type { ExtractFieldResult };
 
 export interface ExtractFieldInput {
   chatSessionId: string;
@@ -23,12 +26,6 @@ export interface ExtractFieldInput {
     type: ExtractFieldType;
     description: string;
   };
-}
-
-export interface ExtractFieldResult {
-  value: string | number | boolean | null;
-  confidence: number;
-  citation?: { documentId: string; page: number; snippet?: string } | null;
 }
 
 export class ExtractFieldApiError extends ApiError {

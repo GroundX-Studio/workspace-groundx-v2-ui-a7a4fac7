@@ -17,7 +17,7 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useWidgetRole } from "@/lib/widgetRole";
-import { useChatStore } from "@/contexts/ChatStoreContext";
+import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { AppShell } from "@/components/layout/AppShell";
@@ -156,10 +156,7 @@ export const OnboardingShell: FC = () => {
     chatStoreState.activeSessionId != null
       ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
       : null;
-  const latestViewerStepEarly =
-    activeChatSessionEarly && activeChatSessionEarly.viewer.currentStep.stepIndex >= 0
-      ? activeChatSessionEarly.viewer.history[activeChatSessionEarly.viewer.currentStep.stepIndex]
-      : null;
+  const latestViewerStepEarly = selectActiveStep(activeChatSessionEarly);
   // ViewerStep → StepStrip pill mapping. Clickable citations push a
   // `doc-viewer` step which maps to the Understand pill, so the nav
   // indicator matches what the canvas surfaces.
@@ -405,10 +402,7 @@ export const OnboardingShell: FC = () => {
   //
   // currentFrame remains a derived getter for backwards compat with
   // StepStrip / pill state computation, but isn't on the render hot path.
-  const latestViewerStep =
-    activeChatSession && activeChatSession.viewer.currentStep.stepIndex >= 0
-      ? activeChatSession.viewer.history[activeChatSession.viewer.currentStep.stepIndex]
-      : null;
+  const latestViewerStep = selectActiveStep(activeChatSession);
   // Fallback to currentFrame projection if no step is in history yet
   // (initial mount before any advanceFrame / pickScenario fires).
   const stepKindFallback: import("@/contexts/ChatStoreContext").ViewerStep["kind"] | null = (() => {

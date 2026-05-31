@@ -15,6 +15,7 @@ import { encryptSecret } from "./lib/crypto.js";
 import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/metrics.js";
 import { CSRF_COOKIE, csrfMiddleware } from "./middleware/csrf.js";
 import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
+import { assertChatSessionOwnership, SESSION_NOT_OWNER_ERROR } from "./middleware/sessionOwnership.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { ChatHandlerError, deriveRagContentScope, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
 import { produceEntityScope } from "./services/entityScopeProducer.js";
@@ -527,12 +528,8 @@ export function createApp({
         res.status(404).json({ error: "chat_session_not_found" });
         return;
       }
-      const ownsViaUser =
-        row.ownerUserId !== null && row.ownerUserId === session.groundxUsername;
-      const ownsViaAnon =
-        row.ownerAnonId !== null && row.ownerAnonId === session.id;
-      if (!ownsViaUser && !ownsViaAnon) {
-        res.status(403).json({ error: "chat_session_forbidden" });
+      if (!assertChatSessionOwnership(row, session)) {
+        res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
         return;
       }
       const messages = await repository.listChatMessages(chatSessionId);
@@ -722,11 +719,8 @@ export function createApp({
         res.status(404).json({ error: "chat_session_not_found" });
         return;
       }
-      const ownedByUser =
-        session.groundxUsername && existing.ownerUserId === session.groundxUsername;
-      const ownedByAnon = !session.groundxUsername && existing.ownerAnonId === session.id;
-      if (!ownedByUser && !ownedByAnon) {
-        res.status(403).json({ error: "not_session_owner" });
+      if (!assertChatSessionOwnership(existing, session)) {
+        res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
         return;
       }
 
@@ -824,11 +818,8 @@ export function createApp({
         res.status(404).json({ error: "chat_session_not_found" });
         return;
       }
-      const ownedByUser =
-        session.groundxUsername && chatSession.ownerUserId === session.groundxUsername;
-      const ownedByAnon = !session.groundxUsername && chatSession.ownerAnonId === session.id;
-      if (!ownedByUser && !ownedByAnon) {
-        res.status(403).json({ error: "not_session_owner" });
+      if (!assertChatSessionOwnership(chatSession, session)) {
+        res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
         return;
       }
 
@@ -975,11 +966,8 @@ export function createApp({
         return;
       }
       const reqSession = req.session!;
-      const ownedByUser =
-        reqSession.groundxUsername && chatSession.ownerUserId === reqSession.groundxUsername;
-      const ownedByAnon = !reqSession.groundxUsername && chatSession.ownerAnonId === reqSession.id;
-      if (!ownedByUser && !ownedByAnon) {
-        res.status(403).json({ error: "not_session_owner" });
+      if (!assertChatSessionOwnership(chatSession, reqSession)) {
+        res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
         return;
       }
       await repository.appendViewerEvent({
@@ -1049,11 +1037,8 @@ export function createApp({
         return;
       }
       const reqSession = req.session!;
-      const ownedByUser =
-        reqSession.groundxUsername && chatSession.ownerUserId === reqSession.groundxUsername;
-      const ownedByAnon = !reqSession.groundxUsername && chatSession.ownerAnonId === reqSession.id;
-      if (!ownedByUser && !ownedByAnon) {
-        res.status(403).json({ error: "not_session_owner" });
+      if (!assertChatSessionOwnership(chatSession, reqSession)) {
+        res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
         return;
       }
       await repository.appendIntentLog({
@@ -1183,11 +1168,8 @@ export function createApp({
           return;
         }
         const reqSession = req.session!;
-        const ownedByUser =
-          reqSession.groundxUsername && chatSession.ownerUserId === reqSession.groundxUsername;
-        const ownedByAnon = !reqSession.groundxUsername && chatSession.ownerAnonId === reqSession.id;
-        if (!ownedByUser && !ownedByAnon) {
-          res.status(403).json({ error: "not_session_owner" });
+        if (!assertChatSessionOwnership(chatSession, reqSession)) {
+          res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
           return;
         }
 
@@ -1271,11 +1253,8 @@ export function createApp({
           return;
         }
         const reqSession = req.session!;
-        const ownedByUser =
-          reqSession.groundxUsername && chatSession.ownerUserId === reqSession.groundxUsername;
-        const ownedByAnon = !reqSession.groundxUsername && chatSession.ownerAnonId === reqSession.id;
-        if (!ownedByUser && !ownedByAnon) {
-          res.status(403).json({ error: "not_session_owner" });
+        if (!assertChatSessionOwnership(chatSession, reqSession)) {
+          res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
           return;
         }
 

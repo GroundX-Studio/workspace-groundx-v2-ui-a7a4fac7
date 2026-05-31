@@ -1,7 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  extractFieldResultSchema,
+  templateFieldTypeSchema,
+  type ExtractFieldResult as SharedExtractFieldResult,
+  type TemplateFieldType,
+} from "@groundx/shared";
+
 import { __resetEnsuredChatSessions } from "./chatSessions";
-import { ExtractFieldApiError, extractField } from "./extractField";
+import {
+  ExtractFieldApiError,
+  extractField,
+  type ExtractFieldResult,
+  type ExtractFieldType,
+} from "./extractField";
+
+/**
+ * 2026-05-31-core-data-followups §4 #12/#13 — the field-type union and the
+ * `/api/extract-field` result body are single-sourced on `@groundx/shared`.
+ * These compile-time asserts fail to build if the app re-declares a divergent
+ * literal union or a forked result shape instead of importing the shared one.
+ */
+type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _assertFieldType = Assert<Eq<ExtractFieldType, TemplateFieldType>>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _assertResult = Assert<Eq<ExtractFieldResult, SharedExtractFieldResult>>;
+
+describe("extractField shared contracts (§4 #12/#13)", () => {
+  it("the field-type union is exactly the four shared primitive types", () => {
+    expect(templateFieldTypeSchema.options).toEqual(["STRING", "NUMBER", "DATE", "BOOLEAN"]);
+  });
+
+  it("the shared extract-field result schema validates the wire envelope", () => {
+    const parsed = extractFieldResultSchema.safeParse({
+      value: 14.07,
+      confidence: 0.92,
+      citation: { documentId: "d1", page: 1, snippet: "Tax: $14.07" },
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
 
 const originalFetch = global.fetch;
 
