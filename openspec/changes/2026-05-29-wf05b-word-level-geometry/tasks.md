@@ -1,5 +1,9 @@
 # Tasks — WF-05b word-level citation geometry
 
+> **MIGRATED 2026-05-31.** The pure `resolveWordGeometry` resolver SHIPPED. The live `-118-map` fetch +
+> pipeline wiring → **`2026-05-31-word-level-citation-geometry`**. Do NOT pick up the live-fetch/wiring
+> tasks here. Stays ACTIVE (not archived) until that plan ships the live path.
+
 > **Execution mode: → SEQUENTIAL/TDD.** One self-contained feature in `citationGeometry.ts` (resolver +
 > fallback + pipeline wire), failing-test-first. Not a fan-out — single module, single test target. It
 > *unblocks* the demo-hack removal in `core-data-model-hardening`; sequence this before that bullet.

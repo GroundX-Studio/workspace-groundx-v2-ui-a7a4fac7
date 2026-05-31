@@ -1,5 +1,11 @@
 # Tasks — Widget access by role
 
+> **MIGRATED 2026-05-31.** Phases 1/2a/2b SHIPPED (the `WidgetRole`/`WidgetScope` contract + the
+> per-widget role+scope sweep — checkboxes below are stale; the work is done in the archived chain).
+> **Phase 3 (LLM-tool role-gating) → `2026-05-31-tool-system-completion`.** Do NOT pick up Phase-3
+> tasks here. This change stays ACTIVE (not archived) only because its `agent-tools` role-scoped-catalog
+> requirement is unshipped; archive once tool-system-completion lands the server role filter.
+
 > Goal: replace the binary widget `mode: "onboarding" | "steady"` with a `WidgetRole` enum + a single
 > central lock policy. Authorization, not a chat phase. **DRAFTED — build deferred** (on record now;
 > do not implement until scheduled). WIP cap = 3.

@@ -1,5 +1,11 @@
 # Tasks — core data-model hardening (running fix list)
 
+> **MIGRATED 2026-05-31.** Run-critical foundations SHIPPED + archived elsewhere (GeneratedResult,
+> ScopedViewerWidget base — orphan discharged, ChatMessage.citations). The remaining refactors
+> (chatRouter split, ApiError base, factories, type-unification, gated DB drops) →
+> **`2026-05-31-core-data-followups`**. Do NOT pick up the remaining-refactor tasks here. Stays ACTIVE
+> (not archived) until that plan ships them.
+
 > Every item is tracked here so none reverts to a silent placeholder/hack. Each lands behind green
 > tests, no user-visible regression. WIP cap = 3 in flight. `[D]` = a smart-report dependency.
 

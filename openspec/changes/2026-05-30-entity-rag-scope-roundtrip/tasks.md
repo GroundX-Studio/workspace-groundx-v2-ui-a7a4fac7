@@ -1,5 +1,10 @@
 # Tasks — Characterize the read-but-unwritten per-entity RAG scope columns
 
+> **MIGRATED 2026-05-31.** Phase 1 SHIPPED (round-trip test + stale-comment fixes). The real
+> entity→scope producer + the §9 column-drop → **`2026-05-31-steady-scope-producer`** (which leads with
+> an INPUT NEEDED gate on the steady/BYO scope model). Do NOT pick up the producer/§9 tasks here. Stays
+> ACTIVE (not archived) — its "persisted by a producer" requirement is unsatisfied until that plan ships.
+
 > THIN SLICE. The `chat_session_entities` scope columns are READ by `deriveRagContentScope` but written
 > by no producer. For the only path that exists today (anon onboarding) the samples-bucket fallback is
 > **by design** — not a live wrong-bucket bug (verified: `chatHandler.ts:384-389`, `types.ts:119-122`,

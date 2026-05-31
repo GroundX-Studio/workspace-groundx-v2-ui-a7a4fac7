@@ -113,14 +113,16 @@ Multi-file steps gate PER coherent sub-unit (one widget / one tool / one view), 
   - submit_/wizard_/close_ are NOT in check-tool-quality ALLOWED_VERBS (only dismiss_ passes); and OnboardingWizard (a view) + DialogTitle (a primitive) are outside the registry/quality globs (chat-widgets/ + viewer-widgets/ only), so their *.tools.ts are invisible to both runtime registry and guard. RECONCILED: §1/§2/§4 new tools are backlogged. The verb-taxonomy decision (same family as the show_* removal) and any glob widening should be a deliberate call — fold glob-widening into RCC if pursued.
 
 ## Backlogged (NOT in this run)
-- **RUN COMPLETE 2026-05-31 — steps 10-24 shipped + archived.** unified-conversation-flow, registry-catalog-consistency, smart-report-screen, onboarding-shell-shared-view all archived (`openspec/changes/archive/2026-05-31-*`). Deferred follow-ups captured here so the archive isn't a tombstone:
-  - **smart-report Phase 7** (live multi-doc Solar render) — gated on `wf10-loan-solar-content-seed` (below). MOCK_MODE path ships.
-  - **smart-report initial-render-through-endpoint** — the `SmartReportRender` *first* f4 paint still reads the client fixture; re-render + Save already go through the Phase-6 endpoints. Convert the initial paint when convenient.
-  - **smart-report live-verify** (Chrome DevTools MCP, manual) — pill→render→CiteChip→edit→builder→pin happy path.
-  - **onboarding-shell: author Workspace/Project/document experiences + enable the nav-rail entries** (today disabled stubs) — its own future change.
-  - **onboarding-shell: SchemaView `live ?? manifest` fallback retirement** — the documented MOCK fallback inside the packaged Extract widget; retire when live extract is the sole path.
-  - **widget-contract rule 5 (dependency-direction) guard + ChatColumn→`@/views/` untangle** — deferred on unified; the guard can land once the import is inverted.
-  - **`wf04-tool-coverage-completion`** — FULLY backlogged; §3/§6/§7 premises stale post-refactor (re-scope before pickup), §1/§2/§4 behind verb-allowlist + glob-home.
+- **RUN COMPLETE 2026-05-31 — steps 10-24 shipped + archived** (unified-conversation-flow, registry-catalog-consistency, smart-report-screen, onboarding-shell-shared-view → `openspec/changes/archive/2026-05-31-*`).
+- **BACKLOG REGROUPED 2026-05-31 → 7 new plans** (everything except the 3 excluded items below). Each turns its blockers into explicit unblock tasks; product/design dependencies are `INPUT NEEDED` tasks sequenced FIRST. The partially-shipped source changes stay ACTIVE (not archived — their deltas aren't fully shipped) with a header pointer to the new plan; archive each once its new plan lands:
+  - **`2026-05-31-tool-system-completion`** ← widget-role-access Phase 3 (LLM-tool role gating) + wf04 §1/§2/§4. 3 INPUT gates (orphan-migration / parity-guard / glob-home shape) + verb-allowlist/glob-home unblocks. _(wf04 §3/§6/§7 dropped — stale.)_
+  - **`2026-05-31-word-level-citation-geometry`** ← wf05b tail (live `-118-map` fetch → tight bbox). Investigate-first: processId discovery (escalates to INPUT if it needs a credential).
+  - **`2026-05-31-steady-scope-producer`** ← entity-rag Phase 2 producer + §9 column drop. **INPUT #1: the steady/BYO scope-production model.** (cf19's multi-bucket producer also waits on this.)
+  - **`2026-05-31-onboarding-experiences`** ← Workspace/Project experiences + nav-rail enable + SchemaView fallback retirement. **INPUT #1: the two experiences' UX/content.**
+  - **`2026-05-31-smart-report-followups`** ← initial-render round-trip + manual live-verify. (Phase 7 live multi-doc stays gated on `wf10` below.)
+  - **`2026-05-31-dependency-direction-guard`** ← rule-5 guard + ChatColumn→`@/views/` untangle.
+  - **`2026-05-31-core-data-followups`** ← remaining core-data refactors (chatRouter split, ApiError base, factories, type-unification, gated DB drops).
+- **`wf04-tool-coverage-completion`** — superseded by `tool-system-completion` (§1/§2/§4); §3/§6/§7 dropped as stale. Husk retained for history only.
 - **`cf19-ensure-bucket-group-helper`** — broken as written (wrong endpoint, empty-group bug, false data model, `kind`→`type` scope, wrong client axis). Rework checklist in its proposal; reconcile with entity-rag when reworked.
 - **`wf10-loan-solar-content-seed`** — blocked on real Loan/Solar source assets.
 - **`cf04-page-usage-event-reader`** — parked until the BYO free-tier budget surface is prioritized.
