@@ -11,7 +11,8 @@
 
 ## Phase 0 · Decide the model (gates everything below)
 
-- [ ] **INPUT NEEDED:** Confirm the steady-mode / BYO scope-production model before any producer code:
+- [x] **INPUT NEEDED → ANSWERED 2026-05-31 — DECISION: build the producer for the existing `sample` EntityKind.** Map `sample` → `{ type: "bucket", filter: { project: <scenarioId> } }` (the demo scope), produced at entity-activate, so the scope columns get a real producer end-to-end. BYO upload is DEFERRED until its upload path lands (not built here). The §9 column-drop (Phase 3) applies ONLY to columns still producerless after this producer. Original question retained below for context:
+- [ ] _(answered above)_ Confirm the steady-mode / BYO scope-production model before any producer code:
       **(a)** When does the BYO upload path land, and what does it write — does a completed upload create a
       customer bucket + documents, and is the producer triggered at upload-complete or at entity-activate?
       **(b)** The `EntityKind` → `ContentScope` mapping: which kind maps to `{type:"bucket"}` (steady-mode

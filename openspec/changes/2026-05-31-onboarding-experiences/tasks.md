@@ -6,7 +6,8 @@
 
 ## 0. Decision gate (blocks all authoring below)
 
-- [ ] **INPUT NEEDED:** For the Workspace AND the Project nav entries, specify: (a) the Intro copy
+- [x] **INPUT NEEDED → ANSWERED 2026-05-31 — DECISION: default-derived from `makeOnboardingExperience` (steady variant).** (a) Intro = a short summary of the scope's docs + pick-view pills (mirror onboarding's Intro; NO scripted ThinkingStream); (b) Choreography = NONE (steady mode — no f3/f5 frame auto-advance); (c) scope = Workspace → its workspace `bucket` id; Project → `bucket` + the project `filter` field/value. Copy/affordances refined later — author against this default now. Original question retained below for context:
+- [ ] _(answered above)_ For the Workspace AND the Project nav entries, specify: (a) the Intro copy
   (header / lead bubbles / any pick-a-view affordances, or "no Intro — bare scoped chat"); (b) the
   Choreography, if any (engine-lifecycle side effects — or "none"); (c) the exact `ContentScope` each
   entry opens on — for Workspace, which `bucket` id is the workspace; for Project, which `bucket` +

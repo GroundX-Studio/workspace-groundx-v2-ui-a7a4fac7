@@ -11,21 +11,17 @@
 
 ## INPUT NEEDED — decisions that gate the work below
 
-- [ ] **INPUT NEEDED:** The app-side `toolRegistry` is documented as an orphan (zero production
-      importers; the live LLM catalog is the middleware `SERVER_TOOL_CATALOG`) and is slated for a
-      coordinated delete shared by multiple in-flight changes. For THIS change, do we (a) migrate the
-      app-side `availableIn` to `WidgetRole[]` for contract/parity alignment now (keeping the orphan
-      alive), or (b) treat the server catalog as the sole role-bearing surface and skip the app-side
-      type migration until the orphan-delete lands? (Affects the app-axis tasks + the parity-guard
-      shape below.)
-- [ ] **INPUT NEEDED:** Parity-guard shape — a single cross-package test (one package importing the
-      other's catalog) vs. a committed name+role manifest each side asserts against. The middleware
-      vitest is file-serial and the packages don't currently share a test harness; confirm which shape
-      to build.
-- [ ] **INPUT NEEDED:** Glob-home shape for view/primitive tools — narrow documented paths
-      (`views/Onboarding/*.tools.ts` + `primitives/DialogTitle/*.tools.ts`) vs. a broader pattern
-      (`views/**/*.tools.ts` + `primitives/**/*.tools.ts`). Both the registry glob and the quality
-      scanner must use the SAME shape; pick one.
+- [x] **INPUT NEEDED → ANSWERED 2026-05-31:** orphan `toolRegistry` handling. **DECISION: (b)** — treat
+      the middleware `SERVER_TOOL_CATALOG` as the SOLE role-bearing surface; do the real server-side role
+      filter and SKIP migrating the app-side `availableIn` type. Leave the orphan as-is (its delete stays
+      RCC's coordinated call — do NOT delete it here, do NOT sink effort migrating dead code's type).
+- [x] **INPUT NEEDED → ANSWERED 2026-05-31:** parity-guard shape. **DECISION:** a minimal cross-package
+      test (one package imports the other's catalog) asserting tool NAME + role agreement — not a committed
+      manifest. Keep it file-serial-safe.
+- [x] **INPUT NEEDED → ANSWERED 2026-05-31:** glob-home shape. **DECISION:** the BROAD pattern —
+      `views/**/*.tools.ts` + `components/primitives/**/*.tools.ts` — applied identically to BOTH the
+      registry glob and `check-tool-quality`'s `collectToolFiles`, so OnboardingWizard + DialogTitle tools
+      are discoverable in place.
 
 ## UNBLOCK 1 · Verb allowlist (gates the three new tools)
 **Execution: → SEQUENTIAL/TDD (one-file, trivial).**
