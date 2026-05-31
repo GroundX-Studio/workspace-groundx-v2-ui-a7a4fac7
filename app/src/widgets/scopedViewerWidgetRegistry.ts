@@ -8,11 +8,19 @@
  * at construction through the shared `assertUniqueIds` helper (the ONE
  * mechanism for that invariant — no bespoke duplicate check).
  *
- * The four viewer widgets (PdfViewer · Extract · SmartReport · Integrate)
- * register their descriptors here in a LATER step. The production
- * singleton is intentionally NOT created in this module yet — wiring the
- * real four descriptors is step 8. This module ships the factory + the
- * read contract so that wiring lands against a fixed base.
+ * ⚠️ NOT YET WIRED — no production singleton is built from this factory
+ * yet, so this module currently has ZERO production importers (the orphan
+ * half of the ScopedViewerWidget base). Step 8 (widget-role-access Phase
+ * 2b) did NOT wire it (it only swapped PdfViewer's prop). Standing up the
+ * production singleton (PdfViewer now; SmartReport/Extract/Integrate as
+ * they are built) is an OUTSTANDING ticket discharged at the
+ * `<ScopedCanvas>` step — see
+ * `openspec/changes/2026-05-29-core-data-model-hardening/tasks.md`
+ * ("OUTSTANDING — the base is ORPHANED; wire it up") +
+ * `openspec/changes/2026-05-30-onboarding-shell-shared-view/tasks.md`
+ * (Phase 1 "DISCHARGE the core-data ScopedViewerWidget orphan HERE").
+ * This module ships only the factory + read contract so wiring lands
+ * against a fixed base.
  */
 import { assertUniqueIds, type Catalog } from "@groundx/shared";
 
