@@ -1,5 +1,5 @@
 import axios from "@/api/axios";
-import { MessageResponse, PartnerRequestOptions, partnerRequestConfig, partnerUrl } from "@/api/common";
+import { MessageResponse, RequestOptions, partnerRequestConfig, partnerUrl } from "@/api/common";
 
 import { Bucket } from "./sdkTypes";
 
@@ -17,20 +17,20 @@ export interface PartnerBucketsResponse {
   buckets: Bucket[];
 }
 
-export const listPartnerBuckets = async (options?: PartnerRequestOptions): Promise<PartnerBucketsResponse> => {
+export const listPartnerBuckets = async (options?: RequestOptions): Promise<PartnerBucketsResponse> => {
   const response = await axios.get<PartnerBucketsResponse>(partnerUrl("/bucket"), partnerRequestConfig(options));
   return response.data;
 };
 
 export const createPartnerBucket = async (
   bucket: PartnerBucketInput,
-  options?: PartnerRequestOptions
+  options?: RequestOptions
 ): Promise<PartnerBucketResponse> => {
   const response = await axios.post<PartnerBucketResponse>(partnerUrl("/bucket"), { bucket }, partnerRequestConfig(options));
   return response.data;
 };
 
-export const getPartnerBucket = async (bucketId: number, options?: PartnerRequestOptions): Promise<PartnerBucketResponse> => {
+export const getPartnerBucket = async (bucketId: number, options?: RequestOptions): Promise<PartnerBucketResponse> => {
   const response = await axios.get<PartnerBucketResponse>(partnerUrl(`/bucket/${bucketId}`), partnerRequestConfig(options));
   return response.data;
 };
@@ -38,7 +38,7 @@ export const getPartnerBucket = async (bucketId: number, options?: PartnerReques
 export const updatePartnerBucket = async (
   bucketId: number,
   bucket: PartnerBucketInput,
-  options?: PartnerRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.put<MessageResponse>(
     partnerUrl(`/bucket/${bucketId}`),
@@ -48,12 +48,12 @@ export const updatePartnerBucket = async (
   return response.data;
 };
 
-export const deletePartnerBucket = async (bucketId: number, options?: PartnerRequestOptions): Promise<MessageResponse> => {
+export const deletePartnerBucket = async (bucketId: number, options?: RequestOptions): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(partnerUrl(`/bucket/${bucketId}`), partnerRequestConfig(options));
   return response.data;
 };
 
-export const transferPartnerBucket = async (bucketId: number, options?: PartnerRequestOptions): Promise<MessageResponse> => {
+export const transferPartnerBucket = async (bucketId: number, options?: RequestOptions): Promise<MessageResponse> => {
   const response = await axios.post<MessageResponse>(
     partnerUrl(`/bucket/transfer/${bucketId}`),
     undefined,

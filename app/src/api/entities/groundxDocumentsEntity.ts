@@ -1,6 +1,6 @@
 import axios from "@/api/axios";
 import {
-  GroundXRequestOptions,
+  RequestOptions,
   MessageResponse,
   Metadata,
   PaginationParams,
@@ -32,18 +32,6 @@ export interface DocumentResponse {
   document: GroundXDocument;
 }
 
-/**
- * The extract endpoint returns the raw extracted JSON at top level
- * (verified 2026-05-25 against `/v1/ingest/document/extract/{id}`).
- * Keys are snake_case field ids; values are scalars / nested
- * objects / arrays. Currency fields come paired with a sibling
- * `<id>_currency` field. Schema metadata (labels, descriptions,
- * types) lives in the workflow, NOT in this response.
- *
- * Strict typing here would commit to a specific scenario's shape;
- * stay generic.
- */
-export type DocumentExtractResponse = Metadata;
 
 /**
  * The xray endpoint returns this shape at top level (verified
@@ -121,7 +109,7 @@ export interface DeleteDocumentsInput {
 
 export const copyGroundXDocuments = async (
   input: CopyDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.post<IngestResponse>(groundxUrl("/v1/ingest/copy"), input, groundxRequestConfig(options));
   return response.data;
@@ -129,7 +117,7 @@ export const copyGroundXDocuments = async (
 
 export const ingestGroundXRemoteDocuments = async (
   input: IngestDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.post<IngestResponse>(
     groundxUrl("/v1/ingest/documents/remote"),
@@ -141,7 +129,7 @@ export const ingestGroundXRemoteDocuments = async (
 
 export const ingestGroundXLocalDocument = async (
   formData: FormData,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.post<IngestResponse>(
     groundxUrl("/v1/ingest/documents/local"),
@@ -153,7 +141,7 @@ export const ingestGroundXLocalDocument = async (
 
 export const crawlGroundXWebsite = async (
   input: CrawlWebsiteInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.post<IngestResponse>(
     groundxUrl("/v1/ingest/documents/website"),
@@ -165,7 +153,7 @@ export const crawlGroundXWebsite = async (
 
 export const listGroundXDocuments = async (
   params?: PaginationParams,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<DocumentsResponse> => {
   const response = await axios.get<DocumentsResponse>(groundxUrl("/v1/ingest/documents"), {
     ...groundxRequestConfig(options),
@@ -176,7 +164,7 @@ export const listGroundXDocuments = async (
 
 export const updateGroundXDocuments = async (
   input: UpdateDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.put<IngestResponse>(
     groundxUrl("/v1/ingest/documents"),
@@ -188,7 +176,7 @@ export const updateGroundXDocuments = async (
 
 export const deleteGroundXDocuments = async (
   input: DeleteDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(groundxUrl("/v1/ingest/documents"), {
     ...groundxRequestConfig(options),
@@ -199,7 +187,7 @@ export const deleteGroundXDocuments = async (
 
 export const lookupGroundXDocument = async (
   id: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<DocumentResponse> => {
   const response = await axios.get<DocumentResponse>(
     groundxUrl(`/v1/ingest/documents/${encodeURIComponent(id)}`),
@@ -210,7 +198,7 @@ export const lookupGroundXDocument = async (
 
 export const getGroundXDocument = async (
   documentId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<DocumentResponse> => {
   const response = await axios.get<DocumentResponse>(
     groundxUrl(`/v1/ingest/document/${encodeURIComponent(documentId)}`),
@@ -221,7 +209,7 @@ export const getGroundXDocument = async (
 
 export const deleteGroundXDocument = async (
   documentId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(
     groundxUrl(`/v1/ingest/document/${encodeURIComponent(documentId)}`),
@@ -230,11 +218,19 @@ export const deleteGroundXDocument = async (
   return response.data;
 };
 
+/**
+ * The extract endpoint returns the raw extracted JSON at top level (verified
+ * 2026-05-25 against `/v1/ingest/document/extract/{id}`): snake_case field-id
+ * keys → scalars / nested objects / arrays; currency fields pair with a
+ * `<id>_currency` sibling; schema metadata lives in the workflow, not here. So
+ * the return is the generic `Metadata` — strict typing would commit to one
+ * scenario's shape. (No `DocumentExtractResponse` alias.)
+ */
 export const getGroundXDocumentExtract = async (
   documentId: string,
-  options?: GroundXRequestOptions
-): Promise<DocumentExtractResponse> => {
-  const response = await axios.get<DocumentExtractResponse>(
+  options?: RequestOptions
+): Promise<Metadata> => {
+  const response = await axios.get<Metadata>(
     groundxUrl(`/v1/ingest/document/extract/${encodeURIComponent(documentId)}`),
     groundxRequestConfig(options)
   );
@@ -243,7 +239,7 @@ export const getGroundXDocumentExtract = async (
 
 export const getGroundXDocumentXray = async (
   documentId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<DocumentXrayResponse> => {
   const response = await axios.get<DocumentXrayResponse>(
     groundxUrl(`/v1/ingest/document/xray/${encodeURIComponent(documentId)}`),
@@ -254,7 +250,7 @@ export const getGroundXDocumentXray = async (
 
 export const getGroundXProcessingStatus = async (
   processId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.get<IngestResponse>(
     groundxUrl(`/v1/ingest/${encodeURIComponent(processId)}`),
@@ -265,7 +261,7 @@ export const getGroundXProcessingStatus = async (
 
 export const cancelGroundXProcess = async (
   processId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(
     groundxUrl(`/v1/ingest/${encodeURIComponent(processId)}`),
@@ -274,7 +270,7 @@ export const cancelGroundXProcess = async (
   return response.data;
 };
 
-export const listGroundXProcesses = async (options?: GroundXRequestOptions): Promise<IngestProcessesResponse> => {
+export const listGroundXProcesses = async (options?: RequestOptions): Promise<IngestProcessesResponse> => {
   const response = await axios.get<IngestProcessesResponse>(groundxUrl("/v1/ingest"), groundxRequestConfig(options));
   return response.data;
 };

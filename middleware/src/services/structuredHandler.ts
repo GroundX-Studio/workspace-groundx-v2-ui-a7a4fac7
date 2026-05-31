@@ -197,7 +197,7 @@ async function answerSavedSchemas(deps: StructuredHandlerDeps): Promise<ChatRout
   if (!deps.groundxUsername) {
     return signInNudge("your saved schemas");
   }
-  const rows = await deps.repository.listExtractionSchemasForUser(deps.groundxUsername);
+  const rows = await deps.repository.listTemplates(deps.groundxUsername, "extract");
   if (rows.length === 0) {
     return {
       mode: "structured",
@@ -442,7 +442,7 @@ export async function runHybridQuery(
   // reference it ("you have 3 saved schemas — want me to apply one?").
   let savedSchemaCount = 0;
   if (deps.groundxUsername) {
-    const rows = await deps.repository.listExtractionSchemasForUser(deps.groundxUsername);
+    const rows = await deps.repository.listTemplates(deps.groundxUsername, "extract");
     savedSchemaCount = rows.length;
   }
 

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
 import { recordIntent } from "@/api/intentLog";
+import type { NormalizedBbox } from "@groundx/shared";
 import { useChatStoreOptional } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { captureException } from "@/lib/sentry";
@@ -59,7 +60,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
       // ChatStore state mid-apply). Both writes are no-ops when no
       // ChatStore is mounted.
       if (chatStore) {
-        chatStore.setCurrentIntent(intent as unknown as Record<string, unknown>);
+        chatStore.setCurrentIntent(intent);
         // entityKey on the viewer_events row reflects what the user
         // was looking at when the intent dispatched — read it from
         // the active ChatSession. The intent payload may name a
@@ -72,7 +73,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
           action: "intent-dispatched",
           source,
           entityKey: activeSession?.activeEntityKey ?? null,
-          detail: intent as unknown as Record<string, unknown>,
+          detail: intent,
         });
         // UI-10b — durable row in the server-side `intent_log` table.
         // Fire-and-forget: failure routes to Sentry inside recordIntent;
@@ -81,7 +82,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
           void recordIntent({
             chatSessionId: chatStore.state.activeSessionId,
             source,
-            intent: intent as unknown as Record<string, unknown>,
+            intent,
           });
         }
         // clickable-citations Phase 3 — built-in side effect for the
@@ -96,6 +97,9 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             documentId: intent.documentId,
             page: intent.page,
             ...(intent.bbox ? { bbox: intent.bbox } : {}),
+            // WF-06b — carry the citation tier so the viewer renders the
+            // overlay at the right precision (or suppresses it for ambient).
+            ...(intent.tier ? { tier: intent.tier } : {}),
           });
         }
         // widget-llm-integration Phase 4 — lighter-weight cousin of
@@ -193,7 +197,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
   // is a no-op in test trees that don't mount ChatStore).
 
   const openCitation = useCallback(
-    (documentId: string, page: number, bbox?: { x: number; y: number; w: number; h: number }) => {
+    (documentId: string, page: number, bbox?: NormalizedBbox) => {
       if (!chatStore) return;
       chatStore.pushOverlay({ kind: "citation-peek", documentId, page, ...(bbox ? { bbox } : {}) });
     },

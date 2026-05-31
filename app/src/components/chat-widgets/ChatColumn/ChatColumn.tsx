@@ -37,16 +37,17 @@ import { useNavigate } from "react-router-dom";
 import { chatErrorToUserCopy, listChatMessages, sendChatMessage } from "@/api/chatSessions";
 import { useLiveExtractionSchema } from "@/api/useLiveExtractionSchema";
 import type {
-  ChatCitation,
   ChatDispatchedIntent,
   ChatSuggestedAction,
   ProposedSchemaField,
 } from "@/api/chatSessions";
+import type { Citation } from "@groundx/shared";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
 import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { Markdown } from "@/components/primitives/Markdown/Markdown";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
@@ -268,7 +269,26 @@ const SteadyConversationFlow: FC = () => {
   const [sending, setSending] = useState(false);
 
   const handleSuggestedAction = useCallback(
-    (action: ChatSuggestedAction) => {
+    (action: ChatSuggestedAction, citations?: Citation[]) => {
+      // "Show source" carries no intent of its own — it opens/highlights the
+      // answer's primary citation, same as clicking the [1] chip. (Previously
+      // this fell through to a null intent and did nothing.)
+      if (action.key === "show-source") {
+        const c = citations?.[0];
+        if (c) {
+          dispatchIntent(
+            {
+              kind: "highlightCitation",
+              documentId: c.documentId,
+              page: c.page,
+              ...(c.bbox ? { bbox: c.bbox } : {}),
+              ...(c.tier ? { tier: c.tier } : {}),
+            },
+            "user",
+          );
+        }
+        return;
+      }
       const intent = suggestedActionToIntent(action);
       if (intent) dispatchIntent(intent, "agent");
     },
@@ -419,50 +439,12 @@ const SteadyConversationFlow: FC = () => {
             Ask anything about your documents.
           </BotBubble>
         )}
-        {(liveTurns.length > 0 || sending) && (
-          <Stack spacing={1} sx={{ mt: 0.5 }}>
-            {liveTurns.map((turn) =>
-              turn.role === "user" ? (
-                <UserBubble key={turn.id} testid="steady-chat-live-user">
-                  {turn.content}
-                </UserBubble>
-              ) : (
-                <Stack key={turn.id} spacing={1}>
-                  {turn.content.trim().length > 0 && (
-                    <BotBubble testid="steady-chat-live-assistant">
-                      {turn.content}
-                    </BotBubble>
-                  )}
-                  {turn.citations && turn.citations.length > 0 && (
-                    <Stack direction="row" spacing={0.5} sx={{ pl: 0.25, flexWrap: "wrap" }}>
-                      {turn.citations.map((c, idx) => (
-                        <CiteChip key={`${turn.id}-cite-${idx}`} citation={c} index={idx + 1} />
-                      ))}
-                    </Stack>
-                  )}
-                  {turn.suggestedActions && turn.suggestedActions.length > 0 && (
-                    <SuggestedActionChips
-                      actions={turn.suggestedActions}
-                      mode="steady"
-                      onAction={handleSuggestedAction}
-                    />
-                  )}
-                  {turn.proposedSchemaField && (
-                    <ProposeSchemaFieldCard
-                      proposedField={turn.proposedSchemaField}
-                      mode="steady"
-                    />
-                  )}
-                </Stack>
-              ),
-            )}
-            {sending && (
-              <BotBubble testid="steady-chat-thinking">
-                <LoadingDots aria-label="Assistant is thinking" />
-              </BotBubble>
-            )}
-          </Stack>
-        )}
+        <LiveTurnList
+          liveTurns={liveTurns}
+          sending={sending}
+          mode="steady"
+          onSuggestedAction={handleSuggestedAction}
+        />
       </Box>
       <Box sx={{ pt: 1, borderTop: `1px solid ${BORDER}` }}>
         <LiveChatInputBar onSend={handleSend} disabled={sending} />
@@ -528,13 +510,82 @@ interface LiveTurn {
    * beneath the assistant bubble. Empty array = no chips, never
    * undefined so callers can map unconditionally.
    */
-  citations?: ChatCitation[];
+  citations?: Citation[];
   /**
    * widget-llm-integration Phase 1 — `reply.suggestedActions[]` from
    * the chat router (chips offered beneath the assistant bubble).
    * Empty/undefined → the SuggestedActionChips widget renders nothing.
    */
   suggestedActions?: ChatSuggestedAction[];
+}
+
+/**
+ * The live ad-hoc turn list — user/assistant bubbles + the answer-source footer
+ * (CiteChips + SuggestedActionChips) + propose-card + the "thinking" indicator.
+ * ONE definition shared by both flow components (steady + onboarding); `mode`
+ * drives the testid prefix AND the `mode` prop on the chips/card. Previously
+ * this block was duplicated verbatim in each flow (which is why `<Markdown>` had
+ * to be wired in two places). Returns `null` when there's nothing live to show.
+ */
+function LiveTurnList({
+  liveTurns,
+  sending,
+  mode,
+  onSuggestedAction,
+}: {
+  liveTurns: LiveTurn[];
+  sending: boolean;
+  mode: "onboarding" | "steady";
+  onSuggestedAction: (action: ChatSuggestedAction, citations?: Citation[]) => void;
+}) {
+  if (liveTurns.length === 0 && !sending) return null;
+  return (
+    <Stack spacing={1} sx={{ mt: 0.5 }}>
+      {liveTurns.map((turn) =>
+        turn.role === "user" ? (
+          <UserBubble key={turn.id} testid={`${mode}-chat-live-user`}>
+            {turn.content}
+          </UserBubble>
+        ) : (
+          <Stack key={turn.id} spacing={1}>
+            {turn.content.trim().length > 0 && (
+              <BotBubble testid={`${mode}-chat-live-assistant`}>
+                <Markdown>{turn.content}</Markdown>
+              </BotBubble>
+            )}
+            {/* One cohesive answer-source footer: citation refs + any
+                suggested actions on a single tidy row under the bubble. */}
+            {((turn.citations?.length ?? 0) > 0 || (turn.suggestedActions?.length ?? 0) > 0) && (
+              <Stack
+                direction="row"
+                alignItems="center"
+                sx={{ pl: 0.25, columnGap: 0.75, rowGap: 0.5, flexWrap: "wrap" }}
+              >
+                {turn.citations?.map((c, idx) => (
+                  <CiteChip key={`${turn.id}-cite-${idx}`} citation={c} index={idx + 1} />
+                ))}
+                {turn.suggestedActions && turn.suggestedActions.length > 0 && (
+                  <SuggestedActionChips
+                    actions={turn.suggestedActions}
+                    mode={mode}
+                    onAction={(action) => onSuggestedAction(action, turn.citations)}
+                  />
+                )}
+              </Stack>
+            )}
+            {turn.proposedSchemaField && (
+              <ProposeSchemaFieldCard proposedField={turn.proposedSchemaField} mode={mode} />
+            )}
+          </Stack>
+        ),
+      )}
+      {sending && (
+        <BotBubble testid={`${mode}-chat-thinking`}>
+          <LoadingDots aria-label="Assistant is thinking" />
+        </BotBubble>
+      )}
+    </Stack>
+  );
 }
 
 /**
@@ -613,7 +664,26 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
   const { dispatch: dispatchIntent } = useCanvasOrchestrator();
 
   const handleSuggestedAction = useCallback(
-    (action: ChatSuggestedAction) => {
+    (action: ChatSuggestedAction, citations?: Citation[]) => {
+      // "Show source" carries no intent of its own — it opens/highlights the
+      // answer's primary citation, same as clicking the [1] chip. (Previously
+      // this fell through to a null intent and did nothing.)
+      if (action.key === "show-source") {
+        const c = citations?.[0];
+        if (c) {
+          dispatchIntent(
+            {
+              kind: "highlightCitation",
+              documentId: c.documentId,
+              page: c.page,
+              ...(c.bbox ? { bbox: c.bbox } : {}),
+              ...(c.tier ? { tier: c.tier } : {}),
+            },
+            "user",
+          );
+        }
+        return;
+      }
       const intent = suggestedActionToIntent(action);
       if (intent) dispatchIntent(intent, "agent");
     },
@@ -859,24 +929,6 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
             "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 2 },
           }}
         >
-          <Box
-            aria-hidden
-            sx={{
-              width: 20,
-              height: 20,
-              borderRadius: "50%",
-              backgroundColor: NAVY,
-              color: WHITE,
-              fontSize: FONT_SIZE_LABEL,
-              fontWeight: FONT_WEIGHT_HEADLINE,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            G
-          </Box>
           <Typography
             variant="subtitle2"
             sx={{
@@ -1122,50 +1174,12 @@ const F2ConversationFlow: FC<F2ConversationFlowProps> = ({
 
         {/* CF-18 live ad-hoc turns: appended after the scripted flow.
             User bubbles right-aligned, assistant bubbles left-aligned. */}
-        {(liveTurns.length > 0 || sending) && (
-          <Stack spacing={1} sx={{ mt: 0.5 }}>
-            {liveTurns.map((turn) =>
-              turn.role === "user" ? (
-                <UserBubble key={turn.id} testid="onboarding-chat-live-user">
-                  {turn.content}
-                </UserBubble>
-              ) : (
-                <Stack key={turn.id} spacing={1}>
-                  {turn.content.trim().length > 0 && (
-                    <BotBubble testid="onboarding-chat-live-assistant">
-                      {turn.content}
-                    </BotBubble>
-                  )}
-                  {turn.citations && turn.citations.length > 0 && (
-                    <Stack direction="row" spacing={0.5} sx={{ pl: 0.25, flexWrap: "wrap" }}>
-                      {turn.citations.map((c, idx) => (
-                        <CiteChip key={`${turn.id}-cite-${idx}`} citation={c} index={idx + 1} />
-                      ))}
-                    </Stack>
-                  )}
-                  {turn.suggestedActions && turn.suggestedActions.length > 0 && (
-                    <SuggestedActionChips
-                      actions={turn.suggestedActions}
-                      mode="onboarding"
-                      onAction={handleSuggestedAction}
-                    />
-                  )}
-                  {turn.proposedSchemaField && (
-                    <ProposeSchemaFieldCard
-                      proposedField={turn.proposedSchemaField}
-                      mode="onboarding"
-                    />
-                  )}
-                </Stack>
-              ),
-            )}
-            {sending && (
-              <BotBubble testid="onboarding-chat-thinking">
-                <LoadingDots aria-label="Assistant is thinking" />
-              </BotBubble>
-            )}
-          </Stack>
-        )}
+        <LiveTurnList
+          liveTurns={liveTurns}
+          sending={sending}
+          mode="onboarding"
+          onSuggestedAction={handleSuggestedAction}
+        />
       </Box>
 
       {/* Bottom: real chat input (CF-18). Posts via sendChatMessage and

@@ -37,10 +37,12 @@
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 import { useEffect, useState, type FC } from "react";
 
 import { isResolvedDocumentId } from "@/api/documentId";
 
+import type { NormalizedBbox } from "@groundx/shared";
 import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity";
 import {
   BORDER,
@@ -82,7 +84,19 @@ export interface PdfViewerWidgetProps {
    * renders as an absolutely-positioned tinted box atop the active
    * page image. Pass `null` / `undefined` to hide the overlay.
    */
-  highlightBbox?: { x: number; y: number; w: number; h: number } | null;
+  highlightBbox?: NormalizedBbox | null;
+  /**
+   * WF-06b — the attribution tier of the highlighted citation. Drives
+   * the overlay's visual precision:
+   *   - `exact`      → solid (tight) word-level box,
+   *   - `paraphrase` → translucent, dashed chunk-region overlay (the
+   *                    lower-confidence visual),
+   *   - `ambient`    → NO inline span (source chip only) — the overlay
+   *                    is suppressed even when a `highlightBbox` is present.
+   * Absent → the default solid box (back-compat with pre-WF-06b
+   * scenario/citation fixtures that carry a bbox but no tier).
+   */
+  highlightTier?: import("@/types/onboarding").CitationTier;
   /**
    * WF-01 C5 (2026-05-28). When true, paint a top→bottom sweeping
    * scan-line over the active page image. Used by F2 UnderstandView
@@ -117,6 +131,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   initialPage = 1,
   targetPage,
   highlightBbox,
+  highlightTier,
   showScanAnimation = false,
   litRegions,
 }) => {
@@ -206,11 +221,10 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
         sx={{
           flex: 1,
           minHeight: 0,
+          position: "relative",
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          px: { xs: 2, md: 3 },
-          py: 2,
           overflow: "hidden",
         }}
       >
@@ -270,17 +284,24 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                 width: "auto",
                 height: "auto",
                 objectFit: "contain",
-                border: `1px solid ${BORDER}`,
                 backgroundColor: WHITE,
               }}
             />
-            {highlightBbox && (
+            {highlightBbox && highlightTier !== "ambient" && (
               // Cite overlay — absolute-positioned tint atop the page
               // image at the bbox-percent coords. Rendered via inline
               // `style` (not `sx`) so the test can assert the four
               // computed percentages directly against the style attr.
+              //
+              // WF-06b — the overlay's precision tracks the citation
+              // tier: `paraphrase` (verified, chunk-level) draws a
+              // more-translucent dashed box to read as lower-confidence;
+              // `exact` (and the legacy/no-tier default) draws the tight
+              // solid box. `ambient` suppresses the overlay entirely
+              // (guarded above) — the source chip is the only affordance.
               <Box
                 data-testid="pdf-viewer-highlight"
+                data-highlight-tier={highlightTier}
                 aria-hidden
                 style={{
                   position: "absolute",
@@ -288,8 +309,8 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                   top: `${highlightBbox.y * 100}%`,
                   width: `${highlightBbox.w * 100}%`,
                   height: `${highlightBbox.h * 100}%`,
-                  backgroundColor: `${CYAN}55`,
-                  border: `2px solid ${CYAN}`,
+                  backgroundColor: highlightTier === "paraphrase" ? `${CYAN}22` : `${CYAN}55`,
+                  border: highlightTier === "paraphrase" ? `1px dashed ${CYAN}` : `2px solid ${CYAN}`,
                   borderRadius: BORDER_RADIUS_SM,
                   pointerEvents: "none",
                 }}
@@ -324,39 +345,6 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                   />
                 );
               })}
-            {showScanAnimation && (
-              // WF-01 C5 (2026-05-28). F2 scan-line: a thin horizontal
-              // bar with a green→cyan→green gradient + glow sweeps top
-              // →bottom over 4s, looping. Decorative only — purely
-              // overlays the page image at z=2 (above highlight bbox
-              // when both are present is fine). Reduced-motion users
-              // get a static centered bar (no sweep).
-              <Box
-                data-testid="pdf-viewer-scan-line"
-                aria-hidden
-                sx={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  height: 3,
-                  background: `linear-gradient(90deg, ${GREEN}00 0%, ${CYAN} 50%, ${GREEN}00 100%)`,
-                  boxShadow: `0 0 12px ${GREEN}80`,
-                  pointerEvents: "none",
-                  animation: "pdfScanSweep 4s ease-in-out infinite",
-                  "@keyframes pdfScanSweep": {
-                    "0%": { top: "0%", opacity: 0 },
-                    "10%": { opacity: 1 },
-                    "90%": { opacity: 1 },
-                    "100%": { top: "100%", opacity: 0 },
-                  },
-                  "@media (prefers-reduced-motion: reduce)": {
-                    animation: "none",
-                    top: "50%",
-                    opacity: 0.5,
-                  },
-                }}
-              />
-            )}
           </Box>
         ) : (
           // Loading state placeholder — neither error nor a real image
@@ -374,6 +362,65 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
               backgroundColor: WHITE,
             }}
           />
+        )}
+        {/* WF-01 C5 — F2 "GroundX is reading the doc" scanner. Lives at the
+            page-area level (not on the letterboxed image) so the dim overlay
+            covers the FULL card. A darker tint reads as "processing"; the
+            original thin beam sweeps top↔bottom (CSS `alternate`). */}
+        {activeImage && showScanAnimation && (
+          <>
+            {/* Dimming veil — the doc reads as "not yet processed". Navy at
+                ~0.34 is dark enough to be unmistakable while keeping the page
+                legible underneath. */}
+            <Box
+              data-testid="pdf-viewer-scan-overlay"
+              aria-hidden
+              sx={{ position: "absolute", inset: 0, backgroundColor: alpha(NAVY, 0.46), pointerEvents: "none" }}
+            />
+            {/* Moving scanner head: a single element sweeps top↔bottom so the
+                soft light band and the crisp beam line always travel together.
+                The band uses mix-blend `screen` so it visibly LIFTS the veil
+                where it passes — reads as a light sweeping over a dimmed doc. */}
+            <Box
+              aria-hidden
+              sx={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                height: 0,
+                pointerEvents: "none",
+                animation: "pdfScanSweep 2.8s ease-in-out infinite alternate",
+                "@keyframes pdfScanSweep": { from: { top: "0%" }, to: { top: "100%" } },
+                "@media (prefers-reduced-motion: reduce)": { animation: "none", top: "50%" },
+              }}
+            >
+              {/* Soft glow band centered on the beam. */}
+              <Box
+                sx={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: -80,
+                  height: 160,
+                  mixBlendMode: "screen",
+                  background: `linear-gradient(180deg, ${CYAN}00 0%, ${alpha(CYAN, 0.45)} 50%, ${GREEN}00 100%)`,
+                }}
+              />
+              {/* Crisp beam line. */}
+              <Box
+                data-testid="pdf-viewer-scan-line"
+                sx={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: -1,
+                  height: 3,
+                  background: `linear-gradient(90deg, ${GREEN}00 0%, ${CYAN} 50%, ${GREEN}00 100%)`,
+                  boxShadow: `0 0 18px 3px ${GREEN}, 0 0 9px ${CYAN}`,
+                }}
+              />
+            </Box>
+          </>
         )}
       </Box>
 

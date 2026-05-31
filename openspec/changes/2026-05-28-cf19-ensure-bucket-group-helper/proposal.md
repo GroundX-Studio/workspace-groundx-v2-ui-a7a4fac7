@@ -1,5 +1,50 @@
 # CF-19: multi-bucket ensureBucketGroup helper
 
+**STATUS: BACKLOGGED (2026-05-30) — needs rework before it can run; NOT in the active set.**
+
+> This proposal is broken as written. The GroundX group API, the entity
+> data model, the scope discriminant, and the credential path are all
+> described incorrectly below. See **Rework checklist** before any work
+> resumes. Do not implement until the checklist is cleared and the
+> proposal body is rewritten to match.
+
+## Rework checklist (before un-backlogging)
+
+Verified defects (each checked against real code / the GroundX API on
+2026-05-30) that MUST be fixed before this change can run:
+
+1. **Wrong endpoint.** Group creation is GroundX **`POST /v1/group`**
+   (singular), not `/v1/groups`. Every reference in this proposal +
+   tasks.md is wrong.
+2. **Empty group on create.** `POST /v1/group` creates an EMPTY group
+   (it only takes `name`, plus an optional single `bucketName` to
+   auto-create one bucket). To actually search across N existing
+   buckets you MUST then call **`group_addbucket`
+   (`POST /v1/group/{groupId}/bucket/{bucketId}`)** once per bucket.
+   The proposal never adds the buckets, so the group would be useless.
+3. **False idempotency claim.** `POST /v1/group` has NO documented
+   name-dedup — each call creates a new group. The "treats POST as
+   idempotent on the deterministic name (returns the existing group
+   id)" claim is false. The helper must **find-or-create explicitly**
+   (list groups, match by name, create only on miss).
+4. **False data model.** `ChatSessionEntityRecord`
+   (`middleware/src/types.ts` ~95-130) has **NO `bucketIds` array**.
+   It carries singular `bucketId: number | null`, plus a separate
+   `groupId: number | null`, `projectIdsJson`, and `documentIdsJson`.
+   The "entity with `bucketIds: [B1, B2]`" framing has no basis in the
+   real record. Rework must decide where a multi-bucket list actually
+   comes from before wiring anything.
+5. **Retired scope shape.** The proposal/tasks use `{ kind: "group", … }`.
+   `ContentScope` (`shared/src/index.ts`) now uses the **`type:`**
+   discriminant (`type: "bucket" | "group" | "documents"`). `kind:` is
+   retired for scopes.
+6. **Wrong credential.** Groups are created with the **CUSTOMER key**
+   (`X-API-Key` via `GroundXClient.forward`), NOT the Partner client.
+   The proposal/tasks repeatedly say "via the Partner client" — wrong.
+7. **Wrong line number.** The `TODO(CF-19)` marker is at
+   **`chatRouter.ts` ~911** (verified), not `852`. The tasks.md
+   `852-862` range is also wrong.
+
 ## Why
 
 `middleware/src/services/chatRouter.ts:852` has a long-standing

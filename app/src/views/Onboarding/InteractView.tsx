@@ -1,24 +1,17 @@
-import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 import Box from "@mui/material/Box";
-import IconButton from "@mui/material/IconButton";
-import InputBase from "@mui/material/InputBase";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useCallback, useEffect, useState, type FC, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FC } from "react";
 
-import { chatErrorToUserCopy, listChatMessages, sendChatMessage } from "@/api/chatSessions";
+import { listChatMessages } from "@/api/chatSessions";
 import {
-  BODY_TEXT,
   BORDER,
-  BORDER_RADIUS_2X,
   BORDER_RADIUS_PILL,
   BORDER_RADIUS_SM,
-  CYAN,
   EYEBROW_ON_LIGHT,
   FONT_SIZE_CAPTION,
   FONT_WEIGHT_LABEL,
-  GREEN,
   NAVY,
   WHITE,
 } from "@/constants";
@@ -26,18 +19,47 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
-import type { ScenarioCitation, SampleChatTurn } from "@/types/scenarios";
-import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import type { Citation } from "@groundx/shared";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
-import { litRegionsFromCitations } from "./litRegions";
+import { litRegionsFromCitations, type LitRegion } from "./litRegions";
+
+// TODO(WF-05): TEMP demo hard-code — remove once word-level geometry lands.
+// The utility sample is extract-workflow-indexed, so its search citations are
+// BARE (no bbox), and we don't yet join X-Ray word boxes to light the exact
+// answer span. Until then, the "what is the total amount due" answer lights a
+// hand-placed box over the Remittance "Amount Due $7,613.20" line on page 1.
+// Color = cyan to match the citation chip in the chat answer.
+// NOTE: these are wrapper-relative coords. The page image overflows its
+// clipping wrapper (page taller than the pane shows only the top portion),
+// so the vertical value bakes in the clip ratio for the current pane aspect
+// rather than being a clean page-normalized fraction. This is one reason the
+// proper fix (WF-05) positions highlights against the image, not the wrapper.
+const UTILITY_AMOUNT_DUE_REGION: LitRegion = {
+  page: 1,
+  x: 0.548,
+  y: 0.218,
+  w: 0.4,
+  h: 0.046,
+  color: "cyan",
+};
 
 /**
- * F5 InteractView — grounded chat with citation chips.
+ * F5 InteractView — the CANVAS (viewer-slot) half of Interact.
  *
- * Placeholder rendering; the real Phase 2/7 wire-up mounts the
- * `chat-with-sources` widget configured for the scenario's ContentScope.
- * Here we replay the fixture chat script and respond to free-form input
- * with a canned "demo only" assistant turn.
+ * P3.b (2026-05-29): per the wireframe `Flow_Answer` + the
+ * `no-onboarding-duplicates` rule, the canvas is the SOURCE DOCUMENT
+ * viewer — NOT a chat. The conversation lives in the shell's
+ * `ChatColumn` (the single chat surface). This view used to render its
+ * own duplicate chat (turns + input + Save), which is the "weird chat
+ * input at the bottom" the owner flagged; that is removed.
+ *
+ * What it does now:
+ *   • Mounts the production `PdfViewerWidget` for the active sample doc.
+ *   • Lights citation regions on the page that trail the latest
+ *     assistant turn in the shared chat thread (read via
+ *     `listChatMessages`, re-read when the session updates).
+ *   • Keeps the "Save 🔒" affordance (top-right) that opens the F6 gate
+ *     — the only interactive control here.
  */
 export const InteractView: FC = () => {
   const { state: appMode } = useAppMode();
@@ -48,251 +70,108 @@ export const InteractView: FC = () => {
   const { state: chatState } = useChatStore();
   const chatSessionId = chatState.activeSessionId;
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
+  // Re-read the thread when the shared chat session changes so the lit
+  // regions trail the latest answer. We key on BOTH updatedAt AND the
+  // in-memory message count — appending a turn always bumps the count, so
+  // this fires even if updatedAt doesn't change for a same-tick append
+  // (which left the highlight stale until a remount).
+  const sessionUpdatedAt = activeChatSession?.updatedAt;
+  const messageCount = activeChatSession?.messages.length ?? 0;
 
-  // WF-13 (2026-05-29). F5 turns are LIVE — never seeded from
-  // `manifest.sampleChatScript`. Start empty; the RT-01 hydration
-  // effect below fills `turns` from the persisted chat thread (shared
-  // with F2's ChatColumn) so a refresh — or arriving on F5 after
-  // chatting in F2 — shows the real conversation with real citations.
-  const [turns, setTurns] = useState<SampleChatTurn[]>([]);
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
+  // Lit-region source — the citations on the latest assistant turn in the
+  // shared chat thread (the same thread ChatColumn writes to). Read-only;
+  // sending happens in ChatColumn, not here.
+  const [litCitations, setLitCitations] = useState<Citation[]>([]);
 
-  // RT-01 hydration — same pattern as ChatColumn. Read the persisted
-  // thread for the active chat session on mount and project each row
-  // (with its citations + bbox) onto a SampleChatTurn. Race rule: only
-  // seed when `turns` is still empty so an optimistic send mid-fetch
-  // wins. Errors are non-fatal (empty thread is a valid render).
   useEffect(() => {
     if (!chatSessionId) return;
     let cancelled = false;
-    void (async () => {
+    const readOnce = async () => {
       try {
         const messages = await listChatMessages(chatSessionId);
-        if (cancelled || messages.length === 0) return;
-        const hydrated: SampleChatTurn[] = messages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            citations: m.citations.length
-              ? m.citations.map((c) => ({ documentId: c.documentId, page: c.page, snippet: c.snippet, bbox: c.bbox }))
-              : undefined,
-          }));
-        setTurns((cur) => (cur.length === 0 ? hydrated : cur));
+        if (cancelled) return;
+        const lastAssistant = [...messages]
+          .reverse()
+          .find((m) => m.role === "assistant" && m.citations.length > 0);
+        setLitCitations(
+          lastAssistant
+            ? lastAssistant.citations.map((c) => ({
+                documentId: c.documentId,
+                page: c.page,
+                snippet: c.snippet,
+                bbox: c.bbox,
+                tier: c.tier,
+              }))
+            : [],
+        );
       } catch {
-        // best-effort; leave turns as-is
+        // best-effort — no citations to light is a valid state
       }
-    })();
+    };
+    void readOnce();
+    // ChatColumn persists turns to the server without bumping this
+    // ChatStore session's in-memory state, so neither updatedAt nor the
+    // message count changes here when an answer arrives. Poll the thread
+    // while mounted so the lit regions trail the latest answer live (not
+    // only after a remount). Cheap; the thread is small.
+    const poll = setInterval(() => void readOnce(), 1500);
     return () => {
       cancelled = true;
+      clearInterval(poll);
     };
-  }, [chatSessionId]);
+  }, [chatSessionId, sessionUpdatedAt, messageCount]);
 
-  const handleSubmit = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const trimmed = draft.trim();
-      if (!trimmed || sending) return;
-
-      // Optimistic user-turn render so the chat stays responsive even
-      // before the network reply lands.
-      const userId = `u-${Date.now()}`;
-      setTurns((current) => [...current, { id: userId, role: "user", content: trimmed }]);
-      setDraft("");
-
-      if (!chatSessionId) {
-        // No active chat session — should never happen inside onboarding
-        // (EntityRegistryProvider auto-seeds one), but fall back to a
-        // polite message rather than throwing.
-        setTurns((current) => [
-          ...current,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content: "No active chat session — please refresh and try again.",
-          },
-        ]);
-        return;
-      }
-
-      setSending(true);
-      try {
-        const result = await sendChatMessage({
-          chatSessionId,
-          newUserMessage: trimmed,
-          sessionMeta: {
-            title: activeChatSession?.title ?? "Onboarding",
-            isOnboarding: activeChatSession?.isOnboardingSession ?? true,
-            onboardingSessionId: chatSessionId,
-            activeEntityKey: activeChatSession?.activeEntityKey ?? null,
-          },
-          // Same scope hint F2's ChatColumn passes — names the active
-          // doc + scenario in the grounded LLM prompt so the model
-          // knows what to talk about even when GroundX search returns
-          // zero snippets for an off-topic query.
-          scopeHint: scenario
-            ? {
-                fileName: scenario.documents[0]?.fileName ?? null,
-                scenarioTitle: scenario.manifest.hero?.title ?? scenarioId,
-              }
-            : undefined,
-        });
-        // WF-13 — thread the WF-03 `bbox` through so the canvas
-        // litRegions use real source geometry instead of a fallback band.
-        const replyCitations: ScenarioCitation[] | undefined = result.reply.citations.length
-          ? result.reply.citations.map((c) => ({ documentId: c.documentId, page: c.page, snippet: c.snippet, bbox: c.bbox }))
-          : undefined;
-        setTurns((current) => [
-          ...current,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content: result.reply.answer,
-            citations: replyCitations,
-          },
-        ]);
-      } catch (err) {
-        // CF-08: branch the user-facing copy on the upstream status.
-        const mapped = chatErrorToUserCopy(err);
-        setTurns((current) => [
-          ...current,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content: mapped.message,
-          },
-        ]);
-      } finally {
-        setSending(false);
-      }
-    },
-    [draft, sending, chatSessionId, activeChatSession],
-  );
-
-  // WF-01b B (2026-05-28). Derive lit regions from the latest assistant
-  // turn's citations. Each citation maps to a single lit region on the
-  // PdfViewer, color-keyed: idx 0 = green (primary), middle = cyan,
-  // last = coral (anomaly / contrast). When a citation lacks an
-  // explicit bbox, render a thin band near the top of the page as a
-  // best-effort default until the upstream API surfaces real coords.
-  const lastAssistantTurn = [...turns].reverse().find((t) => t.role === "assistant");
-  const litCitations = lastAssistantTurn?.citations ?? [];
-  const litRegions = litRegionsFromCitations(litCitations);
+  // TODO(WF-05): TEMP demo override. The utility "amount due" citation DOES
+  // carry a bbox from the WF-03 X-Ray join, but it's coarse and lands on the
+  // wrong chunk (the payment-stub barcode, not the "Amount Due" line). Until
+  // word-level geometry (WF-05) tightens it, force the hand-placed amount-due
+  // box (cyan, to match the citation chip) whenever the utility answer cites
+  // the "Amount Due" line on page 1. Keyed on the citation snippet so other
+  // answers still use their real geometry.
+  const isUtilityAmountDue =
+    scenarioId === "utility" &&
+    litCitations.some((c) => c.page === 1 && /amount\s*due/i.test(c.snippet ?? ""));
+  const litRegions = isUtilityAmountDue
+    ? [UTILITY_AMOUNT_DUE_REGION]
+    : litRegionsFromCitations(litCitations);
+  const highlightTargetPage = isUtilityAmountDue ? 1 : (litCitations[0]?.page ?? undefined);
   const canvasDocumentId = scenario?.documents?.[0]?.documentId ?? null;
+
+  const handleSave = useCallback(() => {
+    advanceFrame("f6");
+    openGate("save");
+  }, [advanceFrame, openGate]);
 
   return (
     <Box
       sx={{
-        display: "grid",
-        gridTemplateRows: "auto auto 1fr auto",
-        gap: 1,
-        p: { xs: 2, md: 3 },
+        display: "flex",
+        flexDirection: "column",
         height: "100%",
         overflow: "hidden",
+        gap: 1.5,
+        p: { xs: 2, md: 3 },
       }}
       aria-label="Interact"
     >
-      <Stack spacing={0.5}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ gap: 1 }}>
         <Typography variant="overline" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_LABEL }}>
           ANALYZE · INTERACT
         </Typography>
-        <Typography variant="h5">Ask anything about the sample</Typography>
-        <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-          Every answer cites the page it came from.
-        </Typography>
-      </Stack>
-
-      {/* WF-01b B (2026-05-28). PdfViewerWidget hosts the source doc.
-          Lit regions trail the latest assistant turn's citations so the
-          user can scan from "[1]" in chat to its colored region on the
-          page. Onboarding mode locks editor-only affordances. */}
-      {canvasDocumentId ? (
-        <Box sx={{ minHeight: 240, maxHeight: 360, overflow: "hidden", border: `1px solid ${BORDER}`, borderRadius: BORDER_RADIUS_SM }}>
-          <PdfViewerWidget
-            documentId={canvasDocumentId}
-            mode="onboarding"
-            litRegions={litRegions}
-            targetPage={litCitations[0]?.page ?? undefined}
-          />
-        </Box>
-      ) : (
-        <Box />
-      )}
-
-      <Box sx={{ overflow: "auto", pr: 1 }} aria-live="polite">
-        <Stack spacing={1.5}>
-          {turns.map((turn) => (
-            <Box
-              key={turn.id}
-              data-testid={`chat-turn-${turn.role}`}
-              sx={{
-                alignSelf: turn.role === "user" ? "flex-end" : "flex-start",
-                maxWidth: "80%",
-                px: 1.5,
-                py: 1,
-                borderRadius: BORDER_RADIUS_2X,
-                backgroundColor: turn.role === "user" ? NAVY : WHITE,
-                color: turn.role === "user" ? WHITE : NAVY,
-                border: turn.role === "assistant" ? `1px solid ${BORDER}` : "none",
-              }}
-            >
-              <Typography variant="body2">{turn.content}</Typography>
-              {turn.citations?.length ? (
-                <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }}>
-                  {turn.citations.map((c, idx) => (
-                    <CiteChip key={`${turn.id}-${idx}`} citation={c} index={idx + 1} />
-                  ))}
-                </Stack>
-              ) : null}
-            </Box>
-          ))}
-        </Stack>
-      </Box>
-
-      <Box
-        component="form"
-        onSubmit={handleSubmit}
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          gap: 1,
-          backgroundColor: WHITE,
-          border: `1px solid ${BORDER}`,
-          borderRadius: BORDER_RADIUS_PILL,
-          px: 2,
-          py: 1,
-        }}
-      >
-        <InputBase
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Ask about the sample…"
-          sx={{ flex: 1, color: NAVY }}
-          inputProps={{ "aria-label": "Chat input" }}
-          data-testid="chat-input"
-        />
-        <IconButton type="submit" aria-label="Send" sx={{ backgroundColor: CYAN, color: NAVY, "&:hover": { backgroundColor: GREEN } }}>
-          <SendOutlinedIcon />
-        </IconButton>
+        {/* The lone interactive control — opens the F6 sign-in gate.
+            (Chat lives in the left ChatColumn; this canvas is doc-only.) */}
         <Box
           role="button"
           tabIndex={0}
           data-testid="advance-to-f6"
-          onClick={() => {
-            advanceFrame("f6");
-            openGate("save");
-          }}
+          onClick={handleSave}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
-              advanceFrame("f6");
-              openGate("save");
+              handleSave();
             }
           }}
           sx={{
-            ml: 1,
             px: 1.5,
             py: 0.75,
             borderRadius: BORDER_RADIUS_PILL,
@@ -301,12 +180,35 @@ export const InteractView: FC = () => {
             cursor: "pointer",
             fontSize: FONT_SIZE_CAPTION,
             fontWeight: FONT_WEIGHT_LABEL,
+            whiteSpace: "nowrap",
             "&:hover": { backgroundColor: alpha(NAVY, 0.04) },
           }}
         >
-          💾 Save
+          💾 Save 🔒
         </Box>
-      </Box>
+      </Stack>
+
+      {canvasDocumentId ? (
+        <Box
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "hidden",
+            border: `1px solid ${BORDER}`,
+            borderRadius: BORDER_RADIUS_SM,
+            backgroundColor: WHITE,
+          }}
+        >
+          <PdfViewerWidget
+            documentId={canvasDocumentId}
+            mode="onboarding"
+            litRegions={litRegions}
+            targetPage={highlightTargetPage}
+          />
+        </Box>
+      ) : (
+        <Box sx={{ flex: 1 }} />
+      )}
     </Box>
   );
 };

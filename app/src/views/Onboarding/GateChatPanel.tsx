@@ -86,8 +86,12 @@ const COMPOSING_DELAY_MS = {
   threshold: 600,
 } as const;
 
+// All triggers use the same short typing copy — a typing indicator should
+// read as a "composing" beat, not a full first-person sentence that appears
+// then vanishes (which read as a dropped message). The byo path keeps its
+// longer pause (see COMPOSING_DELAY_MS) but not the wordy copy.
 const TYPING_COPY = {
-  byo: "Preparing a quick sign-up so you can save your work and keep going",
+  byo: "GroundX is composing",
   save: "GroundX is composing",
   export: "GroundX is composing",
   threshold: "GroundX is composing",

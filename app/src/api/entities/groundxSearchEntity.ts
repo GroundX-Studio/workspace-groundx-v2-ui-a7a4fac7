@@ -1,5 +1,5 @@
 import axios from "@/api/axios";
-import { GroundXRequestOptions, Metadata, groundxRequestConfig, groundxUrl } from "@/api/common";
+import { RequestOptions, Metadata, groundxRequestConfig, groundxUrl } from "@/api/common";
 
 import { SearchResponseBody } from "./sdkTypes";
 
@@ -35,7 +35,7 @@ const searchParams = ({ n, nextToken, verbosity }: SearchParams) => ({
 
 export const searchGroundXContent = async (
   { id, query, relevance, filter, ...params }: SearchContentInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<SearchResponse> => {
   const response = await axios.post<SearchResponse>(
     groundxUrl(`/v1/search/${encodeURIComponent(String(id))}`),
@@ -47,7 +47,7 @@ export const searchGroundXContent = async (
 
 export const searchGroundXDocuments = async (
   { documentIds, query, relevance, filter, ...params }: SearchDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<SearchResponse> => {
   const response = await axios.post<SearchResponse>(
     groundxUrl("/v1/search/documents"),

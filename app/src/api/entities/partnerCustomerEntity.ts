@@ -3,7 +3,7 @@ import rawAxios from "axios";
 import axios from "@/api/axios";
 import {
   MessageResponse,
-  PartnerRequestOptions,
+  RequestOptions,
   customerLoginUrl,
   customerRegisterUrl,
   partnerRequestConfig,
@@ -69,7 +69,7 @@ export const loginPartnerCustomer = async (credentials: PartnerCredentials): Pro
 
 export const getPartnerCustomer = async (
   username: string,
-  options?: PartnerRequestOptions
+  options?: RequestOptions
 ): Promise<PartnerCustomerResponse> => {
   const response = await axios.get<PartnerCustomerResponse>(
     partnerUrl(`/customer/${encodeURIComponent(username)}`),
@@ -80,7 +80,7 @@ export const getPartnerCustomer = async (
 
 export const deletePartnerCustomer = async (
   username: string,
-  options?: PartnerRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(
     partnerUrl(`/customer/${encodeURIComponent(username)}`),

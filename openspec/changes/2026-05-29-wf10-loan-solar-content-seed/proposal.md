@@ -1,5 +1,9 @@
 # WF-10: Loan + Solar scenario content seed (all three scenarios live)
 
+> **STATUS: BACKLOGGED (2026-05-30).** Parked — NOT in the active run set. Also blocked on source assets
+> (real Loan/Solar PDFs). Revisit when prioritized + assets exist. Kept on the planning surface — not
+> archived (not done) and not deleted (valid future work).
+
 ## Why
 
 Only `utility.json` is seeded — `middleware/scripts/scenarios/` contains the Utility scenario

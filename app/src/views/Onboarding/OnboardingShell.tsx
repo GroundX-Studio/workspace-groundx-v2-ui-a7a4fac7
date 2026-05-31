@@ -28,7 +28,7 @@ import type { FFrame, Scenario } from "@/types/onboarding";
 
 import { BookingStatusCard } from "@/components/chat-widgets/BookingStatusCard/BookingStatusCard";
 import { BookCallView } from "@/components/viewer-widgets/BookCallView/BookCallView";
-import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
+import { GateValueProp } from "@/components/viewer-widgets/GateValueProp/GateValueProp";
 import { ExtractView } from "./ExtractView";
 import { IngestView } from "./IngestView";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
@@ -99,9 +99,12 @@ function pillState(
   return "reachable-todo";
 }
 
-function analyzeSubsteps(frame: FFrame): StepDescriptor["substeps"] {
-  const extractActive = frame === "f3" || frame === "f3a" || frame === "f4";
-  const interactActive = frame === "f5" || frame === "f6";
+function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["substeps"] {
+  // P1 (2026-05-29): while the sign-up gate is open the strip sits on
+  // Understand, so the Analyze bracket shows no active sub-step (otherwise
+  // both Understand and Interact would read as active at once).
+  const extractActive = !gateOpen && (frame === "f3" || frame === "f3a" || frame === "f4");
+  const interactActive = !gateOpen && (frame === "f5" || frame === "f6");
   const reportActive = false;
   return [
     { id: "extract", label: "Extract", state: extractActive ? "active" : "reachable-todo" },
@@ -157,9 +160,15 @@ export const OnboardingShell: FC = () => {
     report: "analyze",
     integrate: "integrate",
   };
+  // P1 (2026-05-29): while the sign-up gate is OPEN (the doors + value-prop
+  // screen), the step strip sits on "Understand" — the gate is the "you've
+  // understood the value, now save it" moment. Owner-directed. Once the gate
+  // commits and the user continues, normal step derivation resumes.
   const currentStep: StepId =
-    (latestViewerStepEarly && VIEWER_STEP_KIND_TO_STEP_ID[latestViewerStepEarly.kind]) ??
-    FRAME_TO_STEP[session.currentFrame];
+    session.gate.status === "open"
+      ? "understand"
+      : (latestViewerStepEarly && VIEWER_STEP_KIND_TO_STEP_ID[latestViewerStepEarly.kind]) ??
+        FRAME_TO_STEP[session.currentFrame];
   const isF1 = session.currentFrame === "f1";
 
   // -- URL ↔ surface sync ----------------------------------------
@@ -220,6 +229,11 @@ export const OnboardingShell: FC = () => {
           `[OnboardingShell] URL bucket ${bucketFromUrl} doesn't match registry bucket ${scenarioRegistry.bucketId}; activating scenario anyway.`,
         );
       }
+      // Pop any stale sign-up overlay so the SignUpWidget doesn't render
+      // over the sample's canvas (the picker branch below already does this;
+      // this branch returned early without it — a navigate from
+      // /onboarding/signup → a sample URL left the overlay stuck).
+      popOverlayRef.current("sign-up");
       pickScenarioRef.current(params.scenarioId as Scenario);
       return;
     }
@@ -284,11 +298,11 @@ export const OnboardingShell: FC = () => {
         id: "analyze",
         label: "Analyze",
         state: pillState("analyze", currentStep, completedSteps, signedIn, scenarioPicked),
-        substeps: analyzeSubsteps(session.currentFrame),
+        substeps: analyzeSubsteps(session.currentFrame, session.gate.status === "open"),
       },
       { id: "integrate", label: "4 Integrate", state: pillState("integrate", currentStep, completedSteps, signedIn, scenarioPicked) },
     ];
-  }, [currentStep, completedSteps, appMode.authState, session.currentFrame, session.scenario]);
+  }, [currentStep, completedSteps, appMode.authState, session.currentFrame, session.scenario, session.gate.status]);
 
   const handleStepClick = useCallback(
     (stepId: StepId) => {
@@ -407,7 +421,10 @@ export const OnboardingShell: FC = () => {
 
   const canvasContent = useMemo(() => {
     if (bookCallActive) return <BookCallView />;
-    if (signupSurfaceActive) return <SignUpWidget />;
+    // P1 (2026-05-29): the sign-up DOORS moved into the chat rail
+    // (GateChatRail). The canvas now pitches the value prop instead of
+    // hosting the account form. See GateValueProp + GateChatRail.
+    if (signupSurfaceActive) return <GateValueProp />;
     switch (effectiveStepKind) {
       case "ingest-picker":
         // ARCH-06B (2026-05-26): IngestView is rendered ONLY inside

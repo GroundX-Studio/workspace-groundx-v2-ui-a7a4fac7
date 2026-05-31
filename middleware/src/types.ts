@@ -1,3 +1,5 @@
+import type { TemplateKind } from "@groundx/shared";
+
 export interface SessionRecord {
   id: string;
   groundxUsername: string;
@@ -99,8 +101,8 @@ export interface ChatSessionEntityRecord {
   extractedValuesJson: string | null;
   /**
    * CF-15 — RAG scope refs. The active EntitySession carries enough
-   * routing info for the chat handler to build a `RagContentScope`
-   * without hardcoding the env samples bucket.
+   * routing info for the chat handler to build a `ContentScope`
+   * (`@groundx/shared`) without hardcoding the env samples bucket.
    *
    *   bucketId         — primary bucket the entity lives in (steady mode:
    *                      customer's bucket; onboarding: samples bucket).
@@ -175,17 +177,24 @@ export interface IntentLogRecord {
 }
 
 /**
- * CF-04: app-owned extraction schemas. A saved schema is the user's
- * pinned-and-named version of an F3a extraction shape (categories +
- * fields + prompts). Lives in app DB (not Partner API) because the
- * schema knowledge is product-owned, not GroundX-owned.
+ * shared-template-lifecycle Phase 2 — the durable Template row (Extract schema
+ * + Report template share this). `bodyJson` is the opaque JSON body (the
+ * kind-discriminated `Template.body`), stored as a string. `groundxUsername`
+ * is the owner — SERVER-assigned (never from the wire).
+ *
+ * The WRITE path (`POST /api/templates`) validates the wire shape with the
+ * shared `templateSaveInputSchema` and persists `bodyJson` opaquely. The READ
+ * path that assembles a full `Template` from a row + validates it with
+ * `parseTemplate` is the report-render flow (smart-report); `getTemplate` +
+ * `parseTemplate` are the foundation API it consumes. (Extract today only
+ * exercises write + `listTemplates`.)
  */
-export interface ExtractionSchemaRecord {
+export interface TemplateRecord {
   id: string;
+  kind: TemplateKind;
   groundxUsername: string;
   name: string;
-  /** Full schema serialized as JSON — shape mirrors `ExtractionSchema` on the frontend. */
-  schemaJson: string;
+  bodyJson: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -198,9 +207,13 @@ export interface AppRepository {
   upsertMetadata(metadata: AppUserMetadata): Promise<void>;
   getMetadata(groundxUsername: string): Promise<AppUserMetadata | null>;
 
-  // Extraction schemas (CF-04 — saved_schemas reader)
-  upsertExtractionSchema(record: ExtractionSchemaRecord): Promise<void>;
-  listExtractionSchemasForUser(groundxUsername: string): Promise<ExtractionSchemaRecord[]>;
+  // Templates (shared-template-lifecycle — Extract schema + Report template).
+  // (The legacy `extraction_schemas` repo methods were removed at the Phase-3
+  // cutover — nothing calls them; the table itself is kept, read only by the
+  // boot-time copy-migration, until the deferred drop sweep.)
+  saveTemplate(record: TemplateRecord): Promise<void>;
+  getTemplate(id: string): Promise<TemplateRecord | null>;
+  listTemplates(groundxUsername: string, kind: TemplateKind): Promise<TemplateRecord[]>;
 
   // Chat sessions
   upsertChatSession(record: ChatSessionRecord): Promise<void>;

@@ -1,5 +1,7 @@
 # Tasks — CF-04 page_usage_event reader
 
+> **STATUS: BACKLOGGED (2026-05-30)** — not in the active run set. Do not start until reprioritized.
+
 ## Schema
 
 - [ ] **Failing test:** `mysqlRepository.test.ts` — asserts the

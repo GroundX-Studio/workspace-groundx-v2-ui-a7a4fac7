@@ -6,6 +6,7 @@ import { patchChatSession } from "@/api/chatSessionPatch";
 import { recordViewerEvent } from "@/api/viewerEvents";
 import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntityRegistryContext";
 import type { FFrame } from "@/types/onboarding";
+import type { NormalizedBbox } from "@groundx/shared";
 
 import { EMPTY_PENDING_SCHEMA_OVERLAY, EMPTY_VIEWER_SESSION } from "./types";
 import type {
@@ -20,6 +21,26 @@ import type {
 } from "./types";
 
 const ChatStoreContext = createContext<ChatStoreApi | null>(null);
+
+/**
+ * Coerce an untrusted `currentIntent` value read back from the server
+ * (`chat_sessions.current_intent_json` — arbitrary JSON) into a `CanvasIntent`.
+ *
+ * This is a STRUCTURAL guard only: it accepts a plain object carrying a
+ * non-empty string `kind` and rejects everything else (null, primitives,
+ * arrays, `{}`) → `null`. It does NOT verify `kind` is a real discriminant or
+ * that the variant's fields are present — full validation needs a shared Zod
+ * `CanvasIntent` schema (none exists yet; tracked in the core-data-model
+ * change). It exists so the strict `currentIntent: CanvasIntent | null` state
+ * type isn't populated straight from an unchecked cast: a corrupt/legacy row
+ * degrades to `null` instead of masquerading as a typed intent.
+ */
+function coerceHydratedIntent(raw: unknown): CanvasIntent | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const kind = (raw as { kind?: unknown }).kind;
+  if (typeof kind !== "string" || kind.length === 0) return null;
+  return raw as CanvasIntent;
+}
 
 /**
  * The actions slice — `newSession`, `appendMessage`, etc. — is stable
@@ -719,7 +740,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     }
   }, []);
 
-  const setCurrentIntent = useCallback((intent: CanvasIntent) => {
+  const setCurrentIntent = useCallback((intent: CanvasIntent | null) => {
     // RT-04 — capture the post-mutation chatSessionId from inside
     // the updater so the PATCH runs only when the in-memory change
     // actually committed (not on a reference-equality short-circuit).
@@ -880,7 +901,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
                 // Server wins on fields it owns.
                 title: remote.title,
                 activeEntityKey: (remote.activeEntityKey as EntityKey | null) ?? null,
-                currentIntent: (remote.currentIntent as CanvasIntent) ?? null,
+                currentIntent: coerceHydratedIntent(remote.currentIntent),
                 viewer: hydratedViewer,
                 // Phase 4 sync: pendingSchemaOverlay mirrors workspace.
                 pendingSchemaOverlay: hydratedOverlay,
@@ -897,7 +918,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
                 entities: new Map(),
                 activeEntityKey: (remote.activeEntityKey as EntityKey | null) ?? null,
                 viewerHistory: [],
-                currentIntent: (remote.currentIntent as CanvasIntent) ?? null,
+                currentIntent: coerceHydratedIntent(remote.currentIntent),
                 pendingSchemaOverlay: hydratedOverlay,
                 viewer: hydratedViewer,
                 gate: { status: "idle" },
@@ -1325,8 +1346,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     (input: {
       documentId: string;
       page: number;
-      bbox?: { x: number; y: number; w: number; h: number };
+      bbox?: NormalizedBbox;
       sourceCitationIndex?: number;
+      tier?: import("@/types/onboarding").CitationTier;
     }) => {
       setState((prev) => {
         if (!prev.activeSessionId) return prev;
@@ -1338,6 +1360,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
           page: input.page,
           ...(input.bbox ? { bbox: input.bbox } : {}),
           ...(input.sourceCitationIndex != null ? { sourceCitationIndex: input.sourceCitationIndex } : {}),
+          ...(input.tier ? { tier: input.tier } : {}),
         };
         // Same-document case → mutate the active step in place.
         if (top != null && top.kind === "doc-viewer" && top.documentId === input.documentId) {

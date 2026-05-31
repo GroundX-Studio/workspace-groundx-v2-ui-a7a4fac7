@@ -38,8 +38,36 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # Local-dev-boot guard: builds @groundx/shared, boots middleware (tsx) +
+      # app (Vite), and drives the /api flow (onboarding session, login, the
+      # authed read endpoints + a CSRF-protected POST). Catches dev-runtime
+      # resolution + auth/CSRF regressions the unit suite can't see.
+      - name: Dev smoke (boot servers + /api flow)
+        run: npm run verify:preview
+
       - name: Install Playwright browser
         run: npm --workspace app exec -- playwright install --with-deps chromium
 
       - name: Browser smoke tests
         run: npm run test:e2e
+
+  container-images:
+    name: Build container images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # Builds both images end-to-end — catches container-only regressions the
+      # unit suite can't see (e.g. the @groundx/shared workspace wiring across
+      # the multi-stage deps/build/runtime layers, incl. `npm ci --omit=dev`).
+      - name: Build middleware image
+        run: docker build -f Dockerfile.middleware -t gx-middleware:ci .
+
+      - name: Verify @groundx/shared resolves in the middleware runtime image
+        run: |
+          docker run --rm --entrypoint node gx-middleware:ci \
+            -e "import('@groundx/shared').then((m) => { if (typeof m.parseCitations !== 'function') { console.error('shared did not resolve'); process.exit(1); } console.log('@groundx/shared OK'); }).catch((e) => { console.error(e); process.exit(1); })"
+
+      - name: Build frontend image
+        run: docker build -f Dockerfile.frontend -t gx-frontend:ci .

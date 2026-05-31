@@ -3,12 +3,17 @@
 FROM node:22-alpine AS deps
 WORKDIR /workspace
 COPY package*.json ./
+COPY shared/package*.json shared/
 COPY app/package*.json app/
 COPY middleware/package*.json middleware/
 COPY scripts/check-node-version.mjs scripts/check-node-version.mjs
 RUN npm ci
 
 FROM deps AS build
+# Build the shared wire-contract package first — the app bundles
+# @groundx/shared (resolved via the workspace symlink → its built dist).
+COPY shared shared
+RUN npm --workspace @groundx/shared run build
 COPY app app
 RUN npm --workspace app run build
 # OB-05 — drop sourcemaps from the runtime image. `vite build` emits

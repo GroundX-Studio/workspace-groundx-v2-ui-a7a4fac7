@@ -1,7 +1,7 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
 import { api } from "@/api";
-import { GroundXRequestOptions } from "@/api/common";
+import { RequestOptions } from "@/api/common";
 import { SearchContentInput, SearchDocumentsInput } from "@/api/entities/groundxSearchEntity";
 import { SearchResponseBody } from "@/api/entities/sdkTypes";
 import { useIsLoading } from "@/contexts/LoadingContext";
@@ -38,13 +38,13 @@ export const SearchProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const searchContent = useCallback(
-    (input: SearchContentInput, options?: GroundXRequestOptions) =>
+    (input: SearchContentInput, options?: RequestOptions) =>
       runSearch(async () => (await api.groundxSearch.searchGroundXContent(input, options)).search, input.query),
     [runSearch]
   );
 
   const searchDocuments = useCallback(
-    (input: SearchDocumentsInput, options?: GroundXRequestOptions) =>
+    (input: SearchDocumentsInput, options?: RequestOptions) =>
       runSearch(async () => (await api.groundxSearch.searchGroundXDocuments(input, options)).search, input.query),
     [runSearch]
   );

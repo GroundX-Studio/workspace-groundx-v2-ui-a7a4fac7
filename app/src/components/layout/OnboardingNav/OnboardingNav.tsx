@@ -33,6 +33,7 @@
 
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
+import { alpha } from "@mui/material/styles";
 import { useEffect, useState, type FC, type ReactNode } from "react";
 
 import {
@@ -52,7 +53,6 @@ import {
   ONBOARDING_NAV_SUBLABEL_FONT_SIZE,
   ONBOARDING_NAV_WIDTH_COLLAPSED,
   ONBOARDING_NAV_WIDTH_FULL,
-  WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
 
@@ -198,7 +198,10 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
         width,
         flexShrink: 0,
         height: "100%",
-        backgroundColor: WARM_OFFWHITE,
+        // Floating-panels (2026-05-29): a WHITE rail so it's distinct from
+        // the gray desk (a transparent/gray nav on a gray desk read as one
+        // flat slab). The gray desk separates it from the warm chat card.
+        backgroundColor: WHITE,
         borderRight: `1px solid ${BORDER}`,
         boxSizing: "border-box",
         padding: collapsed ? "10px 6px" : "12px 14px",
@@ -337,8 +340,8 @@ function renderExpandedRow(
         // rendered ~0.5px left of the CTA card's label.
         border: isActive ? `1.5px solid ${BORDER}` : "1.5px solid transparent",
         borderRadius: BORDER_RADIUS_SM,
-        color: item.disabled ? "rgba(41,51,92,0.35)" : isActive ? NAVY : BODY_TEXT,
-        opacity: item.disabled ? 0.7 : 1,
+        color: item.disabled ? alpha(NAVY, 0.32) : isActive ? NAVY : BODY_TEXT,
+        opacity: item.disabled ? 0.85 : 1,
         cursor: item.disabled ? "not-allowed" : "pointer",
         "&:hover": item.disabled ? undefined : { backgroundColor: CYAN },
       }}
@@ -379,8 +382,8 @@ function renderCompactRow(
         backgroundColor: isActive ? CYAN : "transparent",
         border: isActive ? `1px solid ${BORDER}` : "1px solid transparent",
         borderRadius: BORDER_RADIUS_SM,
-        color: item.disabled ? "rgba(41,51,92,0.3)" : isActive ? NAVY : MUTED_ON_LIGHT,
-        opacity: item.disabled ? 0.55 : 1,
+        color: item.disabled ? alpha(NAVY, 0.3) : isActive ? NAVY : MUTED_ON_LIGHT,
+        opacity: item.disabled ? 0.7 : 1,
         cursor: item.disabled ? "not-allowed" : "pointer",
         "&:hover": item.disabled ? undefined : { backgroundColor: CYAN, color: NAVY },
       }}

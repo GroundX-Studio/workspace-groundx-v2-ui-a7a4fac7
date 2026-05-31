@@ -38,18 +38,12 @@ export interface CreateChatSessionResult {
   ownerAnonId: string | null;
 }
 
-export interface ChatCitation {
-  documentId: string;
-  page: number;
-  snippet?: string;
-  /**
-   * Optional bbox in 0–1 page-relative coords. Threaded end-to-end
-   * so `CiteChip`'s viewer-jump dispatch can scroll to + highlight
-   * the cited region. Absent for snippets without source-region
-   * info (page-level highlight is the fallback).
-   */
-  bbox?: { x: number; y: number; w: number; h: number };
-}
+// A chat-reply citation IS the shared `Citation` (`@groundx/shared`) — the
+// middleware end of this same wire already uses it (chatRouter `Citation`).
+// `bbox` (NormalizedBbox) is threaded end-to-end for CiteChip's viewer jump;
+// `tier` drives highlight precision; both optional. Used directly as `Citation`
+// (no `ChatCitation` alias).
+import type { Citation, ScopeFilter } from "@groundx/shared";
 
 export interface ChatSuggestedAction {
   key: string;
@@ -98,7 +92,11 @@ export interface ProposedSchemaField {
  */
 export interface ChatReplyDebug {
   mode: "rag" | "structured" | "hybrid";
-  scope: { kind: "bucket" | "group" | "documents"; bucketId?: number; groupId?: number; documentIds?: string[]; projectIds?: string[] };
+  // Mirrors the middleware `ChatRouterDebug.scope` wire shape (unified
+  // `ContentScope` — discriminant `type`, composable `filter`). Kept in sync
+  // with `chatRouter.ts`; folding both debug-scope mirrors onto `ContentScope`
+  // is tracked in the `core-data-model-hardening` envelope-unification task.
+  scope: { type: "bucket" | "group" | "documents"; bucketId?: number; groupId?: number; documentIds?: string[]; filter?: ScopeFilter };
   groundx: {
     path: string;
     query: string;
@@ -136,7 +134,7 @@ export interface ChatToolFailure {
 export interface ChatReply {
   mode: "rag" | "structured" | "hybrid";
   answer: string;
-  citations: ChatCitation[];
+  citations: Citation[];
   suggestedActions: ChatSuggestedAction[];
   tools: { name: string; arguments: Record<string, unknown> }[];
   /**
@@ -525,7 +523,7 @@ export interface PersistedChatMessage {
    * user turns (and for assistant turns that returned no snippets).
    * Surfaces in the rendered chat thread so chips survive a refresh.
    */
-  citations: ChatCitation[];
+  citations: Citation[];
 }
 
 interface ListChatMessagesResponse {

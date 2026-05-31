@@ -1,5 +1,9 @@
 # CF-04: page_usage_event reader for BYO free-tier budget
 
+> **STATUS: BACKLOGGED (2026-05-30).** Parked — NOT in the active run set. Revisit when the BYO
+> free-tier budget surface is prioritized. Kept on the planning surface — not archived (not done) and
+> not deleted (valid future work).
+
 ## Why
 
 `middleware/src/services/structuredHandler.ts:120` has a

@@ -1,6 +1,6 @@
 import axios from "@/api/axios";
 import {
-  GroundXRequestOptions,
+  RequestOptions,
   MessageResponse,
   PaginationParams,
   groundxRequestConfig,
@@ -29,7 +29,7 @@ export interface CreateGroundXGroupInput {
 
 export const listGroundXGroups = async (
   params?: PaginationParams,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<GroupsResponse> => {
   const response = await axios.get<GroupsResponse>(groundxUrl("/v1/group"), {
     ...groundxRequestConfig(options),
@@ -40,13 +40,13 @@ export const listGroundXGroups = async (
 
 export const createGroundXGroup = async (
   input: CreateGroundXGroupInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<GroupResponse> => {
   const response = await axios.post<GroupResponse>(groundxUrl("/v1/group"), input, groundxRequestConfig(options));
   return response.data;
 };
 
-export const getGroundXGroup = async (groupId: number, options?: GroundXRequestOptions): Promise<GroupResponse> => {
+export const getGroundXGroup = async (groupId: number, options?: RequestOptions): Promise<GroupResponse> => {
   const response = await axios.get<GroupResponse>(groundxUrl(`/v1/group/${groupId}`), groundxRequestConfig(options));
   return response.data;
 };
@@ -54,7 +54,7 @@ export const getGroundXGroup = async (groupId: number, options?: GroundXRequestO
 export const updateGroundXGroup = async (
   groupId: number,
   newName: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<GroupResponse> => {
   const response = await axios.put<GroupResponse>(
     groundxUrl(`/v1/group/${groupId}`),
@@ -64,7 +64,7 @@ export const updateGroundXGroup = async (
   return response.data;
 };
 
-export const deleteGroundXGroup = async (groupId: number, options?: GroundXRequestOptions): Promise<MessageResponse> => {
+export const deleteGroundXGroup = async (groupId: number, options?: RequestOptions): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(groundxUrl(`/v1/group/${groupId}`), groundxRequestConfig(options));
   return response.data;
 };
@@ -72,7 +72,7 @@ export const deleteGroundXGroup = async (groupId: number, options?: GroundXReque
 export const addBucketToGroundXGroup = async (
   groupId: number,
   bucketId: number,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.post<MessageResponse>(
     groundxUrl(`/v1/group/${groupId}/bucket/${bucketId}`),
@@ -85,7 +85,7 @@ export const addBucketToGroundXGroup = async (
 export const removeBucketFromGroundXGroup = async (
   groupId: number,
   bucketId: number,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(
     groundxUrl(`/v1/group/${groupId}/bucket/${bucketId}`),

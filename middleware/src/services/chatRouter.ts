@@ -33,7 +33,7 @@ import {
   type NormalizedBbox,
 } from "./citationGeometry.js";
 import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
-import { assignTier, confidenceFor, verifyQuote, type AttributionTier } from "./attribution.js";
+import { assignTier, confidenceFor, verifyQuote } from "./attribution.js";
 import { fetchDocumentXray } from "./xrayCache.js";
 import { getServerTool, toolsForStep, type ViewerStepKind } from "./toolCatalog.js";
 import { toOpenAiTools, type OpenAiFunctionTool } from "./zodToJsonSchema.js";
@@ -113,24 +113,13 @@ export interface ChatRouterRequest {
   activeStepKind?: string | null;
 }
 
-export interface Citation {
-  documentId: string;
-  page: number;
-  snippet?: string;
-  /** WF-03 — normalized 0-1 page-relative source region for PDF highlight. */
-  bbox?: NormalizedBbox;
-  /**
-   * WF-06 — attribution tier (graduated precision):
-   *   exact      verified verbatim quote + atom box → word-level highlight (dormant w/o WF-05 1b)
-   *   paraphrase verified quote → chunk-level highlight (WF-03 bbox)
-   *   ambient    unverified / retrieved-only → source chip, no auto inline span
-   */
-  tier?: AttributionTier;
-  /** WF-06 — citation confidence [0,1] from the quote-verification gate. */
-  confidence?: number;
-  /** WF-06 — the claim in the answer this citation supports (Bridge B). */
-  answerSpan?: string;
-}
+// Canonical Citation now lives in the shared wire contract (`@groundx/shared`,
+// schema-as-source-of-truth). Import for local use + re-export so existing
+// middleware imports (`Citation` from "./chatRouter.js") keep resolving. The
+// shared shape is identical: documentId, page, snippet?, bbox? (NormalizedBbox),
+// tier? (CitationTier), confidence?, answerSpan?.
+import { compileScopeFilter, type Citation, type ContentScope, type ScopeFilter } from "@groundx/shared";
+export type { Citation };
 
 export interface SuggestedAction {
   key: string;
@@ -179,7 +168,7 @@ export interface ProposedSchemaField {
  */
 export interface ChatRouterDebug {
   mode: ChatMode;
-  scope: { kind: "bucket" | "group" | "documents"; bucketId?: number; groupId?: number; documentIds?: string[]; projectIds?: string[] };
+  scope: { type: "bucket" | "group" | "documents"; bucketId?: number; groupId?: number; documentIds?: string[]; filter?: ScopeFilter };
   groundx: {
     /** Full URL path of the GroundX search call (e.g. /v1/search/...) */
     path: string;
@@ -334,7 +323,7 @@ export interface ChatRouterDeps {
    * The chatHandler derives this from the active entity / current
    * intent / project membership; the chatRouter doesn't recompute it.
    */
-  contentScope?: RagContentScope;
+  contentScope?: ContentScope | null;
   /** Provider model id for the LLM call, e.g. "gpt-4o" or "claude-3-haiku". */
   llmModelId?: string;
   mockMode: boolean;
@@ -399,19 +388,19 @@ export class ChatRouteNotImplementedError extends Error {
  *
  * For "multi-workspace" usage (the user is looking across N buckets),
  * the caller is responsible for ensure-creating a group of those
- * buckets and passing `{kind:"group", groupId}`. Multi-workspace
+ * buckets and passing `{type:"group", groupId}`. Multi-workspace
  * scopes aren't produced by any upstream caller today; the ensure-
  * group helper is tracked in
  * `openspec/specs/chat-routing/spec.md` (Multi-bucket pivots
  * requirement).
+ *
+ * The scope type itself is the unified `ContentScope` from `@groundx/shared`
+ * (was a local `RagContentScope` that diverged on the `kind`/`type`
+ * discriminant + a separate `projectIds` field + an `unknown` variant).
+ * `projectIds` is now expressed via the composable `filter` (`{projectId:
+ * [...]}`); "no derivable scope" is represented by `null` (not a fake variant)
+ * and handled explicitly in `searchGroundX`.
  */
-export type RagContentScope =
-  | { kind: "bucket"; bucketId: number; projectIds?: string[] }
-  | { kind: "group"; groupId: number }
-  | { kind: "documents"; documentIds: string[] }
-  // Legacy fallback for the case where ContentScope is unknown:
-  // search the doc-wide endpoint. Tracked so it shows up in logs.
-  | { kind: "unknown" };
 
 /**
  * Single snippet returned by the GroundX search result list. The
@@ -470,11 +459,11 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
   // (just without grounded snippets).
   let snippets: GroundXSearchResult[] = [];
   if (deps.groundxClient && deps.groundxApiKey) {
-    const scope: RagContentScope =
+    const scope: ContentScope | null =
       deps.contentScope ??
       (deps.samplesBucketId != null
-        ? { kind: "bucket", bucketId: deps.samplesBucketId }
-        : { kind: "unknown" });
+        ? { type: "bucket", bucketId: deps.samplesBucketId }
+        : null);
     try {
       snippets = await searchGroundX(
         request.newUserMessage,
@@ -506,6 +495,16 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
 
 const RAG_SEARCH_LIMIT = 6;
 const RAG_SNIPPET_CHARS = 600;
+/**
+ * Relevance floor for the zero-result retry. GroundX's default relevance
+ * threshold is 10; extract-workflow-indexed documents store their searchable
+ * text as extraction JSON, which scores NEGATIVE against natural-language
+ * queries (e.g. "what is the total amount" → ~-30 on the Utility sample), so
+ * the default floor filters every chunk out and the LLM correctly answers
+ * "no snippets." When the first search returns nothing we retry once with
+ * this low floor so the doc still grounds an answer. Env-overridable.
+ */
+const RAG_FALLBACK_RELEVANCE = Number(process.env.GROUNDX_RAG_FALLBACK_RELEVANCE ?? -100);
 /**
  * CF-06 token-budget guard. Caps the assembled snippet block fed to
  * the grounded LLM so a long document set can't blow past the context
@@ -544,9 +543,9 @@ async function runRagPipeline(
   // Derive the ContentScope. Callers can override via `deps.contentScope`
   // once the chatHandler wires it from the entity bundle; for now we
   // fall back to the legacy single-bucket scope from env.
-  const scope: RagContentScope =
+  const scope: ContentScope | null =
     deps.contentScope ??
-    (deps.samplesBucketId != null ? { kind: "bucket", bucketId: deps.samplesBucketId } : { kind: "unknown" });
+    (deps.samplesBucketId != null ? { type: "bucket", bucketId: deps.samplesBucketId } : null);
 
   // Dev-only diagnostic accumulator — populated by searchGroundX +
   // callGroundedLlm, surfaced on the chat reply's `_debug` field so
@@ -567,6 +566,12 @@ async function runRagPipeline(
   // (filtered to the active ViewerStep) + advertise it to the LLM via
   // native function calling. The empty-catalog case still sends a
   // `tools: []` so the test surface can assert request shape.
+  // NOTE: `as ViewerStepKind` is an unvalidated wire cast (a tracked loose-typing
+  // seam). Do NOT "fix" it by `safeParse → undefined` fallback: `toolsForStep(undefined)`
+  // returns the FULL catalog, but a present-but-invalid kind goes through the
+  // filter and returns the safe unrestricted-only set — so the naive validation
+  // WIDENS the tool surface for bogus input. A proper fix needs `toolsForStep` to
+  // express "unknown step → safe minimum" first. Tracked separately.
   const catalog = toolsForStep(request.activeStepKind as ViewerStepKind | undefined);
   const openAiTools: OpenAiFunctionTool[] = toOpenAiTools(catalog);
 
@@ -742,13 +747,15 @@ async function runRagPipeline(
       ? {
           _debug: {
             mode: "rag" as const,
-            scope: {
-              kind: scope.kind === "unknown" ? "documents" : scope.kind,
-              ...("bucketId" in scope ? { bucketId: scope.bucketId } : {}),
-              ...("groupId" in scope ? { groupId: scope.groupId } : {}),
-              ...("documentIds" in scope ? { documentIds: scope.documentIds } : {}),
-              ...("projectIds" in scope ? { projectIds: scope.projectIds } : {}),
-            } as ChatRouterDebug["scope"],
+            scope: (scope === null
+              ? { type: "documents" }
+              : {
+                  type: scope.type,
+                  ...("bucketId" in scope ? { bucketId: scope.bucketId } : {}),
+                  ...("groupId" in scope ? { groupId: scope.groupId } : {}),
+                  ...("documentIds" in scope ? { documentIds: scope.documentIds } : {}),
+                  ...(scope.filter ? { filter: scope.filter } : {}),
+                }) as ChatRouterDebug["scope"],
             groundx: debugCapture.groundx ?? null,
             llm: debugCapture.llm ?? null,
           },
@@ -887,24 +894,26 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
 }
 
 /**
- * Issue a GroundX search dispatched on `ContentScope`. The five
- * supported shapes per the docs:
+ * Issue a GroundX search dispatched on `ContentScope` (or `null`). The
+ * endpoint is chosen by the scope discriminant; the optional composable
+ * `filter` is compiled (shared `compileScopeFilter`) and applied uniformly
+ * to ANY shape, then composed with the server-derived `rbacFilter` via $and:
  *
- *   bucket / no projectIds  → POST /v1/search/{bucketId} + {query, n}
- *   bucket / 1 projectId    → POST /v1/search/{bucketId} +
- *                             {query, n, filter: {projectId: P}}
- *   bucket / N projectIds   → POST /v1/search/{bucketId} +
- *                             {query, n, filter: {projectId: {$in: [...]}}}
- *   group                   → POST /v1/search/{groupId} + {query, n}
- *   documents               → POST /v1/search/documents +
- *                             {query, n, documentIds: [...]}
+ *   bucket    → POST /v1/search/{bucketId} + {query, n}
+ *   group     → POST /v1/search/{groupId}  + {query, n}
+ *   documents → POST /v1/search/documents  + {query, n, documentIds: [...]}
+ *   null      → POST /v1/search/documents  (doc-wide fallback; logged)
+ *
+ *   + filter  → adds {filter: <compiled>}  (project/portfolio/fund/folder
+ *               filter-fields; single→{field:v}, multi→{$in}, multi-field
+ *               →$and). Was bucket+projectIds-only before B1 inc. 3.
  *
  * TODO(CF-19): multi-bucket usage today requires the caller to
  * provide an existing groupId. The "ensure-create group of buckets
  * [B1, B2, …] if none exists" helper lives outside this function;
- * when it lands, the handler can pass `{kind:"group", groupId}`
+ * when it lands, the handler can pass `{type:"group", groupId}`
  * after the ensure call. CF-02 + CF-15 closed 2026-05-25 — the
- * 5-case dispatch + entity-driven scope derivation are live; only
+ * scope dispatch + entity-driven scope derivation are live; only
  * the multi-bucket→group helper remains.
  */
 /**
@@ -949,7 +958,7 @@ function composeFilters(
 
 export async function searchGroundX(
   query: string,
-  scope: RagContentScope,
+  scope: ContentScope | null,
   client: GroundXClient,
   apiKey: string,
   options: SearchGroundXOptions = {},
@@ -957,46 +966,47 @@ export async function searchGroundX(
   let path: string;
   // Body must always include {query, n}; some scopes add fields.
   const body: Record<string, unknown> = { query, n: RAG_SEARCH_LIMIT };
-  // Filter derived from the scope kind (e.g. projectId). May be unset
-  // for group / unknown / bucket-without-projectIds scopes.
-  let scopeFilter: Record<string, unknown> | null = null;
 
-  switch (scope.kind) {
-    case "bucket": {
-      path = `/search/${scope.bucketId}`;
-      const ids = scope.projectIds ?? [];
-      if (ids.length === 1) {
-        scopeFilter = { projectId: ids[0] };
-      } else if (ids.length > 1) {
-        scopeFilter = { projectId: { $in: ids } };
+  if (scope === null) {
+    // No derivable scope — the chatHandler couldn't resolve an active entity
+    // and there's no env samples bucket (early onboarding). Legacy fallback:
+    // doc-wide search. Logged so the gap shows in telemetry.
+    // eslint-disable-next-line no-console
+    console.warn("rag search dispatched with no scope — falling back to /v1/search/documents");
+    path = "/search/documents";
+  } else {
+    switch (scope.type) {
+      case "bucket": {
+        path = `/search/${scope.bucketId}`;
+        break;
       }
-      break;
-    }
-    case "group": {
-      // Group search has the same shape as bucket search — different
-      // resource id, same endpoint. GroundX resolves the group to its
-      // member buckets server-side.
-      path = `/search/${scope.groupId}`;
-      break;
-    }
-    case "documents": {
-      if (scope.documentIds.length === 0) {
-        throw new Error("rag scope 'documents' requires at least one documentId");
+      case "group": {
+        // Group search has the same shape as bucket search — different
+        // resource id, same endpoint. GroundX resolves the group to its
+        // member buckets server-side.
+        path = `/search/${scope.groupId}`;
+        break;
       }
-      path = "/search/documents";
-      body.documentIds = scope.documentIds;
-      break;
-    }
-    case "unknown": {
-      // Legacy fallback: doc-wide search. This SHOULD only happen when
-      // the chatHandler doesn't know the active entity yet (early
-      // onboarding). Log surfaces this so we can spot it in telemetry.
-      // eslint-disable-next-line no-console
-      console.warn("rag search dispatched with kind=unknown — falling back to /v1/search/documents");
-      path = "/search/documents";
-      break;
+      case "documents": {
+        if (scope.documentIds.length === 0) {
+          throw new Error("rag scope 'documents' requires at least one documentId");
+        }
+        path = "/search/documents";
+        body.documentIds = scope.documentIds;
+        break;
+      }
+      default: {
+        // Exhaustiveness guard — the discriminated union has no other member.
+        const _never: never = scope;
+        throw new Error(`unreachable scope: ${JSON.stringify(_never)}`);
+      }
     }
   }
+
+  // Composable scope filter — applies to EVERY scope shape (project /
+  // portfolio / fund / folder filter-fields). Compiled once via the shared
+  // `compileScopeFilter` (single→{field:v}, multi→$in, multi-field→$and).
+  const scopeFilter = scope ? compileScopeFilter(scope.filter) : null;
 
   // CF-03: compose rbacFilter with scopeFilter via $and. The two are
   // independent constraints from different sources — never collapse
@@ -1012,26 +1022,44 @@ export async function searchGroundX(
   // [REDACTED] for the prompt itself but keep scope info.
   logger.info(
     {
-      groundxSearch: { path, scope: scope.kind, bodyKeys: Object.keys(body), query: body.query, n: body.n, filter: body.filter ?? null },
+      groundxSearch: { path, scope: scope?.type ?? "none", bodyKeys: Object.keys(body), query: body.query, n: body.n, filter: body.filter ?? null },
     },
     "groundx search dispatch",
   );
 
-  const response = await client.forward(path, {
-    method: "POST",
-    apiKey,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "<unreadable>");
-    throw new Error(`groundx search failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`);
-  }
-  const payload = (await response.json()) as {
-    search?: { results?: Array<Record<string, unknown>> };
-    results?: Array<Record<string, unknown>>;
+  const runSearch = async (relevanceFloor?: number): Promise<Array<Record<string, unknown>>> => {
+    const reqBody = relevanceFloor === undefined ? body : { ...body, relevance: relevanceFloor };
+    const response = await client.forward(path, {
+      method: "POST",
+      apiKey,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(reqBody),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "<unreadable>");
+      throw new Error(`groundx search failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`);
+    }
+    const payload = (await response.json()) as {
+      search?: { results?: Array<Record<string, unknown>> };
+      results?: Array<Record<string, unknown>>;
+    };
+    return payload.search?.results ?? payload.results ?? [];
   };
-  const rawResults = payload.search?.results ?? payload.results ?? [];
+
+  let rawResults = await runSearch();
+  // Zero-result retry: extract-indexed docs (searchable text = extraction
+  // JSON) score below GroundX's default relevance floor of 10, so a natural
+  // query returns nothing and the LLM says "no snippets." Retry once with a
+  // low floor to surface the JSON chunks — the grounding prompt already tells
+  // the model to read JSON. Normal (prose) docs clear the default floor on
+  // the first pass, so they never pay this second round-trip.
+  if (rawResults.length === 0 && Number.isFinite(RAG_FALLBACK_RELEVANCE)) {
+    logger.info(
+      { groundxSearchRetry: { path, query: body.query, fallbackRelevance: RAG_FALLBACK_RELEVANCE } },
+      "groundx search: 0 results at default relevance — retrying with low floor",
+    );
+    rawResults = await runSearch(RAG_FALLBACK_RELEVANCE);
+  }
   const mapped: GroundXSearchResult[] = rawResults.map((r) => {
     // WF-03: the deployed API does NOT return a top-level `r.pageNumber`.
     // Page + bbox live in `r.boundingBoxes[]` (px corners + pageNumber) and

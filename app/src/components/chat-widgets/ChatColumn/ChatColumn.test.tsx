@@ -510,6 +510,29 @@ describe("ChatColumn", () => {
       });
     });
 
+    it("P3.c: assistant bubble renders markdown (bold/code), not literal `**`/backticks", async () => {
+      vi.mocked(listChatMessages).mockResolvedValueOnce([
+        { id: "u1", chatSessionId: "md", turnIndex: 1, role: "user", content: "total?", errorCode: null, citations: [] },
+        {
+          id: "a1",
+          chatSessionId: "md",
+          turnIndex: 2,
+          role: "assistant",
+          content: "The total is **$7,613.20** in field `amount_due`.",
+          errorCode: null,
+          citations: [],
+        },
+      ]);
+
+      renderWithOnboardingProviders(<ChatColumn />, { initialFrame: "f2", initialScenario: "utility" });
+
+      const bubble = await screen.findByTestId("onboarding-chat-live-assistant");
+      // bold renders as <strong>, code as <code> — NOT literal markup
+      expect(bubble.querySelector("strong")?.textContent).toBe("$7,613.20");
+      expect(bubble.querySelector("code")?.textContent).toBe("amount_due");
+      expect(bubble.textContent ?? "").not.toContain("**");
+    });
+
     it("filters out system-role rows (UI only renders user + assistant)", async () => {
       vi.mocked(listChatMessages).mockResolvedValueOnce([
         { id: "s1", chatSessionId: "rt-sys", turnIndex: 0, role: "system", content: "system bootstrap", errorCode: null, citations: [] },

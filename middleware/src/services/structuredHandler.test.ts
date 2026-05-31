@@ -169,20 +169,22 @@ describe("runStructuredQuery", () => {
   // still get a frank "sign in" nudge — the data needs an authed
   // customer.
 
-  it("saved_schemas → reads from the extraction_schemas repo and names the schemas", async () => {
-    await repo.upsertExtractionSchema({
+  it("saved_schemas → reads templates (kind=extract) and names them", async () => {
+    await repo.saveTemplate({
       id: "sch-1",
+      kind: "extract",
       groundxUsername: "alice@example.com",
       name: "utility-bill-v2",
-      schemaJson: JSON.stringify({ fields: [] }),
+      bodyJson: JSON.stringify({ categories: [] }),
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    await repo.upsertExtractionSchema({
+    await repo.saveTemplate({
       id: "sch-2",
+      kind: "extract",
       groundxUsername: "alice@example.com",
       name: "loan-applicant",
-      schemaJson: JSON.stringify({ fields: [] }),
+      bodyJson: JSON.stringify({ categories: [] }),
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -473,11 +475,12 @@ describe("runHybridQuery", () => {
     });
 
     it("includes saved-schema count for signed-in users", async () => {
-      await repo.upsertExtractionSchema({
+      await repo.saveTemplate({
         id: "sch-1",
+        kind: "extract",
         groundxUsername: "alice@example.com",
         name: "utility-bill-v2",
-        schemaJson: "{}",
+        bodyJson: '{"categories":[]}',
         createdAt: new Date(),
         updatedAt: new Date(),
       });

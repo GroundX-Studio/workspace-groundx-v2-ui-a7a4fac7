@@ -11,7 +11,8 @@ import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type SyntheticEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { ExtractionSchemaApiError, saveExtractionSchema } from "@/api/extractionSchemas";
+import { TemplateApiError, saveTemplate } from "@/api/templates";
+import type { ExtractBody } from "@groundx/shared";
 import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
 import { extractToValues, workflowToSchema } from "@/api/extractLiveData";
 import { fetchFieldGeometry, type ResolvedFieldGeometry } from "@/api/fieldGeometry";
@@ -41,6 +42,7 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
+import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { track } from "@/lib/analytics";
 import type { ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
@@ -67,8 +69,8 @@ import { SchemaView } from "./SchemaView";
  * Topbar (per `project_dev_contracts.md`):
  *   `export ▾ 🔒 · ↻ rerun · ✎ edit schema ▾ · 💾 Save 🔒`
  * The padlock icons are locked-for-anon affordances; Save reuses the
- * `saveExtractionSchema` path against the auth-gated
- * `POST /api/extraction-schemas`. `✎ edit schema` switches Results ↔
+ * `saveTemplate` path against the auth-gated
+ * `POST /api/templates`. `✎ edit schema` switches Results ↔
  * Design (F3 ↔ F3a). `↻ rerun` is a topbar-level rerun (per-field
  * rerun stays inside the Design surface's inline editor).
  *
@@ -90,13 +92,14 @@ function mintTemplateId(): string {
  * Merge the per-session overlay onto the manifest extraction-schema for
  * Save. Mirrors SchemaView's render-time merge so the persisted
  * "template" is the same shape the user sees on canvas. Returns a
- * plain object the saveExtractionSchema helper sends as JSON.
+ * typed `ExtractBody` the saveTemplate helper sends as the Template body.
  */
 function mergeOverlayForSave(
   manifestSchema: import("@/types/scenarios").ExtractionSchemaDef,
   overlay: import("@/contexts/ChatStoreContext/types").PendingSchemaOverlay | null,
-): Record<string, unknown> {
-  if (!overlay) return manifestSchema as unknown as Record<string, unknown>;
+): ExtractBody {
+  // The Template body is just the categories tree (the row owns id/name).
+  if (!overlay) return { categories: manifestSchema.categories };
   const known = new Set(manifestSchema.categories.map((c) => c.id));
   const orphanAdditions = overlay.addedFields.filter((a) => !known.has(a.categoryId));
   const categories = manifestSchema.categories.map((cat) => {
@@ -128,8 +131,20 @@ function mergeOverlayForSave(
       })),
     });
   }
-  return { ...manifestSchema, categories } as unknown as Record<string, unknown>;
+  return { categories };
 }
+
+// Shared section-label style for the field-detail (provenance) panel — a
+// quiet uppercase eyebrow so the content under each label is the focus.
+const detailLabelSx = {
+  display: "block",
+  color: MUTED_ON_LIGHT,
+  fontWeight: FONT_WEIGHT_LABEL,
+  fontSize: FONT_SIZE_LABEL,
+  letterSpacing: 0.6,
+  textTransform: "uppercase",
+} as const;
+
 export const ExtractView: FC = () => {
   // All hooks must run before any conditional return. Otherwise the render
   // order diverges when the active scenario flips to one without a schema
@@ -242,8 +257,8 @@ export const ExtractView: FC = () => {
   //   - ✎ edit schema ▾ — toggles Results (F3) ↔ Design (F3a). The
   //                   chevron is reserved for a future "load saved
   //                   schema" dropdown.
-  //   - 💾 Save     — `saveExtractionSchema` against the auth-gated
-  //                   `/api/extraction-schemas` endpoint. Reuses
+  //   - 💾 Save     — `saveTemplate` against the auth-gated
+  //                   `/api/templates` endpoint. Reuses
   //                   SchemaView's prior save flow verbatim.
   const isAuthed = appMode.authState === "signed-in";
   const isDesignSurface = session.currentFrame === "f3a";
@@ -273,10 +288,11 @@ export const ExtractView: FC = () => {
       // re-build here because ExtractView is the surface that owns
       // Save now and needs the same merge logic visible to it.
       const merged = mergeOverlayForSave(schema, overlay ?? null);
-      await saveExtractionSchema({
+      await saveTemplate({
         id: templateIdRef.current,
+        kind: "extract",
         name: `${schema.name} (custom)`,
-        schema: merged,
+        body: merged,
       });
       setSaveStatus("saved");
       // `master-viewer-session` Phase 5 — pre-attach is a viewer-step
@@ -291,7 +307,7 @@ export const ExtractView: FC = () => {
         appendAgentMessage(`Schema attached: ${schemaName}`);
       }
     } catch (err) {
-      if (err instanceof ExtractionSchemaApiError && err.status === 401) {
+      if (err instanceof TemplateApiError && err.status === 401) {
         // `f3a-save-signin-gate-handoff`: anonymous user. Open F6 inline
         // with a `save-schema` cause so the post-commit effect knows
         // to retry the save + advance to F1 with the schema pre-attached.
@@ -330,10 +346,11 @@ export const ExtractView: FC = () => {
     (async () => {
       try {
         const merged = mergeOverlayForSave(schema!, overlay ?? null);
-        await saveExtractionSchema({
+        await saveTemplate({
           id: templateIdRef.current!,
+          kind: "extract",
           name: `${schema!.name} (custom)`,
-          schema: merged,
+          body: merged,
         });
         setSaveStatus("saved");
         // `master-viewer-session` Phase 5 — advance the legacy frame
@@ -416,10 +433,27 @@ export const ExtractView: FC = () => {
   }, [schema, primaryDocId]);
 
   if (!schema) {
+    // `chapters.extract === "off"` is the only state that genuinely has no
+    // extract (Solar = Interact + Report only). For every other scenario the
+    // schema arrives from the async GroundX workflow fetch — so a null schema
+    // means "still loading," NOT "skips extract." Without this split the
+    // skips-extract copy flashed on every Extract load before live data
+    // resolved (e.g. the Utility sample, which does extract).
+    const skipsExtract = scenario?.manifest.hero.chapters.extract === "off";
+    if (skipsExtract) {
+      return (
+        <Box sx={{ p: 4 }}>
+          <Typography variant="body1" sx={{ color: BODY_TEXT }}>
+            This sample skips extract — it's an Interact + Report sample. Try the chat instead.
+          </Typography>
+        </Box>
+      );
+    }
     return (
-      <Box sx={{ p: 4 }}>
-        <Typography variant="body1" sx={{ color: BODY_TEXT }}>
-          This sample skips extract — it's an Interact + Report sample. Try the chat instead.
+      <Box sx={{ p: 4, display: "flex", alignItems: "center", gap: 1.5 }} data-testid="extract-loading">
+        <LoadingDots size={6} aria-label="Reading the extraction" />
+        <Typography variant="body2" sx={{ color: MUTED_ON_LIGHT }}>
+          Reading the extraction…
         </Typography>
       </Box>
     );
@@ -502,31 +536,36 @@ export const ExtractView: FC = () => {
           // pane widths (974px viewport ÷ 280px chat = 694px canvas).
           sx={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden" }}
         >
-          {/* ← back returns to F3. On F3 the link is rendered but
-              advancing to F3 is a no-op; keeping it always-present
-              keeps the topbar geometry stable across F3 ↔ F3a. */}
-          <Box
-            component="button"
-            type="button"
-            data-testid="extract-topbar-back"
-            onClick={handleBack}
-            aria-label="Back to extract"
-            sx={{
-              border: "none",
-              background: "none",
-              color: NAVY,
-              cursor: "pointer",
-              fontFamily: "inherit",
-              fontSize: FONT_SIZE_LABEL,
-              fontWeight: FONT_WEIGHT_LABEL,
-              padding: 0,
-              flexShrink: 0,
-              "&:hover": { textDecoration: "underline" },
-            }}
-          >
-            ← back
-          </Box>
-          <Box sx={{ width: 1, height: 18, backgroundColor: BORDER, flexShrink: 0 }} />
+          {/* `← back` only renders on the F3a Design surface, where it
+              returns to F3 (Results). On F3 there is nowhere to go back to,
+              so it was a dead no-op control — hidden to avoid the "button
+              that does nothing" confusion on initial Extract load. */}
+          {isDesignSurface && (
+            <>
+              <Box
+                component="button"
+                type="button"
+                data-testid="extract-topbar-back"
+                onClick={handleBack}
+                aria-label="Back to extract"
+                sx={{
+                  border: "none",
+                  background: "none",
+                  color: NAVY,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: FONT_SIZE_LABEL,
+                  fontWeight: FONT_WEIGHT_LABEL,
+                  padding: 0,
+                  flexShrink: 0,
+                  "&:hover": { textDecoration: "underline" },
+                }}
+              >
+                ← back
+              </Box>
+              <Box sx={{ width: "1px", height: 18, backgroundColor: BORDER, flexShrink: 0 }} />
+            </>
+          )}
           {/* Designing <sample-id> · <category-id> + version chip */}
           <Typography
             variant="body1"
@@ -663,7 +702,7 @@ export const ExtractView: FC = () => {
             gridTemplateColumns: { xs: "1fr", md: "1.2fr 1fr" },
             gridTemplateRows: "auto 1fr",
             gap: 2,
-            p: { xs: 2, md: 4 },
+            p: { xs: 1.5, md: 2 },
             overflow: "hidden",
           }}
         >
@@ -692,7 +731,6 @@ export const ExtractView: FC = () => {
         sx={{
           minHeight: 0,
           overflow: "hidden",
-          border: `1px solid ${BORDER}`,
           borderRadius: BORDER_RADIUS_CARD,
           backgroundColor: WHITE,
           display: "flex",
@@ -777,51 +815,88 @@ export const ExtractView: FC = () => {
             </Box>
           </Stack>
 
-          <Stack spacing={2}>
-            <Box>
-              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
-                FIELD
-              </Typography>
-              <Typography variant="body2" sx={{ fontFamily: "monospace", color: NAVY, mt: 0.5 }}>
+          <Stack spacing={2.25}>
+            {/* Value hero — the extracted value is the headline; the field
+                id + type read as supporting metadata. */}
+            <Box
+              sx={{
+                p: 2,
+                borderRadius: BORDER_RADIUS_CARD,
+                backgroundColor: alpha(NAVY, 0.04),
+                border: `1px solid ${alpha(NAVY, 0.08)}`,
+              }}
+            >
+              <Typography sx={detailLabelSx}>FIELD</Typography>
+              <Typography
+                sx={{
+                  fontFamily: "monospace",
+                  fontSize: FONT_SIZE_LABEL,
+                  color: MUTED_ON_LIGHT,
+                  mt: 0.75,
+                }}
+              >
                 {selectedField.id}
               </Typography>
-              <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-                {selectedField.name} · {selectedField.type}
-              </Typography>
-              <Typography variant="h6" sx={{ color: NAVY, mt: 0.5, fontFamily: "monospace" }}>
+              <Typography
+                sx={{
+                  color: NAVY,
+                  fontWeight: FONT_WEIGHT_HEADLINE,
+                  fontFamily: "monospace",
+                  fontSize: "1.25rem",
+                  lineHeight: 1.3,
+                  mt: 0.25,
+                  wordBreak: "break-word",
+                }}
+              >
                 {selectedValue?.value === undefined || selectedValue?.value === null
                   ? "—"
                   : String(selectedValue.value)}
               </Typography>
+              <Typography sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, mt: 0.5 }}>
+                {selectedField.name} · {selectedField.type}
+              </Typography>
             </Box>
 
             <Box>
-              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
-                SOURCE
-              </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
+              <Typography sx={detailLabelSx}>SOURCE</Typography>
+              <Stack spacing={0.75} sx={{ mt: 0.75 }}>
                 {(selectedValue?.citations ?? []).map((c, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{
-                      p: 1,
-                      borderRadius: BORDER_RADIUS_SM,
-                      border: `1px solid ${BORDER}`,
-                      fontSize: FONT_SIZE_LABEL,
-                      color: NAVY,
-                      fontFamily: "monospace",
-                    }}
-                  >
-                    page {c.page}
+                  <Box key={idx}>
+                    <Box
+                      component="span"
+                      sx={{
+                        display: "inline-block",
+                        px: 1,
+                        py: 0.25,
+                        borderRadius: BORDER_RADIUS_PILL,
+                        backgroundColor: alpha(CYAN, 0.22),
+                        border: `1px solid ${alpha(CYAN, 0.5)}`,
+                        color: NAVY,
+                        fontSize: FONT_SIZE_LABEL,
+                        fontWeight: FONT_WEIGHT_LABEL,
+                      }}
+                    >
+                      page {c.page}
+                    </Box>
                     {c.snippet ? (
-                      <Box component="span" sx={{ color: BODY_TEXT, ml: 0.5 }}>
-                        — {c.snippet.slice(0, 60)}
-                      </Box>
+                      <Typography
+                        sx={{
+                          mt: 0.5,
+                          pl: 1.25,
+                          borderLeft: `2px solid ${alpha(CYAN, 0.5)}`,
+                          color: BODY_TEXT,
+                          fontSize: FONT_SIZE_CAPTION,
+                          fontStyle: "italic",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        “{c.snippet.trim().slice(0, 90)}”
+                      </Typography>
                     ) : null}
                   </Box>
                 ))}
                 {(selectedValue?.citations ?? []).length === 0 ? (
-                  <Typography variant="caption" sx={{ color: BODY_TEXT }}>
+                  <Typography sx={{ color: MUTED_ON_LIGHT, fontSize: FONT_SIZE_CAPTION }}>
                     No source citations on this field.
                   </Typography>
                 ) : null}
@@ -829,51 +904,86 @@ export const ExtractView: FC = () => {
             </Box>
 
             <Box>
-              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
-                WHY MATCHED
-              </Typography>
-              <Typography variant="body2" sx={{ color: BODY_TEXT, mt: 0.5 }}>
+              <Typography sx={detailLabelSx}>WHY MATCHED</Typography>
+              <Typography sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, lineHeight: 1.5, mt: 0.75 }}>
                 {selectedField.description}
               </Typography>
             </Box>
 
             <Box>
-              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
-                CONFIDENCE
-              </Typography>
-              <Typography variant="body2" sx={{ color: NAVY, mt: 0.5, fontFamily: "monospace" }}>
-                {/* The sample `ExtractedFieldValue` fixtures don't carry a
-                    confidence score; show "—". Live extraction can populate
-                    this once the value shape gains a confidence field. */}
-                —
-              </Typography>
+              <Typography sx={detailLabelSx}>CONFIDENCE</Typography>
+              {/* The sample `ExtractedFieldValue` fixtures don't carry a
+                  confidence score yet — render a graceful "not scored" pill
+                  instead of a bare em-dash. Live extraction can swap this for
+                  a real meter once the value shape gains a confidence field. */}
+              <Box
+                component="span"
+                sx={{
+                  display: "inline-block",
+                  mt: 0.75,
+                  px: 1,
+                  py: 0.25,
+                  borderRadius: BORDER_RADIUS_PILL,
+                  backgroundColor: alpha(NAVY, 0.06),
+                  color: MUTED_ON_LIGHT,
+                  fontSize: FONT_SIZE_LABEL,
+                  fontWeight: FONT_WEIGHT_LABEL,
+                }}
+              >
+                Not scored yet
+              </Box>
             </Box>
 
             <Box>
-              <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, letterSpacing: 0.5 }}>
-                NEIGHBORS
-              </Typography>
-              <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+              <Typography sx={detailLabelSx}>NEIGHBORS</Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
                 {(() => {
                   const cat = schema.categories.find((c) => c.fields.some((f) => f.id === selectedField.id));
                   const neighbors = (cat?.fields ?? []).filter((f) => f.id !== selectedField.id).slice(0, 3);
                   if (neighbors.length === 0) {
                     return (
-                      <Typography variant="caption" sx={{ color: BODY_TEXT }}>
+                      <Typography sx={{ color: MUTED_ON_LIGHT, fontSize: FONT_SIZE_CAPTION }}>
                         No neighbors in this category.
                       </Typography>
                     );
                   }
-                  return neighbors.map((n) => (
-                    <Typography
-                      key={n.id}
-                      variant="caption"
-                      sx={{ color: NAVY, fontFamily: "monospace", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
-                      onClick={() => setSelectedFieldId(n.id)}
-                    >
-                      {n.id} · {valuesByFieldId.get(n.id)?.value === undefined ? "—" : String(valuesByFieldId.get(n.id)?.value)}
-                    </Typography>
-                  ));
+                  return neighbors.map((n) => {
+                    const nv = valuesByFieldId.get(n.id)?.value;
+                    return (
+                      <Box
+                        key={n.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedFieldId(n.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedFieldId(n.id);
+                          }
+                        }}
+                        sx={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 0.5,
+                          px: 1,
+                          py: 0.375,
+                          borderRadius: BORDER_RADIUS_PILL,
+                          border: `1px solid ${BORDER}`,
+                          backgroundColor: WHITE,
+                          color: NAVY,
+                          fontFamily: "monospace",
+                          fontSize: FONT_SIZE_LABEL,
+                          cursor: "pointer",
+                          "&:hover": { borderColor: NAVY, backgroundColor: alpha(NAVY, 0.04) },
+                        }}
+                      >
+                        {n.id}
+                        <Box component="span" sx={{ color: MUTED_ON_LIGHT }}>
+                          {nv === undefined || nv === null ? "—" : String(nv).slice(0, 18)}
+                        </Box>
+                      </Box>
+                    );
+                  });
                 })()}
               </Stack>
             </Box>
@@ -881,29 +991,31 @@ export const ExtractView: FC = () => {
         </Box>
       ) : (
       <Box data-testid="extract-fields-panel" sx={{ overflow: "auto" }}>
-        {/* Fields-panel header — hamburger menu opens Save schema… /
-            Edit schema… per the F3a entry-point spec. The hamburger
-            renders only when a real schema is present; F4-only flows
-            keep their topbar-driven navigation. */}
-        <FieldsPanelMenu />
-        {/* WF-01 C7 (2026-05-28). Category tabs row — one tab per
-            category in the active schema, label = `{name} · {n}`. The
-            click handler scrolls the corresponding category Card into
-            view; we don't hide siblings (matches the spec's "tabs as
-            jump-links" behavior on a single scrolling fields list). */}
-        {!supportsJsonRender && schema.categories.length > 1 ? (
-          <Box
-            data-testid="extract-category-tabs"
-            sx={{
-              display: "flex",
-              gap: 0.5,
-              flexWrap: "wrap",
-              mb: 1.5,
-              borderBottom: `1px solid ${BORDER}`,
-              pb: 0.75,
-            }}
-          >
-            {schema.categories.map((category) => (
+        {/* Fields-panel header — category tabs (left) + the ⋮ menu floating
+            right, on ONE row (the ⋮ no longer offsets the tabs downward).
+            WF-01 C7: tabs are jump-links to each category card. */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            mb: 1.5,
+            borderBottom: `1px solid ${BORDER}`,
+            pb: 0.75,
+          }}
+        >
+          {!supportsJsonRender && schema.categories.length > 1 ? (
+            <Box
+              data-testid="extract-category-tabs"
+              sx={{
+                display: "flex",
+                gap: 0.5,
+                flexWrap: "wrap",
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              {schema.categories.map((category) => (
               <Box
                 key={category.id}
                 role="button"
@@ -926,6 +1038,7 @@ export const ExtractView: FC = () => {
                   py: 0.5,
                   borderRadius: BORDER_RADIUS_PILL,
                   border: `1px solid ${alpha(NAVY, 0.18)}`,
+                  backgroundColor: WHITE,
                   cursor: "pointer",
                   color: NAVY,
                   fontSize: FONT_SIZE_LABEL,
@@ -942,9 +1055,13 @@ export const ExtractView: FC = () => {
                   · {category.fields.length}
                 </Box>
               </Box>
-            ))}
-          </Box>
-        ) : null}
+              ))}
+            </Box>
+          ) : (
+            <Box sx={{ flex: 1 }} />
+          )}
+          <FieldsPanelMenu />
+        </Box>
         {supportsJsonRender && renderMode === "json" ? (
           <Box
             component="pre"
@@ -1000,37 +1117,71 @@ export const ExtractView: FC = () => {
                     }}
                     sx={{
                       display: "grid",
-                      gridTemplateColumns: "1fr auto",
-                      gap: 1,
-                      p: 1.25,
+                      gridTemplateColumns: "minmax(0, 1fr) auto",
+                      // Generous gutter + top-align so the value never crowds
+                      // the (wrapping) description — the readability fix.
+                      columnGap: 3,
+                      alignItems: "start",
+                      p: 1.5,
                       borderRadius: BORDER_RADIUS,
                       cursor: "pointer",
                       backgroundColor: selectedFieldId === field.id ? alpha(GREEN, 0.12) : "transparent",
                       "&:hover": { backgroundColor: alpha(GREEN, 0.08) },
                     }}
                   >
-                    <Stack spacing={0.25}>
-                      {/* WF-01 C8 (2026-05-28). Per canonical, field rows
-                          show the snake_case key in monospace as the
-                          primary identifier; the human-readable label
-                          and description trail as secondary text. */}
+                    <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                      {/* WF-01 C8: snake_case key (mono) is the primary id;
+                          label + description trail as secondary text. The
+                          description is clamped + muted so it recedes behind
+                          the value. */}
                       <Typography
                         variant="body2"
                         sx={{ color: NAVY, fontWeight: FONT_WEIGHT_HEADLINE, fontFamily: "monospace" }}
                       >
                         {field.id}
                       </Typography>
-                      <Typography variant="caption" sx={{ color: BODY_TEXT }}>
-                        {field.name} — {field.description}
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: MUTED_ON_LIGHT,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <Box component="span" sx={{ color: BODY_TEXT, fontWeight: FONT_WEIGHT_LABEL }}>
+                          {field.name}
+                        </Box>{" "}
+                        — {field.description}
                       </Typography>
                     </Stack>
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <Typography variant="body2" sx={{ fontFamily: "monospace", color: NAVY, fontWeight: FONT_WEIGHT_HEADLINE }}>
+                    <Stack spacing={0.5} alignItems="flex-end" sx={{ flexShrink: 0, maxWidth: 180 }}>
+                      {/* The extracted value as a distinct token — a subtle
+                          tinted chip, clearly set apart from the description. */}
+                      <Box
+                        sx={{
+                          px: 1,
+                          py: 0.5,
+                          borderRadius: BORDER_RADIUS_SM,
+                          backgroundColor: value === undefined || value === null ? "transparent" : alpha(NAVY, 0.05),
+                          fontFamily: "monospace",
+                          fontSize: FONT_SIZE_LABEL,
+                          fontWeight: FONT_WEIGHT_HEADLINE,
+                          color: NAVY,
+                          textAlign: "right",
+                          wordBreak: "break-word",
+                        }}
+                      >
                         {value === undefined || value === null ? "—" : String(value)}
-                      </Typography>
-                      {citations.map((c, idx) => (
-                        <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} color="coral" />
-                      ))}
+                      </Box>
+                      {citations.length > 0 && (
+                        <Stack direction="row" spacing={0.5}>
+                          {citations.map((c, idx) => (
+                            <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} />
+                          ))}
+                        </Stack>
+                      )}
                     </Stack>
                   </Box>
                 );
@@ -1108,7 +1259,20 @@ export const ExtractView: FC = () => {
               <Box component="span" sx={{ fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_LABEL }}>
                 🔒 Locked behind sign-in: locked fields · CSV / JSON export · save · upload your own docs
               </Box>
-              <Box component="span" sx={{ fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_HEADLINE, color: GREEN }}>
+              <Box
+                component="span"
+                sx={{
+                  flexShrink: 0,
+                  px: 1.5,
+                  py: 0.5,
+                  borderRadius: BORDER_RADIUS_PILL,
+                  backgroundColor: GREEN,
+                  color: NAVY,
+                  fontSize: FONT_SIZE_LABEL,
+                  fontWeight: FONT_WEIGHT_HEADLINE,
+                  whiteSpace: "nowrap",
+                }}
+              >
                 Sign in to unlock →
               </Box>
             </Box>
@@ -1300,6 +1464,10 @@ const PinnedSamplesRow: FC<PinnedSamplesRowProps> = ({
  */
 const FieldsPanelMenu: FC = () => {
   const { advanceFrame } = useOnboardingSession();
+  // Save is sign-in-gated — mirror the topbar Save button's lock so the
+  // menu can't offer a path the anon user can't complete.
+  const { state: appMode } = useAppMode();
+  const isAuthed = appMode.authState === "signed-in";
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = anchorEl != null;
   const handleOpen = useCallback((event: React.MouseEvent<HTMLElement>) => {
@@ -1318,13 +1486,13 @@ const FieldsPanelMenu: FC = () => {
     setAnchorEl(null);
   }, [advanceFrame]);
   return (
-    <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
+    <>
       <IconButton
         data-testid="extract-fields-panel-hamburger"
         onClick={handleOpen}
         aria-label="Fields panel menu"
         size="small"
-        sx={{ color: NAVY }}
+        sx={{ color: NAVY, flexShrink: 0 }}
       >
         <Box component="span" aria-hidden sx={{ fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_HEADLINE }}>
           ⋮
@@ -1334,8 +1502,15 @@ const FieldsPanelMenu: FC = () => {
         <MenuItem
           data-testid="extract-fields-panel-menu-save-schema"
           onClick={handleSave}
+          disabled={!isAuthed}
+          sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}
         >
           Save schema…
+          {!isAuthed ? (
+            <Box component="span" aria-hidden sx={{ fontSize: FONT_SIZE_LABEL, color: MUTED_ON_LIGHT }}>
+              🔒
+            </Box>
+          ) : null}
         </MenuItem>
         <MenuItem
           data-testid="extract-fields-panel-menu-edit-schema"
@@ -1344,7 +1519,7 @@ const FieldsPanelMenu: FC = () => {
           Edit schema…
         </MenuItem>
       </Menu>
-    </Stack>
+    </>
   );
 };
 

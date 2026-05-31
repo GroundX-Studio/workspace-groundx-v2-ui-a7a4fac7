@@ -1,8 +1,8 @@
 import { Metadata } from "@/api/common";
 
-export interface SdkMessageResponse {
-  message: string;
-}
+// (Removed the unused `SdkMessageResponse` — it had zero callers and was an
+// exact duplicate of `MessageResponse` in `@/api/common`, which is the one
+// the ~20 entity wrappers actually use.)
 
 export interface SdkListResponse<T, _K extends string> {
   count?: number;

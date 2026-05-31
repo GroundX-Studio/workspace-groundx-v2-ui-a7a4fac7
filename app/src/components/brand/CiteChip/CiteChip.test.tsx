@@ -35,7 +35,7 @@ describe("CiteChip", () => {
     renderWithOnboardingProviders(<CiteChip citation={citation} index={2} />);
 
     const chip = screen.getByTestId("cite-chip-2");
-    expect(chip).toHaveTextContent("[2]");
+    expect(chip).toHaveTextContent("2");
     expect(chip).toHaveAttribute("data-citation-doc", "utility-bill-2026-04");
     expect(chip).toHaveAttribute("data-citation-page", "3");
     expect(screen.getByLabelText(/Citation 2/)).toBeInTheDocument();

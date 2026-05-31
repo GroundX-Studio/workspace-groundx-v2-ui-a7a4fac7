@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import { utilityTestScenario } from "@/test/scenarioFixtures";
+import type { ScenarioConfig } from "@/types/scenarios";
 
 import { ExtractView } from "./ExtractView";
 
@@ -75,13 +77,14 @@ describe("ExtractView (F3/F4)", () => {
     expect(row.textContent ?? "").toMatch(/account_number/);
   });
 
-  it("WF-01 C8: F3 cite chip carries coral background", () => {
+  it("WF-01 C8: F3 field row renders a citation chip", () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
     // Utility schema's account_number field has one citation → cite-chip-1
-    // inside that field row.
+    // inside that field row. (2026-05-29: dropped the harsh coral background
+    // — field citations use the default neutral chip now.)
     const row = screen.getByTestId("field-row-account_number");
     const chip = within(row).getByTestId("cite-chip-1");
-    expect(chip).toHaveAttribute("data-color", "coral");
+    expect(chip).toHaveAttribute("data-color", "cyan");
   });
 
   // WF-01 C9 (2026-05-28). Clicking a field card in F3 SHALL swap the
@@ -180,6 +183,28 @@ describe("ExtractView (F3/F4)", () => {
     expect(screen.queryByTestId("advance-to-f5")).not.toBeInTheDocument();
   });
 
+  it("shows a loading beat (NOT the skips-extract copy) when an extract scenario's schema hasn't resolved yet", () => {
+    // A scenario whose `chapters.extract` is "live" but with no manifest
+    // extractionSchema mirrors the production Utility sample mid-load, where
+    // the schema arrives from the async GroundX workflow fetch. The
+    // skips-extract message must NOT flash here.
+    const loadingScenario: ScenarioConfig = {
+      ...utilityTestScenario,
+      manifest: {
+        ...utilityTestScenario.manifest,
+        extractionSchema: undefined,
+      },
+    };
+    renderWithOnboardingProviders(<ExtractView />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      initialScenarios: [loadingScenario],
+    });
+
+    expect(screen.getByTestId("extract-loading")).toBeInTheDocument();
+    expect(screen.queryByText(/This sample skips extract/)).not.toBeInTheDocument();
+  });
+
   it("advances from Extract to Interact", async () => {
     const user = userEvent.setup();
     let frame = "";
@@ -199,12 +224,13 @@ describe("ExtractView (F3/F4)", () => {
 
   // ── Workbench-shell topbar (spec: project_dev_contracts.md) ─────────
 
-  it("renders the workbench shell topbar on F3 with ← back · Designing… · v draft · export · rerun · save (no edit-schema toggle)", () => {
+  it("renders the workbench shell topbar on F3 with Designing… · v draft · export · rerun · save (no ← back, no edit-schema toggle)", () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
     expect(screen.getByTestId("extract-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("extract-topbar")).toBeInTheDocument();
-    // Per realign-f3a-topbar-chrome: ← back leads the bar.
-    expect(screen.getByTestId("extract-topbar-back")).toBeInTheDocument();
+    // `← back` is hidden on F3 — it only returns from F3a to F3, so on the
+    // initial Extract surface it would be a dead no-op control.
+    expect(screen.queryByTestId("extract-topbar-back")).not.toBeInTheDocument();
     // Title block: `Designing <sample-id> · <category-id>` — for the
     // utility scenario the sample id is `utility` and the default
     // category id is the schema's first category (`statement`).
@@ -306,7 +332,11 @@ describe("ExtractView (F3/F4)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("extract-fields-panel-menu-edit-schema")).toBeInTheDocument(),
     );
-    expect(screen.getByTestId("extract-fields-panel-menu-save-schema")).toBeInTheDocument();
+    // Save schema is sign-in-gated in onboarding (anon) — present but
+    // disabled, mirroring the topbar Save button's lock.
+    const saveItem = screen.getByTestId("extract-fields-panel-menu-save-schema");
+    expect(saveItem).toBeInTheDocument();
+    expect(saveItem).toHaveAttribute("aria-disabled", "true");
     // Clicking Edit schema advances the frame to F3a.
     await user.click(screen.getByTestId("extract-fields-panel-menu-edit-schema"));
     await waitFor(() => expect(frame).toBe("f3a"));

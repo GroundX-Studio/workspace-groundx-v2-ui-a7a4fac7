@@ -11,12 +11,14 @@
  */
 
 import { csrfFetch } from "@/api/csrfFetch";
+import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
 import { captureException } from "@/lib/sentry";
 
 export interface RecordIntentInput {
   chatSessionId: string;
   source: "user" | "agent" | "tour" | "system";
-  intent: Record<string, unknown>;
+  /** The dispatched canvas intent (always a structured `CanvasIntent`). */
+  intent: CanvasIntent;
 }
 
 export async function recordIntent(input: RecordIntentInput): Promise<void> {

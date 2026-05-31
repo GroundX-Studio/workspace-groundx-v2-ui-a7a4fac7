@@ -19,27 +19,28 @@ export type GateTrigger = "save" | "export" | "byo" | "threshold";
 export type AuthState = "anonymous" | "signed-in";
 
 /**
- * ContentScope — what set of documents an extraction or chat call applies to.
- * Always one of: a whole bucket, a group, or an explicit list of documents.
- * See `project-groundx-types` memory.
+ * ContentScope — what set of documents an extraction / chat / report call
+ * applies to: a whole bucket, a group, or an explicit list of documents, each
+ * with an optional composable `filter` (project/portfolio/fund/folder
+ * filter-fields). Now the single shared wire contract (`@groundx/shared`) —
+ * the middleware consumes the same shape (was the diverged `RagContentScope`).
+ * Re-exported here so existing `@/types/onboarding` imports keep resolving.
  */
-export type ContentScope =
-  | { type: "bucket"; bucketId: number }
-  | { type: "group"; groupId: number }
-  | { type: "documents"; documentIds: string[] };
+export type { ContentScope, ScopeFilter } from "@groundx/shared";
 
-export interface Citation {
-  /** Source document ID. */
-  documentId: string;
-  /** 1-indexed page number. */
-  page: number;
-  /** Optional bounding box on the page in normalized coords (0-1). */
-  bbox?: { x: number; y: number; w: number; h: number };
-  /** Snippet text shown in the peek. */
-  snippet?: string;
-  /** Confidence score 0-1, optional. */
-  confidence?: number;
-}
+/**
+ * WF-06 / WF-06b — graduated source-attribution precision.
+ *   exact      verified verbatim quote + atom box → tight word-level highlight
+ *   paraphrase verified quote → chunk-region highlight (translucent, lower-confidence)
+ *   ambient    unverified / retrieved-only → source chip, no inline span
+ * The middleware emits `paraphrase`/`ambient` today; `exact` is dormant
+ * until WF-05 1b's `-118-map` atom resolver lands. The render handles all
+ * three regardless, so `exact` lights up automatically once it ships.
+ */
+// `Citation`, `CitationTier`, and `NormalizedBbox` now live in the shared wire
+// contract (`@groundx/shared`, schema-as-source-of-truth). Re-exported here so
+// existing `@/types/onboarding` imports keep resolving unchanged.
+export type { Citation, CitationTier, NormalizedBbox } from "@groundx/shared";
 
 export interface UsageCounters {
   /** Pages of BYO docs ingested in the pre-signin session. */

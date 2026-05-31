@@ -1,7 +1,9 @@
 /**
  * Scenario types — frontend mirror of middleware/src/scenarios/types.ts.
- * Keep byte-identical with the middleware definitions; the two files exist
- * because there is no shared workspace.
+ * Keep these in sync with the middleware definitions. Citations use the shared
+ * `Citation` (`@groundx/shared`) directly; the remaining scenario shapes are
+ * still hand-mirrored — folding them into `@groundx/shared` is a tracked task
+ * in the `core-data-model-hardening` change.
  */
 
 export interface ScenarioHero {
@@ -69,25 +71,21 @@ export interface ChatSeed {
   rationale: string;
 }
 
-export interface ScenarioCitation {
-  documentId: string;
-  page: number;
-  bbox?: { x: number; y: number; w: number; h: number };
-  snippet?: string;
-  confidence?: number;
-}
+// A scenario fixture citation IS the shared `Citation` (`@groundx/shared`) —
+// used directly (no `ScenarioCitation` alias).
+import type { Citation } from "@groundx/shared";
 
 export interface ExtractedFieldValue {
   fieldId: string;
   value: string | number | boolean | null;
-  citations: ScenarioCitation[];
+  citations: Citation[];
 }
 
 export interface SampleChatTurn {
   id: string;
   role: "user" | "assistant";
   content: string;
-  citations?: ScenarioCitation[];
+  citations?: Citation[];
 }
 
 export interface ScenarioManifest {

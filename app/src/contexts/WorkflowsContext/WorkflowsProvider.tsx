@@ -1,7 +1,7 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
 import { api } from "@/api";
-import { GroundXRequestOptions } from "@/api/common";
+import { RequestOptions } from "@/api/common";
 import { WorkflowInput, WorkflowRelationshipInput } from "@/api/entities/groundxWorkflowsEntity";
 import { Workflow } from "@/api/entities/sdkTypes";
 import { useIsLoading } from "@/contexts/LoadingContext";
@@ -37,7 +37,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const listWorkflows = useCallback(
-    (options?: GroundXRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.listGroundXWorkflows(options);
         setWorkflows(response.workflows);
@@ -47,7 +47,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const createWorkflow = useCallback(
-    (input: WorkflowInput, options?: GroundXRequestOptions) =>
+    (input: WorkflowInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.createGroundXWorkflow(input, options);
         setWorkflows((items) => [response.workflow, ...items]);
@@ -57,7 +57,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const getWorkflow = useCallback(
-    (id: string | number, options?: GroundXRequestOptions) =>
+    (id: string | number, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.getGroundXWorkflow(id, options);
         setSelectedWorkflow(response.workflow);
@@ -67,7 +67,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const updateWorkflow = useCallback(
-    (id: string | number, input: WorkflowInput, options?: GroundXRequestOptions) =>
+    (id: string | number, input: WorkflowInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.updateGroundXWorkflow(id, input, options);
         setWorkflows((items) => items.map((item) => (item.workflowId === String(id) ? response.workflow : item)));
@@ -78,7 +78,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const deleteWorkflow = useCallback(
-    (id: string | number, options?: GroundXRequestOptions) =>
+    (id: string | number, options?: RequestOptions) =>
       run(async () => {
         await api.groundxWorkflows.deleteGroundXWorkflow(id, options);
         setWorkflows((items) => items.filter((item) => item.workflowId !== String(id)));
@@ -88,7 +88,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const getAccountWorkflow = useCallback(
-    (options?: GroundXRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.getGroundXAccountWorkflow(options);
         setAccountWorkflow(response.workflow);
@@ -98,7 +98,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const assignAccountWorkflow = useCallback(
-    (input: WorkflowRelationshipInput, options?: GroundXRequestOptions) =>
+    (input: WorkflowRelationshipInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.assignGroundXAccountWorkflow(input, options);
         setAccountWorkflow(response.workflow);
@@ -108,7 +108,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const removeAccountWorkflow = useCallback(
-    (options?: GroundXRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         await api.groundxWorkflows.removeGroundXAccountWorkflow(options);
         setAccountWorkflow(null);
@@ -117,13 +117,13 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const assignWorkflowToResource = useCallback(
-    (id: string | number, input: WorkflowRelationshipInput, options?: GroundXRequestOptions) =>
+    (id: string | number, input: WorkflowRelationshipInput, options?: RequestOptions) =>
       run(async () => (await api.groundxWorkflows.assignGroundXWorkflowToResource(id, input, options)).workflow, "Workflow assigned."),
     [run]
   );
 
   const removeWorkflowFromResource = useCallback(
-    (id: string | number, options?: GroundXRequestOptions) =>
+    (id: string | number, options?: RequestOptions) =>
       run(async () => {
         await api.groundxWorkflows.removeGroundXWorkflowFromResource(id, options);
       }, "Workflow removed."),

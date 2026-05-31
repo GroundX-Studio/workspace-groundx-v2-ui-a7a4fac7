@@ -1,5 +1,10 @@
 import type { EntityKey, EntityKind, EntitySession } from "@/contexts/EntityRegistryContext";
 import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
+// The ONE CanvasIntent union. Imported from the orchestrator's leaf `/types`
+// module (type-only → erased → cycle-free with the orchestrator's runtime
+// dependency on ChatStore). Re-exported below for back-compat consumers.
+import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
+import type { NormalizedBbox } from "@groundx/shared";
 
 /**
  * Chat session foundation — see /memory/project_chat_session_model.md.
@@ -69,18 +74,26 @@ export interface ViewerEvent {
     | "intent-dispatched"
     | "left";
   source: "user" | "agent" | "tour" | "system";
-  detail?: Record<string, unknown>;
+  /**
+   * Event-specific payload. For `intent-dispatched` events this is the
+   * structured `CanvasIntent` itself (see `CanvasOrchestratorContext.dispatch`);
+   * for other actions it's a generic JSON bag. Serialized to `viewer_events.detail_json`.
+   */
+  detail?: CanvasIntent | Record<string, unknown>;
 }
 
 /**
- * Canvas Orchestrator intent — what view is currently mounted.
- * Defined as `unknown` here to keep the foundation phase open;
- * the full Zod discriminated union lives in
- * `CanvasOrchestratorContext` (see memory `project_architecture.md`
- * for the schema). At runtime this is the parsed payload of the
- * active intent for this chat session.
+ * Canvas Orchestrator intent — what view is currently mounted. This is the
+ * ONE canonical discriminated union, re-exported from `CanvasOrchestratorContext`
+ * (the orchestrator owns it; ChatStore mirrors `currentIntent` for the LLM
+ * conversation axis). Imported from the leaf `/types` module — type-only, so
+ * it's erased at runtime and can't form a cycle with the orchestrator's
+ * runtime dependency on ChatStore (`useChatStoreOptional`).
+ *
+ * Was a `Record<string,unknown> | null` placeholder (a deferred-foundation
+ * marker); collapsed in B1 "One CanvasIntent".
  */
-export type CanvasIntent = Record<string, unknown> | null;
+export type { CanvasIntent };
 
 /**
  * UI-01 Phase 1 — per-session, in-memory overlay over the active
@@ -257,8 +270,15 @@ export type ViewerStep =
        */
       highlight?: {
         page: number;
-        bbox?: { x: number; y: number; w: number; h: number };
+        bbox?: NormalizedBbox;
         sourceCitationIndex?: number;
+        /**
+         * WF-06b — attribution tier of the citation that produced this
+         * highlight. The viewer pane renders the overlay at the tier's
+         * precision (solid word-level for `exact`, translucent
+         * chunk-region for `paraphrase`, none for `ambient`).
+         */
+        tier?: import("@/types/onboarding").CitationTier;
       };
     }
   | { kind: "extract-workbench"; scenarioId: string; focusedCategoryId?: string }
@@ -274,7 +294,7 @@ export type ViewerStep =
  */
 export type ViewerOverlay =
   | { kind: "sign-up"; state: "pending" | "done" | "dismissed"; cause?: "save-schema" }
-  | { kind: "citation-peek"; documentId: string; page: number; bbox?: { x: number; y: number; w: number; h: number } }
+  | { kind: "citation-peek"; documentId: string; page: number; bbox?: NormalizedBbox }
   | { kind: "book-call" };
 
 /**
@@ -325,7 +345,7 @@ export interface ChatSession {
 
   // Viewer axis (intent + nav trail; used for LLM context)
   viewerHistory: ViewerEvent[];
-  currentIntent: CanvasIntent;
+  currentIntent: CanvasIntent | null;
 
   // Schema-editor overlay (UI-01). Empty by default; Phase 1
   // ships the slot, Phase 2 wires mutations.
@@ -407,7 +427,7 @@ export interface ChatStoreApi {
    * on the conversation axis. Pass `null` to clear. No-op when no
    * session is active.
    */
-  setCurrentIntent: (intent: CanvasIntent) => void;
+  setCurrentIntent: (intent: CanvasIntent | null) => void;
 
   /**
    * RT-05 — merge a server-provided list of persisted chat sessions
@@ -582,8 +602,10 @@ export interface ChatStoreApi {
   gotoDocViewer: (input: {
     documentId: string;
     page: number;
-    bbox?: { x: number; y: number; w: number; h: number };
+    bbox?: NormalizedBbox;
     sourceCitationIndex?: number;
+    /** WF-06b — attribution tier threaded into the step's highlight slot. */
+    tier?: import("@/types/onboarding").CitationTier;
   }) => void;
 }
 

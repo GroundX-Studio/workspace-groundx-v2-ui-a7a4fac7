@@ -21,7 +21,8 @@
 import { logger } from "../lib/logger.js";
 import type { GroundXClient, LlmClient } from "../types.js";
 
-import { searchGroundX, type RagContentScope } from "./chatRouter.js";
+import { searchGroundX } from "./chatRouter.js";
+import type { ContentScope } from "@groundx/shared";
 
 export type SchemaFieldType = "STRING" | "NUMBER" | "DATE" | "BOOLEAN";
 
@@ -36,11 +37,12 @@ export interface ExtractFieldRequest {
     description: string;
   };
   /**
-   * GroundX content scope (same shape as chatRouter). The endpoint
+   * GroundX content scope (the unified `ContentScope`). The endpoint
    * derives this from the chat session's active entity, exactly like
-   * chatHandler does for routed chat.
+   * chatHandler does for routed chat. `null` when no scope is derivable
+   * (handled by `searchGroundX` as the doc-wide fallback).
    */
-  contentScope: RagContentScope;
+  contentScope: ContentScope | null;
   /**
    * Friendly hint about the doc the user is currently looking at —
    * for fallback prose / log context. Optional.

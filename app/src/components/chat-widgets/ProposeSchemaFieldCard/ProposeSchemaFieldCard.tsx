@@ -16,7 +16,7 @@
  *
  * Phase 2c will wire per-field extraction on Accept (re-run a focused
  * extraction so the user sees a real value, not a placeholder).
- * Phase 2d will wire Save Template (POST /api/extraction-schemas).
+ * Phase 2d will wire Save Template (POST /api/templates).
  */
 
 import Box from "@mui/material/Box";

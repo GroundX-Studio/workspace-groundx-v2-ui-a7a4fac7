@@ -1,4 +1,5 @@
 import type { ContentScope, Scenario } from "@/types/onboarding";
+import type { NormalizedBbox } from "@groundx/shared";
 
 /**
  * CanvasIntent — discriminated union of every command the canvas can receive.
@@ -15,7 +16,14 @@ import type { ContentScope, Scenario } from "@/types/onboarding";
 export type CanvasIntent =
   | { kind: "showSample"; scenario: Scenario }
   | { kind: "openDocument"; documentId: string; page?: number }
-  | { kind: "highlightCitation"; documentId: string; page: number; bbox?: { x: number; y: number; w: number; h: number } }
+  | {
+      kind: "highlightCitation";
+      documentId: string;
+      page: number;
+      bbox?: NormalizedBbox;
+      /** WF-06b — attribution tier; threaded to the viewer overlay precision. */
+      tier?: import("@/types/onboarding").CitationTier;
+    }
   /**
    * widget-llm-integration Phase 4 — lighter-weight cousin of
    * `highlightCitation`. Same viewer-step push/swap, but no
@@ -118,7 +126,7 @@ export interface CanvasOrchestratorApi {
    * overlay onto `viewer.overlays`. The viewer surface renders the
    * peek on top of whatever step is active.
    */
-  openCitation: (documentId: string, page: number, bbox?: { x: number; y: number; w: number; h: number }) => void;
+  openCitation: (documentId: string, page: number, bbox?: NormalizedBbox) => void;
 
   /**
    * **viewer→chat**: announce that a document was just opened in the

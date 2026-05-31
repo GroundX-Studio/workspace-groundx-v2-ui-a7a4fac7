@@ -282,3 +282,84 @@ It doesn't catch: writes that go to the wrong column, reads that
 return a value the UI ignores, persistence that races with
 hydration. Those are correctness bugs — Rule 1 (TDD) is the
 defense.
+
+## 10. Adversarial review gate after EVERY task
+
+Locked 2026-05-30 after a hostile review of five plans surfaced
+eight code-contradicting defects that had passed normal self-review
+(claims the codebase falsified: a tool-catalog filter that was a
+no-op, a "canonical" tool that was a scaffold-only demo, a spec that
+contradicted a shipped table, "test stays green" when it had 36
+assertions to retarget). One-time review at the end is not enough.
+
+**The rule:** a task is not done until an adversarial review of its
+output passes — performed as if you are reviewing an engineer you
+distrust, against the **plan AND the actual code**, not the seam.
+Run it BEFORE marking the task done and BEFORE starting the next
+task. Be hostile: assume the work is wrong and try to prove it.
+
+Each task in an execution plan carries a **review gate** — concrete
+`reviewChecks`, `commands`, and `passCriteria` (see the per-task
+gates in `cross-plan-execution-order.md`). The default gate, when a
+task has no bespoke one:
+
+1. **Re-read the task's claims and falsify them against code.** For
+   every "this is X" / "X already does Y" / "mechanical rename"
+   claim, grep/read the real file and confirm. A claim that the code
+   contradicts fails the gate.
+2. **No-op / dormant-plumbing check.** Does the change actually
+   reach the surface it targets (the LLM-facing catalog, the
+   rendered DOM, the persisted byte)? Plumbing the guards don't
+   cover fails the gate (ties to Rule 9 + `hacking-vs-solving.md`).
+3. **Stale-spec check.** `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`
+   and confirm no delta contradicts a shipped table / archived spec.
+4. **Test-reality check.** The task's tests assert real behavior and
+   actually run green — open the test file, confirm the assertions
+   weren't silently weakened or left targeting renamed ids.
+5. **Cross-plan collision check.** If the task touched a multi-plan
+   file (`widget-contract.test.ts`, `tools/types.ts`+`registry.ts`,
+   `specs/app-architecture/spec.md`, `ChatColumn.tsx`,
+   `docs/agents/data-model.md`), confirm it didn't break a sibling
+   plan's assumption.
+6. **`npm run build` (tsc) + the relevant drift guards green.**
+
+**For WORKFLOW (fan-out) tasks the gate runs PER UNIT** — each
+parallel agent's output is adversarially verified independently
+(the find → adversarially-verify pattern), not just the batch.
+
+A failed gate sends the task back to `in-progress`; it does NOT
+advance. Record gate outcomes honestly — "gate failed: X" is a
+normal, expected state, not a setback to hide.
+
+## 11. Composable architecture — add an axis value, not a cross-product
+
+Locked 2026-05-30. The recurring defect this repo drifts into is forking
+*structure* per situation: a view per frame, a flow per mode, a widget per
+onboarding/steady, a canvas per frame. That is a combinatorial explosion and
+the root of the `no-onboarding-duplicates` violations.
+
+The rule: **prefer a stable abstraction parameterized by a value over a new
+component per situation.** New behavior should be a new *value on an existing
+axis*, never a new code path.
+
+- **Mechanism stays; policy/data varies** — one engine + injected behavior
+  (`useConversation` + a `ChatExperience`), not a fork per mode.
+- **Parameterize by a first-class value** — a `scope` (`ContentScope`), a
+  `role` (`WidgetRole`), an experience. These are orthogonal axes; do not
+  collapse two into one (the `mode`-means-both-phase-and-auth trap).
+- **Compose, don't dispatch** — the caller (entry point / mount site) composes
+  the unit it wants; a registry is a read **catalog** (`all`/`byId`), never a
+  `resolve(context)` dispatcher.
+- **Make the choice explicit** — required props with an explicit "not
+  applicable" (`scope: { type: "none" }`) beat silent omission. Omission is a
+  bug; the drift guards enforce the prop's presence.
+- **Guardrail (ties to §5 + `hacking-vs-solving.md`): earn every axis.** The
+  failure mode of this philosophy is over-abstraction. Do NOT add a generic
+  base / axis / framework until a **second real caller** needs it — name that
+  caller in the proposal or don't add the abstraction. When unsure, build the
+  concrete thing; generalize on the second instance, not the first.
+
+Synthesis + the "creating a plan / adding code" checklists live in
+[`principles.md`](principles.md). Named patterns: mechanism/policy separation,
+Strategy, Composition Root (not Service Locator), App Shell + plugins,
+Specification/Query-Object, orthogonal decomposition, narrow-waist interfaces.

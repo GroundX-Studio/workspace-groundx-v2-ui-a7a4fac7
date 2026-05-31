@@ -1,7 +1,7 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
 import { api } from "@/api";
-import { GroundXRequestOptions, PaginationParams, PartnerRequestOptions } from "@/api/common";
+import { RequestOptions, PaginationParams } from "@/api/common";
 import { CreateGroundXGroupInput } from "@/api/entities/groundxGroupsEntity";
 import { PartnerGroupInput } from "@/api/entities/partnerGroupsEntity";
 import { Group } from "@/api/entities/sdkTypes";
@@ -38,7 +38,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const listGroundXGroups = useCallback(
-    (params?: PaginationParams, options?: GroundXRequestOptions) =>
+    (params?: PaginationParams, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxGroups.listGroundXGroups(params, options);
         setGroundXGroups(response.groups);
@@ -48,7 +48,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const createGroundXGroup = useCallback(
-    (input: CreateGroundXGroupInput, options?: GroundXRequestOptions) =>
+    (input: CreateGroundXGroupInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxGroups.createGroundXGroup(input, options);
         setGroundXGroups((groups) => [response.group, ...groups]);
@@ -58,7 +58,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const getGroundXGroup = useCallback(
-    (groupId: number, options?: GroundXRequestOptions) =>
+    (groupId: number, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxGroups.getGroundXGroup(groupId, options);
         setSelectedGroup(response.group);
@@ -68,7 +68,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const updateGroundXGroup = useCallback(
-    (groupId: number, name: string, options?: GroundXRequestOptions) =>
+    (groupId: number, name: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxGroups.updateGroundXGroup(groupId, name, options);
         setGroundXGroups((groups) => groups.map((group) => (group.groupId === groupId ? response.group : group)));
@@ -79,7 +79,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const deleteGroundXGroup = useCallback(
-    (groupId: number, options?: GroundXRequestOptions) =>
+    (groupId: number, options?: RequestOptions) =>
       run(async () => {
         await api.groundxGroups.deleteGroundXGroup(groupId, options);
         setGroundXGroups((groups) => groups.filter((group) => group.groupId !== groupId));
@@ -89,7 +89,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const addBucketToGroundXGroup = useCallback(
-    (groupId: number, bucketId: number, options?: GroundXRequestOptions) =>
+    (groupId: number, bucketId: number, options?: RequestOptions) =>
       run(async () => {
         await api.groundxGroups.addBucketToGroundXGroup(groupId, bucketId, options);
       }, "Bucket added to group."),
@@ -97,7 +97,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const removeBucketFromGroundXGroup = useCallback(
-    (groupId: number, bucketId: number, options?: GroundXRequestOptions) =>
+    (groupId: number, bucketId: number, options?: RequestOptions) =>
       run(async () => {
         await api.groundxGroups.removeBucketFromGroundXGroup(groupId, bucketId, options);
       }, "Bucket removed from group."),
@@ -105,7 +105,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const listPartnerGroups = useCallback(
-    (options?: PartnerRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerGroups.listPartnerGroups(options);
         setPartnerGroups(response.groups);
@@ -115,7 +115,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const createPartnerGroup = useCallback(
-    (group: PartnerGroupInput, options?: PartnerRequestOptions) =>
+    (group: PartnerGroupInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerGroups.createPartnerGroup(group, options);
         setPartnerGroups((groups) => [response.group, ...groups]);
@@ -125,7 +125,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const getPartnerGroup = useCallback(
-    (groupId: number, options?: PartnerRequestOptions) =>
+    (groupId: number, options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerGroups.getPartnerGroup(groupId, options);
         setSelectedGroup(response.group);
@@ -135,7 +135,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const updatePartnerGroup = useCallback(
-    (groupId: number, group: PartnerGroupInput, options?: PartnerRequestOptions) =>
+    (groupId: number, group: PartnerGroupInput, options?: RequestOptions) =>
       run(async () => {
         await api.partnerGroups.updatePartnerGroup(groupId, group, options);
         setPartnerGroups((groups) => groups.map((item) => (item.groupId === groupId ? { ...item, ...group } : item)));
@@ -144,7 +144,7 @@ export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const deletePartnerGroup = useCallback(
-    (groupId: number, options?: PartnerRequestOptions) =>
+    (groupId: number, options?: RequestOptions) =>
       run(async () => {
         await api.partnerGroups.deletePartnerGroup(groupId, options);
         setPartnerGroups((groups) => groups.filter((group) => group.groupId !== groupId));

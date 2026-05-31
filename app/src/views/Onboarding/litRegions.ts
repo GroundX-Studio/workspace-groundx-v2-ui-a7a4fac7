@@ -6,6 +6,8 @@
  * otherwise a best-effort top-of-page band is drawn as a fallback.
  */
 
+import type { NormalizedBbox } from "@groundx/shared";
+
 export type LitRegionColor = "green" | "cyan" | "coral";
 
 export interface LitRegion {
@@ -19,7 +21,7 @@ export interface LitRegion {
 
 interface CitationLike {
   page: number;
-  bbox?: { x: number; y: number; w: number; h: number };
+  bbox?: NormalizedBbox;
 }
 
 export function litRegionsFromCitations(citations: readonly CitationLike[]): LitRegion[] {

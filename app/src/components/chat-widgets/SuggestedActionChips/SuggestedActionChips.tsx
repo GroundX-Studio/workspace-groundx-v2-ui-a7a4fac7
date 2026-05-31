@@ -28,6 +28,7 @@
 
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
+import { alpha } from "@mui/material/styles";
 import { type FC } from "react";
 
 import {
@@ -83,16 +84,20 @@ export const SuggestedActionChips: FC<SuggestedActionChipsProps> = ({
             }
           }}
           sx={{
-            px: 1,
-            py: 0.25,
+            display: "inline-flex",
+            alignItems: "center",
+            height: 22,
+            px: 1.25,
             borderRadius: BORDER_RADIUS_PILL,
             backgroundColor: WHITE,
             border: `1px solid ${BORDER}`,
             color: NAVY,
             fontSize: FONT_SIZE_LABEL,
             fontWeight: FONT_WEIGHT_LABEL,
+            lineHeight: 1,
             cursor: "pointer",
-            "&:hover": { backgroundColor: BORDER },
+            transition: "background-color 120ms ease, border-color 120ms ease",
+            "&:hover": { backgroundColor: alpha(NAVY, 0.05), borderColor: alpha(NAVY, 0.4) },
             "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
           }}
         >

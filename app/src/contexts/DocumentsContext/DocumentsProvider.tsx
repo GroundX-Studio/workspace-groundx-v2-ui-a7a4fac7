@@ -1,7 +1,7 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
 import { api } from "@/api";
-import { GroundXRequestOptions, PaginationParams } from "@/api/common";
+import { RequestOptions, PaginationParams } from "@/api/common";
 import {
   CopyDocumentsInput,
   CrawlWebsiteInput,
@@ -43,7 +43,7 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const listDocuments = useCallback(
-    (params?: PaginationParams, options?: GroundXRequestOptions) =>
+    (params?: PaginationParams, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxDocuments.listGroundXDocuments(params, options);
         setDocuments(response.documents);
@@ -53,31 +53,31 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const ingestRemoteDocuments = useCallback(
-    (input: IngestDocumentsInput, options?: GroundXRequestOptions) =>
+    (input: IngestDocumentsInput, options?: RequestOptions) =>
       run(async () => (await api.groundxDocuments.ingestGroundXRemoteDocuments(input, options)).ingest, "Ingest started."),
     [run]
   );
 
   const crawlWebsite = useCallback(
-    (input: CrawlWebsiteInput, options?: GroundXRequestOptions) =>
+    (input: CrawlWebsiteInput, options?: RequestOptions) =>
       run(async () => (await api.groundxDocuments.crawlGroundXWebsite(input, options)).ingest, "Crawl started."),
     [run]
   );
 
   const copyDocuments = useCallback(
-    (input: CopyDocumentsInput, options?: GroundXRequestOptions) =>
+    (input: CopyDocumentsInput, options?: RequestOptions) =>
       run(async () => (await api.groundxDocuments.copyGroundXDocuments(input, options)).ingest, "Copy started."),
     [run]
   );
 
   const updateDocuments = useCallback(
-    (input: UpdateDocumentsInput, options?: GroundXRequestOptions) =>
+    (input: UpdateDocumentsInput, options?: RequestOptions) =>
       run(async () => (await api.groundxDocuments.updateGroundXDocuments(input, options)).ingest, "Documents updated."),
     [run]
   );
 
   const deleteDocuments = useCallback(
-    (input: DeleteDocumentsInput, options?: GroundXRequestOptions) =>
+    (input: DeleteDocumentsInput, options?: RequestOptions) =>
       run(async () => {
         await api.groundxDocuments.deleteGroundXDocuments(input, options);
         setDocuments((items) => items.filter((document) => !input.documentIds.includes(document.documentId)));
@@ -89,7 +89,7 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const getDocument = useCallback(
-    (documentId: string, options?: GroundXRequestOptions) =>
+    (documentId: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxDocuments.getGroundXDocument(documentId, options);
         setSelectedDocument(response.document);
@@ -99,7 +99,7 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const lookupDocument = useCallback(
-    (id: string, options?: GroundXRequestOptions) =>
+    (id: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxDocuments.lookupGroundXDocument(id, options);
         setSelectedDocument(response.document);
@@ -109,7 +109,7 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const deleteDocument = useCallback(
-    (documentId: string, options?: GroundXRequestOptions) =>
+    (documentId: string, options?: RequestOptions) =>
       run(async () => {
         await api.groundxDocuments.deleteGroundXDocument(documentId, options);
         setDocuments((items) => items.filter((document) => document.documentId !== documentId));
@@ -119,7 +119,7 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const getDocumentXray = useCallback(
-    (documentId: string, options?: GroundXRequestOptions) =>
+    (documentId: string, options?: RequestOptions) =>
       run(async () => {
         // The entity wrapper currently types this as `{ xray: Metadata }`
         // but the real API returns the response object at top level
@@ -136,25 +136,22 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const getDocumentExtract = useCallback(
-    (documentId: string, options?: GroundXRequestOptions) =>
+    (documentId: string, options?: RequestOptions) =>
       run(async () => {
-        const response = (await api.groundxDocuments.getGroundXDocumentExtract(
-          documentId,
-          options,
-        )) as unknown as import("@/api/entities/groundxDocumentsEntity").DocumentExtractResponse;
-        return response;
+        // Returns the raw extract JSON as `Metadata` already — no cast needed.
+        return await api.groundxDocuments.getGroundXDocumentExtract(documentId, options);
       }),
     [run]
   );
 
   const getProcessingStatus = useCallback(
-    (processId: string, options?: GroundXRequestOptions) =>
+    (processId: string, options?: RequestOptions) =>
       run(async () => (await api.groundxDocuments.getGroundXProcessingStatus(processId, options)).ingest),
     [run]
   );
 
   const cancelProcess = useCallback(
-    (processId: string, options?: GroundXRequestOptions) =>
+    (processId: string, options?: RequestOptions) =>
       run(async () => {
         await api.groundxDocuments.cancelGroundXProcess(processId, options);
       }, "Process cancelled."),
@@ -162,7 +159,7 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const listProcesses = useCallback(
-    (options?: GroundXRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxDocuments.listGroundXProcesses(options);
         const nextProcesses = response.ingests || response.processes || [];

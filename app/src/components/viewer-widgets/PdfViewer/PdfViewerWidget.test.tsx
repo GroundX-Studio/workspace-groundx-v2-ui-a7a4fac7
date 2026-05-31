@@ -268,6 +268,70 @@ describe("PdfViewerWidget", () => {
       expect(style).toMatch(/height:\s*5%/);
     });
 
+    // WF-06b — the highlight's visual precision is driven by the
+    // citation tier. `exact` → tight solid word-level box; `paraphrase`
+    // → translucent chunk-region overlay; `ambient` → no inline span
+    // (source chip only). The tier is surfaced as a data attribute so
+    // the contract is assertable without computing rendered alpha.
+    it("renders a SOLID (tight) highlight for an exact-tier citation", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      render(
+        <PdfViewerWidget
+          documentId="doc-1"
+          mode="steady"
+          targetPage={1}
+          highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
+          highlightTier="exact"
+        />,
+        { wrapper },
+      );
+      const overlay = await screen.findByTestId("pdf-viewer-highlight");
+      expect(overlay.getAttribute("data-highlight-tier")).toBe("exact");
+      const style = overlay.getAttribute("style") ?? "";
+      // exact → solid border (the tight word-level box).
+      expect(style).toMatch(/border:\s*2px solid/);
+    });
+
+    it("renders a TRANSLUCENT (chunk-region) highlight for a paraphrase-tier citation", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      render(
+        <PdfViewerWidget
+          documentId="doc-1"
+          mode="steady"
+          targetPage={1}
+          highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
+          highlightTier="paraphrase"
+        />,
+        { wrapper },
+      );
+      const overlay = await screen.findByTestId("pdf-viewer-highlight");
+      expect(overlay.getAttribute("data-highlight-tier")).toBe("paraphrase");
+      const style = overlay.getAttribute("style") ?? "";
+      // paraphrase → distinct lower-confidence visual: dashed border,
+      // and a strictly more translucent fill than the exact tier.
+      expect(style).toMatch(/border:\s*1px dashed/);
+    });
+
+    it("renders NO inline highlight for an ambient-tier citation (source chip only)", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+
+      render(
+        <PdfViewerWidget
+          documentId="doc-1"
+          mode="steady"
+          targetPage={1}
+          highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
+          highlightTier="ambient"
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
+      // Ambient renders no auto inline span even when a bbox is present.
+      expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
+    });
+
     it("does NOT render the highlight overlay when highlightBbox is absent or null", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
 

@@ -8,11 +8,25 @@ import type {
   ChatSessionEntityRecord,
   ChatSessionRecord,
   ConversationSummaryRecord,
-  ExtractionSchemaRecord,
   IntentLogRecord,
   SessionRecord,
+  TemplateRecord,
   ViewerEventRecord,
 } from "../types.js";
+import { templateKindSchema, type TemplateKind } from "@groundx/shared";
+
+/**
+ * True for MySQL/MariaDB's "Duplicate column name" error (ER_DUP_FIELDNAME,
+ * errno 1060) — raised when an `ADD COLUMN` targets a column a concurrent
+ * connection already added. Used to make the idempotent viewer-column ALTER
+ * race-safe across multi-replica pod boots. Matches on `errno` (stable across
+ * drivers) with a `code` fallback.
+ */
+function isDuplicateColumnError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { errno?: number; code?: string };
+  return e.errno === 1060 || e.code === "ER_DUP_FIELDNAME";
+}
 
 export class MySqlAppRepository implements AppRepository {
   private pool: mysql.Pool;
@@ -202,6 +216,44 @@ export class MySqlAppRepository implements AppRepository {
       )
     `);
 
+    // shared-template-lifecycle Phase 2 — the durable Template store (Extract
+    // schema + Report template). `kind` discriminates; `body_json` is the
+    // opaque JSON body. No `version` column (versioning deferred until a reader
+    // needs it). Same per-user scoping as extraction_schemas, plus `kind`.
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS templates (
+        id VARCHAR(64) PRIMARY KEY,
+        kind VARCHAR(16) NOT NULL,
+        groundx_username VARCHAR(128) NOT NULL,
+        name VARCHAR(128) NOT NULL,
+        body_json JSON NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX templates_user_kind_idx (groundx_username, kind, updated_at)
+      )
+    `);
+
+    // Idempotent + concurrent-safe copy-migration: fold existing saved Extract
+    // schemas into `templates` as kind='extract'. `ON DUPLICATE KEY UPDATE id =
+    // id` is a NO-OP on rows already present — so re-runs do nothing AND two
+    // pods booting at once (multi-replica EKS / rolling update) can't crash on
+    // a PRIMARY KEY race (a plain INSERT would throw → createSchema rejects →
+    // CrashLoopBackOff). It is intentionally a no-op on existing rows (does NOT
+    // refresh an edited row) — the migration-window edge is closed by the
+    // Phase-3 cutover's explicit UPSERT-refresh, not here.
+    //
+    // `extraction_schemas` is left intact (deprecated; dropped in a later
+    // sweep — which MUST also remove this copy step, since it reads
+    // `extraction_schemas`). The verbatim `schema_json → body_json` copy is
+    // sound because the shared extract body schema is `.passthrough()` (the
+    // legacy `{id,name,categories}` blob parses unchanged).
+    await this.pool.execute(`
+      INSERT INTO templates (id, kind, groundx_username, name, body_json, created_at, updated_at)
+      SELECT id, 'extract', groundx_username, name, schema_json, created_at, updated_at
+      FROM extraction_schemas
+      ON DUPLICATE KEY UPDATE id = id
+    `);
+
     // master-viewer-session Phase 1 — idempotent column-add migration.
     // The chat_sessions CREATE TABLE IF NOT EXISTS above includes the
     // viewer_* columns by definition, but existing databases that
@@ -239,7 +291,19 @@ export class MySqlAppRepository implements AppRepository {
     // One ALTER statement adds all missing columns in a single rewrite —
     // cheaper than three separate ALTERs for large tables.
     const clauses = missing.map((m) => m.ddl).join(", ");
-    await this.pool.execute(`ALTER TABLE chat_sessions ${clauses}`);
+    try {
+      await this.pool.execute(`ALTER TABLE chat_sessions ${clauses}`);
+    } catch (err) {
+      // Concurrent-pod race (multi-replica EKS / rolling update): two pods both
+      // read the columns as missing and both issue this ALTER. The loser hits
+      // ER_DUP_FIELDNAME (errno 1060) — which is harmless here, the winner
+      // already added the columns. Swallow ONLY that; a plain rethrow would
+      // reject createSchema() → CrashLoopBackOff. Same race-safety intent as
+      // the templates copy-migration's ON DUPLICATE KEY UPDATE. We don't use
+      // `ADD COLUMN IF NOT EXISTS` (MySQL 8.0.29+) because the deploy may
+      // target older MySQL/MariaDB.
+      if (!isDuplicateColumnError(err)) throw err;
+    }
   }
 
   async createSession(session: SessionRecord): Promise<void> {
@@ -616,44 +680,52 @@ export class MySqlAppRepository implements AppRepository {
     return rows.map(rowToIntentLog);
   }
 
-  // ── Extraction schemas (CF-04) ──────────────────────────────────
+  // (Legacy `extraction_schemas` repo methods removed at the Phase-3 cutover —
+  // no callers. The table is still created + read by the boot-time copy-
+  // migration into `templates`, until the deferred drop sweep.)
 
-  async upsertExtractionSchema(record: ExtractionSchemaRecord): Promise<void> {
+  // ── Templates (shared-template-lifecycle) ───────────────────────
+
+  async saveTemplate(record: TemplateRecord): Promise<void> {
     await this.pool.execute(
-      `INSERT INTO extraction_schemas (id, groundx_username, name, schema_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO templates (id, kind, groundx_username, name, body_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
+        kind = VALUES(kind),
         groundx_username = VALUES(groundx_username),
         name = VALUES(name),
-        schema_json = VALUES(schema_json),
+        body_json = VALUES(body_json),
         updated_at = VALUES(updated_at)`,
       [
         record.id,
+        record.kind,
         record.groundxUsername,
         record.name,
-        record.schemaJson,
+        record.bodyJson,
         record.createdAt,
         record.updatedAt,
       ],
     );
   }
 
-  async listExtractionSchemasForUser(groundxUsername: string): Promise<ExtractionSchemaRecord[]> {
+  async getTemplate(id: string): Promise<TemplateRecord | null> {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
-      `SELECT id, groundx_username, name, schema_json, created_at, updated_at
-       FROM extraction_schemas
-       WHERE groundx_username = ?
-       ORDER BY updated_at DESC`,
-      [groundxUsername],
+      `SELECT id, kind, groundx_username, name, body_json, created_at, updated_at
+       FROM templates WHERE id = ?`,
+      [id],
     );
-    return rows.map((row) => ({
-      id: row.id,
-      groundxUsername: row.groundx_username,
-      name: row.name,
-      schemaJson: row.schema_json,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
-    }));
+    const row = rows[0];
+    return row ? rowToTemplate(row) : null;
+  }
+
+  async listTemplates(groundxUsername: string, kind: TemplateKind): Promise<TemplateRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, kind, groundx_username, name, body_json, created_at, updated_at
+       FROM templates WHERE groundx_username = ? AND kind = ?
+       ORDER BY updated_at DESC`,
+      [groundxUsername, kind],
+    );
+    return rows.map(rowToTemplate).filter((t): t is TemplateRecord => t !== null);
   }
 
   // ── Login-claim (re-key, not bulk-upload) ───────────────────────
@@ -806,5 +878,25 @@ function rowToIntentLog(row: mysql.RowDataPacket): IntentLogRecord {
     source: row.source,
     intentKind: row.intent_kind,
     intentJson: row.intent_json,
+  };
+}
+
+/**
+ * Map a `templates` row → `TemplateRecord`, GUARDING the `kind` VARCHAR
+ * against the shared enum (don't blindly cast a union column — a corrupt row
+ * reads back as `null`, treated as absent, rather than masquerading as a
+ * valid kind). `body_json` is passed through as an opaque string.
+ */
+function rowToTemplate(row: mysql.RowDataPacket): TemplateRecord | null {
+  const kind = templateKindSchema.safeParse(row.kind);
+  if (!kind.success) return null;
+  return {
+    id: row.id,
+    kind: kind.data,
+    groundxUsername: row.groundx_username,
+    name: row.name,
+    bodyJson: typeof row.body_json === "string" ? row.body_json : JSON.stringify(row.body_json),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
   };
 }

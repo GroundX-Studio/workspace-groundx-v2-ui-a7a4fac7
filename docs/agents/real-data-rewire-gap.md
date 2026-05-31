@@ -7,8 +7,22 @@ rewire plan.
 ## The single rule
 
 There are **three** onboarding-specific surfaces. Everything else is a
-production widget used identically in onboarding and steady, with a
-`mode` prop that locks certain controls.
+production widget used identically in onboarding and steady. Each
+production widget takes a `role: WidgetRole` + a required
+`scope: WidgetScope` prop. **Availability** (which surface ever mounts
+a widget) is enforced at the **mount site** — the view, from gate /
+session state — NOT by a prop. **Affordance locks** (controls a role
+may use within a visible widget) are **None today** — no widget varies
+an editable affordance by role (widget-access-matrix §2 in
+`openspec/changes/2026-05-30-widget-role-access/design.md`).
+
+> **Migration note.** The code TODAY still ships a
+> `mode: "onboarding" | "steady"` prop and `documentId` (not `scope`)
+> — that is what's wired right now. The contract is migrating
+> `mode` → `role: WidgetRole` and `documentId` → `scope: WidgetScope`
+> via the in-flight **`2026-05-30-widget-role-access`** change. Build
+> NEW work against `role` + `scope`; existing widgets still read
+> `mode`/`documentId` until that change lands.
 
 | Surface | Onboarding-specific? | Notes |
 |---|---|---|
@@ -21,15 +35,13 @@ production widget used identically in onboarding and steady, with a
 | **Report (F7)** | ❌ No | production widget |
 | **Integrations (F7)** | ❌ No | production widget |
 
-In onboarding mode, the production widgets lock features:
-
-- Edit schema (add/rename/delete fields) → locked
-- Change extraction workflow → locked
-- Switch bucket / project → locked
-- Save as template / pin to report → locked
-- Configure connectors → locked
-
-Same widget, same code, same data flow. Mode flag is the only delta.
+Affordance locks like the following — edit schema, change extraction
+workflow, switch bucket/project, save-as-template/pin-to-report,
+configure connectors — are the **forward-looking** target the
+`role` prop exists to express. **None of them are locked by role
+today** (widget-access-matrix §2). When they do land, they ride the
+same production widget (same code, same data flow); `role` decides the
+affordance, the view decides whether the widget mounts at all.
 
 ## How the project drifted
 
@@ -37,14 +49,41 @@ The drift pattern across `src/views/Onboarding/`:
 
 | File | Drift |
 |---|---|
-| `UnderstandView.tsx` | Standalone implementation reading `scenario.manifest`. Should be a thin wrapper that mounts the production PDF viewer widget with `documentId` from the active session + `mode` from `appMode`. |
-| `ExtractView.tsx` | Standalone implementation reading `scenario.manifest.extractionSchema` + `sampleExtractionValues`. Should mount the production Extract widget with `documentId` + `mode`. The schema metadata comes from `getGroundXWorkflow(document.filter.workflow_id)`; the values come from `getGroundXDocumentExtract(documentId)`. |
+| `UnderstandView.tsx` | Standalone implementation reading `scenario.manifest`. Should be a thin wrapper that mounts the production PDF viewer widget with a `scope` built from the active session's document + `role`. (Today the widget still takes `documentId` + `mode`; target is `scope` + `role`.) |
+| `ExtractView.tsx` | Standalone implementation reading `scenario.manifest.extractionSchema` + `sampleExtractionValues`. Should mount the production Extract widget with `scope` + `role`. The schema metadata comes from `getGroundXWorkflow(document.filter.workflow_id)`; the values come from `getGroundXDocumentExtract(documentId)`. |
 | `InteractView.tsx` | Standalone implementation. Should mount the production Chat widget. The chat infrastructure is correct (real LLM + real RAG); the view just needs to delegate. |
-| `IntegrateView.tsx` | Standalone implementation with hardcoded plugin list. Should mount the production Integrations widget with `mode`. |
+| `IntegrateView.tsx` | Standalone implementation with hardcoded plugin list. Should mount the production Integrations widget with `scope` + `role`. |
 
 The data layer (entity functions in `app/src/api/entities/`, the
 context providers, the middleware proxy) is correct. The drift is
 entirely in `src/views/Onboarding/<Frame>View.tsx`.
+
+## One main view: shells host it; experience + scope drive the canvas
+
+Architectural target (clarified 2026-05-30). The per-frame-view fold below is not just
+de-duplication — it is what makes the app conform to **"one main view that loads chat experiences."**
+
+- **Shells stay separate** (onboarding vs authenticated vs future contexts) — they are per-context
+  chrome + entry points, and that difference is legitimate. We do NOT collapse shells.
+- **Both shells host the SAME main view** = `AppShell` (`nav` + `chat` + `canvas` slots) with:
+  - `chat` = `ConversationFlow` + the active `ChatExperience` (unified-conversation-flow change);
+  - `canvas` = the experience/scope-driven `ScopedViewerWidget` set (PdfViewer · Extract · SmartReport ·
+    Integrate), driven by the active experience's `ContentScope` + viewer step — NOT a bespoke per-frame
+    switch. `SteadyShell` already mounts `AppShell`; **`OnboardingShell` must adopt the same shared view**
+    instead of its own `canvasContent` frame-switch over `UnderstandView`/`ExtractView`/….
+- **The entry point selects the experience** (the mount site composes it): the onboarding full-screen
+  overlay composes `makeOnboardingExperience(...)`; the authenticated nav rail's Workspaces/Projects
+  entries (today disabled stubs in `OnboardingNav`) will compose Workspace/Project/document(+filter)
+  experiences. No entry-context resolver.
+- **The signup gate is a widget** (`SignUpWidget`/`GateChatRail`/`GateValueProp`, anonymous-only), shown
+  by the onboarding surface — NOT a chat experience.
+
+Conformance owners: chat → unified-conversation-flow; canvas widgets → core-data-model-hardening
+(`ScopedViewerWidget` base) + this fold; entry experiences (Workspace/Project/document) → follow-on.
+The one **explicit gap to track**: `OnboardingShell` adopting the shared `AppShell` + experience/scope
+canvas (so the canvas is one surface across both shells), and wiring the nav-rail entries to compose
+experiences. The **`2026-05-30-onboarding-shell-shared-view`** change owns the
+`OnboardingShell` → `AppShell` fold.
 
 ## Why the mock manifest exists
 
@@ -60,18 +99,23 @@ real GroundX endpoint.
 
 ### Step 1: extract the production widgets
 
-**Production widget directory (locked 2026-05-25): `app/src/components/widgets/`.**
+**Production widgets live under the slot-scoped dirs
+`app/src/components/viewer-widgets/` and
+`app/src/components/chat-widgets/`** (the slot directory declares the
+surface — see the locked widget contract). There is **no**
+`app/src/components/widgets/` directory.
 
-Today this directory doesn't exist. Each of the 5 widgets needs to be
-authored:
+The viewer-surface widgets need to be authored / completed:
 
 ```
-app/src/components/widgets/
-├── PdfViewer/                  ← was: views/Onboarding/UnderstandView UX shell
-├── Extract/                    ← was: views/Onboarding/ExtractView UX shell
-├── ChatWithSources/            ← was: views/Onboarding/InteractView UX shell + OnboardingChatColumn delegation
-├── Integrations/               ← was: views/Onboarding/IntegrateView UX shell
-└── Report/                     ← does not exist yet (UI-02 / TL-05..07 territory)
+app/src/components/viewer-widgets/
+├── PdfViewer/                  ← exists; was: views/Onboarding/UnderstandView UX shell
+├── Extract/                    ← to author; was: views/Onboarding/ExtractView UX shell
+├── SmartReport/                ← greenfield (UI-02 / TL-05..07 territory; see smart-report-screen change)
+└── Integrate/                  ← to author; was: views/Onboarding/IntegrateView UX shell
+
+app/src/components/chat-widgets/
+└── ChatColumn/ (+ delegation)  ← chat-with-sources; was: views/Onboarding/InteractView UX shell + OnboardingChatColumn delegation
 ```
 
 **Rewire order (locked 2026-05-25): PdfViewer → Extract → ChatWithSources → Integrations → Report.** Reviewer-impact ranked: F2 silhouette is the biggest visible mock, F3 hardcoded schema is next, chat is already mostly real, F7 is small, Report is greenfield.
@@ -81,11 +125,17 @@ The current onboarding views are reasonable starting points for the
 chat column chrome). They are wrong in their **data sources**. So the
 extraction is:
 
-- Lift the UX shell into `src/widgets/<Widget>/`
+- Lift the UX shell into the slot dir
+  `app/src/components/{viewer,chat}-widgets/<Widget>/`
 - Replace the mock-data reads with the corresponding entity/context
   calls (`getGroundXDocumentXray`, `getGroundXDocumentExtract`, etc.)
-- Add a `mode: "onboarding" | "steady"` (or `isLocked`) prop that
-  gates the editable affordances
+- Take a required `scope: WidgetScope` + `role: WidgetRole` prop.
+  **Availability** (whether the widget mounts) is enforced at the
+  mount site (the view, from gate/session state), not by a prop.
+  Affordance locks by role are None today; `role` is the
+  forward-looking hook. (NEW work targets `role`/`scope`; existing
+  widgets still read `mode`/`documentId` until widget-role-access
+  lands.)
 - Move the existing unit tests with them; rewrite the data mocks
 
 ### Step 2: shrink the onboarding views to layout wrappers
@@ -94,21 +144,28 @@ Each of the four files becomes ~30 lines:
 
 ```tsx
 // src/views/Onboarding/UnderstandView.tsx (after)
-import { PdfViewerWidget } from "@/widgets/PdfViewer";
-import { useAppMode } from "@/contexts/AppModeContext";
+import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer";
+import { useWidgetRole } from "@/contexts/...";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 
 export const UnderstandView: FC = () => {
-  const { state: appMode } = useAppMode();
+  const role = useWidgetRole();
   const { state: session } = useOnboardingSession();
   const documentId = session.activeDocumentId;
   if (!documentId) return <SignInPlaceholder />;  // BYO branch only
-  return <PdfViewerWidget documentId={documentId} mode={appMode.mode} />;
+  return (
+    <PdfViewerWidget
+      scope={{ type: "documents", documentIds: [documentId] }}
+      role={role}
+    />
+  );
 };
 ```
 
 Same shape for `ExtractView`, `InteractView`, `IntegrateView`. They
-own only the BYO branch and the mode/document handoff.
+own only the BYO branch and the scope/role handoff. (This is the
+post-`widget-role-access` shape; today the widget still takes
+`documentId` + `mode`.)
 
 ### Step 3: strip the mock manifest
 
@@ -150,7 +207,7 @@ changes under `openspec/changes/`.
 | SCEN-06 (real PDFs ingested) | Closed-as-obsolete. PDFs are already there; the view just wasn't reading them. |
 | TS-04 (widget integration tests) | **Re-anchor**: this row was always about adopting the production widgets. The current blocked classification was wrong — the widgets either exist in the scaffold (port them in) or need to be authored. Either way, tests follow the widgets. |
 | UR-01 (PdfViewer with pdfjs-dist) | Closure note update: the new flow is `PdfViewerWidget` reads `getGroundXDocumentXray(documentId)` → binary URL → existing `<PdfViewer>` primitive. The `previewUrl` field on `ScenarioDocument` becomes dead code. |
-| New OpenSpec changes | One per locked-control surface that needs the mode gate. E.g. "F3 schema editor locked in onboarding mode", "F7 connector setup locked in onboarding mode", etc. — file each under `openspec/changes/` against the relevant capability spec. |
+| New OpenSpec changes | One per locked-control surface that needs a role-gated affordance (none exist today). E.g. "F3 schema editor locked for read-only roles", "F7 connector setup locked for read-only roles", etc. — file each under `openspec/changes/` against the relevant capability spec. The role-gating mechanism itself is owned by `2026-05-30-widget-role-access`. |
 
 ## Open: chat seeds (`scenario.manifest.chatSeeds`)
 

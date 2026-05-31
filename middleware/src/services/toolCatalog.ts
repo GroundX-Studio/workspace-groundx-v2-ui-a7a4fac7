@@ -19,6 +19,10 @@
  */
 import { z } from "zod";
 
+import { viewerStepKindSchema, type ViewerStepKind } from "@groundx/shared";
+
+export type { ViewerStepKind };
+
 /**
  * Server-side tool descriptor. The `intentBuilder` produces the
  * `CanvasIntent` shape the app's orchestrator dispatches. The
@@ -39,17 +43,11 @@ export interface ServerTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
   intentBuilder: (input: z.infer<TSchema>) => Record<string, unknown>;
 }
 
-/**
- * Mirror of `app/src/contexts/ChatStoreContext`'s `ViewerStep["kind"]`.
- * Hand-typed to avoid a cross-workspace import.
- */
-export type ViewerStepKind =
-  | "ingest-picker"
-  | "doc-viewer"
-  | "extract-workbench"
-  | "interact-chat"
-  | "report"
-  | "integrate";
+// `ViewerStepKind` is now the ONE shared definition (`@groundx/shared`,
+// re-exported above) — app `ViewerStep["kind"]` and this catalog share it, with
+// the app-side `ViewerStepKind.contract.test` guarding exact equality. (Was a
+// hand-typed cross-workspace mirror, possible to dedupe now that the shared
+// package exists.)
 
 // ── Tool declarations (hand-mirrored from app side) ──────────────────
 

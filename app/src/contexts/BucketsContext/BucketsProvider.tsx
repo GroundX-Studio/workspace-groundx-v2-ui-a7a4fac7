@@ -1,7 +1,7 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
 import { api } from "@/api";
-import { GroundXRequestOptions, PaginationParams, PartnerRequestOptions } from "@/api/common";
+import { RequestOptions, PaginationParams } from "@/api/common";
 import { PartnerBucketInput } from "@/api/entities/partnerBucketsEntity";
 import { Bucket } from "@/api/entities/sdkTypes";
 import { useIsLoading } from "@/contexts/LoadingContext";
@@ -37,7 +37,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const listGroundXBuckets = useCallback(
-    (params?: PaginationParams, options?: GroundXRequestOptions) =>
+    (params?: PaginationParams, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxBuckets.listGroundXBuckets(params, options);
         setGroundXBuckets(response.buckets);
@@ -47,7 +47,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const getGroundXBucket = useCallback(
-    (bucketId: number, options?: GroundXRequestOptions) =>
+    (bucketId: number, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxBuckets.getGroundXBucket(bucketId, options);
         setSelectedBucket(response.bucket);
@@ -57,7 +57,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const createGroundXBucket = useCallback(
-    (name: string, options?: GroundXRequestOptions) =>
+    (name: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxBuckets.createGroundXBucket(name, options);
         setGroundXBuckets((buckets) => [response.bucket, ...buckets]);
@@ -67,7 +67,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const updateGroundXBucket = useCallback(
-    (bucketId: number, name: string, options?: GroundXRequestOptions) =>
+    (bucketId: number, name: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxBuckets.updateGroundXBucket(bucketId, name, options);
         setGroundXBuckets((buckets) => buckets.map((bucket) => (bucket.bucketId === bucketId ? response.bucket : bucket)));
@@ -78,7 +78,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const deleteGroundXBucket = useCallback(
-    (bucketId: number, options?: GroundXRequestOptions) =>
+    (bucketId: number, options?: RequestOptions) =>
       run(async () => {
         await api.groundxBuckets.deleteGroundXBucket(bucketId, options);
         setGroundXBuckets((buckets) => buckets.filter((bucket) => bucket.bucketId !== bucketId));
@@ -88,7 +88,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const listPartnerBuckets = useCallback(
-    (options?: PartnerRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerBuckets.listPartnerBuckets(options);
         setPartnerBuckets(response.buckets);
@@ -98,7 +98,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const getPartnerBucket = useCallback(
-    (bucketId: number, options?: PartnerRequestOptions) =>
+    (bucketId: number, options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerBuckets.getPartnerBucket(bucketId, options);
         setSelectedBucket(response.bucket);
@@ -108,7 +108,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const createPartnerBucket = useCallback(
-    (bucket: PartnerBucketInput, options?: PartnerRequestOptions) =>
+    (bucket: PartnerBucketInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerBuckets.createPartnerBucket(bucket, options);
         setPartnerBuckets((buckets) => [response.bucket, ...buckets]);
@@ -118,7 +118,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const updatePartnerBucket = useCallback(
-    (bucketId: number, bucket: PartnerBucketInput, options?: PartnerRequestOptions) =>
+    (bucketId: number, bucket: PartnerBucketInput, options?: RequestOptions) =>
       run(async () => {
         await api.partnerBuckets.updatePartnerBucket(bucketId, bucket, options);
         setPartnerBuckets((buckets) => buckets.map((item) => (item.bucketId === bucketId ? { ...item, ...bucket } : item)));
@@ -127,7 +127,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const deletePartnerBucket = useCallback(
-    (bucketId: number, options?: PartnerRequestOptions) =>
+    (bucketId: number, options?: RequestOptions) =>
       run(async () => {
         await api.partnerBuckets.deletePartnerBucket(bucketId, options);
         setPartnerBuckets((buckets) => buckets.filter((bucket) => bucket.bucketId !== bucketId));

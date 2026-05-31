@@ -11,15 +11,6 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-export interface GroundXRequestOptions extends RequestOptions {
-}
-
-export interface PartnerRequestOptions extends RequestOptions {
-}
-
-export interface LlmRequestOptions extends RequestOptions {
-}
-
 export interface MessageResponse {
   message: string;
 }
@@ -54,15 +45,15 @@ export const paramsWithPagination = (params?: PaginationParams): Record<string, 
   return output;
 };
 
-export const groundxRequestConfig = (options: GroundXRequestOptions = {}) => ({
+export const groundxRequestConfig = (options: RequestOptions = {}) => ({
   signal: options.signal,
 });
 
-export const partnerRequestConfig = (options: PartnerRequestOptions = {}) => ({
+export const partnerRequestConfig = (options: RequestOptions = {}) => ({
   signal: options.signal,
 });
 
-export const llmRequestConfig = (options: LlmRequestOptions = {}) => {
+export const llmRequestConfig = (options: RequestOptions = {}) => {
   return {
     signal: options.signal,
   };

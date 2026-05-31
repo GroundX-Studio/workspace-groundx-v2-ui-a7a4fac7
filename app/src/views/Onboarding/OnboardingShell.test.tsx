@@ -157,39 +157,84 @@ describe("OnboardingShell", () => {
     expect(screen.getByText("Ask anything about the sample. Citations appear next to every answer.")).toBeInTheDocument();
   });
 
-  // ARCH-05B (2026-05-26): the canvas (viewer slot) MUST swap to
-  // `<SignUpWidget>` when the gate becomes active. Before the split,
-  // the canvas kept rendering whatever frame view was previously
-  // active — so a user who clicked Sign Up while looking at an F2
-  // sample saw the sample PDF sitting behind a chat-side form. The
-  // motivating ARCH-05 bug. Pin the new behavior here.
-  it("ARCH-05B: canvas swaps to SignUpWidget while the gate is open (F5 sample → Sign Up)", async () => {
+  // ARCH-05B (2026-05-26) + P1 (2026-05-29): the canvas (viewer slot)
+  // MUST swap away from the previous frame view when the gate becomes
+  // active — so a user who clicked Sign Up while looking at an F2 sample
+  // doesn't see the sample PDF sitting behind the gate. Before the split
+  // the canvas kept rendering the prior frame view (the ARCH-05 bug).
+  // P1 changed WHAT the canvas swaps to: the sign-up DOORS moved into the
+  // chat rail (GateChatRail), so the canvas now shows the GateValueProp
+  // pitch, not the account form.
+  it("P1: canvas swaps to the value-prop pane while the gate is open (F5 sample → Sign Up)", async () => {
     const user = userEvent.setup();
 
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f5", initialScenario: "utility" });
 
     // Pre-condition: canvas shows the InteractView for the sample.
     expect(screen.getByTestId("onboarding-frame-f5")).toBeInTheDocument();
-    expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
 
     // Trigger the gate via the F6 advance pill — same path as a real
     // user clicking through.
     await user.click(screen.getByTestId("advance-to-f6"));
 
-    // Canvas swaps to the SignUpWidget form. The previous frame view
-    // is gone (so the user isn't staring at the sample behind the
-    // form). The chat-side preamble renders alongside.
-    expect(await screen.findByTestId("signup-submit")).toBeInTheDocument();
+    // Canvas swaps to the value-prop pitch (the form is gone; sign-up
+    // doors live in the chat rail). The previous frame view is gone, and
+    // the chat-side gate (preamble + doors) renders alongside.
+    expect(await screen.findByTestId("gate-value-prop")).toBeInTheDocument();
+    expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-frame-f5")).not.toBeInTheDocument();
     expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-send-magic-link")).toBeInTheDocument();
 
-    // And when the user dismisses, the canvas drops back to the
-    // frame view (no lingering form). currentFrame is now f6 (the
-    // advance-to-f6 click moved it there), so the wrapper testid is
-    // f6 rather than the original f5.
+    // And when the user dismisses, the canvas drops back to the frame
+    // view (no lingering pitch). currentFrame is now f6.
     await user.click(screen.getByTestId("gate-rail-dismiss"));
-    await waitFor(() => expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument());
     expect(screen.getByTestId("onboarding-frame-f6")).toBeInTheDocument();
+  });
+
+  it("BUG: navigating signup → a sample URL clears the stale sign-up surface (deep-link branch must pop the overlay)", async () => {
+    const user = userEvent.setup();
+    // Probe that can navigate the router to a deep-link sample URL.
+    const Nav = () => {
+      const navigate = useNavigate();
+      return (
+        <button data-testid="goto-sample" onClick={() => navigate("/onboarding/28454/utility")}>
+          go
+        </button>
+      );
+    };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <Nav />
+      </>,
+      // Start on the sign-up URL → the deep-link effect pushes the sign-up overlay.
+      { initialUrl: "/onboarding/signup" },
+    );
+    // Sign-up surface is up (overlay pushed by the /signup branch).
+    expect(await screen.findByTestId("gate-value-prop")).toBeInTheDocument();
+
+    // Navigate to a sample. The deep-link SAMPLE branch (params.bucketId+scenarioId)
+    // must pop the stale sign-up overlay — the picker branch already does; this one
+    // returned early without it, leaving SignUpWidget over the sample.
+    await user.click(screen.getByTestId("goto-sample"));
+    await waitFor(() => expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
+  });
+
+  // P1 (2026-05-29): while the sign-up gate is open the step strip sits on
+  // "Understand" (owner-directed), regardless of which frame triggered it.
+  it("P1: step strip is on Understand while the gate is open", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f5", initialScenario: "utility" });
+
+    await user.click(screen.getByTestId("advance-to-f6"));
+    await screen.findByTestId("gate-value-prop");
+
+    const understandPill = screen.getByText("Understand").closest('[role="button"]');
+    expect(understandPill).toHaveAttribute("aria-current", "step");
   });
 
   // ARCH-06B (2026-05-26): the F1 overlay has its own StepStrip

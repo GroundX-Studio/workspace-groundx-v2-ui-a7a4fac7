@@ -9,11 +9,20 @@
  *     declares the slot.
  *   • Each widget ships a `README.md`.
  *   • Each widget ships a sibling `<Name>.test.tsx` covering the
- *     mode contract.
- *   • Each widget's main `.tsx` file references `mode:` in its
- *     props type. (We can't reliably introspect TypeScript types at
+ *     role + scope contract.
+ *   • Each widget's main `.tsx` file references BOTH a `role:` prop
+ *     AND a `scope:` prop in its props type, declares NO remaining
+ *     `mode: "onboarding" | "steady"` literal, and declares NO raw
+ *     `documentId`/`bucketId`/`projectId` prop (those collapse into
+ *     `scope`). (We can't reliably introspect TypeScript types at
  *     runtime under vitest without a compiler pass; the regex check
  *     is the practical drift guard.)
+ *
+ * 2026-05-30-widget-role-access Phase 1 flips this guard from
+ * requiring `mode` to requiring `role` + `scope`. Until the Phase 2b
+ * per-widget sweep lands, the unmigrated widgets will fail this guard
+ * — that is the EXPECTED red target driving the sweep, not a defect
+ * in this guard.
  *
  * Per `widget-contract.md` § The exception, F1 `IngestView` is the
  * sole carve-out — onboarding-only, NOT a widget. The test does not
@@ -120,20 +129,62 @@ describe("widget contract drift guard", () => {
         ).toBe(true);
       });
 
-      it("declares a `mode` prop in its main .tsx", () => {
+      it("declares BOTH a `role` and a `scope` prop in its main .tsx", () => {
         const mainTsx = findMainTsx(widget);
         expect(
           mainTsx,
           `could not find main .tsx in ${widget.absPath} (expected ${widget.name}.tsx / ${widget.name}Widget.tsx / index.tsx)`,
         ).not.toBeNull();
         const src = readFileSync(mainTsx!, "utf8");
-        // Accept either explicit `mode:` in a Props interface OR
-        // a destructured `mode` prop in the component signature.
-        const hasModeInProps = /mode\s*[?:]?\s*:/.test(src);
-        const hasModeDestructured = /\{\s*[^}]*\bmode\b[^}]*\}\s*[:)]/.test(src);
+        // Accept either explicit `role:` in a Props interface OR a
+        // destructured `role` prop in the component signature.
+        const hasRoleInProps = /\brole\s*[?]?\s*:/.test(src);
+        const hasRoleDestructured = /\{\s*[^}]*\brole\b[^}]*\}\s*[:)]/.test(src);
         expect(
-          hasModeInProps || hasModeDestructured,
-          `${mainTsx} must accept a \`mode\` prop — see widget-contract.md § "The contract" #3`,
+          hasRoleInProps || hasRoleDestructured,
+          `${mainTsx} must accept a \`role: WidgetRole\` prop — see widget-contract.md § "The contract" #3 (2026-05-30-widget-role-access)`,
+        ).toBe(true);
+
+        const hasScopeInProps = /\bscope\s*[?]?\s*:/.test(src);
+        const hasScopeDestructured = /\{\s*[^}]*\bscope\b[^}]*\}\s*[:)]/.test(src);
+        expect(
+          hasScopeInProps || hasScopeDestructured,
+          `${mainTsx} must accept a \`scope: WidgetScope\` prop — see widget-contract.md § "The contract" #3 (2026-05-30-widget-role-access)`,
+        ).toBe(true);
+      });
+
+      it("declares NO retired `mode: \"onboarding\" | \"steady\"` literal", () => {
+        const mainTsx = findMainTsx(widget);
+        if (mainTsx === null) return; // covered by the prop test above
+        const src = readFileSync(mainTsx, "utf8");
+        // The retired binary mode union, in either order, with flexible
+        // quoting/whitespace. `role` replaces it; a stray onboarding/steady
+        // mode literal is the migration tell.
+        const onb = `["']onboarding["']`;
+        const stdy = `["']steady["']`;
+        const modeLiteral = new RegExp(
+          `\\bmode\\b[^;\\n]*(?:(?:${onb}[^;\\n]*${stdy})|(?:${stdy}[^;\\n]*${onb}))`,
+        );
+        expect(
+          modeLiteral.test(src),
+          `${mainTsx} still declares a \`mode: "onboarding" | "steady"\` literal — replace with \`role: WidgetRole\` (2026-05-30-widget-role-access Phase 2b)`,
+        ).toBe(false);
+      });
+
+      it("declares NO raw documentId/bucketId/projectId prop (use `scope`)", () => {
+        const mainTsx = findMainTsx(widget);
+        if (mainTsx === null) return; // covered by the prop test above
+        const src = readFileSync(mainTsx, "utf8");
+        // A raw id PROP declaration: `documentId:` / `bucketId?:` etc. in a
+        // props position. These collapse into `scope: WidgetScope`. Match the
+        // identifier followed by an optional `?` then `:` (a type annotation),
+        // which is how a prop is declared — not how `scope.documentIds` is
+        // read.
+        const rawIdProp = /\b(?:documentId|bucketId|projectId)\s*\??\s*:/;
+        const match = rawIdProp.exec(src);
+        expect(
+          match === null,
+          `${mainTsx} declares a raw id prop (${match?.[0]?.trim() ?? ""}) — collapse it into \`scope: WidgetScope\` (2026-05-30-widget-role-access Phase 2b)`,
         ).toBe(true);
       });
 

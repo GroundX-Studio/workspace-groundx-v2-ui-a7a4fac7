@@ -27,11 +27,11 @@ describe("MySqlAppRepository", () => {
     await repository.createSchema();
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
-    // 9 CREATE TABLE statements + 1 information_schema probe + the
-    // ALTER TABLE migration only fires when columns are missing. The
-    // mock returns [] (no rows) → all three viewer columns reported
-    // missing → 1 ALTER fires. Total = 11.
-    expect(statements).toHaveLength(11);
+    // 9 legacy CREATE TABLE statements + 1 information_schema probe + 1 ALTER
+    // (mock reports all three viewer columns missing) = 11; shared-template-
+    // lifecycle Phase 2 adds CREATE TABLE templates + the idempotent copy
+    // INSERT…SELECT from extraction_schemas = 13.
+    expect(statements).toHaveLength(13);
     const joined = statements.join("\n");
     // Auth + metadata.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS sessions");
@@ -46,6 +46,25 @@ describe("MySqlAppRepository", () => {
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS intent_log");
     // CF-04 — app-owned saved-schemas table.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS extraction_schemas");
+    // shared-template-lifecycle Phase 2 — templates table + idempotent copy.
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS templates");
+    const copyStmt = statements.find((s) => /INSERT\s+INTO\s+templates/i.test(s))!;
+    // Idempotent AND concurrent-safe: ON DUPLICATE KEY UPDATE no-ops on a
+    // row already present, so re-runs do nothing and a multi-pod boot race on
+    // the PRIMARY KEY can't throw (a plain INSERT would → CrashLoopBackOff).
+    expect(copyStmt).toMatch(/ON\s+DUPLICATE\s+KEY\s+UPDATE\s+id\s*=\s*id/i);
+    // A plain INSERT (no conflict handling) would be the bug — assert it's absent.
+    expect(copyStmt).not.toMatch(/WHERE\s+id\s+NOT\s+IN/i);
+    // Column MAPPING must be exact — a swapped column silently corrupts the
+    // migration and substring matches wouldn't catch it. Pin INSERT target
+    // columns AND the SELECT projection order (body_json ← schema_json,
+    // kind ← literal 'extract', everything else 1:1).
+    expect(copyStmt).toMatch(
+      /INSERT\s+INTO\s+templates\s*\(\s*id\s*,\s*kind\s*,\s*groundx_username\s*,\s*name\s*,\s*body_json\s*,\s*created_at\s*,\s*updated_at\s*\)/i,
+    );
+    expect(copyStmt).toMatch(
+      /SELECT\s+id\s*,\s*'extract'\s*,\s*groundx_username\s*,\s*name\s*,\s*schema_json\s*,\s*created_at\s*,\s*updated_at\s+FROM\s+extraction_schemas/i,
+    );
     // master-viewer-session Phase 1 — idempotent migration probe + ALTER
     // when the viewer JSON columns are missing.
     expect(joined).toContain("information_schema.COLUMNS");
@@ -166,6 +185,56 @@ describe("MySqlAppRepository", () => {
       expect(probe).toContain("'viewer_overlays_json'");
       expect(probe).toContain("'viewer_workspace_json'");
     });
+
+    // Concurrency regression: multi-replica EKS / rolling update boots two pods
+    // at once. Both probe "column missing" and both issue the ALTER; the loser
+    // hits ER_DUP_FIELDNAME (errno 1060). A plain throw rejects createSchema()
+    // → CrashLoopBackOff until the winner finishes. The ALTER must tolerate
+    // losing the race (same class of fix as the templates copy-migration's
+    // ON DUPLICATE KEY UPDATE).
+    it("swallows a duplicate-column error from the ALTER (concurrent-pod race)", async () => {
+      mysqlMock.execute.mockImplementation((sql: string) => {
+        if (typeof sql === "string" && sql.includes("information_schema.COLUMNS")) {
+          // We saw the columns as missing — so we'll issue the ALTER...
+          return Promise.resolve([[], []]);
+        }
+        if (typeof sql === "string" && /^ALTER TABLE chat_sessions/i.test(sql)) {
+          // ...but a concurrent pod already added them. MySQL: errno 1060.
+          const err = Object.assign(new Error("Duplicate column name 'viewer_history_json'"), {
+            code: "ER_DUP_FIELDNAME",
+            errno: 1060,
+          });
+          return Promise.reject(err);
+        }
+        return Promise.resolve([[], []]);
+      });
+      const repository = new MySqlAppRepository(testEnv);
+
+      // The race-loser must NOT crash the pod — createSchema resolves.
+      await expect(repository.createSchema()).resolves.toBeUndefined();
+      // It DID attempt the ALTER (it isn't silently skipping the migration).
+      expect(alters()).toHaveLength(1);
+    });
+
+    it("re-throws a non-duplicate-column error from the ALTER (real failures still surface)", async () => {
+      mysqlMock.execute.mockImplementation((sql: string) => {
+        if (typeof sql === "string" && sql.includes("information_schema.COLUMNS")) {
+          return Promise.resolve([[], []]);
+        }
+        if (typeof sql === "string" && /^ALTER TABLE chat_sessions/i.test(sql)) {
+          // e.g. table genuinely gone, permissions, syntax — must NOT be eaten.
+          const err = Object.assign(new Error("Table 'chat_sessions' doesn't exist"), {
+            code: "ER_NO_SUCH_TABLE",
+            errno: 1146,
+          });
+          return Promise.reject(err);
+        }
+        return Promise.resolve([[], []]);
+      });
+      const repository = new MySqlAppRepository(testEnv);
+
+      await expect(repository.createSchema()).rejects.toThrow(/doesn't exist/);
+    });
   });
 
   it("stores session rows with GroundX username and optional encrypted key only", async () => {
@@ -236,6 +305,62 @@ describe("MySqlAppRepository", () => {
       onboardingState: "complete",
       lastActiveProjectId: "project-id-only",
       appRole: "admin",
+    });
+  });
+
+  // shared-template-lifecycle Phase 2 — templates repo methods.
+  describe("templates (Phase 2)", () => {
+    it("saveTemplate upserts INTO templates with the kind + body_json params", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      const createdAt = new Date("2026-05-29T00:00:00.000Z");
+      await repository.saveTemplate({
+        id: "t1",
+        kind: "extract",
+        groundxUsername: "gx-user",
+        name: "Utility",
+        bodyJson: '{"categories":[]}',
+        createdAt,
+        updatedAt: createdAt,
+      });
+      const [sql, params] = mysqlMock.execute.mock.calls.at(-1)!;
+      expect(String(sql)).toContain("INTO templates");
+      expect(String(sql)).toMatch(/ON DUPLICATE KEY UPDATE/i);
+      expect(params).toEqual(["t1", "extract", "gx-user", "Utility", '{"categories":[]}', createdAt, createdAt]);
+    });
+
+    it("listTemplates filters by username AND kind and maps rows", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{ id: "e1", kind: "extract", groundx_username: "gx-user", name: "U", body_json: '{"categories":[]}', created_at: "2026-05-29T00:00:00.000Z", updated_at: "2026-05-29T00:00:00.000Z" }],
+        [],
+      ]);
+      const rows = await repository.listTemplates("gx-user", "extract");
+      const [sql, params] = mysqlMock.execute.mock.calls.at(-1)!;
+      expect(String(sql)).toMatch(/WHERE\s+groundx_username\s*=\s*\?\s+AND\s+kind\s*=\s*\?/i);
+      expect(params).toEqual(["gx-user", "extract"]);
+      expect(rows).toEqual([
+        { id: "e1", kind: "extract", groundxUsername: "gx-user", name: "U", bodyJson: '{"categories":[]}', createdAt: new Date("2026-05-29T00:00:00.000Z"), updatedAt: new Date("2026-05-29T00:00:00.000Z") },
+      ]);
+    });
+
+    it("getTemplate maps a row; unknown id → null", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{ id: "t1", kind: "report", groundx_username: "gx-user", name: "R", body_json: '{"sections":[]}', created_at: "2026-05-29T00:00:00.000Z", updated_at: "2026-05-29T00:00:00.000Z" }],
+        [],
+      ]);
+      await expect(repository.getTemplate("t1")).resolves.toMatchObject({ id: "t1", kind: "report", name: "R" });
+      mysqlMock.execute.mockResolvedValueOnce([[], []]);
+      await expect(repository.getTemplate("nope")).resolves.toBeNull();
+    });
+
+    it("getTemplate guards a corrupt kind → null (VARCHAR not blindly cast)", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{ id: "t1", kind: "bogus", groundx_username: "gx-user", name: "X", body_json: "{}", created_at: "2026-05-29T00:00:00.000Z", updated_at: "2026-05-29T00:00:00.000Z" }],
+        [],
+      ]);
+      await expect(repository.getTemplate("t1")).resolves.toBeNull();
     });
   });
 });

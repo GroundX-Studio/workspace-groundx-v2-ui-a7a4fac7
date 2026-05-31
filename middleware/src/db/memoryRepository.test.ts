@@ -6,6 +6,7 @@ import type {
   ChatSessionRecord,
   ConversationSummaryRecord,
   IntentLogRecord,
+  TemplateRecord,
   ViewerEventRecord,
 } from "../types.js";
 
@@ -294,5 +295,52 @@ describe("MemoryAppRepository — chat-session methods", () => {
     const repo = new MemoryAppRepository();
     const result = await repo.rekeyAnonymousChatSessions("anon-nothing", "u-claimed");
     expect(result.rekeyedSessions).toBe(0);
+  });
+});
+
+// shared-template-lifecycle Phase 2 — the templates repo methods.
+describe("MemoryAppRepository — templates (Phase 2)", () => {
+  function tpl(over: Partial<TemplateRecord> & { id: string }): TemplateRecord {
+    return {
+      kind: "extract",
+      groundxUsername: "user-a",
+      name: "T",
+      bodyJson: JSON.stringify({ categories: [] }),
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+      ...over,
+    };
+  }
+
+  it("saveTemplate → getTemplate round-trips; unknown id → null", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.saveTemplate(tpl({ id: "t1", name: "Utility", bodyJson: '{"categories":[{"id":"s"}]}' }));
+    const got = await repo.getTemplate("t1");
+    expect(got).not.toBeNull();
+    expect(got?.name).toBe("Utility");
+    expect(got?.bodyJson).toBe('{"categories":[{"id":"s"}]}');
+    expect(await repo.getTemplate("nope")).toBeNull();
+  });
+
+  it("listTemplates filters by user AND kind, newest first", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.saveTemplate(tpl({ id: "e1", kind: "extract", groundxUsername: "user-a", updatedAt: new Date(10) }));
+    await repo.saveTemplate(tpl({ id: "e2", kind: "extract", groundxUsername: "user-a", updatedAt: new Date(20) }));
+    await repo.saveTemplate(tpl({ id: "r1", kind: "report", groundxUsername: "user-a" }));
+    await repo.saveTemplate(tpl({ id: "e3", kind: "extract", groundxUsername: "user-b" }));
+
+    const extracts = await repo.listTemplates("user-a", "extract");
+    expect(extracts.map((t) => t.id)).toEqual(["e2", "e1"]); // user-a extracts only, newest first
+    const reports = await repo.listTemplates("user-a", "report");
+    expect(reports.map((t) => t.id)).toEqual(["r1"]);
+  });
+
+  it("saveTemplate upserts on id (re-save replaces)", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.saveTemplate(tpl({ id: "t1", name: "v1" }));
+    await repo.saveTemplate(tpl({ id: "t1", name: "v2" }));
+    const list = await repo.listTemplates("user-a", "extract");
+    expect(list).toHaveLength(1);
+    expect(list[0].name).toBe("v2");
   });
 });

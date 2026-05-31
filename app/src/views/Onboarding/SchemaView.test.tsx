@@ -231,7 +231,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     });
   });
 
-  it("clicking topbar Save POSTs to /api/extraction-schemas + flips status to Saved", async () => {
+  it("clicking topbar Save POSTs to /api/templates + flips status to Saved", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
     // Make a change so the button enables.
@@ -253,11 +253,14 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     // Confirm the request body is the merged schema, not just the
     // overlay — the server stores the full pinned snapshot.
     const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
-    const saveCall = calls.find(([url]) => String(url).endsWith("/api/extraction-schemas"));
+    const saveCall = calls.find(([url]) => String(url).endsWith("/api/templates"));
     expect(saveCall).toBeDefined();
     const body = JSON.parse(String((saveCall![1] as RequestInit).body));
     expect(body.name).toBeTruthy();
-    expect(body.schema.categories).toBeInstanceOf(Array);
+    expect(body.kind).toBe("extract");
+    expect(body.body.categories).toBeInstanceOf(Array);
+    // 🔒 client never sends an owner.
+    expect("ownerUsername" in body).toBe(false);
   });
 
   // ── category-scoped-fields-view (openspec change) ───────────────
@@ -554,7 +557,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     // GateCommitter — simulates the gate's sign-up form submitting.
     // Listens for the gate to open with cause "save-schema" and then
     // calls commitGate("register"); also seeds a SUCCESS response for
-    // the post-commit POST /api/extraction-schemas retry.
+    // the post-commit POST /api/templates retry.
     function GateCommitter() {
       const { state, commitGate } = useOnboardingSession();
       useEffect(() => {

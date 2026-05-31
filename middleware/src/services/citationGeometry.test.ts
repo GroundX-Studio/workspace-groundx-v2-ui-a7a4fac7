@@ -10,9 +10,13 @@ import {
   parsePages,
   resolveGeometryFromXray,
   resolveFieldGeometry,
+  resolveWordGeometry,
   type BoundingBox,
+  type WordMap,
   type XrayDoc,
 } from "./citationGeometry.js";
+
+import wordMapFixture from "./wordMap.fixture.json" with { type: "json" };
 
 const box = (p: number, tlx: number, tly: number, brx: number, bry: number): BoundingBox => ({
   pageNumber: p,
@@ -196,5 +200,57 @@ describe("resolveFieldGeometry (WF-05 extract-field value → geometry)", () => 
     expect(resolveFieldGeometry("", "x", xray)).toBeNull();
     expect(resolveFieldGeometry(null, "x", xray)).toBeNull();
     expect(resolveFieldGeometry(true, "x", xray)).toBeNull();
+  });
+});
+
+describe("resolveWordGeometry (WF-05b word-level -118-map atom resolver)", () => {
+  const wordMap = wordMapFixture as unknown as WordMap;
+
+  // The X-Ray chunk box for the "Amount Due" line is the broad envelope
+  // (100,200)-(1600,400) on page 1 (see resolveFieldGeometry's chunk fixture
+  // + UTILITY_AMOUNT_DUE region). The word-level box must be TIGHTER than that.
+  const chunkBox = { x: 100 / 1700, y: 200 / 2200, w: 1500 / 1700, h: 200 / 2200 };
+
+  it("resolves the Utility 'amount due' verbatim span to a tight word-level bbox", () => {
+    const geo = resolveWordGeometry("$7,613.20", wordMap);
+    expect(geo).not.toBeNull();
+    expect(geo!.page).toBe(1);
+    // atom a4 box: (450,250)-(760,320) on a 1700x2200 page.
+    expect(geo!.bbox!.x).toBeCloseTo(450 / 1700, 3);
+    expect(geo!.bbox!.y).toBeCloseTo(250 / 2200, 3);
+    expect(geo!.bbox!.w).toBeCloseTo((760 - 450) / 1700, 3);
+    expect(geo!.bbox!.h).toBeCloseTo((320 - 250) / 2200, 3);
+    // The whole point of WF-05b: the word box is strictly tighter than the chunk box.
+    expect(geo!.bbox!.w).toBeLessThan(chunkBox.w);
+    expect(geo!.bbox!.h).toBeLessThanOrEqual(chunkBox.h);
+  });
+
+  it("unions consecutive atoms for a multi-word verbatim span", () => {
+    // "Amount Due $7,613.20" spans atoms a2..a4 → envelope (140,250)-(760,320).
+    const geo = resolveWordGeometry("Amount Due $7,613.20", wordMap);
+    expect(geo).not.toBeNull();
+    expect(geo!.page).toBe(1);
+    expect(geo!.bbox!.x).toBeCloseTo(140 / 1700, 3);
+    expect(geo!.bbox!.w).toBeCloseTo((760 - 140) / 1700, 3);
+  });
+
+  it("matches the consecutive atom run, not scattered tokens (ordered match)", () => {
+    // page-2 span: "Demand 2,218.75" → atoms b2..b3, envelope (710,600)-(1120,670).
+    const geo = resolveWordGeometry("Demand 2,218.75", wordMap);
+    expect(geo).not.toBeNull();
+    expect(geo!.page).toBe(2);
+    expect(geo!.bbox!.x).toBeCloseTo(710 / 1700, 3);
+    expect(geo!.bbox!.w).toBeCloseTo((1120 - 710) / 1700, 3);
+  });
+
+  it("returns null when the span is not present verbatim (no paraphrase guessing)", () => {
+    expect(resolveWordGeometry("the amount owed is roughly seven thousand", wordMap)).toBeNull();
+    expect(resolveWordGeometry("zzzz qqqq nonexistent", wordMap)).toBeNull();
+  });
+
+  it("returns null on empty span or empty map", () => {
+    expect(resolveWordGeometry("", wordMap)).toBeNull();
+    expect(resolveWordGeometry("$7,613.20", { pages: [] })).toBeNull();
+    expect(resolveWordGeometry("$7,613.20", {} as WordMap)).toBeNull();
   });
 });

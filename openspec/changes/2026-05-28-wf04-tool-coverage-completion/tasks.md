@@ -1,5 +1,20 @@
 # Tasks — WF-04 complete tool coverage
 
+> **Partially BACKLOGGED (2026-05-30):** the new `submit_` / `wizard_` / `close_`
+> tools (§1, §2, §4) are blocked and deferred. Two prerequisites must land first:
+> 1. **Verb-allowlist entries** — add `submit_` / `wizard_` / `close_` to
+>    `ALLOWED_VERBS` in `app/scripts/check-tool-quality.mjs` (lines 35-54); only
+>    `dismiss_` from that family passes today.
+> 2. **A glob-home for view/primitive tools** — the registry
+>    (`app/src/tools/registry.ts`, glob lines 90-93) and the quality scanner
+>    (`collectToolFiles`, lines 56-82) walk only `chat-widgets/*/*.tools.ts` +
+>    `viewer-widgets/*/*.tools.ts`; `OnboardingWizard` (a view) and `DialogTitle`
+>    (a primitive) have no glob home.
+>
+> Keep only the runnable cleanup active: §3 (GateChatRail → existing gate tool),
+> §5 (Auth honest `noTool` — done), §7 (inert-trio docs), and closure. Defer
+> §1/§2/§4 and the new-tool parts of §6 behind the two prerequisites.
+
 > **Progress 2026-05-29: census cleanup DONE; tool-building REMAINS.** The misleading
 > `"legacy — Phase 7 backfills tool"` placeholder was retired from the 7 files whose resolution is a
 > reason-swap (no new tool): the **4 Auth forms** → `"pre-app auth (not agent-driven)"` (§5), and the
@@ -9,7 +24,7 @@
 > existing gate tool §3), DialogTitle (`close_dialog` §4) + guard widening (§6) + inert-trio docs
 > (§7). Each new tool = intent variant + orchestrator handler + `tools.ts` + catalog mirror + test.
 
-## 1. SignUpWidget → real tool
+## 1. SignUpWidget → real tool — DEFERRED (blocked on `submit_` verb + view/primitive glob-home; see banner)
 
 - [ ] **Failing test:** `SignUpWidget.tools.test.ts` — exports a `submit_signup`
       mutate tool (zod args: email + any sign-up fields); valid schema.
@@ -20,7 +35,7 @@
       with honest reason `"value collected by submit_signup"`.
 - [ ] Mirror `submit_signup` in `middleware/services/toolCatalog.ts`.
 
-## 2. OnboardingWizard → nav tools
+## 2. OnboardingWizard → nav tools — DEFERRED (blocked on `wizard_` verb + view glob-home; see banner)
 
 - [ ] **Failing test:** wizard nav tools (`wizard_next`, `wizard_back`,
       `wizard_finish`, `dismiss_wizard`) exist + dispatch the right CanvasIntent.
@@ -33,7 +48,7 @@
       (`commit_gate` or `dismiss_gate`) — no new tool, no `noTool`.
 - [ ] Wire it.
 
-## 4. DialogTitle close → close_dialog
+## 4. DialogTitle close → close_dialog — DEFERRED (blocked on `close_` verb + primitive glob-home; see banner)
 
 - [ ] **Failing test:** the close IconButton carries `tool="close_dialog"`.
 - [ ] Add `close_dialog` intent + handler + catalog mirror.
@@ -52,7 +67,10 @@
       `onClick` that lacks `tool|noTool` fails the guard.
 - [ ] Extend `check-tool-references.mjs` enforcement set beyond
       Button/IconButton/TextField to those interactive surfaces.
-- [ ] Resolve every newly-flagged site (real tool or honest `noTool`).
+- [ ] Resolve every newly-flagged site. Active now: sites resolvable to an
+      *existing* tool or an honest `noTool`. DEFERRED: any site that would need a
+      new `submit_`/`wizard_`/`close_` tool (blocked on the two prerequisites in
+      the banner).
 
 ## 7. Sanctioned-inert trio
 
@@ -61,13 +79,20 @@
       exceptions to "every widget needs a tool."
 - [ ] Update each `no-llm.md` with the real rationale (replace any boilerplate).
 
-## Closure
+## Closure (runnable scope only — does NOT gate on the deferred §1/§2/§4)
 
 - [ ] No `noTool` with the `"legacy — Phase 7 backfills tool"` placeholder remains
       anywhere (grep clean).
 - [ ] App + middleware suites green; tsc both sides; drift guards green
       (`check-tool-references`, `check-tool-quality`, `widget-contract`).
 - [ ] OpenSpec `validate --all --strict`.
-- [ ] Chrome DevTools MCP smoke: the LLM-driven flows for the new tools fire
-      (e.g. ask the agent to advance the wizard / submit sign-up → chip → intent).
+- [ ] Do NOT archive until the two banner prerequisites land and §1/§2/§4 ship —
+      the change stays open carrying the deferred work.
+
+## DEFERRED closure (re-activates once the two prerequisites land)
+
+- [ ] Prereq 1: `submit_` / `wizard_` / `close_` added to `ALLOWED_VERBS`.
+- [ ] Prereq 2: registry + quality glob extended to a view/primitive tool home.
+- [ ] §1/§2/§4 tools built; Chrome DevTools MCP smoke: the LLM-driven flows fire
+      (advance the wizard / submit sign-up → chip → intent).
 - [ ] Archive.

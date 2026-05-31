@@ -1,5 +1,12 @@
 # Tasks — CF-19 ensureBucketGroup helper
 
+**STATUS: BACKLOGGED (2026-05-30) — needs rework before it can run; NOT in the active set.**
+
+> These tasks are written against a broken proposal (wrong endpoint,
+> empty-group-on-create, false idempotency, false data model, retired
+> scope discriminant, wrong credential, wrong line number). See the
+> Rework checklist in `proposal.md`. Do not execute until rewritten.
+
 ## Helper module
 
 - [ ] **Failing test:** `ensureBucketGroup.test.ts` — first call with

@@ -123,10 +123,25 @@ try {
       assert(json.username === "smoke@example.com", `login returned unexpected username: ${JSON.stringify(json)}`);
     },
   );
-  const cookie = login.response.headers.get("set-cookie")?.split(";")[0];
-  assert(cookie, "login did not set a session cookie");
+  // Login sets BOTH the session cookie (gx_app_session) and the CSRF cookie.
+  // Forward ALL of them: `headers.get("set-cookie")` comma-joins multiple
+  // Set-Cookie values (ambiguous — Expires attrs contain commas) and a
+  // `.split(";")[0]` would keep only the FIRST cookie, which can be the CSRF
+  // token, dropping the session → /api/project 401s. `getSetCookie()` returns
+  // each Set-Cookie individually; take `name=value` from each and rejoin.
+  const setCookies = login.response.headers.getSetCookie?.() ?? [];
+  const cookiePairs = setCookies.map((c) => c.split(";")[0]);
+  const cookie = cookiePairs.join("; ");
+  assert(/gx_app_session=/.test(cookie), "login did not set the session cookie");
 
-  const authHeaders = { cookie, "content-type": "application/json" };
+  // CSRF double-submit: mutating requests (POST) must echo the `csrf_token`
+  // cookie value in the `x-csrf-token` header, or the server 403s
+  // (`csrf_token_missing`). Safe (GET) requests ignore the header.
+  const csrfPair = cookiePairs.find((c) => c.startsWith("csrf_token="));
+  const csrfToken = csrfPair ? csrfPair.slice("csrf_token=".length) : "";
+  assert(csrfToken, "login did not set a csrf_token cookie");
+
+  const authHeaders = { cookie, "content-type": "application/json", "x-csrf-token": csrfToken };
   await expectJson(`${frontendUrl}/api/project`, { headers: authHeaders }, (json) => {
     assert(json.mode === "development", `project route did not use mock mode: ${JSON.stringify(json)}`);
     assert(json.projects?.some?.((project) => project.projectId === "demo-project"), `missing demo project: ${JSON.stringify(json)}`);

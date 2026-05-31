@@ -142,6 +142,7 @@ export const SteadyShell: FC = () => {
           mode="steady"
           targetPage={activeStep.highlight?.page ?? activeStep.page ?? null}
           highlightBbox={activeStep.highlight?.bbox ?? null}
+          highlightTier={activeStep.highlight?.tier}
         />
       </Box>
     ) : (

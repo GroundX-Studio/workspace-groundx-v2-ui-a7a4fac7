@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@groundx/shared": "*",
     "@opentelemetry/auto-instrumentations-node": "^0.76.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
     "@opentelemetry/resources": "^2.7.1",

@@ -56,7 +56,7 @@ describe("recordIntent (UI-10b client)", () => {
       recordIntent({
         chatSessionId: "chat-1",
         source: "user",
-        intent: { kind: "openDocument" },
+        intent: { kind: "openDocument", documentId: "d-1" },
       }),
     ).resolves.toBeUndefined();
     expect(captureException).toHaveBeenCalledTimes(1);
@@ -75,7 +75,7 @@ describe("recordIntent (UI-10b client)", () => {
       recordIntent({
         chatSessionId: "chat-1",
         source: "user",
-        intent: { kind: "openDocument" },
+        intent: { kind: "openDocument", documentId: "d-1" },
       }),
     ).resolves.toBeUndefined();
     expect(captureException).toHaveBeenCalledTimes(1);

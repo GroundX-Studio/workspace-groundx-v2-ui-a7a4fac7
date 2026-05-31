@@ -1,0 +1,82 @@
+{
+  "_comment": "Minimal -118-map.json fixture for the Utility sample doc. Real maps are large + schema-unstable (groundx-api guide 08 §10). This captures only the shape the word-atom resolver reads: pages[].{pageNumber,width,height,molecules[].rows[].atoms[]} with atom {text,minX,minY,maxX,maxY}. Page 1 carries the 'Amount Due $7,613.20' line; the atoms for that line sit on a tight band near the top of the page, well inside the broad X-Ray chunk envelope (100,200)-(1600,400).",
+  "locale": "en",
+  "pages": [
+    {
+      "pageNumber": 1,
+      "width": 1700,
+      "height": 2200,
+      "pageFile": "https://upload.eyelevel.ai/layout/raw/prod/PROC/DOC/1.jpg",
+      "molecules": [
+        {
+          "type": "paragraph",
+          "paraID": "p1",
+          "paraText": "Account Summary",
+          "pageNumber": [1],
+          "minPoint": { "x": 120, "y": 90 },
+          "maxPoint": { "x": 520, "y": 150 },
+          "rows": [
+            {
+              "type": "paragraph-row",
+              "pageNumber": [1],
+              "atoms": [
+                { "elementId": "a0", "rawId": "0", "type": "text", "text": "Account ", "minX": 120, "minY": 90, "maxX": 320, "maxY": 150 },
+                { "elementId": "a1", "rawId": "1", "type": "text", "text": "Summary", "minX": 330, "minY": 90, "maxX": 520, "maxY": 150 }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "paraID": "p2",
+          "paraText": "Amount Due $7,613.20 by 06/15",
+          "pageNumber": [1],
+          "minPoint": { "x": 140, "y": 250 },
+          "maxPoint": { "x": 980, "y": 320 },
+          "rows": [
+            {
+              "type": "paragraph-row",
+              "pageNumber": [1],
+              "atoms": [
+                { "elementId": "a2", "rawId": "2", "type": "text", "text": "Amount ", "minX": 140, "minY": 250, "maxX": 320, "maxY": 320 },
+                { "elementId": "a3", "rawId": "3", "type": "text", "text": "Due ", "minX": 330, "minY": 250, "maxX": 440, "maxY": 320 },
+                { "elementId": "a4", "rawId": "4", "type": "text", "text": "$7,613.20 ", "minX": 450, "minY": 250, "maxX": 760, "maxY": 320 },
+                { "elementId": "a5", "rawId": "5", "type": "text", "text": "by ", "minX": 770, "minY": 250, "maxX": 850, "maxY": 320 },
+                { "elementId": "a6", "rawId": "6", "type": "text", "text": "06/15", "minX": 860, "minY": 250, "maxX": 980, "maxY": 320 }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "width": 1700,
+      "height": 2200,
+      "pageFile": "https://upload.eyelevel.ai/layout/raw/prod/PROC/DOC/2.jpg",
+      "molecules": [
+        {
+          "type": "paragraph",
+          "paraID": "p3",
+          "paraText": "Industrial Electric Demand 2,218.75 kW",
+          "pageNumber": [2],
+          "minPoint": { "x": 200, "y": 600 },
+          "maxPoint": { "x": 1200, "y": 670 },
+          "rows": [
+            {
+              "type": "paragraph-row",
+              "pageNumber": [2],
+              "atoms": [
+                { "elementId": "b0", "rawId": "20", "type": "text", "text": "Industrial ", "minX": 200, "minY": 600, "maxX": 460, "maxY": 670 },
+                { "elementId": "b1", "rawId": "21", "type": "text", "text": "Electric ", "minX": 470, "minY": 600, "maxX": 700, "maxY": 670 },
+                { "elementId": "b2", "rawId": "22", "type": "text", "text": "Demand ", "minX": 710, "minY": 600, "maxX": 940, "maxY": 670 },
+                { "elementId": "b3", "rawId": "23", "type": "text", "text": "2,218.75 ", "minX": 950, "minY": 600, "maxX": 1120, "maxY": 670 },
+                { "elementId": "b4", "rawId": "24", "type": "text", "text": "kW", "minX": 1130, "minY": 600, "maxX": 1200, "maxY": 670 }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

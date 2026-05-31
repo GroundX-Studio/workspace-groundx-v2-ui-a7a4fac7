@@ -5,11 +5,12 @@ import type {
   ChatSessionEntityRecord,
   ChatSessionRecord,
   ConversationSummaryRecord,
-  ExtractionSchemaRecord,
   IntentLogRecord,
   SessionRecord,
+  TemplateRecord,
   ViewerEventRecord,
 } from "../types.js";
+import type { TemplateKind } from "@groundx/shared";
 
 /**
  * In-memory implementation of AppRepository. Used in MOCK_MODE and
@@ -27,7 +28,7 @@ export class MemoryAppRepository implements AppRepository {
   chatSessionEntities = new Map<string, ChatSessionEntityRecord>(); // key: `${sessionId}|${entityKey}`
   viewerEvents = new Map<string, ViewerEventRecord[]>();
   // CF-04 saved-schemas reader source. Keyed by schema id.
-  extractionSchemas = new Map<string, ExtractionSchemaRecord>();
+  templates = new Map<string, TemplateRecord>();
   // UI-10b — intent log (every canvas-orchestrator dispatch).
   intentLog = new Map<string, IntentLogRecord[]>();
 
@@ -154,17 +155,20 @@ export class MemoryAppRepository implements AppRepository {
     return [...filtered].sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  // ── Extraction schemas (CF-04) ──────────────────────────────────
+  // ── Templates (shared-template-lifecycle) ───────────────────────
 
-  async upsertExtractionSchema(record: ExtractionSchemaRecord): Promise<void> {
-    this.extractionSchemas.set(record.id, record);
+  async saveTemplate(record: TemplateRecord): Promise<void> {
+    this.templates.set(record.id, record);
   }
 
-  async listExtractionSchemasForUser(groundxUsername: string): Promise<ExtractionSchemaRecord[]> {
-    const all = Array.from(this.extractionSchemas.values()).filter(
-      (s) => s.groundxUsername === groundxUsername,
-    );
-    return all.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  async getTemplate(id: string): Promise<TemplateRecord | null> {
+    return this.templates.get(id) ?? null;
+  }
+
+  async listTemplates(groundxUsername: string, kind: TemplateKind): Promise<TemplateRecord[]> {
+    return Array.from(this.templates.values())
+      .filter((t) => t.groundxUsername === groundxUsername && t.kind === kind)
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
   }
 
   // ── Login-claim (re-key, not bulk-upload) ───────────────────────

@@ -355,16 +355,44 @@ describe("searchGroundX (ContentScope dispatch)", () => {
 
   it("bucket scope (no projectIds) → POST /v1/search/{bucketId} with no filter", async () => {
     const { client, calls } = spyClient();
-    await searchGroundX("hello", { kind: "bucket", bucketId: 42 }, client, "k");
-    expect(calls).toHaveLength(1);
+    await searchGroundX("hello", { type: "bucket", bucketId: 42 }, client, "k");
+    // First call is the default-relevance search (no `relevance` field).
     expect(calls[0].path).toBe("/search/42");
     expect(calls[0].body).toEqual({ query: "hello", n: 6 });
     expect(calls[0].apiKey).toBe("k");
   });
 
+  it("zero results → retries once with a low relevance floor (extract-indexed-doc rescue)", async () => {
+    // spyClient returns empty results, so the default search yields nothing
+    // → the retry fires with the fallback floor so JSON-indexed sample docs
+    // still ground an answer instead of "no snippets".
+    const { client, calls } = spyClient();
+    await searchGroundX("what is the total amount", { type: "bucket", bucketId: 42 }, client, "k");
+    expect(calls).toHaveLength(2);
+    expect(calls[0].body).toEqual({ query: "what is the total amount", n: 6 });
+    expect(calls[1].body).toEqual({ query: "what is the total amount", n: 6, relevance: -100 });
+  });
+
+  it("non-empty first result → no retry (normal prose docs pay one round-trip)", async () => {
+    const calls: Array<{ path: string }> = [];
+    const client: GroundXClient = {
+      forward: vi.fn(async (path: string) => {
+        calls.push({ path });
+        return new Response(
+          JSON.stringify({ search: { results: [{ documentId: "d-1", text: "Total amount due is $7,613.20." }] } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    };
+    await searchGroundX("total", { type: "bucket", bucketId: 42 }, client, "k");
+    // Only ONE search call (the first pass found results, so no retry). Any
+    // extra forward calls are the per-result X-Ray geometry fetch, not a retry.
+    expect(calls.filter((c) => c.path.startsWith("/search/"))).toHaveLength(1);
+  });
+
   it("bucket scope with ONE project id → adds filter: { projectId: P }", async () => {
     const { client, calls } = spyClient();
-    await searchGroundX("hello", { kind: "bucket", bucketId: 42, projectIds: ["proj-A"] }, client, "k");
+    await searchGroundX("hello", { type: "bucket", bucketId: 42, filter: { projectId: ["proj-A"] } }, client, "k");
     expect(calls[0].path).toBe("/search/42");
     expect(calls[0].body).toEqual({
       query: "hello",
@@ -377,7 +405,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     const { client, calls } = spyClient();
     await searchGroundX(
       "hello",
-      { kind: "bucket", bucketId: 42, projectIds: ["A", "B", "C"] },
+      { type: "bucket", bucketId: 42, filter: { projectId: ["A", "B", "C"] } },
       client,
       "k",
     );
@@ -390,14 +418,14 @@ describe("searchGroundX (ContentScope dispatch)", () => {
 
   it("group scope → POST /v1/search/{groupId} with no filter", async () => {
     const { client, calls } = spyClient();
-    await searchGroundX("hello", { kind: "group", groupId: 99 }, client, "k");
+    await searchGroundX("hello", { type: "group", groupId: 99 }, client, "k");
     expect(calls[0].path).toBe("/search/99");
     expect(calls[0].body).toEqual({ query: "hello", n: 6 });
   });
 
   it("documents scope → POST /v1/search/documents + documentIds in body", async () => {
     const { client, calls } = spyClient();
-    await searchGroundX("hello", { kind: "documents", documentIds: ["d1", "d2"] }, client, "k");
+    await searchGroundX("hello", { type: "documents", documentIds: ["d1", "d2"] }, client, "k");
     expect(calls[0].path).toBe("/search/documents");
     expect(calls[0].body).toEqual({
       query: "hello",
@@ -427,7 +455,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
         }),
       ),
     };
-    const results = await searchGroundX("demand charge", { kind: "bucket", bucketId: 28454 }, client, "k");
+    const results = await searchGroundX("demand charge", { type: "bucket", bucketId: 28454 }, client, "k");
     expect(results).toHaveLength(1);
     expect(results[0].pageNumber).toBe(2);
     expect(results[0].bbox).toBeDefined();
@@ -441,7 +469,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     const client: GroundXClient = {
       forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "flat", text: "t" }] } })),
     };
-    const results = await searchGroundX("q", { kind: "bucket", bucketId: 1 }, client, "k");
+    const results = await searchGroundX("q", { type: "bucket", bucketId: 1 }, client, "k");
     expect(results[0].pageNumber).toBe(1);
     expect(results[0].bbox).toBeUndefined();
   });
@@ -464,7 +492,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
         return jsonOk({ search: { results: [{ documentId: "c3bfff49", text: "Demand 2,218.75" }] } });
       }),
     };
-    const results = await searchGroundX("demand", { kind: "bucket", bucketId: 28454 }, client, "k");
+    const results = await searchGroundX("demand", { type: "bucket", bucketId: 28454 }, client, "k");
     expect(results[0].pageNumber).toBe(2);
     expect(results[0].bbox).toBeDefined();
     expect(results[0].bbox!.x).toBeCloseTo(0.213, 2);
@@ -473,17 +501,17 @@ describe("searchGroundX (ContentScope dispatch)", () => {
   it("documents scope with empty documentIds throws (programming bug guard)", async () => {
     const { client } = spyClient();
     await expect(
-      searchGroundX("hello", { kind: "documents", documentIds: [] }, client, "k"),
+      searchGroundX("hello", { type: "documents", documentIds: [] }, client, "k"),
     ).rejects.toThrow(/at least one documentId/i);
   });
 
-  it("unknown scope → legacy fallback to /v1/search/documents + console.warn", async () => {
+  it("null scope (no derivable scope) → legacy fallback to /v1/search/documents + console.warn", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { client, calls } = spyClient();
-    await searchGroundX("hello", { kind: "unknown" }, client, "k");
+    await searchGroundX("hello", null, client, "k");
     expect(calls[0].path).toBe("/search/documents");
     expect(calls[0].body).toEqual({ query: "hello", n: 6 });
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/kind=unknown/));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no scope/));
   });
 
   // CF-03 — RBAC + arbitrary metadata filter composition. The
@@ -497,7 +525,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX(
         "hello",
-        { kind: "bucket", bucketId: 42, projectIds: ["P1", "P2"] },
+        { type: "bucket", bucketId: 42, filter: { projectId: ["P1", "P2"] } },
         client,
         "k",
         { rbacFilter: { orgId: "org-X" } },
@@ -518,7 +546,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX(
         "hello",
-        { kind: "bucket", bucketId: 42, projectIds: ["solo"] },
+        { type: "bucket", bucketId: 42, filter: { projectId: ["solo"] } },
         client,
         "k",
         { rbacFilter: { orgId: "org-X" } },
@@ -536,7 +564,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX(
         "hello",
-        { kind: "bucket", bucketId: 42 },
+        { type: "bucket", bucketId: 42 },
         client,
         "k",
         { rbacFilter: { orgId: "org-X" } },
@@ -552,7 +580,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX(
         "hello",
-        { kind: "bucket", bucketId: 42, projectIds: ["P1"] },
+        { type: "bucket", bucketId: 42, filter: { projectId: ["P1"] } },
         client,
         "k",
         { rbacFilter: undefined },
@@ -568,7 +596,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX(
         "hello",
-        { kind: "group", groupId: 99 },
+        { type: "group", groupId: 99 },
         client,
         "k",
         { rbacFilter: { tenant: "t-7" } },
@@ -585,7 +613,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX(
         "hello",
-        { kind: "documents", documentIds: ["d1"] },
+        { type: "documents", documentIds: ["d1"] },
         client,
         "k",
         { rbacFilter: { tenant: "t-7" } },
@@ -605,7 +633,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX(
         "hello",
-        { kind: "bucket", bucketId: 42, projectIds: ["P1"] },
+        { type: "bucket", bucketId: 42, filter: { projectId: ["P1"] } },
         client,
         "k",
         {
@@ -627,6 +655,79 @@ describe("searchGroundX (ContentScope dispatch)", () => {
           ],
         },
       });
+    });
+  });
+
+  // ── B1 inc. 3 — composable `filter` on EVERY scope shape ──────────────
+  // The unified ContentScope carries an optional `filter` (project /
+  // portfolio / fund / folder filter-fields) on bucket, group, AND
+  // documents. searchGroundX compiles it uniformly via the shared
+  // compileScopeFilter (was bucket-only / projectIds-only) and composes it
+  // with the server-derived rbacFilter via $and. These lock the headline
+  // capability for the two shapes the legacy code never filtered.
+  describe("scope.filter composable on every shape (B1 inc. 3)", () => {
+    it("group scope + filter → body.filter (filter is NOT bucket-only)", async () => {
+      const { client, calls } = spyClient();
+      await searchGroundX("hello", { type: "group", groupId: 99, filter: { fund: "f3" } }, client, "k");
+      expect(calls[0].path).toBe("/search/99");
+      expect(calls[0].body).toEqual({ query: "hello", n: 6, filter: { fund: "f3" } });
+    });
+
+    it("documents scope + filter → body.filter alongside documentIds", async () => {
+      const { client, calls } = spyClient();
+      await searchGroundX(
+        "hello",
+        { type: "documents", documentIds: ["d1"], filter: { folder: ["a", "b"] } },
+        client,
+        "k",
+      );
+      expect(calls[0].path).toBe("/search/documents");
+      expect(calls[0].body).toEqual({
+        query: "hello",
+        n: 6,
+        documentIds: ["d1"],
+        filter: { folder: { $in: ["a", "b"] } },
+      });
+    });
+
+    it("bucket scope + multi-field filter → $and of each clause", async () => {
+      const { client, calls } = spyClient();
+      await searchGroundX(
+        "hello",
+        { type: "bucket", bucketId: 42, filter: { projectId: ["A", "B"], fund: "f3" } },
+        client,
+        "k",
+      );
+      expect(calls[0].body).toEqual({
+        query: "hello",
+        n: 6,
+        filter: { $and: [{ projectId: { $in: ["A", "B"] } }, { fund: "f3" }] },
+      });
+    });
+
+    it("scope.filter (non-projectId field) composes with rbacFilter via $and", async () => {
+      const { client, calls } = spyClient();
+      await searchGroundX(
+        "hello",
+        { type: "group", groupId: 99, filter: { fund: "f3" } },
+        client,
+        "k",
+        { rbacFilter: { orgId: "org-X" } },
+      );
+      expect(calls[0].body).toEqual({
+        query: "hello",
+        n: 6,
+        filter: { $and: [{ orgId: "org-X" }, { fund: "f3" }] },
+      });
+    });
+
+    it("null scope still composes rbacFilter alone (doc-wide fallback, no scopeFilter)", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { client, calls } = spyClient();
+      await searchGroundX("hello", null, client, "k", { rbacFilter: { orgId: "org-X" } });
+      expect(calls[0].path).toBe("/search/documents");
+      expect(calls[0].body).toEqual({ query: "hello", n: 6, filter: { orgId: "org-X" } });
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no scope/));
     });
   });
 });
@@ -1336,7 +1437,7 @@ describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
       llmModelId: "test-model",
       mockMode: false,
     });
-    expect(reply._debug?.scope).toMatchObject({ kind: "bucket", bucketId: 28454 });
+    expect(reply._debug?.scope).toMatchObject({ type: "bucket", bucketId: 28454 });
   });
 
   it("_debug.groundx.resultCount === 0 surfaces the 'GroundX returned nothing' failure mode", async () => {

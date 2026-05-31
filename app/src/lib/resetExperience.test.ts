@@ -26,6 +26,7 @@ describe("clearAppClientStorage", () => {
     // App-owned (prefix-matched, so future keys are caught too).
     localStorage.setItem("groundx-onboarding.chat-store.v1", "x");
     localStorage.setItem("groundx-onboarding.entity-registry.v1", "x");
+    localStorage.setItem("groundx-onboarding.gate-sequence-played", "true");
     localStorage.setItem("appshell.chatWidth.v2", "360");
     localStorage.setItem("x-ray-demo-email", "a@b.com");
     sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
@@ -37,6 +38,8 @@ describe("clearAppClientStorage", () => {
 
     expect(localStorage.getItem("groundx-onboarding.chat-store.v1")).toBeNull();
     expect(localStorage.getItem("groundx-onboarding.entity-registry.v1")).toBeNull();
+    // P1 — the gate "animated in once" flag is session state; reset replays it.
+    expect(localStorage.getItem("groundx-onboarding.gate-sequence-played")).toBeNull();
     expect(localStorage.getItem("appshell.chatWidth.v2")).toBeNull();
     expect(localStorage.getItem("x-ray-demo-email")).toBeNull();
     expect(sessionStorage.getItem("groundx-onboarding.thinking-stream-done.utility")).toBeNull();

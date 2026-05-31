@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ExtractionSchemaApiError, saveExtractionSchema } from "./extractionSchemas";
+import { TemplateApiError, saveTemplate, type TemplateSaveInput } from "./templates";
 
 const originalFetch = global.fetch;
 
@@ -15,14 +15,15 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-const samplePayload = {
+const samplePayload: TemplateSaveInput = {
   id: "es-1",
+  kind: "extract",
   name: "Utility (custom)",
-  schema: { name: "Utility", categories: [] },
+  body: { categories: [] },
 };
 
-describe("saveExtractionSchema", () => {
-  it("POSTs to /api/extraction-schemas with the supplied body and returns the server payload", async () => {
+describe("saveTemplate", () => {
+  it("POSTs the TemplateSaveInput to /api/templates and returns the server payload", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -30,17 +31,19 @@ describe("saveExtractionSchema", () => {
     });
     global.fetch = fetchMock;
 
-    const result = await saveExtractionSchema(samplePayload);
+    const result = await saveTemplate(samplePayload);
     expect(result).toMatchObject({ id: "es-1", name: "Utility (custom)" });
 
     const [path, init] = fetchMock.mock.calls[0];
-    expect(path).toBe("/api/extraction-schemas");
+    expect(path).toBe("/api/templates");
     expect((init as RequestInit).method).toBe("POST");
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body).toMatchObject(samplePayload);
+    // 🔒 the client never sends an owner/timestamps (server assigns them).
+    expect("ownerUsername" in body).toBe(false);
   });
 
-  it("throws ExtractionSchemaApiError on 401 (anonymous user) so callers can surface the sign-in nudge", async () => {
+  it("throws TemplateApiError on 401 (anonymous) so callers surface the sign-in nudge", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -48,15 +51,15 @@ describe("saveExtractionSchema", () => {
     });
     let caught: unknown = null;
     try {
-      await saveExtractionSchema(samplePayload);
+      await saveTemplate(samplePayload);
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(ExtractionSchemaApiError);
-    expect((caught as ExtractionSchemaApiError).status).toBe(401);
+    expect(caught).toBeInstanceOf(TemplateApiError);
+    expect((caught as TemplateApiError).status).toBe(401);
   });
 
-  it("throws ExtractionSchemaApiError on 400 (malformed payload)", async () => {
+  it("throws TemplateApiError on 400 (malformed payload)", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -64,11 +67,11 @@ describe("saveExtractionSchema", () => {
     });
     let caught: unknown = null;
     try {
-      await saveExtractionSchema(samplePayload);
+      await saveTemplate(samplePayload);
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(ExtractionSchemaApiError);
-    expect((caught as ExtractionSchemaApiError).status).toBe(400);
+    expect(caught).toBeInstanceOf(TemplateApiError);
+    expect((caught as TemplateApiError).status).toBe(400);
   });
 });

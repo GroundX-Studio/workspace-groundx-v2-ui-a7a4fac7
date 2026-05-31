@@ -1,7 +1,7 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
 import { api } from "@/api";
-import { GroundXRequestOptions } from "@/api/common";
+import { RequestOptions } from "@/api/common";
 import { ServiceHealth } from "@/api/entities/groundxHealthEntity";
 import { useIsLoading } from "@/contexts/LoadingContext";
 import { useMessageContext } from "@/contexts/MessageBarContext";
@@ -16,7 +16,7 @@ export const HealthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [selectedService, setSelectedService] = useState<ServiceHealth | null>(null);
 
   const listHealth = useCallback(
-    async (options?: GroundXRequestOptions) => {
+    async (options?: RequestOptions) => {
       const result = createSdkResult<ServiceHealth[]>();
       setIsLoading(true);
       try {
@@ -36,7 +36,7 @@ export const HealthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   );
 
   const getServiceHealth = useCallback(
-    async (service: string, options?: GroundXRequestOptions) => {
+    async (service: string, options?: RequestOptions) => {
       const result = createSdkResult<ServiceHealth>();
       setIsLoading(true);
       try {

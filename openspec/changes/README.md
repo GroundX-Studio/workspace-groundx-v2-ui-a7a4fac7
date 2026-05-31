@@ -37,6 +37,26 @@ discipline (`scaffold/docs/agents/discipline.md` Rule 9), each change's
 `tasks.md` MUST start with a failing user-visible test before any
 implementation step.
 
+## Plan authoring — tier-1 conformance
+
+Every proposal is held to the tier-1 principles
+(`scaffold/docs/agents/principles.md`). A plan is not ready for review until:
+
+- **`proposal.md` carries a `## Conformance to core architectural decisions`**
+  section checking the change against: composable-not-forked (principle 1 —
+  new variation is a *value on an axis*, not a new forked component; if it adds
+  an abstraction it names the **second real caller** or drops it); done-able
+  (principle 5); one source of truth (principle 6 — reuse `@groundx/shared`, no
+  twin types).
+- **`tasks.md` starts with a failing user-visible test** (principle 2) and tags
+  each task **SEQUENTIAL vs WORKFLOW** plus its **adversarial review gate**
+  (principle 3) — a task does not advance until its gate passes against the
+  plan AND the real code.
+- **Deferred work is a tracked ticket**, never orphaned/dormant code
+  (principle 5 / discipline §8).
+- **Written in plain, succinct English** (principle 4) — tables over prose,
+  lead with the decision.
+
 ## History
 
 Historical changes live under `archive/`. The current durable spec for

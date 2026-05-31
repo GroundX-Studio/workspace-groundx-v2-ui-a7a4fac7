@@ -1,12 +1,13 @@
 import Box from "@mui/material/Box";
 import IconButton from "@mui/material/IconButton";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import { useTheme } from "@mui/material/styles";
+import { alpha, useTheme } from "@mui/material/styles";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 import {
   BORDER,
+  BORDER_RADIUS_CARD,
   BORDER_RADIUS_PILL,
   BORDER_RADIUS_SM,
   FONT_SIZE_CAPTION,
@@ -15,6 +16,35 @@ import {
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
+
+/**
+ * Floating-panels look (2026-05-29): the shell sits on a warm "desk"; the
+ * chat + canvas render as elevated white cards with a gutter between them,
+ * instead of two flat beige panels abutting. Shared card styling here.
+ */
+const FLOATING_CARD_SX = {
+  flex: 1,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
+  m: 1,
+  borderRadius: BORDER_RADIUS_CARD,
+  backgroundColor: WHITE,
+  border: `1px solid ${BORDER}`,
+  // Lifted enough to read against the cool-gray desk below.
+  boxShadow: `0 6px 20px ${alpha(NAVY, 0.12)}`,
+} as const;
+
+/**
+ * The "desk" the cards float on — a soft cool-gray (navy doesn't work as a
+ * full background). Distinct enough from the cards' white/warm to read.
+ */
+const FLOATING_DESK_BG = alpha(NAVY, 0.08);
+
+/** Canvas card: like the chat card but borderless so the PDF viewer fills it
+ *  edge-to-edge (just the rounded corners, no gray frame). */
+const FLOATING_CANVAS_CARD_SX = { ...FLOATING_CARD_SX, border: "none" } as const;
 import { useFocusMode } from "@/shared/hooks/useFocusMode";
 import { useResizableSplit } from "@/shared/hooks/useResizableSplit";
 
@@ -443,6 +473,9 @@ export function AppShell({
           height: RAIL_HEIGHT,
           width: "100%",
           overflow: "hidden",
+          // Floating-panels: cool-gray "desk" behind the nav + the chat/canvas
+          // cards (warm-offwhite was too close to the cards' white to read).
+          backgroundColor: FLOATING_DESK_BG,
         }}
       >
         <AnimatePresence initial={false}>
@@ -515,7 +548,10 @@ export function AppShell({
                   aria-label="Chat pane"
                   data-testid="appshell-chat"
                 >
-                  {chat}
+                  {/* Chat card is WARM (not white) so the white assistant
+                      bubbles keep their contrast; the canvas card stays white.
+                      Both float distinctly on the cool-gray desk. */}
+                  <Box sx={{ ...FLOATING_CARD_SX, backgroundColor: WARM_OFFWHITE }}>{chat}</Box>
                 </motion.section>
               ) : null}
             </AnimatePresence>
@@ -543,7 +579,7 @@ export function AppShell({
                   aria-label="Canvas"
                   data-testid="appshell-canvas"
                 >
-                  {canvas}
+                  <Box sx={FLOATING_CANVAS_CARD_SX}>{canvas}</Box>
                 </motion.section>
               ) : null}
             </AnimatePresence>

@@ -43,8 +43,8 @@ import {
   routeChat,
   type ChatRouterRequest,
   type ChatRouterResponse,
-  type RagContentScope,
 } from "./chatRouter.js";
+import type { ContentScope } from "@groundx/shared";
 import { runCompression, runMetaCompaction, selectActiveSummaries } from "./conversationCompressor.js";
 import { UpstreamTimeoutError } from "./http.js";
 import { logger } from "../lib/logger.js";
@@ -511,46 +511,48 @@ export async function handleChatMessage(
  *
  * Precedence (first match wins):
  *
- *   1. entity.documentIds (non-empty)             → `{kind:"documents"}`
- *   2. entity.groupId (set)                       → `{kind:"group"}`
- *   3. entity.bucketId (set)                      → `{kind:"bucket",
- *                                                     projectIds?: [...]}`
- *   4. fallback env samples bucketId              → `{kind:"bucket"}`
- *   5. else                                       → `{kind:"unknown"}`
+ *   1. entity.documentIds (non-empty)             → `{type:"documents"}`
+ *   2. entity.groupId (set)                       → `{type:"group"}`
+ *   3. entity.bucketId (set)                      → `{type:"bucket",
+ *                                                     filter?:{projectId:[...]}}`
+ *   4. fallback env samples bucketId              → `{type:"bucket"}`
+ *   5. else                                       → `null` (no derivable scope)
  *
  * Onboarding's anon seed entity has none of the four scope refs so
  * the env fallback still drives the search — the legacy behavior is
- * intact.
+ * intact. A product project is a `projectId` **filter-field** on the bucket
+ * (WF-07), never a group; that mapping is expressed via the composable
+ * `filter`. "No derivable scope" returns `null` (not a fake variant);
+ * `searchGroundX` handles null as the doc-wide legacy fallback.
  */
 export function deriveRagContentScope(
   activeEntity: ChatSessionEntityRecord | null | undefined,
   fallbackBucketId: number | null | undefined,
-): RagContentScope {
+): ContentScope | null {
   if (activeEntity) {
     // 1. Document-level scope wins (single-PDF viewer flows).
     const docIds = safeParseStringArray(activeEntity.documentIdsJson ?? "[]");
     if (docIds.length > 0) {
-      return { kind: "documents", documentIds: docIds };
+      return { type: "documents", documentIds: docIds };
     }
     // 2. Multi-workspace group.
     if (activeEntity.groupId != null) {
-      return { kind: "group", groupId: activeEntity.groupId };
+      return { type: "group", groupId: activeEntity.groupId };
     }
-    // 3. Bucket — optionally narrowed by projectIds.
+    // 3. Bucket — optionally narrowed by a projectId filter-field.
     if (activeEntity.bucketId != null) {
       const projectIds = safeParseStringArray(activeEntity.projectIdsJson ?? "[]");
       return projectIds.length > 0
-        ? { kind: "bucket", bucketId: activeEntity.bucketId, projectIds }
-        : { kind: "bucket", bucketId: activeEntity.bucketId };
+        ? { type: "bucket", bucketId: activeEntity.bucketId, filter: { projectId: projectIds } }
+        : { type: "bucket", bucketId: activeEntity.bucketId };
     }
   }
   // 4. Legacy env-bucket fallback for the onboarding samples flow.
   if (fallbackBucketId != null) {
-    return { kind: "bucket", bucketId: fallbackBucketId };
+    return { type: "bucket", bucketId: fallbackBucketId };
   }
-  // 5. Last resort. Logged downstream in searchGroundX so the gap shows
-  //    in telemetry.
-  return { kind: "unknown" };
+  // 5. No derivable scope. Returns null; searchGroundX logs the gap.
+  return null;
 }
 
 /**

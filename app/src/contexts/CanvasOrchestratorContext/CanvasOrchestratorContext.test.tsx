@@ -380,6 +380,31 @@ describe("CanvasOrchestratorContext", () => {
       }
     });
 
+    // WF-06b — the citation tier rides the intent into the step's
+    // highlight slot so the viewer pane can render at the right precision.
+    it("threads the citation tier onto the doc-viewer step highlight slot", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      act(() => {
+        result.current.bus.dispatch({
+          kind: "highlightCitation",
+          documentId: "doc-A",
+          page: 4,
+          bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 },
+          tier: "paraphrase",
+        }, "user");
+      });
+      const session = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const current = session?.viewer.history[session.viewer.currentStep.stepIndex];
+      expect(current?.kind).toBe("doc-viewer");
+      if (current?.kind === "doc-viewer") {
+        expect(current.highlight?.tier).toBe("paraphrase");
+      }
+    });
+
     it("dispatching highlightCitation while a doc-viewer step for the SAME documentId is active MUTATES the highlight in place (no new step)", () => {
       const { result } = renderHook(
         () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),

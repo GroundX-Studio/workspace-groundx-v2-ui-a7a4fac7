@@ -33,13 +33,13 @@ function entity(partial: Partial<ChatSessionEntityRecord>): ChatSessionEntityRec
 }
 
 describe("WF-07 domain vocabulary lock — deriveRagContentScope", () => {
-  it("a single-workspace project view resolves to bucket + projectIds filter, NOT a group", () => {
+  it("a single-workspace project view resolves to bucket + projectId filter-field, NOT a group", () => {
     const scope = deriveRagContentScope(
       entity({ bucketId: 28454, projectIdsJson: JSON.stringify(["proj_sundance"]) }),
       null,
     );
-    expect(scope).toEqual({ kind: "bucket", bucketId: 28454, projectIds: ["proj_sundance"] });
-    expect(scope.kind).not.toBe("group");
+    expect(scope).toEqual({ type: "bucket", bucketId: 28454, filter: { projectId: ["proj_sundance"] } });
+    expect(scope?.type).not.toBe("group");
   });
 
   it("a multi-project view is still a bucket filter (never a group)", () => {
@@ -47,25 +47,38 @@ describe("WF-07 domain vocabulary lock — deriveRagContentScope", () => {
       entity({ bucketId: 28454, projectIdsJson: JSON.stringify(["P1", "P2"]) }),
       null,
     );
-    expect(scope).toEqual({ kind: "bucket", bucketId: 28454, projectIds: ["P1", "P2"] });
-    expect(scope.kind).not.toBe("group");
+    expect(scope).toEqual({ type: "bucket", bucketId: 28454, filter: { projectId: ["P1", "P2"] } });
+    expect(scope?.type).not.toBe("group");
   });
 
-  it("a portfolio / bucket-wide view (no projectIds) is a plain bucket scope", () => {
+  it("a portfolio / bucket-wide view (no projectIds) is a plain bucket scope (no filter)", () => {
     const scope = deriveRagContentScope(entity({ bucketId: 28454 }), null);
-    expect(scope).toEqual({ kind: "bucket", bucketId: 28454 });
+    expect(scope).toEqual({ type: "bucket", bucketId: 28454 });
   });
 
   it("a group is used ONLY for an explicit multi-workspace groupId", () => {
     const scope = deriveRagContentScope(entity({ groupId: 99 }), null);
-    expect(scope).toEqual({ kind: "group", groupId: 99 });
+    expect(scope).toEqual({ type: "group", groupId: 99 });
   });
 
-  it("bucket + projectIds wins over the env fallback and never silently becomes a group", () => {
+  it("bucket + projectId filter wins over the env fallback and never silently becomes a group", () => {
     const scope = deriveRagContentScope(
       entity({ bucketId: 28454, projectIdsJson: JSON.stringify(["proj_sundance"]), groupId: null }),
       77,
     );
-    expect(scope.kind).toBe("bucket");
+    expect(scope?.type).toBe("bucket");
+  });
+
+  // B1 inc. 3 — the retired `{kind:"unknown"}` variant is now an explicit
+  // `null` (no fake scope shape). searchGroundX handles null as the doc-wide
+  // fallback. Lock the null contract so the behavior-preserving migration
+  // can't silently regress to a truthy fallback.
+  it("no entity + no fallback bucket → null (not a fake 'unknown' variant)", () => {
+    expect(deriveRagContentScope(null, null)).toBeNull();
+    expect(deriveRagContentScope(undefined, null)).toBeNull();
+  });
+
+  it("an entity with no scope refs + no fallback bucket → null", () => {
+    expect(deriveRagContentScope(entity({}), null)).toBeNull();
   });
 });

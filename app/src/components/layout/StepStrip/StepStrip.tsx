@@ -60,8 +60,8 @@ const stepChipSx = (state: StepPillState) => {
     case "disabled":
       return {
         backgroundColor: WHITE,
-        borderColor: alpha(NAVY, 0.25),
-        color: alpha(NAVY, 0.5),
+        borderColor: alpha(NAVY, 0.14),
+        color: alpha(NAVY, 0.34),
         fontWeight: FONT_WEIGHT_MEDIUM,
         cursor: "not-allowed",
       };

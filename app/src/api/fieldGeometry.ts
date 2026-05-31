@@ -9,10 +9,11 @@
  * nulls so the extract UI never breaks on a geometry miss.
  */
 import { csrfFetch } from "@/api/csrfFetch";
+import type { NormalizedBbox } from "@groundx/shared";
 
 export interface ResolvedFieldGeometry {
   page: number;
-  bbox: { x: number; y: number; w: number; h: number } | null;
+  bbox: NormalizedBbox | null;
 }
 
 export interface FieldGeometryQuery {

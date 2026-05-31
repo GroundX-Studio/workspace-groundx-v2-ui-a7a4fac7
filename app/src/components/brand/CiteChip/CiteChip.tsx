@@ -1,14 +1,15 @@
 import Chip from "@mui/material/Chip";
+import { alpha } from "@mui/material/styles";
 import { useCallback, type FC } from "react";
 
 import {
+  BORDER_RADIUS_PILL,
   CORAL,
   CYAN,
   FONT_SIZE_LABEL,
   FONT_WEIGHT_LABEL,
   GREEN,
   NAVY,
-  WHITE,
 } from "@/constants";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { track } from "@/lib/analytics";
@@ -52,16 +53,10 @@ export interface CiteChipProps {
  */
 export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color = "cyan" }) => {
   const { dispatch } = useCanvasOrchestrator();
-  const palette = (() => {
-    switch (color) {
-      case "coral":
-        return { background: CORAL, foreground: WHITE };
-      case "green":
-        return { background: GREEN, foreground: NAVY };
-      default:
-        return { background: CYAN, foreground: NAVY };
-    }
-  })();
+  // Single accent per color-key — rendered as a soft tinted pill (tint fill +
+  // matching border + navy label) instead of a loud solid chip, so the
+  // citation reads as a refined source tag in the answer footer.
+  const accent = color === "coral" ? CORAL : color === "green" ? GREEN : CYAN;
 
   const handle = useCallback(() => {
     // OB-02 — cite.peeked fires on every citation chip activation
@@ -85,6 +80,9 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color
         documentId: citation.documentId,
         page: citation.page,
         ...(citation.bbox ? { bbox: citation.bbox } : {}),
+        // WF-06b — thread the attribution tier so the viewer overlay
+        // renders at the citation's precision (ambient → chip only).
+        ...(citation.tier ? { tier: citation.tier } : {}),
       },
       "user",
     );
@@ -96,7 +94,10 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color
 
   return (
     <Chip
-      label={`[${index}]`}
+      // A clean little footnote-style badge: just the number (no brackets),
+      // a small circular pill with a tinted fill + accent ring. Reads as a
+      // source reference, not a loud red bubble.
+      label={`${index}`}
       size="small"
       onClick={handle}
       clickable
@@ -107,13 +108,17 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color
       data-citation-page={citation.page}
       data-color={color}
       sx={{
-        height: 20,
+        height: 19,
+        minWidth: 19,
+        borderRadius: BORDER_RADIUS_PILL,
         fontSize: FONT_SIZE_LABEL,
-        backgroundColor: palette.background,
-        color: palette.foreground,
         fontWeight: FONT_WEIGHT_LABEL,
+        color: NAVY,
+        backgroundColor: alpha(accent, 0.38),
+        border: `1px solid ${alpha(accent, 0.9)}`,
         cursor: "pointer",
-        "&:hover": { filter: "brightness(0.95)" },
+        "& .MuiChip-label": { px: 0.5 },
+        "&:hover": { backgroundColor: alpha(accent, 0.55) },
       }}
     />
   );

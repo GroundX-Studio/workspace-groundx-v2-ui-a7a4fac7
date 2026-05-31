@@ -77,13 +77,14 @@ describe("GateChatPanel", () => {
     expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
   });
 
-  it("uses a longer composing delay AND a more substantial typing message for the BYO/signup trigger", async () => {
+  it("uses a longer composing delay for the BYO/signup trigger (same typing copy as the rest)", async () => {
     // BYO is the only path where the gate IS the destination — the
     // user just clicked Sign Up from F1 and there's no prior context
     // in the chat. A 600ms beat feels rushed for that case; bump to
-    // ~1500ms so the bot's "thinking" reads as a genuine reply.
-    // The typing copy also gets richer than the default "GroundX is
-    // composing" — long enough to read in the longer window.
+    // ~1500ms so the bot's "thinking" reads as a genuine reply. The
+    // copy stays the shared "GroundX is composing" — a typing indicator
+    // should read as a composing beat, not a full sentence that flashes
+    // then vanishes (the prior wordy byo copy read as a dropped message).
     vi.useFakeTimers();
 
     renderWithOnboardingProviders(
@@ -98,15 +99,10 @@ describe("GateChatPanel", () => {
       screen.getByTestId("open-gate").click();
     });
 
-    // Right after the open: typing visible AND the copy mentions
-    // setting up sign-up (longer than just "composing").
+    // Right after the open: typing visible with the shared composing copy.
     const indicator = screen.getByTestId("gate-typing-indicator");
     expect(indicator).toBeInTheDocument();
-    // The BYO-specific copy should reference the sign-up specifically,
-    // not just "is composing" — it's the start of a multi-turn
-    // sign-up chat moment.
-    expect(indicator.textContent ?? "").toMatch(/sign.?up|preparing|save your work/i);
-    expect(indicator.textContent ?? "").not.toMatch(/^GroundX is composing$/);
+    expect(indicator.textContent ?? "").toMatch(/GroundX is composing/);
 
     // At 700ms (past the SAVE-trigger threshold), BYO should STILL be
     // typing — the longer delay is the whole point.

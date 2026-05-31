@@ -11,6 +11,7 @@
 import Box from "@mui/material/Box";
 import type { FC } from "react";
 
+import { isResolvedDocumentId } from "@/api/documentId";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
@@ -42,9 +43,18 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
 
   const scenarioId = overrideScenarioId !== undefined ? overrideScenarioId : appMode.scenario ?? session.scenario;
   const scenario = scenarioId ? byId(scenarioId) : undefined;
-  // Citation-click case: a doc-viewer step exists → use it directly,
-  // even if no scenario is active (steady-mode reuse).
-  if (stepDocViewer) {
+  const scenarioDocId = scenario?.documents?.[0]?.documentId ?? null;
+
+  // Citation-click case: a doc-viewer step with a RESOLVED documentId (real
+  // GroundX UUID) → render it directly with its highlight, no scan.
+  //
+  // NB: the F2 frame→step mapping seeds a doc-viewer step with a PLACEHOLDER
+  // id (`scenario:<id>`, see OnboardingSessionContext). That placeholder must
+  // NOT reach the viewer (it gates the X-Ray fetch → blank canvas, no scan
+  // — the F2 "nothing like the wireframe" bug). So this branch fires only for
+  // a resolved id; the placeholder falls through to the scenario-doc + scan
+  // branch below.
+  if (stepDocViewer && isResolvedDocumentId(stepDocViewer.documentId)) {
     return (
       <Box data-testid="understand-canvas" sx={{ height: "100%", width: "100%" }}>
         <PdfViewerWidget
@@ -52,22 +62,21 @@ export const UnderstandView: FC<UnderstandViewProps> = ({ overrideScenarioId }) 
           mode="onboarding"
           targetPage={stepDocViewer.highlight?.page ?? stepDocViewer.page ?? null}
           highlightBbox={stepDocViewer.highlight?.bbox ?? null}
+          highlightTier={stepDocViewer.highlight?.tier}
         />
       </Box>
     );
   }
   if (!scenario) return <UnderstandPlaceholder kind="byo" />;
-  const documentId = scenario.documents[0]?.documentId;
-  if (!documentId) return <UnderstandPlaceholder kind="no-doc" />;
+  if (!scenarioDocId) return <UnderstandPlaceholder kind="no-doc" />;
   // WF-01 C5 (2026-05-28). While the chat is on F2 (Understand /
-  // mid-thinking), paint a scan-line overlay so the canvas shows the
-  // "GroundX is reading the doc" visual signal the spec calls for.
-  // Once the chat auto-advances to F3 on the Done bubble, the overlay
-  // drops — matches the wireframe's "done → fields" beat.
+  // mid-thinking), paint a scan-line overlay over the real source doc so the
+  // canvas shows the "GroundX is reading the doc" visual the spec calls for.
+  // Once the chat auto-advances to F3 on the Done bubble, the overlay drops.
   const isF2 = session.currentFrame === "f2";
   return (
     <Box data-testid="understand-canvas" sx={{ height: "100%", width: "100%" }}>
-      <PdfViewerWidget documentId={documentId} mode="onboarding" showScanAnimation={isF2} />
+      <PdfViewerWidget documentId={scenarioDocId} mode="onboarding" showScanAnimation={isF2} />
     </Box>
   );
 };

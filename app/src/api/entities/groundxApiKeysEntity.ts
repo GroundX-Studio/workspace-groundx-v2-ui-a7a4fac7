@@ -1,5 +1,5 @@
 import axios from "@/api/axios";
-import { GroundXRequestOptions, MessageResponse, groundxRequestConfig, groundxUrl } from "@/api/common";
+import { RequestOptions, MessageResponse, groundxRequestConfig, groundxUrl } from "@/api/common";
 
 import { GroundXApiKey } from "./sdkTypes";
 
@@ -7,14 +7,14 @@ export interface GroundXApiKeysResponse {
   apiKeys: GroundXApiKey[];
 }
 
-export const listGroundXApiKeys = async (options?: GroundXRequestOptions): Promise<GroundXApiKeysResponse> => {
+export const listGroundXApiKeys = async (options?: RequestOptions): Promise<GroundXApiKeysResponse> => {
   const response = await axios.get<GroundXApiKeysResponse>(groundxUrl("/v1/apikey"), groundxRequestConfig(options));
   return response.data;
 };
 
 export const createGroundXApiKey = async (
   name: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<GroundXApiKeysResponse> => {
   const response = await axios.post<GroundXApiKeysResponse>(
     groundxUrl("/v1/apikey"),
@@ -27,7 +27,7 @@ export const createGroundXApiKey = async (
 export const renameGroundXApiKey = async (
   apiKey: string,
   name: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<GroundXApiKeysResponse> => {
   const response = await axios.put<GroundXApiKeysResponse>(
     groundxUrl(`/v1/apikey/${encodeURIComponent(apiKey)}`),
@@ -39,7 +39,7 @@ export const renameGroundXApiKey = async (
 
 export const deleteGroundXApiKey = async (
   apiKey: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(
     groundxUrl(`/v1/apikey/${encodeURIComponent(apiKey)}`),

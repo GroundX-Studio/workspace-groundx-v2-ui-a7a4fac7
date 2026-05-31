@@ -197,6 +197,60 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
     expect(observedCount).toBe(0);
   });
 
+  // ── B1 "One CanvasIntent" — currentIntent hydration boundary ──
+  // The DB column is arbitrary JSON; `coerceHydratedIntent` is the structural
+  // guard so the strict `currentIntent: CanvasIntent | null` state type isn't
+  // populated straight from an unchecked cast.
+  it("hydrates a well-formed server currentIntent into the session", async () => {
+    vi.mocked(listChatSessions).mockResolvedValue([
+      makeRemoteSession({
+        id: "ci-1",
+        title: "Has intent",
+        currentIntent: { kind: "openDocument", documentId: "d-1", page: 2 },
+      }),
+    ]);
+    let observed: unknown = "unset";
+    const Inspector: FC = () => {
+      observed = useChatStore().state.sessions.get("ci-1")?.currentIntent ?? "missing";
+      return null;
+    };
+    render(
+      <StubAuthProvider auth={{ isLoggedIn: true }}>
+        <ChatStoreProvider ephemeral>
+          <ChatStoreServerHydrator />
+          <Inspector />
+        </ChatStoreProvider>
+      </StubAuthProvider>,
+    );
+    await waitFor(() => {
+      expect(observed).toEqual({ kind: "openDocument", documentId: "d-1", page: 2 });
+    });
+  });
+
+  it("coerces a malformed server currentIntent (no string `kind`) to null", async () => {
+    vi.mocked(listChatSessions).mockResolvedValue([
+      // `{}` has no `kind` — must NOT masquerade as a typed intent.
+      makeRemoteSession({ id: "ci-2", title: "Garbage intent", currentIntent: {} }),
+    ]);
+    let observed: unknown = "unset";
+    const Inspector: FC = () => {
+      const s = useChatStore().state.sessions.get("ci-2");
+      observed = s ? s.currentIntent : "missing";
+      return null;
+    };
+    render(
+      <StubAuthProvider auth={{ isLoggedIn: true }}>
+        <ChatStoreProvider ephemeral>
+          <ChatStoreServerHydrator />
+          <Inspector />
+        </ChatStoreProvider>
+      </StubAuthProvider>,
+    );
+    await waitFor(() => {
+      expect(observed).toBeNull();
+    });
+  });
+
   // ── master-viewer-session Phase 1 — viewer slot hydrate round-trip ──
   it("hydrates ViewerSession.history + overlays + workspace from the server payload", async () => {
     const remoteHistory = [
@@ -277,14 +331,18 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   });
 });
 
-function makeRemoteSession(overrides: { id: string; title: string }) {
+function makeRemoteSession(overrides: {
+  id: string;
+  title: string;
+  currentIntent?: Record<string, unknown> | null;
+}) {
   return {
     id: overrides.id,
     onboardingSessionId: overrides.id,
     title: overrides.title,
     isOnboarding: false,
     activeEntityKey: null,
-    currentIntent: null,
+    currentIntent: overrides.currentIntent ?? null,
     // master-viewer-session Phase 1: server returns null for never-touched
     // viewer slots; the hydrator projects null → EMPTY_VIEWER_SESSION.
     viewerHistory: null,

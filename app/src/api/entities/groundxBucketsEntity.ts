@@ -1,6 +1,6 @@
 import axios from "@/api/axios";
 import {
-  GroundXRequestOptions,
+  RequestOptions,
   MessageResponse,
   PaginationParams,
   groundxRequestConfig,
@@ -24,7 +24,7 @@ export interface BucketsResponse {
 
 export const listGroundXBuckets = async (
   params?: PaginationParams,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<BucketsResponse> => {
   const response = await axios.get<BucketsResponse>(groundxUrl("/v1/bucket"), {
     ...groundxRequestConfig(options),
@@ -33,14 +33,14 @@ export const listGroundXBuckets = async (
   return response.data;
 };
 
-export const createGroundXBucket = async (name: string, options?: GroundXRequestOptions): Promise<BucketResponse> => {
+export const createGroundXBucket = async (name: string, options?: RequestOptions): Promise<BucketResponse> => {
   const response = await axios.post<BucketResponse>(groundxUrl("/v1/bucket"), { name }, groundxRequestConfig(options));
   return response.data;
 };
 
 export const getGroundXBucket = async (
   bucketId: number,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<BucketResponse> => {
   const response = await axios.get<BucketResponse>(groundxUrl(`/v1/bucket/${bucketId}`), groundxRequestConfig(options));
   return response.data;
@@ -49,7 +49,7 @@ export const getGroundXBucket = async (
 export const updateGroundXBucket = async (
   bucketId: number,
   newName: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<BucketResponse> => {
   const response = await axios.put<BucketResponse>(
     groundxUrl(`/v1/bucket/${bucketId}`),
@@ -61,7 +61,7 @@ export const updateGroundXBucket = async (
 
 export const deleteGroundXBucket = async (
   bucketId: number,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(groundxUrl(`/v1/bucket/${bucketId}`), groundxRequestConfig(options));
   return response.data;

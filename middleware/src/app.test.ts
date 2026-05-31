@@ -65,6 +65,59 @@ describe("middleware scaffold", () => {
     await request(app).get("/api/healthz").expect(200, { status: "ok" });
   });
 
+  it("B1: the messages-hydrate route validates citations_json — drops malformed entries, strips unknown keys", async () => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+    const created = await agent.post("/api/onboarding/session").expect(200);
+    const sid: string = created.body.sessionId;
+    const now = new Date();
+    await repository.upsertChatSession({
+      id: "cs-b1",
+      onboardingSessionId: sid,
+      ownerUserId: null,
+      ownerAnonId: sid,
+      title: "t",
+      isOnboarding: true,
+      activeEntityKey: null,
+      currentIntent: null,
+      viewerHistory: null,
+      viewerOverlays: null,
+      viewerWorkspace: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+    await repository.appendChatMessage({
+      id: "m-b1",
+      chatSessionId: "cs-b1",
+      turnIndex: 1,
+      role: "assistant",
+      content: "answer",
+      citationsJson: JSON.stringify([
+        { documentId: "d1", page: 1, snippet: "ok", extraneous: "stripped" }, // valid
+        { documentId: "d2" }, // malformed: missing page
+        { page: 3 }, // malformed: missing documentId
+        { documentId: "d4", page: "nope" }, // malformed: page wrong type
+      ]),
+      toolCallsJson: null,
+      attachmentsJson: null,
+      compressedIntoSummaryId: null,
+      llmProvider: null,
+      llmModelId: null,
+      latencyMs: null,
+      promptTokens: null,
+      completionTokens: null,
+      errorCode: null,
+      createdAt: now,
+    });
+
+    const res = await agent.get("/api/chat-sessions/cs-b1/messages").expect(200);
+    const cites = res.body.messages[0].citations;
+    expect(cites).toHaveLength(1); // only the valid citation survives validation
+    expect(cites[0]).toMatchObject({ documentId: "d1", page: 1, snippet: "ok" });
+    expect(cites[0]).not.toHaveProperty("extraneous"); // unknown keys stripped by the schema
+  });
+
   it("skips request logging for kube-probe and Prometheus endpoints", async () => {
     // Direct unit test on the helper; the pino-http wiring is a
     // one-liner that delegates to it.
@@ -573,75 +626,84 @@ describe("middleware scaffold", () => {
   // because anonymous sessions don't have a `groundxUsername` to key
   // the row by; the frontend surfaces a sign-in nudge when 401 comes
   // back.
-  describe("POST /api/extraction-schemas (UI-01 Phase 2d)", () => {
+  describe("POST /api/templates (shared-template-lifecycle Phase 3)", () => {
+    const body = {
+      categories: [
+        { id: "statement", type: "statement", name: "Statement", fields: [{ id: "total_tax", name: "Total tax", type: "NUMBER", description: "d" }] },
+      ],
+    };
+
     it("rejects unauthenticated requests with 401", async () => {
       const { app } = setup();
       await request(app)
-        .post("/api/extraction-schemas")
-        .send({ id: "es-1", name: "Utility", schema: { categories: [] } })
+        .post("/api/templates")
+        .send({ id: "es-1", kind: "extract", name: "Utility", body })
         .expect(401);
     });
 
-    it("returns 400 for malformed payload (missing required fields)", async () => {
+    it("returns 400 for malformed payload (missing fields / bad kind)", async () => {
       const { app } = setup();
       const agent = request.agent(app);
       await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
-      await agent
-        .post("/api/extraction-schemas")
-        .send({ id: "es-1" })
-        .expect(400, { error: "invalid_payload" });
-      await agent
-        .post("/api/extraction-schemas")
-        .send({ id: "es-1", name: "X" })
-        .expect(400, { error: "invalid_payload" });
+      await agent.post("/api/templates").send({ id: "es-1" }).expect(400, { error: "invalid_payload" });
+      await agent.post("/api/templates").send({ id: "es-1", kind: "extract", name: "X" }).expect(400, { error: "invalid_payload" });
+      await agent.post("/api/templates").send({ id: "es-1", kind: "bogus", name: "X", body }).expect(400, { error: "invalid_payload" });
+      // whitespace-only name is rejected (the route's trim guard).
+      await agent.post("/api/templates").send({ id: "es-1", kind: "extract", name: "   ", body }).expect(400, { error: "invalid_payload" });
     });
 
-    it("persists a saved schema scoped to the authed user (round-trip)", async () => {
+    it("persists a template scoped to the authed user (round-trip)", async () => {
       const { app, repository } = setup();
       const agent = request.agent(app);
       await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
 
-      const schema = {
-        name: "Utility",
-        categories: [
-          { id: "statement", type: "statement", name: "Statement", fields: [{ id: "total_tax", name: "Total tax", type: "NUMBER", description: "d" }] },
-        ],
-      };
       const response = await agent
-        .post("/api/extraction-schemas")
-        .send({ id: "es-1", name: "Utility (custom)", schema })
+        .post("/api/templates")
+        .send({ id: "es-1", kind: "extract", name: "Utility (custom)", body })
         .expect(200);
       expect(response.body).toMatchObject({ id: "es-1", name: "Utility (custom)" });
 
-      // Round-trip: the row is visible to the same authed user via the
-      // repository read path.
-      const rows = await repository.listExtractionSchemasForUser("gx-user");
+      const rows = await repository.listTemplates("gx-user", "extract");
       expect(rows).toHaveLength(1);
       expect(rows[0].id).toBe("es-1");
+      expect(rows[0].kind).toBe("extract");
       expect(rows[0].name).toBe("Utility (custom)");
-      const parsed = JSON.parse(rows[0].schemaJson) as { categories: { id: string }[] };
+      const parsed = JSON.parse(rows[0].bodyJson) as { categories: { id: string }[] };
       expect(parsed.categories[0].id).toBe("statement");
     });
 
-    it("upserts on the same id (second POST overwrites name + schema)", async () => {
+    it("upserts on the same id (second POST overwrites name + body)", async () => {
+      const { app, repository } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+
+      await agent.post("/api/templates").send({ id: "es-1", kind: "extract", name: "v1", body: { categories: [] } }).expect(200);
+      await agent
+        .post("/api/templates")
+        .send({ id: "es-1", kind: "extract", name: "v2", body: { categories: [{ id: "x", type: "statement", name: "X", fields: [] }] } })
+        .expect(200);
+
+      const rows = await repository.listTemplates("gx-user", "extract");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe("v2");
+      const parsed = JSON.parse(rows[0].bodyJson) as { categories: { id: string }[] };
+      expect(parsed.categories[0].id).toBe("x");
+    });
+
+    it("🔒 owner is the SESSION user — a client-supplied owner in the body is ignored", async () => {
       const { app, repository } = setup();
       const agent = request.agent(app);
       await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
 
       await agent
-        .post("/api/extraction-schemas")
-        .send({ id: "es-1", name: "v1", schema: { categories: [] } })
-        .expect(200);
-      await agent
-        .post("/api/extraction-schemas")
-        .send({ id: "es-1", name: "v2", schema: { categories: [{ id: "x", type: "statement", name: "X", fields: [] }] } })
+        .post("/api/templates")
+        // attacker tries to assert a different owner via the wire
+        .send({ id: "es-1", kind: "extract", name: "Owned", body, ownerUsername: "attacker", groundxUsername: "attacker" })
         .expect(200);
 
-      const rows = await repository.listExtractionSchemasForUser("gx-user");
-      expect(rows).toHaveLength(1);
-      expect(rows[0].name).toBe("v2");
-      const parsed = JSON.parse(rows[0].schemaJson) as { categories: { id: string }[] };
-      expect(parsed.categories[0].id).toBe("x");
+      // Persisted under the session user (gx-user), not the injected owner.
+      expect(await repository.listTemplates("gx-user", "extract")).toHaveLength(1);
+      expect(await repository.listTemplates("attacker", "extract")).toHaveLength(0);
     });
   });
 

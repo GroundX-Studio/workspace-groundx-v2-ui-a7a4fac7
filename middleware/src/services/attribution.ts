@@ -60,7 +60,9 @@ export function verifyQuote(quote: string, chunkText: string, embedder?: Embedde
   return { verified: false, method: "none", score: 0 };
 }
 
-export type AttributionTier = "exact" | "paraphrase" | "ambient";
+// The attribution tier IS the shared `CitationTier` (`@groundx/shared`) — used
+// directly (no `AttributionTier` alias).
+import type { CitationTier } from "@groundx/shared";
 
 /**
  * Map a verification result to the highlight tier. The `exact` (word-level)
@@ -68,7 +70,7 @@ export type AttributionTier = "exact" | "paraphrase" | "ambient";
  * verified claim resolves at `paraphrase` (chunk-level). This is the
  * "degrades cleanly" contract: WF-06 never forces WF-05's optional 1b.
  */
-export function assignTier(v: QuoteVerification, opts: { hasAtomBox: boolean }): AttributionTier {
+export function assignTier(v: QuoteVerification, opts: { hasAtomBox: boolean }): CitationTier {
   if (!v.verified) return "ambient";
   if (opts.hasAtomBox && v.method === "exact") return "exact";
   return "paraphrase";

@@ -21,6 +21,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 const dismissGate = vi.fn();
+const commitGate = vi.fn();
 let mockGate: { status: "open" | "committed" | "dismissed" | "idle"; trigger?: string; method?: string } = {
   status: "open",
   trigger: "byo",
@@ -29,7 +30,7 @@ let mockGate: { status: "open" | "committed" | "dismissed" | "idle"; trigger?: s
 vi.mock("@/contexts/OnboardingSessionContext", () => ({
   useOnboardingSession: () => ({
     state: { gate: mockGate, currentFrame: "f6" },
-    commitGate: vi.fn(),
+    commitGate,
     dismissGate,
     advanceFrame,
   }),
@@ -57,7 +58,37 @@ describe("GateChatRail", () => {
   beforeEach(() => {
     dismissGate.mockReset();
     advanceFrame.mockReset();
+    commitGate.mockReset();
     mockGate = { status: "open", trigger: "byo" };
+  });
+
+  // P1 — the gate's three doors live in the chat rail (wireframe Flow_Gate):
+  // email "send magic link", SSO, and book-a-call.
+  it("renders the magic-link email door and SSO door", () => {
+    renderWidget();
+    expect(screen.getByTestId("gate-rail-email")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-send-magic-link")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-rail-sso")).toBeInTheDocument();
+  });
+
+  it("SSO door commits the gate via the sso method", () => {
+    renderWidget();
+    fireEvent.click(screen.getByTestId("gate-rail-sso"));
+    expect(commitGate).toHaveBeenCalledWith("sso");
+  });
+
+  it("send-magic-link with an email commits via register (demo magic-link)", () => {
+    renderWidget();
+    const email = screen.getByTestId("gate-rail-email").querySelector("input")!;
+    fireEvent.change(email, { target: { value: "ada@example.com" } });
+    fireEvent.click(screen.getByTestId("gate-rail-send-magic-link"));
+    expect(commitGate).toHaveBeenCalledWith("register");
+  });
+
+  it("send-magic-link with no email does NOT commit (guards empty input)", () => {
+    renderWidget();
+    fireEvent.click(screen.getByTestId("gate-rail-send-magic-link"));
+    expect(commitGate).not.toHaveBeenCalled();
   });
 
   it("renders the BYO preamble when triggered by BYO", () => {

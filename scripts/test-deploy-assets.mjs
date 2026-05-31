@@ -50,6 +50,49 @@ const middlewareDockerfile = read("Dockerfile.middleware");
 assert(middlewareDockerfile.includes("npm --workspace middleware run build"), "middleware image must build TypeScript");
 assert(middlewareDockerfile.includes('"npm", "--workspace", "middleware", "run", "start"'), "middleware image must run the middleware start script");
 
+// ── @groundx/shared workspace wiring (B1) — keep dev / prod / container
+// resolution intact. The shared wire-contract package must be built before
+// its consumers (no `prepare` — that breaks `npm ci --omit=dev` where tsc is
+// omitted, as the container build caught). These static assertions fail fast
+// in `npm test`; the CI docker-build job (below) is the end-to-end guard.
+const rootPkg = JSON.parse(read("package.json"));
+assert(
+  Array.isArray(rootPkg.workspaces) && rootPkg.workspaces.includes("shared"),
+  "root workspaces must include 'shared'",
+);
+for (const script of ["build", "dev", "test"]) {
+  assert(
+    rootPkg.scripts[script]?.includes("npm --workspace @groundx/shared run build"),
+    `root '${script}' script must build @groundx/shared first (dev/test/prod must resolve it without relying on a prepare hook)`,
+  );
+}
+const sharedPkg = JSON.parse(read("shared/package.json"));
+assert(
+  sharedPkg.main === "./dist/index.js" && sharedPkg.types === "./dist/index.d.ts",
+  "@groundx/shared must publish its built dist (main + types) for node/tsc resolution",
+);
+assert(
+  !sharedPkg.scripts?.prepare,
+  "@groundx/shared must NOT have a 'prepare' script — it runs during `npm ci --omit=dev` (container runtime stage) where tsc is absent and fails the build",
+);
+for (const [name, df] of [
+  ["frontend", frontendDockerfile],
+  ["middleware", middlewareDockerfile],
+]) {
+  assert(df.includes("COPY shared/package*.json shared/"), `${name} image deps stage must COPY shared/package*.json for the workspace install`);
+  assert(df.includes("COPY shared shared"), `${name} image build stage must COPY the shared package`);
+  assert(df.includes("npm --workspace @groundx/shared run build"), `${name} image must build @groundx/shared before the app/middleware build`);
+}
+assert(
+  middlewareDockerfile.includes("COPY --from=build /workspace/shared/dist shared/dist"),
+  "middleware runtime stage must ship shared/dist for the @groundx/shared symlink to resolve at runtime",
+);
+const ciWorkflow = read(".github/workflows/ci.yml");
+assert(
+  /docker build/.test(ciWorkflow) && ciWorkflow.includes("Dockerfile.middleware") && ciWorkflow.includes("Dockerfile.frontend"),
+  "CI must build BOTH Docker images (the container-build regression guard for the @groundx/shared wiring)",
+);
+
 const nginxTemplate = read("deploy/nginx/default.conf.template");
 assert(nginxTemplate.includes("location /api/"), "nginx must proxy /api/*");
 assert(nginxTemplate.includes("proxy_pass ${MIDDLEWARE_SERVICE_URL};"), "nginx must proxy to middleware service URL");

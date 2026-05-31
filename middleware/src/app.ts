@@ -7,6 +7,8 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
+import { parseCitations, templateSaveInputSchema } from "@groundx/shared";
+
 import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
 import { encryptSecret } from "./lib/crypto.js";
@@ -485,22 +487,22 @@ export function createApp({
       // Null/absent JSON maps to []; parse failures soft-fail to []
       // so a corrupt row doesn't 500 the whole hydrate.
       const projected = messages.map((m) => {
-        let parsed: unknown[] = [];
         const raw: unknown = m.citationsJson;
-        if (raw) {
+        // WF-16 — the MySQL `JSON` column comes back ALREADY parsed (an
+        // array); the memory repo + older rows store a string. Tolerate
+        // both, then validate. `parseCitations` (shared contract) drops
+        // malformed entries + strips unknown keys, so the typed client
+        // never receives an unvalidated `unknown[]` (B1 — replaces the
+        // prior cast-through projection).
+        let value: unknown = raw;
+        if (typeof raw === "string") {
           try {
-            // WF-16 — the MySQL `JSON` column comes back ALREADY parsed
-            // (an array), while the memory repo + older rows store a
-            // string. Tolerate both: parse a string, use an array as-is.
-            // Without this the MySQL path threw and dropped every
-            // hydrated turn's chips to [].
-            const j = typeof raw === "string" ? JSON.parse(raw) : raw;
-            if (Array.isArray(j)) parsed = j;
+            value = JSON.parse(raw);
           } catch {
-            // soft-fail — corrupt row degrades to no chips
+            value = [];
           }
         }
-        return { ...m, citations: parsed };
+        return { ...m, citations: parseCitations(value) };
       });
       res.json({ messages: projected });
     } catch (error) {
@@ -999,7 +1001,7 @@ export function createApp({
   // handles the ON DUPLICATE KEY UPDATE in MySQL (memory repository
   // mirrors the semantics via Map.set).
   app.post(
-    "/api/extraction-schemas",
+    "/api/templates",
     apiLimiter,
     requireAuthenticatedUser,
     async (req, res, next) => {
@@ -1011,42 +1013,29 @@ export function createApp({
           res.status(401).json({ error: "no_signed_in_user" });
           return;
         }
-        const body = req.body as
-          | {
-              id?: unknown;
-              name?: unknown;
-              schema?: unknown;
-            }
-          | null;
-        if (!body || typeof body !== "object" || Array.isArray(body)) {
+        // Validate the wire shape via the shared `TemplateSaveInput` schema.
+        // Default (strip) key handling drops any client-supplied owner/
+        // timestamps — 🔒 ownership is SERVER-assigned, never trusted from the
+        // body (no IDOR / spoofing).
+        const parsed = templateSaveInputSchema.safeParse(req.body);
+        if (!parsed.success || parsed.data.name.trim().length === 0) {
           res.status(400).json({ error: "invalid_payload" });
           return;
         }
-        const id = typeof body.id === "string" && body.id.trim().length > 0 ? body.id.trim() : null;
-        const name =
-          typeof body.name === "string" && body.name.trim().length > 0 ? body.name.trim() : null;
-        const schema =
-          body.schema && typeof body.schema === "object" && !Array.isArray(body.schema)
-            ? (body.schema as Record<string, unknown>)
-            : null;
-        if (!id || !name || !schema) {
-          res.status(400).json({ error: "invalid_payload" });
-          return;
-        }
+        const input = parsed.data;
         const now = new Date();
-        await repository.upsertExtractionSchema({
-          id,
-          groundxUsername,
-          name,
-          schemaJson: JSON.stringify(schema),
-          // First-write path: createdAt is preserved by ON DUPLICATE
-          // KEY UPDATE so re-saves don't reset the original creation
-          // timestamp; the column is only mutated on the initial
-          // INSERT branch.
+        await repository.saveTemplate({
+          id: input.id,
+          kind: input.kind,
+          groundxUsername, // from the session — NOT the request body
+          name: input.name,
+          bodyJson: JSON.stringify(input.body),
+          // createdAt is preserved on re-save by ON DUPLICATE KEY UPDATE
+          // (which doesn't touch created_at); only set on the initial INSERT.
           createdAt: now,
           updatedAt: now,
         });
-        res.status(200).json({ id, name, updatedAt: now.toISOString() });
+        res.status(200).json({ id: input.id, name: input.name, updatedAt: now.toISOString() });
       } catch (error) {
         next(error);
       }

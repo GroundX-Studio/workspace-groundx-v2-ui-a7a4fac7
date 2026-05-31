@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryAppRepository } from "../db/memoryRepository.js";
 import type {
   ChatMessageRecord,
+  ChatSessionEntityRecord,
   ChatSessionRecord,
   GroundXClient,
   LlmClient,
 } from "../types.js";
 
-import { ChatHandlerError, handleChatMessage } from "./chatHandler.js";
+import { ChatHandlerError, deriveRagContentScope, handleChatMessage } from "./chatHandler.js";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -1118,5 +1119,55 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
     expect(summarizerCall).toBeDefined();
     const body = JSON.parse((summarizerCall![1] as RequestInit).body as string);
     expect(body.max_completion_tokens).toBe(250);
+  });
+});
+
+describe("deriveRagContentScope — characterization: read-but-unwritten scope columns", () => {
+  // CHARACTERIZATION (2026-05-30-entity-rag-scope-roundtrip Phase 1).
+  //
+  // `deriveRagContentScope` READS the four `chat_session_entities` scope
+  // columns (documentIdsJson / groupId / bucketId / projectIdsJson), but
+  // NO producer writes them today: the only writer (app.ts ~803-810)
+  // deliberately preserves them server-only (`existing?.X ?? null`) and
+  // the client PUT can never set them, and no steady-mode/BYO producer
+  // exists yet. So for the only path that runs today (anon onboarding) a
+  // fresh entity has all four columns NULL and resolves to the env
+  // samples-bucket fallback — this is **by design**, the documented
+  // onboarding default, not a live wrong-bucket bug.
+  //
+  // This test locks that current behavior. It is the RED starting point
+  // the future steady-mode/BYO producer change (sequenced with cf19/CF-15)
+  // will flip once a producer writes a customer's real scope into these
+  // columns. Do NOT add a producer or drop the columns in this slice.
+
+  function makeFreshEntity(): ChatSessionEntityRecord {
+    // A fresh anon onboarding entity: all four scope columns NULL,
+    // exactly as the only live writer leaves them.
+    return {
+      chatSessionId: "chat-fresh",
+      entityKey: "sample:utility",
+      lastFrame: null,
+      completedFramesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: null,
+      projectIdsJson: null,
+      groupId: null,
+      documentIdsJson: null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    };
+  }
+
+  it("a fresh entity with all four scope columns NULL resolves to the samples-bucket fallback", () => {
+    const scope = deriveRagContentScope(makeFreshEntity(), 28454);
+    // The columns are read-but-unwritten, so none of the entity-scope
+    // branches fire; the env samples bucket drives the search.
+    expect(scope).toEqual({ type: "bucket", bucketId: 28454 });
+  });
+
+  it("with no fallback bucket either, a fresh entity resolves to null (no derivable scope)", () => {
+    const scope = deriveRagContentScope(makeFreshEntity(), null);
+    expect(scope).toBeNull();
   });
 });
