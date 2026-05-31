@@ -918,6 +918,87 @@ describe("ChatColumn", () => {
     expect(sendChatMessage).toHaveBeenCalledTimes(1);
   });
 
+  // 2026-05-31-stable-experience-identity — REGRESSION GUARD for the inline
+  // experience-construction bug.
+  //
+  // ChatColumn used to construct the onboarding ChatExperience INLINE on every
+  // render: `chatExperienceRegistry.byId("onboarding")?.create({...})`.
+  // `makeOnboardingExperience` returns a NEW `Choreography` FC on every call, so
+  // every ChatColumn re-render handed <ConversationFlow> an `experience` object
+  // with a NEW component IDENTITY → React unmounted + remounted the
+  // Choreography, resetting its internal `firstSendFiredRef`.
+  //
+  // Consequence: after the first user send auto-advances f2→f5, any later
+  // re-render that lands while still in the scenario journey re-mounted the
+  // Choreography and re-fired `advanceFrame("f5")` — so the frame was
+  // un-holdable against the choreography. Drive an explicit advance back to f3
+  // and the spurious re-fire bounces it straight back to f5.
+  //
+  // This test seeds a first send (auto f2→f5), then drives an explicit
+  // advanceFrame("f3") and asserts the frame STAYS f3 (the choreography must not
+  // bounce it back to f5). Against the inline-construction implementation the
+  // remounted Choreography re-fires and the frame flips back to f5 → FAIL.
+  it("stable-experience-identity: an explicit advance back to f3 STAYS f3 (choreography does not re-fire to f5)", async () => {
+    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      userMessageId: "u-id",
+      assistantMessageId: "a-id",
+      reply: {
+        mode: "rag",
+        answer: "Done.",
+        citations: [],
+        suggestedActions: [],
+        tools: [],
+        intents: [],
+        toolFailures: [],
+        proposedSchemaField: null,
+      },
+      compressionRan: false,
+    });
+
+    let lastFrame = "";
+    let driveAdvance: (frame: "f3") => void = () => {};
+    function FrameProbe() {
+      const { state, advanceFrame } = useOnboardingSession();
+      lastFrame = state.currentFrame;
+      driveAdvance = (frame) => advanceFrame(frame);
+      return null;
+    }
+
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(
+      <>
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
+        <FrameProbe />
+      </>,
+      { initialFrame: "f2", initialScenario: "utility" },
+    );
+
+    expect(lastFrame).toBe("f2");
+
+    // First real send → onboarding Choreography auto-advances f2 → f5.
+    const input = screen.getByTestId("chat-live-input").querySelector("input")!;
+    await user.type(input, "Reconcile the totals.");
+    await user.click(screen.getByTestId("chat-live-send"));
+    await waitFor(() => {
+      expect(lastFrame).toBe("f5");
+    });
+
+    // Now drive an explicit advance back to f3 (still inside the scenario
+    // journey, so ChatColumn keeps mounting the onboarding experience). The
+    // choreography's first-send side-effect already fired once and must NOT
+    // fire again — the frame must HOLD at f3.
+    act(() => {
+      driveAdvance("f3");
+    });
+
+    // Give any spurious remount-driven effect a chance to fire, then assert
+    // the frame did NOT bounce back to f5.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(lastFrame).toBe("f3");
+  });
+
   // widget-llm-integration Phase 1 — render `suggestedActions[]` as a chip
   // row beneath each assistant bubble, and dispatch chip clicks.
   describe("SuggestedActionChips integration (widget-llm-integration Phase 1)", () => {

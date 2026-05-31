@@ -377,8 +377,9 @@ function matchSpanOnPage(spanNorm: string, atoms: PageAtom[]): { minX: number; m
  * that spells out the span, unions their page-pixel boxes, and normalizes by
  * the page dims → 0-1 `{x,y,w,h}` (the same normalized space the chunk/X-Ray
  * boxes use, but strictly tighter). Returns the first page that matches, or
- * null when the span isn't present verbatim. PURE — fixture/payload in, no
- * fetch (the live `-118-map.json` fetch is backlogged).
+ * null when the span isn't present verbatim. PURE — word-map in, no fetch; the
+ * live `-118-map.json` fetch is `wordMapCache.ts`, which feeds this resolver
+ * from the chat router.
  */
 export function resolveWordGeometry(
   span: string,

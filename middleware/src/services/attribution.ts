@@ -6,7 +6,8 @@
  * against the chunk the LLM cited, then assigns a graduated-precision tier:
  *
  *   - exact      quote is verbatim in the raw text AND atoms resolve → word box
- *                (needs WF-05's `-118-map` atom resolver; dormant until built)
+ *                (WF-05's `-118-map` word-level resolver, fetched live in the
+ *                chat router via `wordMapCache.ts`)
  *   - paraphrase quote matches the chunk text (exact/normalized/embedding)    → chunk box (WF-03)
  *   - ambient    quote unverified / no structured claim                       → source chip only
  *
@@ -66,9 +67,10 @@ import type { CitationTier } from "@groundx/shared";
 
 /**
  * Map a verification result to the highlight tier. The `exact` (word-level)
- * tier requires a resolved atom box from WF-05's `-118-map` — without it, a
- * verified claim resolves at `paraphrase` (chunk-level). This is the
- * "degrades cleanly" contract: WF-06 never forces WF-05's optional 1b.
+ * tier requires a resolved atom box from WF-05's `-118-map` (`hasAtomBox`);
+ * when the word-map can't be fetched or the span isn't verbatim, a verified
+ * claim degrades cleanly to `paraphrase` (chunk-level). The caller (chat
+ * router) supplies `hasAtomBox` from the live word-map resolve.
  */
 export function assignTier(v: QuoteVerification, opts: { hasAtomBox: boolean }): CitationTier {
   if (!v.verified) return "ambient";

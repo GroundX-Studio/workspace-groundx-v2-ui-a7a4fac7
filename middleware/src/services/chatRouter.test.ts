@@ -6,6 +6,9 @@ import type { WidgetRole } from "@groundx/shared";
 
 import { SERVER_TOOL_CATALOG } from "./toolCatalog.js";
 import { __clearXrayCache } from "./xrayCache.js";
+import { __clearWordMapCache } from "./wordMapCache.js";
+import wordMapFixture from "./wordMap.fixture.json" with { type: "json" };
+import type { WordMap } from "./citationGeometry.js";
 import {
   classifyChatMode,
   GROUNDED_REFUSAL_PHRASE,
@@ -991,6 +994,169 @@ describe("CF-06 token-budget guard in callGroundedLlm", () => {
     // gets dropped — assert the kept-then-dropped contract.
     expect(userContent).toContain("doc=doc-0");
     expect(userContent).not.toContain("doc=doc-7");
+  });
+});
+
+// ── 2026-05-31-word-level-citation-geometry: live -118-map → exact tier ──
+//
+// A RAG reply with a structured citation whose verbatim `quote` appears in the
+// document's word-map resolves to `tier: "exact"` with the TIGHT word-level
+// bbox (not the coarse X-Ray chunk box). The fallback chain degrades to
+// `paraphrase`/none when the word-map is unfetchable or the span isn't verbatim,
+// and the turn never fails. The word-map fetch is injected via the
+// `wordMapFetch` dep seam (the live default is `fetchDocumentWordMap`).
+describe("2026-05-31-word-level-citation-geometry — exact tier from live word-map", () => {
+  beforeEach(() => {
+    __clearXrayCache();
+    __clearWordMapCache();
+  });
+
+  function jsonOk(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  const wordMap = wordMapFixture as unknown as WordMap;
+  // The fixture's "$7,613.20" atom box: (450,250)-(760,320) on a 1700×2200 page.
+  const tight = {
+    x: 450 / 1700,
+    y: 250 / 2200,
+    w: (760 - 450) / 1700,
+    h: (320 - 250) / 2200,
+  };
+
+  // A search result for doc-1 carrying NO search-side geometry (so the snippet
+  // bbox is undefined) but whose text contains the verbatim "$7,613.20".
+  const searchResults = [
+    { documentId: "doc-1", pageNumber: 1, text: "Account Summary. Amount Due $7,613.20 by 06/15." },
+  ];
+  // The LLM answer with a structured citation block quoting the amount verbatim.
+  const llmAnswer =
+    'The amount due is $7,613.20.\n\n```json\n{"citations":[{"documentId":"doc-1","page":1,"quote":"$7,613.20"}]}\n```';
+
+  function clients() {
+    // forward serves the search payload for /search and an empty (no-bbox)
+    // X-Ray for the xray endpoint so the X-Ray fallback yields no chunk box.
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async (path: string) => {
+        if (path.includes("/xray/")) return jsonOk({ chunks: [], documentPages: [] });
+        return jsonOk({ search: { results: searchResults } });
+      }),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
+    };
+    return { groundxClient, llmClient };
+  }
+
+  it("lights the exact tier with the tight word-level bbox for a verified verbatim citation", async () => {
+    const { groundxClient, llmClient } = clients();
+    const wordMapFetch = vi.fn(async (_c, _k, documentId: string) =>
+      documentId === "doc-1" ? wordMap : null,
+    );
+    const reply = await routeChat(makeRequest({ newUserMessage: "amount due?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+      wordMapFetch,
+    });
+    expect(reply.citations).toHaveLength(1);
+    const c = reply.citations[0];
+    expect(c.tier).toBe("exact");
+    expect(c.bbox).toBeDefined();
+    expect(c.bbox!.x).toBeCloseTo(tight.x, 4);
+    expect(c.bbox!.y).toBeCloseTo(tight.y, 4);
+    expect(c.bbox!.w).toBeCloseTo(tight.w, 4);
+    expect(c.bbox!.h).toBeCloseTo(tight.h, 4);
+    // The fetch fired for the verified citation's documentId.
+    expect(wordMapFetch).toHaveBeenCalledWith(groundxClient, "k", "doc-1");
+  });
+
+  it("falls back to paraphrase when the word-map is unfetchable (turn never fails)", async () => {
+    const { groundxClient, llmClient } = clients();
+    const wordMapFetch = vi.fn(async () => null);
+    const reply = await routeChat(makeRequest({ newUserMessage: "amount due?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+      wordMapFetch,
+    });
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0].tier).toBe("paraphrase");
+  });
+
+  it("falls back to paraphrase when the verified quote is not present verbatim in the word-map", async () => {
+    // The snippet text carries a sentence the word-map atoms do NOT spell out
+    // (the map only has the "Account Summary" + "Amount Due …" lines). The quote
+    // verifies against the snippet (exact substring) but has no consecutive atom
+    // run in the word-map → no tight box → paraphrase.
+    const snippetWithExtra = [
+      {
+        documentId: "doc-1",
+        pageNumber: 1,
+        text: "Account Summary. Amount Due $7,613.20 by 06/15. Late fees may apply after the grace period.",
+      },
+    ];
+    const llmAnswerNoMap =
+      'See the policy.\n\n```json\n{"citations":[{"documentId":"doc-1","page":1,"quote":"Late fees may apply after the grace period"}]}\n```';
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async (path: string) => {
+        if (path.includes("/xray/")) return jsonOk({ chunks: [], documentPages: [] });
+        return jsonOk({ search: { results: snippetWithExtra } });
+      }),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswerNoMap } }] })),
+    };
+    const wordMapFetch = vi.fn(async () => wordMap);
+    const reply = await routeChat(makeRequest({ newUserMessage: "summary?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+      wordMapFetch,
+    });
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0].tier).toBe("paraphrase");
+  });
+
+  it("does NOT fetch the word-map for an unverified (too-short / non-verbatim) citation", async () => {
+    // The quote is shorter than the verification minimum → unverified → ambient,
+    // and the word-map fetch must be skipped entirely.
+    const llmAnswerUnverified =
+      'Short.\n\n```json\n{"citations":[{"documentId":"doc-1","page":1,"quote":"abc"}]}\n```';
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async (path: string) => {
+        if (path.includes("/xray/")) return jsonOk({ chunks: [], documentPages: [] });
+        return jsonOk({ search: { results: searchResults } });
+      }),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswerUnverified } }] })),
+    };
+    const wordMapFetch = vi.fn(async () => wordMap);
+    const reply = await routeChat(makeRequest({ newUserMessage: "q?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+      wordMapFetch,
+    });
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0].tier).toBe("ambient");
+    expect(wordMapFetch).not.toHaveBeenCalled();
   });
 });
 

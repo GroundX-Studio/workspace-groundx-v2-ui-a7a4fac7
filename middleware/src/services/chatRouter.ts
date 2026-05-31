@@ -30,11 +30,14 @@ import {
   parseBoundingBoxes,
   parsePages,
   resolveGeometryFromXray,
+  resolveWordGeometry,
   type NormalizedBbox,
+  type WordMap,
 } from "./citationGeometry.js";
 import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
 import { assignTier, confidenceFor, verifyQuote } from "./attribution.js";
 import { fetchDocumentXray } from "./xrayCache.js";
+import { fetchDocumentWordMap } from "./wordMapCache.js";
 import { getServerTool, toolsForStep, type ViewerStepKind } from "./toolCatalog.js";
 import { toOpenAiTools, type OpenAiFunctionTool } from "./zodToJsonSchema.js";
 
@@ -365,6 +368,18 @@ export interface ChatRouterDeps {
    * scope filter dispatches unchanged.
    */
   rbacFilter?: Record<string, unknown>;
+  /**
+   * WF-05b word-level geometry seam. Fetches a document's `-118-map.json`
+   * word-map (cached per doc, best-effort `null`). Defaults to the live
+   * `fetchDocumentWordMap`; tests inject a fixture. Used ONLY for citations
+   * whose verbatim quote already verified, to upgrade them to the `exact`
+   * tier with a tight word-level bbox.
+   */
+  wordMapFetch?: (
+    client: GroundXClient,
+    apiKey: string,
+    documentId: string,
+  ) => Promise<WordMap | null>;
 }
 
 /**
@@ -724,24 +739,49 @@ async function runRagPipeline(
   // WF-06 — graduated attribution. For each LLM-emitted (validated) citation,
   // verify the verbatim `quote` against the chunk it cited and assign a tier
   // + confidence + the supported answer span. The `exact` (word-level) tier
-  // needs WF-05's `-118-map` atom box (not built) so it's dormant: a verified
-  // quote resolves at `paraphrase` (chunk bbox). The all-snippets fallback has
-  // no claim-level proof → `ambient` (source chip; bbox kept for click-to-view).
+  // is now LIVE: for an ALREADY-VERIFIED citation we fetch the document's
+  // `-118-map.json` word-map (cached, best-effort) and run the shipped
+  // `resolveWordGeometry(quote, map)` resolver. On a hit, the tighter
+  // word-level bbox replaces the X-Ray chunk box and `hasAtomBox: true` lights
+  // the `exact` tier. The fetch fires ONLY for verified citations (an
+  // unverified quote can never reach `exact`, so it pays no word-map cost).
+  // Fallback chain: word-level box → X-Ray chunk box (WF-03) → none — a
+  // missing/unfetchable map or a non-verbatim span leaves the citation at
+  // `paraphrase`/geometry-less, and the turn never fails. The all-snippets
+  // fallback has no claim-level proof → `ambient` (source chip; bbox kept for
+  // click-to-view).
+  const wordMapFetch = deps.wordMapFetch ?? fetchDocumentWordMap;
   const citations: Citation[] =
     validatedCitations.length > 0
-      ? validatedCitations.map((c) => {
-          const v = verifyQuote(c.quote, snippetTextFor(c.documentId, c.page));
-          const tier = assignTier(v, { hasAtomBox: false });
-          return {
-            documentId: c.documentId,
-            page: c.page,
-            snippet: c.quote.slice(0, RAG_SNIPPET_CHARS),
-            bbox: bboxFor(c.documentId, c.page),
-            tier,
-            confidence: confidenceFor(v),
-            ...(c.answerSpan ? { answerSpan: c.answerSpan } : {}),
-          };
-        })
+      ? await Promise.all(
+          validatedCitations.map(async (c) => {
+            const v = verifyQuote(c.quote, snippetTextFor(c.documentId, c.page));
+            // Default: the X-Ray chunk box (WF-03) for this doc+page.
+            let bbox = bboxFor(c.documentId, c.page);
+            let hasAtomBox = false;
+            // Word-level upgrade — verified citations only.
+            if (v.verified && deps.groundxClient && deps.groundxApiKey) {
+              const map = await wordMapFetch(deps.groundxClient, deps.groundxApiKey, c.documentId);
+              if (map) {
+                const geo = resolveWordGeometry(c.quote, map);
+                if (geo) {
+                  bbox = geo.bbox;
+                  hasAtomBox = true;
+                }
+              }
+            }
+            const tier = assignTier(v, { hasAtomBox });
+            return {
+              documentId: c.documentId,
+              page: c.page,
+              snippet: c.quote.slice(0, RAG_SNIPPET_CHARS),
+              bbox,
+              tier,
+              confidence: confidenceFor(v),
+              ...(c.answerSpan ? { answerSpan: c.answerSpan } : {}),
+            };
+          }),
+        )
       : snippets.map((s) => ({
           documentId: s.documentId,
           page: s.pageNumber ?? 1,

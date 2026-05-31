@@ -1,7 +1,7 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type FC } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 
@@ -108,6 +108,22 @@ beforeEach(() => {
   vi.mocked(renderReport).mockResolvedValue(utilityResult);
 });
 
+afterEach(() => {
+  // Explicitly unmount the prior render BEFORE the next test mounts. RTL's
+  // auto-cleanup normally handles this, but SmartReportRender now paints
+  // ASYNCHRONOUSLY (the first paint awaits `renderReport`), so a test that
+  // returns while a render call is still in flight can flush a late state
+  // update — and, without a deterministic unmount, leak a stale node
+  // (notably `smart-report-empty`) into the next test's `document.body`,
+  // where a sibling's `findByTestId` would resolve against it. Tearing the
+  // tree down here makes each test start from an empty DOM.
+  cleanup();
+  // Drop any queued `*Once` responses / implementation so the next test's
+  // `beforeEach` default (or its own override) is the only source of truth
+  // for what the render endpoint returns.
+  vi.mocked(renderReport).mockReset();
+});
+
 describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-followups)", () => {
   // ── role + scope contract (widget-contract sibling test) ──────────
   it.each<WidgetRole>(["anonymous", "member"])(
@@ -189,21 +205,24 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       );
     };
     renderWithOnboardingProviders(<Harness />);
-    // First paint resolves to the empty state for the no-fixture scope.
+    // First paint resolves to the empty state for the no-fixture scope. The
+    // no-template scope short-circuits synchronously (no endpoint call), so
+    // this empty MUST belong to the current mount — assert no call has fired.
     expect(await screen.findByTestId("smart-report-empty")).toBeInTheDocument();
+    expect(renderReport).not.toHaveBeenCalled();
 
     // Re-scope to the Utility bucket+project — the adapter must re-render
-    // (a NEW endpoint call) and show the Utility sections.
+    // (a NEW endpoint call) and show the Utility sections. The re-scope walks
+    // empty → loading → ready, so we must AWAIT the endpoint response (the
+    // Utility sections) rather than reading synchronously the moment the empty
+    // state clears — at that instant the render call is still in flight.
     await user.click(screen.getByTestId("flip-scope"));
-    await waitFor(() =>
-      expect(screen.queryByTestId("smart-report-empty")).not.toBeInTheDocument(),
-    );
-    expect(
-      within(screen.getByTestId("smart-report-render")).getByText(/billing summary/i),
-    ).toBeInTheDocument();
+    const surface = within(screen.getByTestId("smart-report-render"));
+    expect(await surface.findByText(/billing summary/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-empty")).not.toBeInTheDocument();
     // The adapter drove the re-scope through the endpoint (not a fixture read):
-    // the no-template scope short-circuits to empty without a call, and the
-    // Utility scope re-runs the endpoint with the NEW scope.
+    // the no-template scope short-circuited without a call, and only the
+    // Utility scope re-ran the endpoint — with the NEW scope.
     await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
     expect(vi.mocked(renderReport).mock.calls[0][0]).toMatchObject({ scope: UTILITY_SCOPE });
   });

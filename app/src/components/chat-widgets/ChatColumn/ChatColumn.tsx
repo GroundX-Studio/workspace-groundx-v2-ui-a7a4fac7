@@ -22,7 +22,7 @@
 
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { type FC } from "react";
+import { useMemo, type FC } from "react";
 
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 import { chatExperienceRegistry } from "@/conversation/chatExperienceRegistry";
@@ -91,18 +91,47 @@ export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFr
   // not-yet-hydrated session renders the onboarding chrome, not the bare chat.
   const isOnboardingSession = activeChatSession?.isOnboardingSession ?? true;
 
-  // A non-onboarding session is the steady chat — the bare ConversationFlow,
-  // no experience, no placeholders.
-  if (!isOnboardingSession) {
-    return <ConversationFlow chatSessionId={activeSessionId} />;
-  }
-
   const currentFrame = overrideFrame ?? session?.currentFrame;
   const scenarioId =
     overrideScenarioId !== undefined
       ? overrideScenarioId
       : appMode.scenario ?? session?.scenario ?? null;
   const scenario = scenarioId ? scenarioRegistry?.byId(scenarioId) : undefined;
+
+  // Memoize the onboarding ChatExperience on its config inputs so its `Intro`
+  // and `Choreography` components keep a STABLE identity across ChatColumn
+  // re-renders. `makeOnboardingExperience` mints fresh `Intro`/`Choreography`
+  // FCs on every call; constructing it inline handed <ConversationFlow> a new
+  // `experience` (new component identities) every render, so React unmounted +
+  // remounted the Choreography, resetting its `firstSendFiredRef` and
+  // re-firing `advanceFrame("f5")` on any re-render during the journey — making
+  // the frame un-holdable after the first send. The registry entry, scenario
+  // object, and its derived fields are all stable references, so this memo is
+  // recomputed only when the scenario actually changes. (Regression:
+  // ChatColumn.test.tsx "stable-experience-identity …".) Computed
+  // unconditionally (before the early returns below) to respect Rules of Hooks;
+  // only consumed on the scenario-journey branch.
+  const thinkingScript = scenario?.manifest.thinkingScript;
+  const experienceFileName = scenario?.documents[0]?.fileName ?? "sample.pdf";
+  const experienceTitle = scenario?.manifest.hero?.title ?? scenarioId ?? "Sample";
+  const onboardingExperience = useMemo(() => {
+    if (!scenarioId || !scenario) return undefined;
+    return chatExperienceRegistry.byId("onboarding")?.create({
+      scenarioId,
+      thinkingScript: thinkingScript ?? [],
+      // Scenario file/title → the experience's grounding scopeHint (the
+      // functional input the deleted onboarding fork threaded into
+      // useConversation). Derived here exactly as that fork did.
+      fileName: experienceFileName,
+      scenarioTitle: experienceTitle,
+    });
+  }, [scenarioId, scenario, thinkingScript, experienceFileName, experienceTitle]);
+
+  // A non-onboarding session is the steady chat — the bare ConversationFlow,
+  // no experience, no placeholders.
+  if (!isOnboardingSession) {
+    return <ConversationFlow chatSessionId={activeSessionId} />;
+  }
 
   // Gate takes over the chat column when active — preserves the existing F6
   // typing-indicator + GateView flow.
@@ -127,16 +156,7 @@ export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFr
     currentFrame === "f5";
 
   if (isInScenarioJourney && scenario) {
-    const experience = chatExperienceRegistry.byId("onboarding")?.create({
-      scenarioId: scenarioId!,
-      thinkingScript: scenario.manifest.thinkingScript ?? [],
-      // Scenario file/title → the experience's grounding scopeHint (the
-      // functional input the deleted onboarding fork threaded into
-      // useConversation). Derived here exactly as that fork did.
-      fileName: scenario.documents[0]?.fileName ?? "sample.pdf",
-      scenarioTitle: scenario.manifest.hero?.title ?? scenarioId! ?? "Sample",
-    });
-    return <ConversationFlow chatSessionId={activeSessionId} experience={experience} />;
+    return <ConversationFlow chatSessionId={activeSessionId} experience={onboardingExperience} />;
   }
 
   if (isF1) return <IdleChatPlaceholder />;
