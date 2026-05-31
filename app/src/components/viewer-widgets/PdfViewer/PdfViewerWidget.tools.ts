@@ -23,6 +23,7 @@
 import { z } from "zod";
 
 import type { WidgetTool } from "@/tools/types";
+import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 
 const openDocument: WidgetTool = {
   name: "open_document",
@@ -81,3 +82,19 @@ const jumpToPage: WidgetTool = {
 };
 
 export const tools: WidgetTool[] = [openDocument, jumpToPage];
+
+/**
+ * ScopedViewerWidget descriptor for the PDF viewer — the `doc-viewer`
+ * canvas kind. Carries the widget's full canvas-dispatch tool SET
+ * (`open_document` + `jump_to_page`, neither of which is a `show_` verb —
+ * the descriptor accepts the full allowlisted verb set; verbs are policed
+ * by `check-tool-quality`). Registered into the production singleton
+ * (`scopedViewerWidgetRegistryProduction.ts`) so `<ScopedCanvas>` mounts
+ * `PdfViewerWidget` for `doc-viewer` steps.
+ */
+export const descriptor = defineScopedViewerWidget({
+  id: "pdf-viewer",
+  kind: "doc-viewer",
+  slot: "viewer-widgets",
+  tools,
+});

@@ -65,4 +65,66 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  // ── ScopedViewerWidget reachability ban (2026-05-30-onboarding-shell-shared-view) ──
+  //
+  // The three registry-backed ScopedViewerWidget COMPONENTS (PdfViewer,
+  // SmartReportRender, SmartReportBuilder) may be imported ONLY by the
+  // production registry singleton (`scopedViewerWidgetRegistryProduction.ts`)
+  // and each widget's own test. `<ScopedCanvas>` is the SOLE mount path, so
+  // "unregistered" == "unreachable": a view that imports one of these
+  // components directly would re-introduce the per-frame canvas fork the
+  // `no-onboarding-duplicates` rule forbids. (The `*.tools.ts` descriptors are
+  // NOT banned — the registry imports those; and the gate/book-call viewer
+  // widgets — GateValueProp/BookCallView/SignUpWidget — are NOT ScopedViewerWidgets,
+  // so they are not covered by this ban.)
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      // The sole legitimate non-test importer of the components.
+      "src/widgets/scopedViewerWidgetRegistryProduction.ts",
+      // Each widget's own test mounts its component directly (allowed).
+      "src/components/viewer-widgets/PdfViewer/*.test.{ts,tsx}",
+      "src/components/viewer-widgets/SmartReportRender/*.test.{ts,tsx}",
+      "src/components/viewer-widgets/SmartReportBuilder/*.test.{ts,tsx}",
+      // ── GRANDFATHERED, pending step-20 retirement/alignment ──
+      // These six legacy views/shells still mount a ScopedViewerWidget
+      // component directly. They are NO LONGER on the live OnboardingShell
+      // canvas path (the shell mounts <ScopedCanvas>), but the files are not
+      // deleted yet: the 5 onboarding per-frame views are retired in
+      // onboarding-shell-shared-view Phase 3, and SteadyShell's own
+      // doc-viewer canvas fork is aligned to <ScopedCanvas> in Phase 4
+      // (both = the next execution-order step). Each exemption is removed as
+      // its file is deleted/aligned there — the ban is otherwise fully active
+      // for all new code.
+      "src/views/Steady/SteadyShell/SteadyShell.tsx",
+      "src/views/Onboarding/UnderstandView.tsx",
+      "src/views/Onboarding/InteractView.tsx",
+      "src/views/Onboarding/ExtractView.tsx",
+      "src/views/Onboarding/ReportRenderView.tsx",
+      "src/views/Onboarding/ReportBuilderView.tsx",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@/components/viewer-widgets/PdfViewer/PdfViewerWidget",
+                "**/viewer-widgets/PdfViewer/PdfViewerWidget",
+                "@/components/viewer-widgets/SmartReportRender/SmartReportRender",
+                "**/viewer-widgets/SmartReportRender/SmartReportRender",
+                "@/components/viewer-widgets/SmartReportBuilder/SmartReportBuilder",
+                "**/viewer-widgets/SmartReportBuilder/SmartReportBuilder",
+              ],
+              message:
+                "Import ScopedViewerWidget components only via the production registry " +
+                "(scopedViewerWidgetRegistryProduction.ts) — <ScopedCanvas> is the sole mount path. " +
+                "Mount them through <ScopedCanvas>, not directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

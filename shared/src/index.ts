@@ -415,6 +415,29 @@ export const viewerStepKindSchema = z.enum([
 export type ViewerStepKind = z.infer<typeof viewerStepKindSchema>;
 
 // ──────────────────────────────────────────────────────────────────────
+// CanvasKind — the CLOSED set of canvas surfaces that have a built
+// `ScopedViewerWidget` today. This is deliberately NARROWER than
+// `ViewerStepKind`: a ViewerStep can carry a kind (`extract-workbench`,
+// `integrate`, `ingest-picker`) for which no production widget exists yet,
+// so `<ScopedCanvas>` resolves those to a labelled "not yet available"
+// placeholder rather than a widget mount. CanvasKind lists ONLY the kinds
+// the production registry can resolve, so:
+//
+//   • the production registry asserts exactly one descriptor per CanvasKind
+//     at construction (totality over the declared set), and
+//   • `<ScopedCanvas>`'s `switch` over CanvasKind gets a `never` default —
+//     adding a CanvasKind value WITHOUT a registered widget fails to compile.
+//
+// Therefore extract-workbench / integrate are NOT listed: declaring them
+// here with no widget would break the total-registry construction + the
+// exhaustive switch. They join when their widgets are built. `report` and
+// `report-builder` are SEPARATE kinds (render surface vs builder surface),
+// each backed by its own widget (SmartReportRender / SmartReportBuilder).
+// ──────────────────────────────────────────────────────────────────────
+export const canvasKindSchema = z.enum(["doc-viewer", "report", "report-builder"]);
+export type CanvasKind = z.infer<typeof canvasKindSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
 // Catalog<T> — the shared READ contract every data catalog satisfies. A
 // catalog looks up a descriptor by id and enumerates the set; it is NEVER a
 // dispatcher (it does not resolve behavior) and NEVER a state store (it is

@@ -20,6 +20,7 @@ import { z } from "zod";
 import { contentScopeSchema } from "@groundx/shared";
 
 import type { WidgetTool } from "@/tools/types";
+import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 
 const showSmartReportRender: WidgetTool = {
   name: "show_smart_report_render",
@@ -47,3 +48,17 @@ const showSmartReportRender: WidgetTool = {
 };
 
 export const tools: WidgetTool[] = [showSmartReportRender];
+
+/**
+ * ScopedViewerWidget descriptor for the Report RENDER surface — the
+ * `report` canvas kind (the builder is the separate `report-builder`
+ * kind on `SmartReportBuilder.tools.ts`). Registered into the production
+ * singleton so `<ScopedCanvas>` mounts `SmartReportRender` for `report`
+ * steps.
+ */
+export const descriptor = defineScopedViewerWidget({
+  id: "smart-report-render",
+  kind: "report",
+  slot: "viewer-widgets",
+  tools,
+});

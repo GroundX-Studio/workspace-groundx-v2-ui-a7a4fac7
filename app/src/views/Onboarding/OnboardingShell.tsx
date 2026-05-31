@@ -27,18 +27,16 @@ import { StepStrip } from "@/components/layout/StepStrip";
 import type { StepDescriptor, StepId, StepPillState } from "@/components/layout/StepStrip";
 import type { FFrame, Scenario } from "@/types/onboarding";
 
+import type { ContentScope } from "@groundx/shared";
+
 import { BookingStatusCard } from "@/components/chat-widgets/BookingStatusCard/BookingStatusCard";
 import { BookCallView } from "@/components/viewer-widgets/BookCallView/BookCallView";
 import { GateValueProp } from "@/components/viewer-widgets/GateValueProp/GateValueProp";
-import { ExtractView } from "./ExtractView";
+import { ScopedCanvas } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 import { IngestView } from "./IngestView";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
-import { IntegrateView } from "./IntegrateView";
-import { InteractView } from "./InteractView";
 import { NavDebugOverlay } from "./NavDebugOverlay";
-import { ReportBuilderView } from "./ReportBuilderView";
-import { ReportRenderView } from "./ReportRenderView";
-import { UnderstandView } from "./UnderstandView";
+import { isResolvedDocumentId } from "@/api/documentId";
 
 // ─────────────────────────────────────────────────────────────────────
 // ARCH-06 F1 overlay animation spec (locked 2026-05-26).
@@ -145,7 +143,7 @@ export const OnboardingShell: FC = () => {
   const { state: appMode } = useAppMode();
   const widgetRole = useWidgetRole();
   const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate } = useOnboardingSession();
-  const { state: scenarioRegistry } = useScenarioRegistry();
+  const { state: scenarioRegistry, byId: scenarioById } = useScenarioRegistry();
   // ChatStore is read up here so the StepStrip pill state below can
   // derive from the active ViewerStep (citation clicks push a
   // doc-viewer step → nav highlight follows the canvas swap, see
@@ -436,6 +434,79 @@ export const OnboardingShell: FC = () => {
   })();
   const effectiveStepKind = latestViewerStep?.kind ?? stepKindFallback;
 
+  // 2026-05-30-onboarding-shell-shared-view Phase 2 — the per-frame
+  // `canvasContent` switch is GONE. The canvas is now driven entirely by
+  // `<ScopedCanvas>` (the SOLE viewer-widget mount path) fed the active
+  // viewer step + the experience's resolved `ContentScope`. The shell no
+  // longer mounts `UnderstandView`/`ExtractView`/`InteractView`/
+  // `IntegrateView`/`ReportRenderView`/`ReportBuilderView` — those views
+  // are retired in Phase 3 (next step). The unbuilt surfaces
+  // (`extract-workbench` / `integrate`) resolve to ScopedCanvas's labelled
+  // placeholder; their production widgets join `CanvasKind` when built.
+  //
+  // Gate / book-call remain WIDGET mounts the shell shows directly (NOT
+  // views routed through ScopedCanvas) — they're anonymous-context
+  // surfaces, not document-scoped ScopedViewerWidgets.
+
+  // Resolve the document the canvas renders for the active scenario. A
+  // citation-click doc-viewer step carries a RESOLVED GroundX UUID — prefer
+  // it; otherwise fall back to the scenario's first document.
+  const canvasScenarioId = appMode.scenario ?? session.scenario ?? null;
+  const canvasScenario = canvasScenarioId ? scenarioById(canvasScenarioId) : undefined;
+  const stepDocId =
+    latestViewerStep?.kind === "doc-viewer" && isResolvedDocumentId(latestViewerStep.documentId)
+      ? latestViewerStep.documentId
+      : null;
+  const scenarioDocId = canvasScenario?.documents?.[0]?.documentId ?? null;
+  const canvasDocId = stepDocId ?? scenarioDocId;
+
+  // The scope ScopedCanvas feeds the mounted widget, by the active step kind:
+  //   • doc-viewer / interact-chat → the single document (documents scope)
+  //   • report → bucket + project filter (the project filter-field value IS
+  //     the scenario id; the opening display context for every demo sample)
+  const canvasScope: ContentScope = useMemo(() => {
+    if (effectiveStepKind === "report") {
+      return {
+        type: "bucket",
+        bucketId: scenarioRegistry.bucketId ?? 28454,
+        filter: { project: canvasScenarioId ?? "utility" },
+      };
+    }
+    if (canvasDocId) {
+      return { type: "documents", documentIds: [canvasDocId] };
+    }
+    // No resolved document yet (BYO / pre-resolution) — an empty documents
+    // scope holds the widget's neutral loading state (PdfViewer gates its
+    // fetch on a resolved id).
+    return { type: "documents", documentIds: [] };
+  }, [effectiveStepKind, scenarioRegistry.bucketId, canvasScenarioId, canvasDocId]);
+
+  // The viewer step ScopedCanvas selects the widget from. Use the live step
+  // when present; otherwise synthesize from the frame projection so the
+  // canvas resolves on initial mount before any step lands in history.
+  const canvasStep: import("@/contexts/ChatStoreContext").ViewerStep = useMemo(() => {
+    if (latestViewerStep) return latestViewerStep;
+    switch (effectiveStepKind) {
+      case "doc-viewer":
+        return { kind: "doc-viewer", documentId: canvasDocId ?? "" };
+      case "extract-workbench":
+        return { kind: "extract-workbench", scenarioId: canvasScenarioId ?? "utility" };
+      case "interact-chat":
+        return { kind: "interact-chat", scenarioId: canvasScenarioId ?? "utility" };
+      case "report":
+        return { kind: "report" };
+      case "integrate":
+        return { kind: "integrate" };
+      case "ingest-picker":
+      default:
+        return { kind: "ingest-picker" };
+    }
+  }, [latestViewerStep, effectiveStepKind, canvasDocId, canvasScenarioId]);
+
+  // f4 = render, f4a = builder. The `report` step kind alone can't tell the
+  // two apart; the frame disambiguates which report CanvasKind to mount.
+  const reportSurface: "render" | "builder" = session.currentFrame === "f4a" ? "builder" : "render";
+
   const canvasContent = useMemo(() => {
     // 2026-05-30-widget-role-access: gate/book-call canvas widgets are
     // anonymous-context (pre-signup) and not document-scoped → role
@@ -446,36 +517,27 @@ export const OnboardingShell: FC = () => {
     // hosting the account form. See GateValueProp + GateChatRail.
     if (signupSurfaceActive)
       return <GateValueProp role="anonymous" scope={{ type: "none" }} />;
-    switch (effectiveStepKind) {
-      case "ingest-picker":
-        // ARCH-06B (2026-05-26): IngestView is rendered ONLY inside
-        // the F1 overlay (see render below). The canvas underneath
-        // stays blank so the user doesn't see IngestView duplicated
-        // during the 700ms return-window before the F1 overlay
-        // finishes covering. The brief blank moment is masked by the
-        // overlay sliding into place.
-        return null;
-      case "doc-viewer":
-        return <UnderstandView />;
-      case "extract-workbench":
-        // Per spec (`project_spec_frames.md`), F3 / F3a / F4 are three
-        // surfaces of the same extraction-workbench widget. ExtractView
-        // is the workbench shell.
-        return <ExtractView />;
-      case "interact-chat":
-        return <InteractView />;
-      case "report":
-        // 2026-05-29-smart-report-screen Phase 1/3 — `report` is the step kind
-        // for BOTH f4 (render) and f4a (builder). Disambiguate by the active
-        // frame: f4a → the builder route (placeholder, Phase 4), else → the
-        // production render surface (f4 / S3).
-        return session.currentFrame === "f4a" ? <ReportBuilderView /> : <ReportRenderView />;
-      case "integrate":
-        return <IntegrateView />;
-      default:
-        return null;
-    }
-  }, [bookCallActive, signupSurfaceActive, effectiveStepKind, session.currentFrame]);
+    // ARCH-06B: the F1 ingest picker is rendered ONLY inside the F1 overlay
+    // (see render below); the canvas underneath stays blank during the
+    // return-window so the user doesn't see it duplicated.
+    if (effectiveStepKind === "ingest-picker") return null;
+    return (
+      <ScopedCanvas
+        scope={canvasScope}
+        step={canvasStep}
+        role={widgetRole}
+        reportSurface={reportSurface}
+      />
+    );
+  }, [
+    bookCallActive,
+    signupSurfaceActive,
+    effectiveStepKind,
+    canvasScope,
+    canvasStep,
+    widgetRole,
+    reportSurface,
+  ]);
 
   // Theme-driven breakpoint detection. Compact step strip activates below
   // md (900 = MUI default; iPad-portrait-to-landscape divide). Phones +

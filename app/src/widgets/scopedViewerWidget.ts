@@ -9,33 +9,46 @@
  *
  *   • `defineScopedViewerWidget()` produces a frozen DESCRIPTOR — the
  *     base "object" each viewer widget is registered as. It validates
- *     the descriptor at construction (id present, `show_*` verb) so a
+ *     the descriptor at construction (id present, ≥1 tool) so a
  *     malformed viewer widget fails loudly rather than silently passing
- *     a regex guard.
- *   • The descriptor carries the widget's `show_*` tool. The descriptor
- *     registry (`scopedViewerWidgetRegistry.ts`) surfaces these to the
- *     LLM tool catalog and conforms to the shared `Catalog<T>` contract.
+ *     a regex guard. Verb prefixes are policed by `check-tool-quality`,
+ *     not here, so a widget's full tool SET (PdfViewer's `open_`/`jump_`
+ *     as well as the report family's `show_*`) registers cleanly.
+ *   • The descriptor carries the widget's `kind: CanvasKind` + its tool
+ *     SET. The catalog factory (`scopedViewerWidgetRegistry.ts`) conforms
+ *     to the shared `Catalog<T>` contract; the production singleton
+ *     (`scopedViewerWidgetRegistryProduction.ts`) builds a catalog of
+ *     MOUNTS (descriptor + component) keyed by `descriptor.id`, and
+ *     `<ScopedCanvas>` resolves `step.kind → CanvasKind → catalog mount →
+ *     component` THROUGH that singleton (`componentForKind`). The
+ *     descriptor's tool SET is surfaced to the LLM tool catalog.
  *   • `scopeKey()` + `useScopeAdapter()` are the scope-prop-handling
  *     primitives the base provides: a viewer widget takes a REQUIRED,
  *     non-`none` `ContentScope` (per widget-role-access rule 6 — these
  *     widgets narrow `WidgetScope`) and re-runs its data load whenever
  *     the scope IDENTITY changes (not on every render).
  *
- * ⚠️ NOT YET WIRED — this base + `scopeKey`/`useScopeAdapter` +
- * `scopedViewerWidgetRegistry` currently have ZERO production importers.
- * `PdfViewerWidget` was migrated to a required `scope` prop (widget-role-
- * access Phase 2b) but takes `scope` directly and rolls its own reload —
- * it does NOT build on this base, and no production registry singleton
- * exists. Wiring the viewer widgets onto the base + standing up the
- * production registry is an OUTSTANDING ticket — see
- * `openspec/changes/2026-05-29-core-data-model-hardening/tasks.md`
- * ("OUTSTANDING — the base is ORPHANED; wire it up"). Do not treat this
- * module as a live dependency until that lands; the alternative the
- * ticket records is to delete the unused registry if only PdfViewer is
- * needed. (PdfViewer's raw `documentId` → `{ type: "documents",
- * documentIds: [id] }` collapse already landed in widget-role-access
- * Phase 2b; the base is designed to expect a `ContentScope` so the
- * eventual wiring lands consistent with it.)
+ * ✅ WIRED + LOAD-BEARING (2026-05-30-onboarding-shell-shared-view
+ * Phase 1, hardened in REFINE) — the step-7 "base is ORPHANED" ticket is
+ * DISCHARGED here. The production registry singleton
+ * (`scopedViewerWidgetRegistryProduction.ts`) is a
+ * `Catalog<ScopedViewerWidgetMount>` of three real mounts (descriptor +
+ * component): PdfViewer · SmartReportRender · SmartReportBuilder.
+ * `<ScopedCanvas>` resolves the component it mounts THROUGH that catalog
+ * (`componentForKind(kind)` → `scopedViewerWidgetRegistry.all()` →
+ * `mount.component`) — there is no parallel `CanvasKind → component`
+ * Record, so the catalog's output is on the live render path.
+ * `OnboardingShell` mounts `<ScopedCanvas>`. So the chain `OnboardingShell
+ * → ScopedCanvas → componentForKind → registry singleton → these mounts`
+ * is a live, non-test production consumer chain.
+ * `PdfViewerWidget` now (a) exports a descriptor (`kind: "doc-viewer"`,
+ * tools `open_document`/`jump_to_page`) and (b) reloads its X-Ray via
+ * `useScopeAdapter(scope, …)` instead of a bespoke `useEffect`. The
+ * unbuilt surfaces (`extract-workbench` / `integrate`) are NOT in
+ * `CanvasKind`; `<ScopedCanvas>` renders a labelled placeholder for any
+ * undeclared step kind. (PdfViewer's raw `documentId` → `{ type:
+ * "documents", documentIds: [id] }` collapse landed in widget-role-
+ * access Phase 2b.)
  *
  * Anti-overengineering: the "base" is a descriptor + factory + two
  * hooks, NOT a React base class. A viewer widget is a plain function
@@ -46,7 +59,7 @@
  */
 import { useEffect, useRef } from "react";
 
-import type { ContentScope } from "@groundx/shared";
+import type { CanvasKind, ContentScope } from "@groundx/shared";
 
 import type { WidgetTool } from "@/tools/types";
 
@@ -55,27 +68,43 @@ export type WidgetSlot = "chat-widgets" | "viewer-widgets";
 
 /**
  * The base "object" every main viewer widget is registered as. Frozen
- * at construction by `defineScopedViewerWidget`. The four viewer widgets
- * each export one of these alongside their component.
+ * at construction by `defineScopedViewerWidget`. The viewer widgets each
+ * export one of these alongside their component, and the production
+ * registry (`scopedViewerWidgetRegistryProduction.ts`) pairs each with
+ * its component in a catalog mount so `<ScopedCanvas>` can resolve
+ * `step.kind → CanvasKind → catalog mount → component`.
  */
 export interface ScopedViewerWidgetDescriptor {
   /** Stable registry id (kebab-case widget identity, globally unique). */
   readonly id: string;
+  /**
+   * The canvas surface this widget IS — the production registry asserts
+   * exactly one catalog mount per declared `CanvasKind`, and `<ScopedCanvas>`
+   * resolves a step to its widget through this. `CanvasKind` is the CLOSED
+   * set of BUILT surfaces (`doc-viewer` / `report` / `report-builder`).
+   */
+  readonly kind: CanvasKind;
   /** Which widget slot the component lives under. */
   readonly slot: WidgetSlot;
   /**
-   * The widget's canvas-dispatch tool — its name MUST start with the
-   * `show_` verb (the dispatch-tool taxonomy: `show_*` surfaces the
-   * widget at a scope). Surfaced to the LLM catalog by the registry.
+   * The widget's canvas-dispatch tool SET — every LLM tool this widget
+   * owns (e.g. PdfViewer's `open_document` + `jump_to_page`, the report
+   * builder's `show_*`/`propose_*`/… family). Surfaced to the LLM catalog
+   * by the registry. The verb prefixes are policed by `check-tool-quality`,
+   * NOT here — the descriptor accepts the full allowlisted verb set
+   * (`open_`/`jump_`/`show_`/…), so PdfViewer's non-`show_` tools register
+   * cleanly. A widget MUST declare ≥1 tool (it is, by definition, the set
+   * of canvas-dispatch tools the widget exposes).
    */
-  readonly showTool: WidgetTool;
+  readonly tools: readonly WidgetTool[];
 }
 
 /** Inputs to {@link defineScopedViewerWidget}. */
 export interface ScopedViewerWidgetSpec {
   id: string;
+  kind: CanvasKind;
   slot: WidgetSlot;
-  showTool: WidgetTool;
+  tools: readonly WidgetTool[];
 }
 
 /**
@@ -90,17 +119,17 @@ export function defineScopedViewerWidget(
   if (!spec.id || spec.id.trim() === "") {
     throw new Error("ScopedViewerWidget: `id` is required and must be non-empty.");
   }
-  if (!spec.showTool.name.startsWith("show_")) {
+  if (!spec.tools || spec.tools.length === 0) {
     throw new Error(
-      `ScopedViewerWidget "${spec.id}": showTool "${spec.showTool.name}" must use the ` +
-        `\`show_\` canvas-dispatch verb (e.g. show_document / show_extract / show_report / ` +
-        `show_integrations).`,
+      `ScopedViewerWidget "${spec.id}": \`tools\` must declare at least one canvas-dispatch tool.`,
     );
   }
   return Object.freeze({
     id: spec.id,
+    kind: spec.kind,
     slot: spec.slot,
-    showTool: spec.showTool,
+    // Freeze the tools array so the descriptor's set is immutable.
+    tools: Object.freeze([...spec.tools]),
   });
 }
 

@@ -1,6 +1,6 @@
 /**
  * ScopedViewerWidget registry — the enumerable set of viewer-widget
- * descriptors. core data-model hardening, Item 5/7.
+ * MOUNTS. core data-model hardening, Item 5/7.
  *
  * Conforms to the shared `Catalog<T>` read contract (`@groundx/shared`):
  * `all()` enumerates in stable insertion order, `byId()` looks one up.
@@ -8,39 +8,44 @@
  * at construction through the shared `assertUniqueIds` helper (the ONE
  * mechanism for that invariant — no bespoke duplicate check).
  *
- * ⚠️ NOT YET WIRED — no production singleton is built from this factory
- * yet, so this module currently has ZERO production importers (the orphan
- * half of the ScopedViewerWidget base). Step 8 (widget-role-access Phase
- * 2b) did NOT wire it (it only swapped PdfViewer's prop). Standing up the
- * production singleton (PdfViewer now; SmartReport/Extract/Integrate as
- * they are built) is an OUTSTANDING ticket discharged at the
- * `<ScopedCanvas>` step — see
- * `openspec/changes/2026-05-29-core-data-model-hardening/tasks.md`
- * ("OUTSTANDING — the base is ORPHANED; wire it up") +
- * `openspec/changes/2026-05-30-onboarding-shell-shared-view/tasks.md`
- * (Phase 1 "DISCHARGE the core-data ScopedViewerWidget orphan HERE").
- * This module ships only the factory + read contract so wiring lands
- * against a fixed base.
+ * ✅ WIRED + LOAD-BEARING (2026-05-30-onboarding-shell-shared-view
+ * Phase 1, hardened in REFINE) — this factory builds the production
+ * singleton (`scopedViewerWidgetRegistryProduction.ts`), which holds the
+ * three real viewer-widget MOUNTS (descriptor + component): PdfViewer ·
+ * SmartReportRender · SmartReportBuilder. `<ScopedCanvas>` mounts a step's
+ * widget by resolving its `CanvasKind` THROUGH this catalog singleton
+ * (`componentForKind` → catalog entry → `.component`), so the catalog's
+ * output is on the live render path — not a parallel dormant structure.
+ * `OnboardingShell` mounts `<ScopedCanvas>`. That discharges the core-data
+ * "OUTSTANDING — the base is ORPHANED; wire it up" ticket. This module
+ * keeps shipping just the generic catalog factory + read contract; the
+ * production singleton + the one-mount-per-declared-`CanvasKind` totality
+ * assertion live in the production module so the factory stays
+ * widget-agnostic.
+ *
+ * The factory is generic over the catalog item `T` with an explicit
+ * `idOf` accessor: the descriptor catalog keys by `d.id`, the production
+ * mount catalog keys by `m.descriptor.id`. Same one mechanism, one axis
+ * (the id accessor), no fork.
  */
 import { assertUniqueIds, type Catalog } from "@groundx/shared";
 
-import type { ScopedViewerWidgetDescriptor } from "./scopedViewerWidget";
-
 /**
- * Build a `Catalog<ScopedViewerWidgetDescriptor>` from a list of viewer
- * widget descriptors. Throws (via `assertUniqueIds`) if two descriptors
- * share an id, naming the duplicate.
+ * Build a `Catalog<T>` from a list of items + an id accessor. Throws (via
+ * the shared `assertUniqueIds`) if two items share an id, naming the
+ * duplicate. The defensive copy means callers can't mutate the catalog's
+ * backing array.
  */
-export function createScopedViewerWidgetRegistry(
-  descriptors: readonly ScopedViewerWidgetDescriptor[],
-): Catalog<ScopedViewerWidgetDescriptor> {
-  assertUniqueIds(descriptors, (d) => d.id);
+export function createScopedViewerWidgetRegistry<T>(
+  items: readonly T[],
+  idOf: (item: T) => string,
+): Catalog<T> {
+  assertUniqueIds(items, idOf);
 
-  const byId = new Map<string, ScopedViewerWidgetDescriptor>();
-  for (const d of descriptors) byId.set(d.id, d);
+  const byId = new Map<string, T>();
+  for (const item of items) byId.set(idOf(item), item);
 
-  // Defensive copy so callers can't mutate the catalog's backing array.
-  const all = Object.freeze([...descriptors]);
+  const all = Object.freeze([...items]);
 
   return {
     all: () => all,

@@ -45,9 +45,10 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useEffect, useState, type FC } from "react";
+import { useEffect, useRef, useState, type FC } from "react";
 
 import { isResolvedDocumentId } from "@/api/documentId";
+import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
 
 import type { ContentScope, NormalizedBbox, WidgetRole } from "@groundx/shared";
 import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity";
@@ -174,8 +175,17 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
     }
   }, [targetPage]);
 
-  useEffect(() => {
-    let cancelled = false;
+  // ScopedViewerWidget contract (core-data base): reload the X-Ray on
+  // scope-IDENTITY change via `useScopeAdapter` rather than a bespoke
+  // `useEffect` keyed on a derived id. The adapter fires on mount and again
+  // only when the `scope` identity changes (`scopeKey`), not on every render.
+  // Async cancellation is handled with a monotonically-increasing token: a
+  // newer adapt run invalidates an in-flight fetch from an older scope.
+  const loadTokenRef = useRef(0);
+  useScopeAdapter(scope, (nextScope) => {
+    const token = ++loadTokenRef.current;
+    const nextDocId =
+      nextScope.type === "documents" ? nextScope.documentIds[0] ?? "" : "";
     setXray(null);
     setError(null);
     // WF-15 — gate the fetch on a resolved GroundX documentId. The
@@ -183,25 +193,19 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
     // the active entity resolves the real UUID; fetching an X-Ray for
     // it 406s and flashes "COULD NOT LOAD". Hold the neutral loading
     // state (xray + error both null → `loading` true) until a real id
-    // arrives, then re-run via the `documentId` dep.
-    if (!isResolvedDocumentId(documentId)) {
-      return () => {
-        cancelled = true;
-      };
-    }
+    // arrives.
+    if (!isResolvedDocumentId(nextDocId)) return;
     void (async () => {
-      const result = await getDocumentXray(documentId);
-      if (cancelled) return;
+      const result = await getDocumentXray(nextDocId);
+      // A newer scope took over while we awaited — drop this stale result.
+      if (loadTokenRef.current !== token) return;
       if (result.isSuccess && result.response) {
         setXray(result.response);
       } else {
         setError(result.error ?? new Error("xray fetch failed"));
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [documentId, getDocumentXray]);
+  });
 
   const pages = xray?.documentPages ?? [];
   const activeImage =

@@ -29,60 +29,89 @@ import {
   type ScopedViewerWidgetDescriptor,
 } from "./scopedViewerWidget";
 
-const showDoc: WidgetTool = {
-  name: "show_document",
-  description:
-    "Show a document in the viewer pane. Use when the user references a document by name.",
-  category: "read",
-  input: z.object({
-    documentId: z.string().min(1).describe("GroundX document UUID"),
-  }),
-  handler: (input) => {
-    const parsed = input as { documentId: string };
-    return { kind: "openDocument", documentId: parsed.documentId };
-  },
-  availableSteps: ["doc-viewer"],
-};
+function mkTool(name: string): WidgetTool {
+  return {
+    name,
+    description: `${name} — drive a scoped viewer surface. Use when the user asks for it.`,
+    category: "read",
+    input: z.object({
+      documentId: z.string().min(1).describe("GroundX document UUID"),
+    }),
+    handler: (input) => {
+      const parsed = input as { documentId: string };
+      return { kind: "openDocument", documentId: parsed.documentId };
+    },
+    availableSteps: ["doc-viewer"],
+  };
+}
+
+const openDoc = mkTool("open_document");
+const jumpToPage = mkTool("jump_to_page");
 
 const bucketScope: ContentScope = { type: "bucket", bucketId: 42 };
 const docsScope: ContentScope = { type: "documents", documentIds: ["doc-1"] };
 
 describe("defineScopedViewerWidget — the base descriptor", () => {
-  it("produces a frozen descriptor carrying id + show tool", () => {
+  it("produces a frozen descriptor carrying id + kind + the tools SET", () => {
     const d = defineScopedViewerWidget({
       id: "pdf-viewer",
+      kind: "doc-viewer",
       slot: "viewer-widgets",
-      showTool: showDoc,
+      tools: [openDoc, jumpToPage],
     });
     expect(d.id).toBe("pdf-viewer");
+    expect(d.kind).toBe("doc-viewer");
     expect(d.slot).toBe("viewer-widgets");
-    expect(d.showTool).toBe(showDoc);
+    expect(d.tools).toEqual([openDoc, jumpToPage]);
     expect(Object.isFrozen(d)).toBe(true);
+    // The tools array is frozen too so callers can't mutate the descriptor's set.
+    expect(Object.isFrozen(d.tools)).toBe(true);
   });
 
-  it("requires the show tool name to start with the `show_` verb", () => {
+  it("accepts non-`show_` canvas-dispatch verbs (PdfViewer's open_/jump_)", () => {
+    // The `show_`-verb-only throw was removed: verb prefixes are policed by
+    // `check-tool-quality`, and the descriptor must accept the PdfViewer
+    // open_/jump_ tools (which are NOT `show_`).
     expect(() =>
       defineScopedViewerWidget({
-        id: "bad",
+        id: "pdf-viewer",
+        kind: "doc-viewer",
         slot: "viewer-widgets",
-        showTool: { ...showDoc, name: "open_document" },
+        tools: [openDoc, jumpToPage],
       }),
-    ).toThrow(/show_/);
+    ).not.toThrow();
   });
 
   it("rejects an empty id", () => {
     expect(() =>
-      defineScopedViewerWidget({ id: "", slot: "viewer-widgets", showTool: showDoc }),
+      defineScopedViewerWidget({
+        id: "",
+        kind: "doc-viewer",
+        slot: "viewer-widgets",
+        tools: [openDoc],
+      }),
     ).toThrow(/id/i);
+  });
+
+  it("rejects an empty tools set (a viewer widget must declare ≥1 canvas-dispatch tool)", () => {
+    expect(() =>
+      defineScopedViewerWidget({
+        id: "no-tools",
+        kind: "doc-viewer",
+        slot: "viewer-widgets",
+        tools: [],
+      }),
+    ).toThrow(/tool/i);
   });
 
   it("a descriptor satisfies the exported ScopedViewerWidgetDescriptor type", () => {
     const d: ScopedViewerWidgetDescriptor = defineScopedViewerWidget({
-      id: "extract",
+      id: "smart-report-render",
+      kind: "report",
       slot: "viewer-widgets",
-      showTool: { ...showDoc, name: "show_extract" },
+      tools: [mkTool("show_smart_report_render")],
     });
-    expect(d.showTool.name).toBe("show_extract");
+    expect(d.tools[0].name).toBe("show_smart_report_render");
   });
 });
 

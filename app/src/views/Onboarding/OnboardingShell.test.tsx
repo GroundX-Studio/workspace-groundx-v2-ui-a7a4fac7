@@ -40,9 +40,9 @@ const SessionProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { sessionId: stri
  * `advanceFrame` programmatically without going through the step
  * strip UI (the compact step strip hides pills at narrow viewports).
  */
-const SessionActionsProbe = ({ onReady }: { onReady: (api: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void }) => void }) => {
-  const { advanceFrame } = useOnboardingSession();
-  onReady({ advanceFrame });
+const SessionActionsProbe = ({ onReady }: { onReady: (api: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] }) => void }) => {
+  const { advanceFrame, openGate } = useOnboardingSession();
+  onReady({ advanceFrame, openGate });
   return null;
 };
 
@@ -145,10 +145,24 @@ describe("OnboardingShell", () => {
 
   it("does not leave the chat column blank after dismissing the F6 gate", async () => {
     const user = userEvent.setup();
+    // The InteractView "💾 Save 🔒" button that used to open the gate was
+    // retired with the per-frame canvas views (the F5 canvas is now the
+    // shared PdfViewer via <ScopedCanvas>). Drive the gate open through the
+    // session API instead — equivalent user-level coverage (gate opens),
+    // without depending on retired view chrome.
+    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SessionActionsProbe onReady={(api) => (actions = api)} />
+      </>,
+      { initialFrame: "f5", initialScenario: "utility" },
+    );
 
-    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f5", initialScenario: "utility" });
-
-    await user.click(screen.getByTestId("advance-to-f6"));
+    act(() => {
+      actions!.advanceFrame("f6");
+      actions!.openGate("save");
+    });
     expect(await screen.findByTestId("gate-rail-preamble")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("gate-rail-dismiss"));
@@ -168,15 +182,26 @@ describe("OnboardingShell", () => {
   it("P1: canvas swaps to the value-prop pane while the gate is open (F5 sample → Sign Up)", async () => {
     const user = userEvent.setup();
 
-    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f5", initialScenario: "utility" });
+    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SessionActionsProbe onReady={(api) => (actions = api)} />
+      </>,
+      { initialFrame: "f5", initialScenario: "utility" },
+    );
 
-    // Pre-condition: canvas shows the InteractView for the sample.
+    // Pre-condition: canvas shows the F5 sample surface (the shared
+    // PdfViewer via <ScopedCanvas>); the value-prop pitch is not yet up.
     expect(screen.getByTestId("onboarding-frame-f5")).toBeInTheDocument();
     expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
 
-    // Trigger the gate via the F6 advance pill — same path as a real
-    // user clicking through.
-    await user.click(screen.getByTestId("advance-to-f6"));
+    // Trigger the gate via the session API (the InteractView Save button
+    // that used to do this was retired with the per-frame canvas views).
+    act(() => {
+      actions!.advanceFrame("f6");
+      actions!.openGate("save");
+    });
 
     // Canvas swaps to the value-prop pitch (the form is gone; sign-up
     // doors live in the chat rail). The previous frame view is gone, and
@@ -247,10 +272,19 @@ describe("OnboardingShell", () => {
   // P1 (2026-05-29): while the sign-up gate is open the step strip sits on
   // "Understand" (owner-directed), regardless of which frame triggered it.
   it("P1: step strip is on Understand while the gate is open", async () => {
-    const user = userEvent.setup();
-    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f5", initialScenario: "utility" });
+    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SessionActionsProbe onReady={(api) => (actions = api)} />
+      </>,
+      { initialFrame: "f5", initialScenario: "utility" },
+    );
 
-    await user.click(screen.getByTestId("advance-to-f6"));
+    act(() => {
+      actions!.advanceFrame("f6");
+      actions!.openGate("save");
+    });
     await screen.findByTestId("gate-value-prop");
 
     const understandPill = screen.getByText("Understand").closest('[role="button"]');
@@ -954,13 +988,21 @@ describe("OnboardingShell", () => {
     expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
   });
 
-  it("Phase 1: f4 → f4a edit affordance routes to the builder; f4a → f4 back returns to render", async () => {
-    const user = userEvent.setup();
+  it("Phase 1: f4 render → f4a builder mounts SmartReportBuilder; f4a → f4 returns to render", async () => {
+    // 2026-05-30-onboarding-shell-shared-view Phase 2: the canvas is the
+    // shared <ScopedCanvas> (scope+role only). The render→builder `✎ edit §N`
+    // hand-off + the builder `← back` button lived on the retired per-frame
+    // ReportRenderView/ReportBuilderView wrappers; with those gone, this test
+    // drives the f4↔f4a transition via the session `advanceFrame` API and
+    // asserts <ScopedCanvas> mounts the right report surface for each frame
+    // (`report` step kind + frame f4 → render widget; f4a → builder widget).
     let snapshot = { sessionId: null as string | null, frame: "" };
+    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
     renderWithOnboardingProviders(
       <>
         <OnboardingShell />
         <SessionProbe onSnapshot={(next) => (snapshot = next)} />
+        <SessionActionsProbe onReady={(api) => (actions = api)} />
       </>,
       { initialFrame: "f4", initialScenario: "utility" },
     );
@@ -968,16 +1010,14 @@ describe("OnboardingShell", () => {
     // f4 render surface is up.
     expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
 
-    // ✎ edit §1 → f4a builder. Phase 4: the f4a wrapper now mounts the
-    // production `SmartReportBuilder` widget (was a placeholder
-    // `report-builder-view` in Phase 1).
-    await user.click(screen.getByTestId("report-section-edit-billing_summary"));
+    // f4 → f4a: ScopedCanvas mounts the builder (report-builder CanvasKind).
+    act(() => actions!.advanceFrame("f4a"));
     expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
     await waitFor(() => expect(snapshot.frame).toBe("f4a"));
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
 
-    // ← back → f4 render.
-    await user.click(screen.getByTestId("report-builder-back"));
+    // f4a → f4: back to the render surface.
+    act(() => actions!.advanceFrame("f4"));
     expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
     await waitFor(() => expect(snapshot.frame).toBe("f4"));
   });
@@ -1038,25 +1078,29 @@ describe("OnboardingShell", () => {
     }
 
     // Before the click — the active step is the "Analyze" bracket's
-    // Extract SubPill, which doesn't expose aria-current. Confirm
-    // the canvas is the ExtractView (no understand-canvas testid).
-    expect(screen.queryByTestId("understand-canvas")).not.toBeInTheDocument();
+    // Extract SubPill, which doesn't expose aria-current. On F3 the
+    // extract-workbench step has no built widget, so <ScopedCanvas>
+    // shows its placeholder (NOT the doc-viewer canvas).
+    expect(screen.queryByTestId("scoped-canvas-unavailable")).toBeInTheDocument();
     expect(activeStepLabel()).toBe(""); // no aria-current node
 
     // Fire the citation-click side effect (the orchestrator's
-    // `highlightCitation` handler calls this internally).
+    // `highlightCitation` handler calls this internally). A RESOLVED
+    // GroundX UUID is required so the doc-viewer canvas mounts the
+    // viewer (the placeholder-id path holds the loading state).
     act(() => {
       storeRef!.gotoDocViewer({
-        documentId: "doc-cite",
+        documentId: "11111111-2222-3333-4444-555555555555",
         page: 7,
         bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 },
       });
     });
 
-    // After the click — canvas is UnderstandView AND the Understand
-    // pill has aria-current="step" (matches the canvas).
+    // After the click — <ScopedCanvas> swaps to the doc-viewer widget
+    // (data-canvas-kind="doc-viewer") AND the Understand pill has
+    // aria-current="step" (the nav indicator travels with the canvas).
     await waitFor(() => {
-      expect(screen.getByTestId("understand-canvas")).toBeInTheDocument();
+      expect(screen.getByTestId("scoped-canvas")).toHaveAttribute("data-canvas-kind", "doc-viewer");
     });
     expect(activeStepLabel()).toMatch(/understand/i);
   });

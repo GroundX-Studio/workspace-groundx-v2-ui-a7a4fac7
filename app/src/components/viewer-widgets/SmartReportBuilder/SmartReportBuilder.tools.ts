@@ -25,6 +25,7 @@
 import { z } from "zod";
 
 import type { WidgetTool } from "@/tools/types";
+import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 
 const showSmartReportEdit: WidgetTool = {
   name: "show_smart_report_edit",
@@ -164,3 +165,17 @@ export const tools: WidgetTool[] = [
   editReportSection,
   deleteReportSection,
 ];
+
+/**
+ * ScopedViewerWidget descriptor for the Report BUILDER surface — the
+ * `report-builder` canvas kind (distinct from the render surface's
+ * `report` kind). Carries the builder's full chat-drivable tool family.
+ * Registered into the production singleton so `<ScopedCanvas>` mounts
+ * `SmartReportBuilder` for `report-builder` steps.
+ */
+export const descriptor = defineScopedViewerWidget({
+  id: "smart-report-builder",
+  kind: "report-builder",
+  slot: "viewer-widgets",
+  tools,
+});
