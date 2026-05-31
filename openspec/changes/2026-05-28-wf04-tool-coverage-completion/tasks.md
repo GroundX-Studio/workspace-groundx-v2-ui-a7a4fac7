@@ -11,9 +11,17 @@
 >    `viewer-widgets/*/*.tools.ts`; `OnboardingWizard` (a view) and `DialogTitle`
 >    (a primitive) have no glob home.
 >
-> Keep only the runnable cleanup active: §3 (GateChatRail → existing gate tool),
-> §5 (Auth honest `noTool` — done), §7 (inert-trio docs), and closure. Defer
-> §1/§2/§4 and the new-tool parts of §6 behind the two prerequisites.
+> **FULLY BACKLOGGED (2026-05-31) — premises stale after the architecture run.** The
+> "runnable cleanup" (§3/§6/§7) no longer applies as written: §3's GateChatPanel stray-Button
+> target is gone (0 `<Button>` after the unified-conversation-flow rewrite); §6's binding-guard
+> test does not exist by that name; §7's `DropdownMenu`/`GxPill`/`GxSectionHeader` `no-llm.md`
+> files don't exist. The codebase moved substantially under this change (unified flow, ScopedCanvas,
+> smart-report). **Do NOT run as-is.** Before any future pickup, RE-SCOPE §3/§6/§7 against current
+> code (most is likely obsolete) and reconfirm the §1/§2/§4 prerequisites (verb-allowlist + glob-home).
+> Tracked in `docs/agents/cross-plan-execution-order.md` backlog. (§5 Auth honest `noTool` already done.)
+>
+> _(prior note:)_ §5 done; §1/§2/§4 + the new-tool parts of §6 were already deferred behind the
+> verb-allowlist + glob-home prerequisites.
 
 > **Progress 2026-05-29: census cleanup DONE; tool-building REMAINS.** The misleading
 > `"legacy — Phase 7 backfills tool"` placeholder was retired from the 7 files whose resolution is a

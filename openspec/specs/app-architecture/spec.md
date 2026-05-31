@@ -287,11 +287,12 @@ The F1 IngestView overlay SHALL render as a full-viewport opaque pane covering t
 
 ### Requirement: Step-strip sub-pills SHALL be keyboard-navigable when reachable
 
-The step-strip Extract / Interact / Report sub-pills SHALL each render with `role="button"`, `tabindex="0"` when reachable, and an `onClick` handler that advances the canvas to the corresponding frame. Disabled
-sub-pills MUST carry `aria-disabled="true"` and MUST NOT receive
-focus. The current implementation renders them as plain `<div>`s with
-no role / no handler, which blocks F3↔F5 navigation via the step
-strip.
+The step-strip Extract / Interact / Report sub-pills SHALL each render with `role="button"`,
+`tabindex="0"` when reachable, and an `onClick` handler that advances the canvas to the corresponding
+frame. Disabled sub-pills MUST carry `aria-disabled="true"` and MUST NOT receive focus. Report is a
+general capability and SHALL be reachable for anonymous users (it previews like Extract); it SHALL
+NOT be treated as auth-disabled. Sign-in gating applies to report **actions** (Save / Export / BYO
+scope) via the shared gate, not to the pill.
 
 #### Scenario: Reachable sub-pill is clickable + focusable
 
@@ -301,13 +302,13 @@ strip.
 - **AND** the `Interact` sub-pill has `role="button"`, `tabindex="0"`, and is clickable
 - **AND** clicking `Interact` advances the canvas to F5 InteractView.
 
-#### Scenario: Locked sub-pill is not focusable
+#### Scenario: Report is reachable for anon (preview), gated only on actions
 
-- **GIVEN** the user is logged out and Report is sign-in-gated
+- **GIVEN** an anonymous user who has reached the Analyze step
 - **WHEN** the step strip renders
-- **THEN** the `Report` sub-pill has `aria-disabled="true"` and `tabindex="-1"`
-- **AND** keyboard Tab does NOT focus it
-- **AND** clicking it does not advance the frame.
+- **THEN** the `Report` sub-pill has `role="button"`, `tabindex="0"`, and is clickable
+- **AND** clicking it advances to `f4` and previews the report
+- **AND** Save / Export / rendering a BYO scope trigger the sign-in gate (not the pill).
 
 ### Requirement: Onboarding URL paths SHALL not throw the error boundary
 
@@ -455,4 +456,113 @@ real bucket.
 - **WHEN** it is resolved to a GroundX request
 - **THEN** a GroundX `group` MAY be used (e.g. the multi-bucket pivot helper)
 - **AND** single-bucket scopes never resolve to a group.
+
+### Requirement: Data catalogs SHALL share a `Catalog<T>` read contract
+
+Every data catalog SHALL satisfy a shared `Catalog<T>` contract exposing `all(): readonly T[]` and
+`byId(id: string): T | undefined`. A data catalog is a collection looked up by id and enumerated —
+today `ScenarioRegistry`, `toolRegistry`, and `chatExperienceRegistry`. Locally-sourced catalogs
+(static or glob-discovered) SHALL additionally enforce a unique-id invariant that fails at build/boot
+on a duplicate id. A catalog SHALL be lookup + enumeration only: it SHALL NOT resolve an entry from a
+route/entry context and SHALL NOT mount or otherwise dispatch behavior.
+
+The unique-id helper SHALL accept an optional source-label extractor; when a glob-discovered catalog
+supplies it (e.g. each entry's module path), the duplicate-id error SHALL name the colliding source
+modules. Without it, the error names the duplicate id only.
+
+Sourcing and delivery MAY differ and SHALL NOT be flattened: a remote catalog MAY add an async status
+machine + `refresh()` and be delivered via a React Context; a local catalog MAY be a plain singleton.
+The shared contract governs the data-access API only. No catalog base class or runtime catalog
+framework SHALL be introduced — the contract is a type plus a unique-id helper.
+
+#### Scenario: Each catalog satisfies the shared read API
+
+- **GIVEN** `ScenarioRegistry`, `toolRegistry`, and `chatExperienceRegistry`
+- **WHEN** their public APIs are inspected
+- **THEN** each exposes `all()` and `byId(id)` conforming to `Catalog<T>`
+- **AND** `toolRegistry` retains `byName` as a documented alias (a tool's id is its `name`) and its
+  tool-specific `forStep(...)` extension
+- **AND** `ScenarioRegistry` retains its async status + `refresh()` as the remote-catalog extension.
+
+#### Scenario: A local catalog rejects a duplicate id at boot
+
+- **GIVEN** a glob-discovered catalog (e.g. `toolRegistry` or `chatExperienceRegistry`) with two entries sharing an id, assembled via the unique-id helper with a source-label extractor (each entry's module path)
+- **WHEN** the catalog is assembled at boot
+- **THEN** assembly throws an error naming the duplicate id
+- **AND** because the source-label extractor was supplied, the error also names the colliding source modules.
+
+#### Scenario: A catalog does not dispatch
+
+- **GIVEN** any data catalog
+- **WHEN** its surface is inspected
+- **THEN** it offers lookup (`byId`) and enumeration (`all`) only
+- **AND** it exposes no `resolve(context)`-style method that selects or mounts an entry from a route/entry context.
+
+### Requirement: "Registry"/"Catalog" naming SHALL denote a read catalog, not mutable state
+
+A module named `*Registry` or `*Catalog` SHALL be a read catalog satisfying `Catalog<T>`. Mutable
+per-entity or per-session state SHALL NOT carry that naming. The existing `EntityRegistry` module —
+a mutable state shim over `ChatStore` with an `activate`/`upsert`/`update` API — SHALL be renamed to a
+state-store name (`EntitySessionStore`; the "Store" suffix avoids collision with the existing
+`EntitySession` data-type already exported from that module) so the catalog vocabulary reliably means
+"read lookup".
+
+#### Scenario: Mutable session state is not named a registry
+
+- **GIVEN** the per-entity session state formerly exported as `EntityRegistry`/`useEntityRegistry`
+- **WHEN** the rename lands
+- **THEN** it is exported under a state-store name (`EntitySessionStore`/`useEntitySessionStore`) with its API and behavior unchanged
+- **AND** the existing `EntitySession` data-type export is left intact (the "Store" suffix avoids that collision)
+- **AND** no `*Registry`/`*Catalog` export in the app has a mutate (`activate`/`upsert`/`update`) API.
+
+### Requirement: The frame model SHALL include a report builder frame f4a
+
+`FFrame` SHALL include `f4a` (the report builder / S3a), alongside the existing `f4` (the report
+render / S3). `f4` SHALL route the shell canvas to the report **render** surface and `f4a` to the
+report **builder** surface — `f4` SHALL NOT render the extract workbench. Advancing
+`f4 → f4a` (via a section's edit affordance or `show_smart_report_edit`) and returning `f4a → f4`
+(via `← back`) SHALL mirror the F3 ↔ F3a navigation.
+
+#### Scenario: f4 renders report, f4a renders builder
+
+- **GIVEN** the active frame is `f4`
+- **WHEN** the shell resolves the canvas
+- **THEN** it renders the report render surface (not the extract workbench)
+- **AND** **WHEN** the frame is `f4a`
+- **THEN** it renders the report builder surface.
+
+### Requirement: SmartReport SHALL build on the shared ScopedViewerWidget base
+
+SmartReport's render and builder widgets SHALL build on the `ScopedViewerWidget` base — each taking a
+real `ContentScope` `scope` (plus `role: WidgetRole` per `widget-role-access`), adapting when the
+scope changes (re-render in place, not a remount fork) across the full scope union (`bucket` ·
+`bucket+filter` · `documents[]` · `documents[]+filter` · `group` · `group+filter`), and registering
+its `show_smart_report_render` / `show_smart_report_edit` tools. The `ScopedViewerWidget` base
+class/object + registry + its structural contract test are **owned by `core-data-model-hardening`**
+(which establishes that the four main viewer widgets — PdfViewer, Extract, SmartReport, Integrate —
+each build on a common base): this change does NOT re-declare that contract, it CONSUMES it.
+Dependency: blocks on the base landing in `core-data-model-hardening`.
+
+#### Scenario: SmartReport adapts to a scope change on the shared base
+
+- **GIVEN** the SmartReport render widget mounted with a `bucket + project filter` scope on the shared base
+- **WHEN** the scope prop changes (e.g. to `documents[]` or a `group`)
+- **THEN** the widget re-renders against the new scope without a remount fork
+- **AND** the widget exposes its `show_smart_report_render` canvas-dispatch tool via the shared registry.
+
+### Requirement: The Report sub-pill SHALL be reachable for all scenarios
+
+The Report step-strip / nav sub-pill SHALL be reachable (clickable, advancing the canvas to `f4`) for
+**all scenarios** — Report is a general capability over the active `ContentScope`, not a per-scenario
+feature. The hard-coded always-disabled state (`reportActive = false`) SHALL be removed. Reachability
+SHALL NOT depend on `chapters.report` (which, if retained, only flavors guided-demo emphasis) and
+SHALL NOT be auth-gated — anonymous users reach Report and preview it (Save/Export/BYO gate per the
+`smart-report` contract, mirroring Extract).
+
+#### Scenario: Report pill is reachable on every scenario, including for anon
+
+- **GIVEN** any scenario (Utility, Loan, Solar) and an anonymous user
+- **WHEN** the step strip renders
+- **THEN** the Report sub-pill has `role="button"`, `tabindex="0"`, and is clickable
+- **AND** clicking it advances the canvas to `f4` and previews the report.
 

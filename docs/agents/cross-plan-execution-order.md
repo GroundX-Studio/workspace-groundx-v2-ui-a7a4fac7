@@ -113,6 +113,14 @@ Multi-file steps gate PER coherent sub-unit (one widget / one tool / one view), 
   - submit_/wizard_/close_ are NOT in check-tool-quality ALLOWED_VERBS (only dismiss_ passes); and OnboardingWizard (a view) + DialogTitle (a primitive) are outside the registry/quality globs (chat-widgets/ + viewer-widgets/ only), so their *.tools.ts are invisible to both runtime registry and guard. RECONCILED: §1/§2/§4 new tools are backlogged. The verb-taxonomy decision (same family as the show_* removal) and any glob widening should be a deliberate call — fold glob-widening into RCC if pursued.
 
 ## Backlogged (NOT in this run)
+- **RUN COMPLETE 2026-05-31 — steps 10-24 shipped + archived.** unified-conversation-flow, registry-catalog-consistency, smart-report-screen, onboarding-shell-shared-view all archived (`openspec/changes/archive/2026-05-31-*`). Deferred follow-ups captured here so the archive isn't a tombstone:
+  - **smart-report Phase 7** (live multi-doc Solar render) — gated on `wf10-loan-solar-content-seed` (below). MOCK_MODE path ships.
+  - **smart-report initial-render-through-endpoint** — the `SmartReportRender` *first* f4 paint still reads the client fixture; re-render + Save already go through the Phase-6 endpoints. Convert the initial paint when convenient.
+  - **smart-report live-verify** (Chrome DevTools MCP, manual) — pill→render→CiteChip→edit→builder→pin happy path.
+  - **onboarding-shell: author Workspace/Project/document experiences + enable the nav-rail entries** (today disabled stubs) — its own future change.
+  - **onboarding-shell: SchemaView `live ?? manifest` fallback retirement** — the documented MOCK fallback inside the packaged Extract widget; retire when live extract is the sole path.
+  - **widget-contract rule 5 (dependency-direction) guard + ChatColumn→`@/views/` untangle** — deferred on unified; the guard can land once the import is inverted.
+  - **`wf04-tool-coverage-completion`** — FULLY backlogged; §3/§6/§7 premises stale post-refactor (re-scope before pickup), §1/§2/§4 behind verb-allowlist + glob-home.
 - **`cf19-ensure-bucket-group-helper`** — broken as written (wrong endpoint, empty-group bug, false data model, `kind`→`type` scope, wrong client axis). Rework checklist in its proposal; reconcile with entity-rag when reworked.
 - **`wf10-loan-solar-content-seed`** — blocked on real Loan/Solar source assets.
 - **`cf04-page-usage-event-reader`** — parked until the BYO free-tier budget surface is prioritized.
