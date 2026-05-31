@@ -35,7 +35,19 @@ never a state store.
   async status machine + `refresh()` and are delivered via a React Context; local catalogs are plain
   singletons. The contract governs the *data-access API*, not the delivery/sourcing.
 - **Align `toolRegistry`**: expose `byId` (the tool's id IS its `name`) so it satisfies `Catalog<WidgetTool>`;
-  keep `byName` as a documented alias and `forStep(...)` as a tool-specific extension. No behavior change.
+  keep `byName` as a documented alias and `forStep(...)` as a tool-specific extension. Route the registry's
+  bespoke duplicate-name throw through the shared `assertUniqueIds` (`sourceOf` = each tool's module path),
+  so the unique-id invariant has ONE mechanism and still names the colliding modules. No behavior change.
+  - **`toolRegistry` is an ORPHAN — delete recommended, delete DEFERRED.** Audit (2026-05-30) found the
+    app `toolRegistry` singleton + every widget `handler` have ZERO production importers: the live LLM
+    catalog is the middleware `SERVER_TOOL_CATALOG` (`toolsForStep`, `chatRouter.ts`), and the app
+    dispatches server-built `reply.intents`. The recommendation is to DELETE the app-side registry and the
+    dead `category`/`handler` duplication of the server `intentBuilder`. The delete is NOT executed in this
+    change: `toolRegistry` is shared by four in-flight changes (RCC, core-data-model-hardening,
+    widget-role-access, wf04-tool-coverage-completion) and a half-done removal across them is forbidden
+    (cross-plan conflict map; `feedback_no_shortcuts`). A coordinated follow-up owns the delete. This
+    change does the non-destructive `Catalog<T>` alignment only and records the orphan in a code comment
+    on `ToolRegistry` (`app/src/tools/types.ts`).
 - **Align `ScenarioRegistry`**: expose `all()` (returns `state.scenarios`) and keep `byId`, so its
   ready-state data view satisfies `Catalog<ScenarioConfig>`; the async status + `refresh()` remain as
   the remote-catalog extension.

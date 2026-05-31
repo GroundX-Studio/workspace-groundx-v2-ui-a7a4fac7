@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import type { Catalog } from "@groundx/shared";
 
 import type { WidgetTool, WidgetToolModule } from "./types";
 import { createRegistry } from "./registry";
@@ -75,7 +76,7 @@ describe("toolRegistry — createRegistry", () => {
         "./A.tools.ts": mkModule([openDocument]),
         "./B.tools.ts": mkModule([dup]),
       }),
-    ).toThrow(/duplicate tool name.*open_document/i);
+    ).toThrow(/duplicate catalog id.*open_document/i);
   });
 
   it("accepts modules that export the canonical `tools` array name", () => {
@@ -136,5 +137,44 @@ describe("toolRegistry — createRegistry", () => {
     expect(ok.success).toBe(true);
     const bad = tool.input.safeParse({ documentId: 42 });
     expect(bad.success).toBe(false);
+  });
+
+  // ── RCC Phase 2: satisfies the shared Catalog<WidgetTool> contract ──
+  it("satisfies the shared Catalog<WidgetTool> read contract", () => {
+    const reg = createRegistry({ "./A.tools.ts": mkModule([openDocument]) });
+    // Structural assignability — fails to compile if the registry drifts.
+    const catalog: Catalog<WidgetTool> = reg;
+    expect(catalog.all().map((t) => t.name)).toEqual(["open_document"]);
+    expect(catalog.byId("open_document")).toBe(openDocument);
+    expect(catalog.byId("nope")).toBeUndefined();
+  });
+
+  it("byId is an alias of byName (a tool's id IS its name)", () => {
+    const reg = createRegistry({
+      "./A.tools.ts": mkModule([openDocument]),
+      "./B.tools.ts": mkModule([proposeField]),
+    });
+    expect(reg.byId("open_document")).toBe(reg.byName("open_document"));
+    expect(reg.byId("propose_field")).toBe(reg.byName("propose_field"));
+    expect(reg.byId("missing")).toBe(reg.byName("missing"));
+  });
+
+  it("duplicate throw (via shared assertUniqueIds) names the colliding modules", () => {
+    const dup = { ...openDocument };
+    let message = "";
+    try {
+      createRegistry({
+        "./PdfViewer/PdfViewerWidget.tools.ts": mkModule([openDocument]),
+        "./ExtractWorkbench/ExtractWorkbench.tools.ts": mkModule([dup]),
+      });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    // The shared assertUniqueIds names the duplicate id AND both colliding
+    // module paths (sourceOf = module path), preserving the
+    // "declared in two modules" diagnostic.
+    expect(message).toMatch(/open_document/);
+    expect(message).toMatch(/PdfViewerWidget\.tools\.ts/);
+    expect(message).toMatch(/ExtractWorkbench\.tools\.ts/);
   });
 });

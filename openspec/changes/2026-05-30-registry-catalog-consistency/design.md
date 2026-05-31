@@ -45,6 +45,31 @@ Placed where both app + (if needed) shared can import it — `@groundx/shared` i
 no call-site churn forced. The async/Context wrapper on `ScenarioRegistry` is the legitimate
 remote-catalog shape — the `Catalog<T>` view is its ready-state data API, not a demand to go synchronous.
 
+The tool registry's bespoke duplicate-name throw is refactored to call the shared `assertUniqueIds`
+(`sourceOf` = each tool's module path): ONE mechanism for the unique-id invariant across all local
+catalogs, and it preserves the existing "declared in two modules" diagnostic by naming the colliding
+module paths in the error.
+
+### toolRegistry is an orphan — DOCUMENT now, DELETE later (deferred)
+
+The audit (2026-05-30) found the app `toolRegistry` singleton + every widget `handler` have **zero
+production importers**. The live LLM tool catalog is the middleware `SERVER_TOOL_CATALOG` (`toolsForStep`,
+`chatRouter.ts`); the app dispatches server-built `reply.intents`, never the app-side `handler`. So the
+app-side `category`/`handler` are a dead duplication of the server `intentBuilder`.
+
+**Decision: the registry is dead → recommend DELETE; but the delete is DEFERRED out of this change.**
+`toolRegistry` is a shared seam across four in-flight changes — RCC, core-data-model-hardening,
+widget-role-access, wf04-tool-coverage-completion (see the cross-plan conflict map). A half-done removal
+across those plans is forbidden (`feedback_no_shortcuts`: finish it or ticket it; never orphan a
+half-done refactor). A coordinated follow-up owns the actual deletion. This change therefore:
+
+1. **Documents** the orphan + the delete recommendation here and in a code comment on `ToolRegistry`
+   (`app/src/tools/types.ts`).
+2. **Aligns non-destructively** — `byId` alias + `Catalog<WidgetTool>` declaration + shared
+   `assertUniqueIds`. These additions are harmless while the registry is dormant and make the eventual
+   delete (or the eventual wiring, if that decision is revisited) cleaner, not harder. No new consumer is
+   wired and nothing is deleted in this run.
+
 ### 3. Delivery is allowed to differ (and should)
 - **Remote** catalog (Scenario): Context + status machine + `refresh()` — consumers need loading/error UI.
 - **Local** catalog (Tool, ChatExperience): plain singleton built at boot from a glob — no async, no

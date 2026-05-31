@@ -72,12 +72,20 @@ export const ScenarioRegistryProvider: FC<ScenarioRegistryProviderProps> = ({
     void refresh();
   }, [forcedDemoState, initialScenarios, refresh]);
 
+  // `all()` is the Catalog<ScenarioConfig> enumerate view over the
+  // ready-state data; `byId` is the lookup view. The async status +
+  // `refresh()` remain the remote-catalog extension (RCC design.md §3).
+  const all = useCallback(() => state.scenarios, [state.scenarios]);
+
   const byId = useCallback(
     (id: string) => state.scenarios.find((scenario) => scenario.id === id),
     [state.scenarios]
   );
 
-  const api: ScenarioRegistryApi = useMemo(() => ({ state, refresh, byId }), [state, refresh, byId]);
+  const api: ScenarioRegistryApi = useMemo(
+    () => ({ state, refresh, all, byId }),
+    [state, refresh, all, byId]
+  );
 
   return <ScenarioRegistryContext.Provider value={api}>{children}</ScenarioRegistryContext.Provider>;
 };

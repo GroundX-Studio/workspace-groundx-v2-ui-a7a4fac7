@@ -13,6 +13,8 @@
  */
 import type { ZodTypeAny, infer as zInfer } from "zod";
 
+import type { Catalog } from "@groundx/shared";
+
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import type { ViewerStep } from "@/contexts/ChatStoreContext";
 
@@ -88,11 +90,34 @@ export interface WidgetToolModule {
  * Read surface returned by `createRegistry`. Kept narrow so future
  * consumers (Phase 5 middleware bridge, Phase 5b runtime checker)
  * compose against it without leaking implementation details.
+ *
+ * Satisfies the shared `Catalog<WidgetTool>` read contract
+ * (`@groundx/shared`): `all()` enumerates, `byId(name)` looks up. A tool's
+ * id IS its `name`, so `byId` is a documented alias of `byName` (kept for
+ * back-compat / call-site clarity). `forStep(...)` + the unique-name
+ * invariant are tool-specific extensions, not part of the shared contract.
+ *
+ * ⚠️ ORPHAN (audit 2026-05-30, RCC Phase 2): the production `toolRegistry`
+ * singleton + every widget `handler` currently have ZERO production
+ * importers — the live LLM catalog is the middleware `SERVER_TOOL_CATALOG`
+ * (`toolsForStep`, `chatRouter.ts`), and the app dispatches server-built
+ * `reply.intents`. Recommendation: DELETE this app-side registry + the dead
+ * `category`/`handler` duplication of the server `intentBuilder`. The delete
+ * is DEFERRED — `toolRegistry` is shared by four in-flight changes (RCC,
+ * core-data, widget-role-access, wf04) and a half-done removal across them is
+ * forbidden (cross-plan conflict map). A coordinated follow-up owns the
+ * delete. This Catalog alignment is harmless non-destructive plumbing in the
+ * meantime. See proposal.md / design.md "toolRegistry orphan".
  */
-export interface ToolRegistry {
-  /** Every tool, in stable insertion order. */
+export interface ToolRegistry extends Catalog<WidgetTool> {
+  /** Every tool, in stable insertion order. (Catalog<T>.all) */
   all(): readonly WidgetTool[];
-  /** Lookup by `name`. Returns `undefined` if no such tool exists. */
+  /**
+   * Lookup by id (`Catalog<T>.byId`). A tool's id IS its `name`, so this is
+   * an exact alias of `byName`.
+   */
+  byId(id: string): WidgetTool | undefined;
+  /** Lookup by `name`. Documented alias of `byId`. Returns `undefined` if no such tool exists. */
   byName(name: string): WidgetTool | undefined;
   /**
    * Tools available at the given ViewerStep kind. Optional `mode`

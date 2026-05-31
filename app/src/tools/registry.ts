@@ -20,6 +20,8 @@
  * `<Name>.tools.ts` (PdfViewer). Phase 5 wires the catalog into
  * the middleware function-calling boundary.
  */
+import { assertUniqueIds } from "@groundx/shared";
+
 import type { ToolMode, ToolRegistry, WidgetTool, WidgetToolModule } from "./types";
 import type { ViewerStep } from "@/contexts/ChatStoreContext";
 
@@ -36,27 +38,31 @@ function isWidgetToolModule(value: unknown): value is WidgetToolModule {
 export function createRegistry(
   modules: Record<string, unknown>,
 ): ToolRegistry {
-  const tools: WidgetTool[] = [];
-  const byName = new Map<string, WidgetTool>();
-
   // Stable iteration: walk module paths in lexicographic order so
-  // the catalog rendering for the LLM is deterministic.
+  // the catalog rendering for the LLM is deterministic. Carry each
+  // tool's source module path so the unique-id invariant can name the
+  // colliding modules (preserving the "declared in two modules" diagnostic).
   const sortedPaths = Object.keys(modules).sort();
+  const located: { tool: WidgetTool; path: string }[] = [];
   for (const path of sortedPaths) {
     const mod = modules[path];
     if (!isWidgetToolModule(mod)) continue;
     for (const tool of mod.tools) {
-      const existing = byName.get(tool.name);
-      if (existing) {
-        throw new Error(
-          `tool registry: duplicate tool name "${tool.name}" — declared in two modules. ` +
-            `Tool names are globally unique (design.md §F). Rename one of the declarations.`,
-        );
-      }
-      byName.set(tool.name, tool);
-      tools.push(tool);
+      located.push({ tool, path });
     }
   }
+
+  // ONE mechanism for the unique-id invariant: the shared
+  // `assertUniqueIds` (a tool's id IS its `name`). `sourceOf` = the
+  // module path, so a duplicate names both colliding modules.
+  assertUniqueIds(
+    located,
+    (entry) => entry.tool.name,
+    (entry) => entry.path,
+  );
+
+  const tools: WidgetTool[] = located.map((entry) => entry.tool);
+  const lookup = new Map<string, WidgetTool>(tools.map((tool) => [tool.name, tool]));
 
   const inMode = (tool: WidgetTool, mode: ToolMode | undefined): boolean => {
     if (!mode) return true;
@@ -69,9 +75,13 @@ export function createRegistry(
     return tool.availableSteps.includes(stepKind);
   };
 
+  const byName = (name: string) => lookup.get(name);
+
   return {
     all: () => tools,
-    byName: (name) => byName.get(name),
+    // Catalog<T>.byId — a tool's id IS its name, so this aliases byName.
+    byId: byName,
+    byName,
     forStep: (stepKind, mode) =>
       tools.filter((t) => inStep(t, stepKind) && inMode(t, mode)),
   };

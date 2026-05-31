@@ -1,3 +1,5 @@
+import type { Catalog } from "@groundx/shared";
+
 import type { ScenarioConfig } from "@/types/scenarios";
 
 export type ScenarioRegistryStatus = "idle" | "loading" | "ready" | "error";
@@ -16,10 +18,22 @@ export interface ScenarioRegistryState {
   error: string | null;
 }
 
-export interface ScenarioRegistryApi {
+/**
+ * The scenario registry's data-access API. Its ready-state data view
+ * satisfies the shared `Catalog<ScenarioConfig>` read contract
+ * (`all()` + `byId()`); the async status machine + `refresh()` + Context
+ * delivery are the legitimate remote-catalog extension layered on top
+ * (RCC design.md §3 — sourcing/delivery differs, the read contract is shared).
+ */
+export interface ScenarioRegistryApi extends Catalog<ScenarioConfig> {
   state: ScenarioRegistryState;
   /** Re-fetch the catalog. Useful after a seed run. */
   refresh: () => Promise<void>;
+  /**
+   * Every loaded scenario, in stable order (`state.scenarios`). Empty
+   * before the catalog loads. Satisfies `Catalog<T>.all()`.
+   */
+  all: () => readonly ScenarioConfig[];
   /** Find a scenario by id, or undefined if not loaded. */
   byId: (id: string) => ScenarioConfig | undefined;
 }
