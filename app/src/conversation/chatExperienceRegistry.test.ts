@@ -6,8 +6,13 @@
  * `assertUniqueIds`.
  */
 import { describe, expect, it } from "vitest";
+import type { Catalog } from "@groundx/shared";
 
-import { chatExperienceRegistry, createChatExperienceRegistry } from "./chatExperienceRegistry";
+import {
+  chatExperienceRegistry,
+  createChatExperienceRegistry,
+  type ChatExperienceEntry,
+} from "./chatExperienceRegistry";
 
 describe("chatExperienceRegistry (production singleton)", () => {
   it("byId('onboarding') returns the entry; create() yields a ChatExperience", () => {
@@ -26,6 +31,21 @@ describe("chatExperienceRegistry (production singleton)", () => {
   it("all() enumerates the onboarding entry", () => {
     const ids = chatExperienceRegistry.all().map((e) => e.id);
     expect(ids).toContain("onboarding");
+  });
+
+  // ── RCC Phase 4: declare + assert it satisfies the shared Catalog<T> contract ──
+  // (the declaration `ChatExperienceRegistry = Catalog<ChatExperienceEntry>` landed
+  // with the registry in unified Phase 2; this is the explicit conformance check,
+  // mirroring toolRegistry + ScenarioRegistry.)
+  it("satisfies the shared Catalog<ChatExperienceEntry> read contract (RCC Phase 4)", () => {
+    // Compile-time conformance: the registry IS assignable to Catalog<T>.
+    const catalog: Catalog<ChatExperienceEntry> = chatExperienceRegistry;
+    expect(typeof catalog.all).toBe("function");
+    expect(typeof catalog.byId).toBe("function");
+    // Runtime: all() returns a stable array; byId() agrees with it.
+    const first = catalog.all()[0];
+    expect(first).toBeDefined();
+    expect(catalog.byId(first!.id)).toBe(first);
   });
 
   it("byId() returns undefined for an unknown id (lookup-only, no resolve)", () => {

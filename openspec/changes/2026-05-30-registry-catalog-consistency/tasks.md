@@ -32,7 +32,7 @@
 - [x] Rename `EntityRegistryContext`→`EntitySessionStoreContext`, `EntityRegistryProvider`→`EntitySessionStoreProvider`, `useEntityRegistry`→`useEntitySessionStore`; update all consumers (contexts/views/tests) in one pass. Do NOT rename the `EntitySession` data-type export (already used by ChatStore/OnboardingSession) — the "Store" suffix exists precisely to avoid that collision. `npm run build` (tsc) green proves no missed reference. **— DONE 2026-05-31 (step 14, commit 4441811): old dir/names gone, `EntitySession` type preserved, tsc clean.**
 
 ## Phase 4 · Declare `chatExperienceRegistry` against the contract
-- [ ] Once unified-conversation-flow has shipped `chatExperienceRegistry`, declare it `Catalog<ChatExperienceEntry>` (it natively has `all()`/`byId()`); add a test that it satisfies the shared contract. *(If this change lands first, leave a tracked checkbox; do NOT pre-create the catalog here.)*
+- [x] Once unified-conversation-flow has shipped `chatExperienceRegistry`, declare it `Catalog<ChatExperienceEntry>` (it natively has `all()`/`byId()`); add a test that it satisfies the shared contract. *(If this change lands first, leave a tracked checkbox; do NOT pre-create the catalog here.)* **— DONE 2026-05-31 (step 24): the declaration `ChatExperienceRegistry = Catalog<ChatExperienceEntry>` landed with the registry in unified Phase 2; this adds the explicit conformance test (`const catalog: Catalog<ChatExperienceEntry> = chatExperienceRegistry` + all()/byId() runtime check), mirroring toolRegistry + ScenarioRegistry.**
 
 ## Closeout
 - [ ] `validate --all --strict` green; app + middleware suites green; widget-contract + no-hardcoded-styles guards green; `npm run build` clean.
