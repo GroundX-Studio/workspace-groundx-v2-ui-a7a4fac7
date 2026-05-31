@@ -155,10 +155,7 @@ const fieldTypeEnum = z
 const proposeSchemaField: ServerTool = {
   name: "propose_schema_field",
   description:
-    "Propose adding a new extraction-schema field. Use when the user asks " +
-    "to capture an additional value from the documents (\"add a field for " +
-    "total tax\", \"track due date too\"). The card surfaces inline with " +
-    "the assistant bubble for the user to Accept or Reject.",
+    "Propose adding a new extraction-schema field. Use when the user asks to capture an additional value from the documents (add a field for total tax, track due date too). The card surfaces inline with the assistant bubble for the user to Accept or Reject.",
   category: "mutate",
   inputSchema: z.object({
     categoryId: z
@@ -182,8 +179,7 @@ const proposeSchemaField: ServerTool = {
 const acceptProposal: ServerTool = {
   name: "accept_proposal",
   description:
-    "Accept a previously-proposed schema field on the user's behalf. Use when " +
-    "an agentic flow has high confidence the user wants the proposal applied.",
+    "Accept a previously-proposed schema field on behalf of the user. Use when an agentic flow has high confidence the user wants the proposal applied (auto-accept above a confidence threshold). The user can always Reject the chip if they disagree.",
   category: "mutate",
   inputSchema: z.object({
     proposalId: z.string().min(1).describe("Proposal id from the pending overlay queue"),
@@ -198,8 +194,7 @@ const acceptProposal: ServerTool = {
 const rejectProposal: ServerTool = {
   name: "reject_proposal",
   description:
-    "Reject (dismiss) a previously-proposed schema field on the user's " +
-    "behalf. Use when an agentic flow determines the proposal doesn't fit.",
+    "Reject (dismiss) a previously-proposed schema field on behalf of the user. Use when an agentic flow determines the proposal does not fit the active scenario (the field duplicates an existing column).",
   category: "mutate",
   inputSchema: z.object({
     proposalId: z.string().min(1).describe("Proposal id from the pending overlay queue"),
@@ -217,8 +212,7 @@ const rejectProposal: ServerTool = {
 const commitGate: ServerTool = {
   name: "commit_gate",
   description:
-    "Commit the active sign-up gate via a specific identity method. " +
-    "Use when the user has explicitly chosen the path forward.",
+    "Commit the active sign-up gate via a specific identity method. Use when the user has explicitly chosen the path forward (\"sign up now\", \"book a call instead\") and you want to surface a one-click chip for the chosen method.",
   category: "mutate",
   inputSchema: z.object({
     method: z
@@ -231,8 +225,7 @@ const commitGate: ServerTool = {
 const dismissGate: ServerTool = {
   name: "dismiss_gate",
   description:
-    "Dismiss the active sign-up gate without committing. Use when the " +
-    "user has indicated they want to keep exploring without signing up.",
+    "Dismiss the active sign-up gate without committing. Use when the user has indicated they want to keep exploring without signing up (\"not now\", \"let me see the rest first\").",
   category: "mutate",
   inputSchema: z.object({}),
   intentBuilder: () => ({ kind: "dismissGate" }),
@@ -326,8 +319,7 @@ const suggestIntent: ServerTool = {
 const bookCall: ServerTool = {
   name: "book_call",
   description:
-    "Open the Calendly booking surface for a 15-minute engineer call. " +
-    "Use when the user signals they want a human-assisted path forward.",
+    "Open the Calendly booking surface for a 15-minute engineer call. Use when the user has signaled they want a human-assisted path forward — uncertainty about fit, complex documents, evaluation questions a sales engineer can answer. The user confirms by clicking the chip; the iframe is not opened automatically.",
   category: "mutate",
   inputSchema: z.object({}),
   intentBuilder: () => ({ kind: "openBookCall" }),
@@ -512,8 +504,7 @@ const proposeReportSection: ServerTool = {
 const acceptReportSection: ServerTool = {
   name: "accept_report_section",
   description:
-    "Accept a previously-proposed report section on the user's behalf. Use when an " +
-    "agentic flow has high confidence the user wants the proposed section added.",
+    "Accept a previously-proposed report section on behalf of the user. Use when an agentic flow has high confidence the proposed section should be added.",
   category: "mutate",
   inputSchema: z.object({
     proposal_id: z.string().min(1).describe("Proposal id (from the builder's pending proposal queue) to accept."),
@@ -525,8 +516,7 @@ const acceptReportSection: ServerTool = {
 const rejectReportSection: ServerTool = {
   name: "reject_report_section",
   description:
-    "Reject (dismiss) a previously-proposed report section on the user's behalf. Use " +
-    "when an agentic flow determines the proposed section does not fit the report.",
+    "Reject (dismiss) a previously-proposed report section on behalf of the user. Use when an agentic flow determines the proposed section does not fit the report.",
   category: "mutate",
   inputSchema: z.object({
     proposal_id: z.string().min(1).describe("Proposal id (from the builder's pending proposal queue) to reject."),
@@ -538,9 +528,7 @@ const rejectReportSection: ServerTool = {
 const editReportSection: ServerTool = {
   name: "edit_report_section",
   description:
-    "Edit an existing report section's name / renderAs / question / instructions. Use " +
-    "when the user asks to tweak a section (\"make the summary a bulleted list\", " +
-    "\"rephrase the anomalies question\"). Mirrors the builder's inline editor.",
+    "Edit an existing report section name, renderAs, question, or instructions. Use when the user asks to tweak a section, such as making the summary a bulleted list or rephrasing the question. Mirrors the builder inline editor.",
   category: "mutate",
   inputSchema: z.object({
     section_id: z.string().min(1).describe("The section id to edit (a draft or saved section)."),

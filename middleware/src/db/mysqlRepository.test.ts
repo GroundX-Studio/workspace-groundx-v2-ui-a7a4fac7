@@ -308,6 +308,95 @@ describe("MySqlAppRepository", () => {
     });
   });
 
+  // 2026-05-31-core-data-followups §4c — row→object mapper union validation.
+  //
+  // The union-typed VARCHAR columns (`role`/`action`/`source`) used to be
+  // blind-cast (`row.role` straight into `ChatMessageRecord.role`), so a
+  // corrupt DB value would flow unchecked into LLM context. Parallel to the
+  // `rowToTemplate` kind-guard precedent, the mappers now validate against the
+  // shared row-enum schema and COERCE an out-of-union value to a safe in-union
+  // default (so a single bad telemetry/message row is sanitized, not silently
+  // trusted, and the row is not dropped — preserving turn ordering). A VALID
+  // value maps through unchanged (behavior preserved).
+  describe("row-mapper union validation (§4c)", () => {
+    it("listChatMessages passes a valid role through unchanged", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{
+          id: "m1", chat_session_id: "c1", turn_index: 0, role: "assistant", content: "hi",
+          citations_json: null, tool_calls_json: null, attachments_json: null,
+          compressed_into_summary_id: null, llm_provider: null, llm_model_id: null,
+          latency_ms: null, prompt_tokens: null, completion_tokens: null, error_code: null,
+          created_at: "2026-05-31T00:00:00.000Z",
+        }],
+        [],
+      ]);
+      const [msg] = await repository.listChatMessages("c1");
+      expect(msg.role).toBe("assistant");
+    });
+
+    it("listChatMessages coerces a corrupt role to a safe default (not blind-cast)", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{
+          id: "m1", chat_session_id: "c1", turn_index: 0, role: "HACKER", content: "x",
+          citations_json: null, tool_calls_json: null, attachments_json: null,
+          compressed_into_summary_id: null, llm_provider: null, llm_model_id: null,
+          latency_ms: null, prompt_tokens: null, completion_tokens: null, error_code: null,
+          created_at: "2026-05-31T00:00:00.000Z",
+        }],
+        [],
+      ]);
+      const [msg] = await repository.listChatMessages("c1");
+      expect(msg.role).not.toBe("HACKER");
+      expect(["user", "assistant", "system", "tool"]).toContain(msg.role);
+      expect(msg.role).toBe("system");
+    });
+
+    it("listViewerEvents coerces a corrupt action + source (not blind-cast)", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{
+          id: "v1", chat_session_id: "c1", ts_ms: 100, entity_key: "e1",
+          action: "DROP TABLE", source: "evil", detail_json: null,
+        }],
+        [],
+      ]);
+      const [evt] = await repository.listViewerEvents("c1");
+      expect(evt.action).toBe("opened");
+      expect(evt.source).toBe("system");
+    });
+
+    it("listViewerEvents passes valid action + source through unchanged", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{
+          id: "v1", chat_session_id: "c1", ts_ms: 100, entity_key: "e1",
+          action: "citation-clicked", source: "user", detail_json: null,
+        }],
+        [],
+      ]);
+      const [evt] = await repository.listViewerEvents("c1");
+      expect(evt.action).toBe("citation-clicked");
+      expect(evt.source).toBe("user");
+    });
+
+    it("listIntentLog coerces a corrupt source (not blind-cast)", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{
+          id: "i1", chat_session_id: "c1", ts_ms: 100, source: "spoofed",
+          intent_kind: "openDocument", intent_json: "{}",
+        }],
+        [],
+      ]);
+      const [log] = await repository.listIntentLog("c1");
+      expect(log.source).toBe("system");
+      // intent_kind is a free string discriminator (not a closed union) — unchanged.
+      expect(log.intentKind).toBe("openDocument");
+    });
+  });
+
   // shared-template-lifecycle Phase 2 — templates repo methods.
   describe("templates (Phase 2)", () => {
     it("saveTemplate upserts INTO templates with the kind + body_json params", async () => {

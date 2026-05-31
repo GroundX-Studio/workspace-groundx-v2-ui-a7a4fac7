@@ -177,14 +177,40 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   shared `ContentScope`), the X-Ray response shape (declared 3× with `documentPages[].number` vs `.page`
   drift — coordinate with `wf05b`, do not double-fix), and one shared `Source` union
   (`IntentSource = Exclude<Source,'system'>`).
-- [ ] **Upgrade the tool-catalog drift guard** from name-set to NAME+DESCRIPTION parity app↔server
+- [x] **Upgrade the tool-catalog drift guard** from name-set to NAME+DESCRIPTION parity app↔server
   (`toolCatalog.test.ts` — currently 6/8 descriptions drifted). Failing-first.
+  — DONE: the description-parity assertion landed in the EXISTING cross-package consumer
+  `app/src/tools/catalog-parity.test.ts` (it already imports BOTH catalogs — the app `toolRegistry`
+  glob + the middleware `SERVER_TOOL_CATALOG`; `toolCatalog.test.ts` can't see the app glob, so the
+  cross-package guard is the only place a real app↔server description comparison can run). New test
+  "every app tool's description matches its server mirror's description verbatim" failed RED first
+  (9 drifted descriptions — book_call, commit_gate, dismiss_gate, propose_schema_field, accept_proposal,
+  reject_proposal, accept_report_section, reject_report_section, edit_report_section — wording diverged
+  silently between the hand-mirrored sides), green after reconciling the 9 SERVER descriptions to match
+  the app `.tools.ts` canonical text VERBATIM. Behavior-preserving: descriptions are LLM-facing text; the
+  edit only de-drifts wording (no tool/intent/schema change). The guard now fires on any future one-sided
+  description edit. SERVER-ONLY tools (suggest_intent) skipped by design. Existing `toolCatalog.test.ts`
+  (18) unchanged + green; tool-quality/tool-references guards green (descriptions still pass the 40-char +
+  Use-when floor).
 
 ### 4c. Row-mapper validation (→ SEQUENTIAL/TDD)
-- [ ] **Union-typed DB columns get validation in the row→object mappers.** Failing test: a corrupt
+- [x] **Union-typed DB columns get validation in the row→object mappers.** Failing test: a corrupt
   `role`/`action`/`source`/`intent_kind`/`last_frame`/`entity_key` row value is rejected/coerced, not
   cast straight into LLM context. Push the citation-style validation into `rowToChatMessage`/
   `rowToViewerEvent` etc. (`mysqlRepository.ts`).
+  — DONE: the three genuinely-union columns (`chat_messages.role`, `viewer_events.action`/`source`,
+  `intent_log.source`) are now Zod-derived enums in `middleware/src/types.ts` (one source of truth — the
+  TS type is `z.infer` of the schema, paralleling shared's `templateKindSchema`), and the row→object
+  mappers narrow them via a new `coerceEnum(schema, value, fallback)` helper in `mysqlRepository.ts`
+  (parallel to the existing `rowToTemplate` kind-guard precedent). A corrupt value is COERCED to a
+  documented safe in-union default (`role`→`system`, `action`→`opened`, `source`→`system`) rather than
+  blind-cast into LLM context — coerce-not-drop preserves turn ordering + the row's other fields. A VALID
+  value passes through unchanged (behavior preserved). `intent_kind`/`last_frame`/`entity_key` are FREE
+  strings (not closed unions — `intentKind` is the open CanvasIntent discriminator, `lastFrame`/`entityKey`
+  are arbitrary ids), so they are correctly NOT enum-coerced. Failing-first: 5 new cases in
+  `mysqlRepository.test.ts` ("row-mapper union validation (§4c)") — 3 corrupt-coercion (red first, green
+  after) + 2 valid-passthrough (green throughout, proving behavior preserved). The MEDIUM `canvasIntentSchema`
+  sub-item below is SEPARATE and remains open.
 - [ ] **MEDIUM — promote a single `canvasIntentSchema` (Zod) to `@groundx/shared`** and validate at both
   boundaries that read `current_intent_json` (app ChatStore hydration `coerceHydratedIntent` structural
   guard + the middleware cast). Failing-first.

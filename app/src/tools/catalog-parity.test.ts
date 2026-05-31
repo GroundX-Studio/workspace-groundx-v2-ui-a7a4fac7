@@ -80,6 +80,27 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
     }
   });
 
+  // 2026-05-31-core-data-followups §4b — upgrade the drift guard from NAME-only
+  // to NAME+DESCRIPTION parity. The description is the single most impactful
+  // field for tool-selection accuracy (design.md §I) and is an app↔middleware
+  // wire twin: the same tool's `description` was hand-mirrored on each side and
+  // ~9 of them drifted (wording diverged silently). Asserting equality here
+  // means a future edit to one side that isn't mirrored fails the suite.
+  // SERVER-ONLY tools have no app mirror by design and are skipped.
+  it("every app tool's description matches its server mirror's description verbatim", () => {
+    const mismatches: string[] = [];
+    for (const tool of toolRegistry.all()) {
+      const server = serverByName.get(tool.name);
+      if (server === undefined) continue; // missing-mirror covered by the name guard
+      if (server.description !== tool.description) {
+        mismatches.push(
+          `${tool.name}\n  app:    ${JSON.stringify(tool.description)}\n  server: ${JSON.stringify(server.description)}`,
+        );
+      }
+    }
+    expect(mismatches, `tool descriptions drifted app↔server:\n${mismatches.join("\n")}`).toEqual([]);
+  });
+
   it("the new wf04 tools (submit_signup / wizard_* / close_dialog) are mirrored on both sides", () => {
     for (const name of [
       "submit_signup",

@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { TemplateKind } from "@groundx/shared";
 
 export interface SessionRecord {
@@ -57,7 +59,18 @@ export interface ChatSessionRecord {
   archivedAt: Date | null;
 }
 
-export type ChatMessageRole = "user" | "assistant" | "system" | "tool";
+/**
+ * 2026-05-31-core-data-followups §4c — the union-typed DB columns are Zod
+ * enums (one source of truth: the TS type is derived via `z.infer`), so the
+ * row→object mappers can `safeParse`-validate the persisted VARCHAR instead of
+ * blind-casting it into LLM context. Each schema carries a documented SAFE
+ * in-union default for coercion when a corrupt row is read.
+ */
+export const chatMessageRoleSchema = z.enum(["user", "assistant", "system", "tool"]);
+export type ChatMessageRole = z.infer<typeof chatMessageRoleSchema>;
+/** Safe default for a corrupt `chat_messages.role` — `system` is the
+ * non-authoritative role (never treated as the user's words or the model's). */
+export const CHAT_MESSAGE_ROLE_FALLBACK: ChatMessageRole = "system";
 
 export interface ChatMessageRecord {
   id: string;
@@ -129,16 +142,25 @@ export interface ChatSessionEntityRecord {
   lastVisitedAt: Date;
 }
 
-export type ViewerEventAction =
-  | "opened"
-  | "frame-advanced"
-  | "extracted-value-viewed"
-  | "citation-clicked"
-  | "scan-completed"
-  | "intent-dispatched"
-  | "left";
+export const viewerEventActionSchema = z.enum([
+  "opened",
+  "frame-advanced",
+  "extracted-value-viewed",
+  "citation-clicked",
+  "scan-completed",
+  "intent-dispatched",
+  "left",
+]);
+export type ViewerEventAction = z.infer<typeof viewerEventActionSchema>;
+/** Safe default for a corrupt `viewer_events.action` — `opened` is the inert
+ * baseline action (no UI side effect inferred from it). */
+export const VIEWER_EVENT_ACTION_FALLBACK: ViewerEventAction = "opened";
 
-export type ViewerEventSource = "user" | "agent" | "tour" | "system";
+export const viewerEventSourceSchema = z.enum(["user", "agent", "tour", "system"]);
+export type ViewerEventSource = z.infer<typeof viewerEventSourceSchema>;
+/** Safe default for a corrupt `viewer_events.source` — `system` (the
+ * non-attributable origin). */
+export const VIEWER_EVENT_SOURCE_FALLBACK: ViewerEventSource = "system";
 
 export interface ViewerEventRecord {
   id: string;
@@ -163,7 +185,10 @@ export interface ViewerEventRecord {
  * Both tables share `chat_session_id` so the conversation/viewer/intent
  * axes can be cross-joined when building LLM context.
  */
-export type IntentLogSource = "user" | "agent" | "tour" | "system";
+export const intentLogSourceSchema = z.enum(["user", "agent", "tour", "system"]);
+export type IntentLogSource = z.infer<typeof intentLogSourceSchema>;
+/** Safe default for a corrupt `intent_log.source` — `system`. */
+export const INTENT_LOG_SOURCE_FALLBACK: IntentLogSource = "system";
 
 export interface IntentLogRecord {
   id: string;

@@ -13,7 +13,35 @@ import type {
   TemplateRecord,
   ViewerEventRecord,
 } from "../types.js";
+import {
+  CHAT_MESSAGE_ROLE_FALLBACK,
+  chatMessageRoleSchema,
+  INTENT_LOG_SOURCE_FALLBACK,
+  intentLogSourceSchema,
+  VIEWER_EVENT_ACTION_FALLBACK,
+  viewerEventActionSchema,
+  VIEWER_EVENT_SOURCE_FALLBACK,
+  viewerEventSourceSchema,
+} from "../types.js";
 import { templateKindSchema, type TemplateKind } from "@groundx/shared";
+import type { z } from "zod";
+
+/**
+ * 2026-05-31-core-data-followups §4c — narrow an untrusted union-typed DB
+ * column into its enum, COERCING an out-of-union value to a documented safe
+ * default rather than blind-casting it straight into LLM context. Parallels the
+ * `rowToTemplate` kind-guard precedent (which drops the whole row); here a
+ * single bad telemetry/message field is coerced so turn ordering and the row's
+ * other fields survive. A VALID value passes through unchanged.
+ */
+function coerceEnum<T extends string>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  fallback: T,
+): T {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : fallback;
+}
 
 /**
  * True for MySQL/MariaDB's "Duplicate column name" error (ER_DUP_FIELDNAME,
@@ -809,7 +837,7 @@ function rowToChatMessage(row: mysql.RowDataPacket): ChatMessageRecord {
     id: row.id,
     chatSessionId: row.chat_session_id,
     turnIndex: row.turn_index,
-    role: row.role,
+    role: coerceEnum(chatMessageRoleSchema, row.role, CHAT_MESSAGE_ROLE_FALLBACK),
     content: row.content,
     citationsJson: jsonColumnToString(row.citations_json),
     toolCallsJson: jsonColumnToString(row.tool_calls_json),
@@ -864,8 +892,8 @@ function rowToViewerEvent(row: mysql.RowDataPacket): ViewerEventRecord {
     chatSessionId: row.chat_session_id,
     timestamp: Number(row.ts_ms),
     entityKey: row.entity_key,
-    action: row.action,
-    source: row.source,
+    action: coerceEnum(viewerEventActionSchema, row.action, VIEWER_EVENT_ACTION_FALLBACK),
+    source: coerceEnum(viewerEventSourceSchema, row.source, VIEWER_EVENT_SOURCE_FALLBACK),
     detailJson: row.detail_json,
   };
 }
@@ -875,7 +903,7 @@ function rowToIntentLog(row: mysql.RowDataPacket): IntentLogRecord {
     id: row.id,
     chatSessionId: row.chat_session_id,
     timestamp: Number(row.ts_ms),
-    source: row.source,
+    source: coerceEnum(intentLogSourceSchema, row.source, INTENT_LOG_SOURCE_FALLBACK),
     intentKind: row.intent_kind,
     intentJson: row.intent_json,
   };
