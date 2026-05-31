@@ -36,6 +36,29 @@ Findings:
 - **[LOW] ChatColumn is touched by both dependency-direction-guard (untangle) and onboarding-experiences
   (mounts experiences through it).** Sequenced so the untangle lands first (step 2 before step 6).
 
+## Second review (2026-05-31) — falsified against the shipped/archived code
+
+Re-reviewed specifically for the wf04 failure mode (a plan whose premise the completed run already
+invalidated). Every plan's core premise was checked against current code and **HOLDS** — none stale:
+
+- dependency-direction-guard — `ChatColumn.tsx` STILL imports `GateChatPanel` from `@/views/` (`:44`,
+  used `:111`); the step-11 rewrite kept it. Rule-5 violation is real. ✓
+- tool-system-completion — `WidgetTool.availableIn` is STILL `ToolMode[]` (`tools/types.ts:73`);
+  smart-report's step-17 tools used `availableSteps`, not a role axis. WRA Phase 3 genuinely undone. ✓
+- word-level-citation-geometry — the `assignTier(v, { hasAtomBox: false })` seam EXISTS
+  (`chatRouter.ts:713`). NIT: the plan cites `:706` — the line drifted +7; the executor must GREP the
+  seam, not trust the number. ✓ (premise valid)
+- onboarding-experiences — the disabled Workspaces/Projects nav stubs EXIST (`OnboardingNav.tsx:116-117`,
+  disabled when logged-out); `SchemaView` STILL has the `liveSchema ?? manifest` fallback (`:163`). ✓
+- smart-report-followups — `SmartReportRender` STILL reads `getReportFixture` on initial paint
+  (`:102`); step-21 wired only re-render + Save to the endpoint. Premise current. ✓
+- core-data-followups — `chatRouter.ts` is STILL exactly **1637 lines** (split target accurate); the
+  orchestrator dispatch is an `if (intent.kind === …)` chain with **NO `never` default** — so the
+  "exhaustive dispatch" item is REAL work, not already-satisfied. ✓
+- (1 archive-blocker — smart-report-followups MODIFIED header — was found + fixed in the first pass.)
+
+Conclusion: the 7-plan regroup is viable; the sequential order below stands.
+
 ## The sequential order
 
 | # | Plan | What | Gate / depends on |
