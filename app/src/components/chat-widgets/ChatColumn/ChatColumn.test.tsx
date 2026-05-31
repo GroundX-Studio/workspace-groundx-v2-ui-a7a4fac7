@@ -13,14 +13,11 @@ vi.mock("framer-motion", async () => {
   return { ...actual, useReducedMotion: () => false };
 });
 
-// CF-18: F2 chat input wires through the same sendChatMessage path
-// InteractView (F5) uses. Mock the API module so we can sniff the call
-// + control the assistant reply.
+// CF-18: chat input wires through the same sendChatMessage path. Mock the
+// API module so we can sniff the call + control the assistant reply.
 //
-// RT-01: `listChatMessages` is also mocked here so the on-mount
-// hydration effect doesn't try to hit a real network. Default is
-// `[]` so existing tests still see an empty thread on mount; the
-// RT-01 round-trip test overrides with persisted turns.
+// RT-01: `listChatMessages` is also mocked so the on-mount hydration effect
+// doesn't hit the network. Default `[]` so existing tests see an empty thread.
 vi.mock("@/api/chatSessions", async () => {
   const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
   return {
@@ -31,10 +28,9 @@ vi.mock("@/api/chatSessions", async () => {
 });
 import { ChatApiError, listChatMessages, sendChatMessage } from "@/api/chatSessions";
 
-// WF-17: the F2 pick-view pills now read the live workflow schema via this
-// hook. Mock it so tests are deterministic (no workflow fetch). Default
-// null → `derivePickViews` falls back to the manifest, keeping the
-// existing fixture-based pill assertions valid.
+// WF-17: the onboarding pick-view pills read the live workflow schema via
+// this hook. Mock it so tests are deterministic. Default null → the
+// experience's `derivePickViews` falls back to the manifest.
 vi.mock("@/api/useLiveExtractionSchema", () => ({
   useLiveExtractionSchema: vi.fn(() => null),
 }));
@@ -49,13 +45,13 @@ import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProvid
 import { ChatColumn } from "./ChatColumn";
 
 /**
- * 2026-05-30-unified-conversation-flow Phase 1 — a real STEADY mount sits
- * on a non-onboarding chat session (`newSession` defaults
- * `isOnboardingSession:false`, like SteadyShell's SessionSwitcher). The
- * onboarding harness seeds an onboarding-flagged session, so steady tests
- * that care about `isOnboarding` flip to a fresh steady session first.
- * The durable engine reads `isOnboarding` from the active session (no
- * longer hardcoded per surface), so the session flag is the contract.
+ * 2026-05-30-unified-conversation-flow Phase 2 — the steady chat is the bare
+ * conversation, selected by mounting ChatColumn on a NON-onboarding chat
+ * session (`newSession` defaults `isOnboardingSession:false`, like SteadyShell's
+ * SessionSwitcher). The onboarding harness seeds an onboarding-flagged session,
+ * so steady tests flip to a fresh steady session first. There is NO `surface`
+ * prop — ChatColumn reads the active session's `isOnboardingSession` flag (the
+ * source of truth) to decide bare-chat vs onboarding experience.
  */
 function SteadySessionMount(props: Parameters<typeof ChatColumn>[0]) {
   const { newSession } = useChatStore();
@@ -92,13 +88,13 @@ describe("ChatColumn", () => {
   // scrollbar gutter so the bar doesn't paint over the message bubbles.
   it("DBG-01 B: onboarding chat scroll container reserves a scrollbar gutter", () => {
     renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
-    const scroll = screen.getByTestId("onboarding-chat-scroll");
+    const scroll = screen.getByTestId("chat-live-scroll");
     expect(scroll.style.scrollbarGutter).toBe("stable");
   });
 
-  it("DBG-01 B: steady chat scroll container reserves a scrollbar gutter", () => {
-    renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
-    const scroll = screen.getByTestId("steady-chat-scroll");
+  it("DBG-01 B: steady chat scroll container reserves a scrollbar gutter", async () => {
+    renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
+    const scroll = await screen.findByTestId("chat-live-scroll");
     expect(scroll.style.scrollbarGutter).toBe("stable");
   });
 
@@ -108,8 +104,6 @@ describe("ChatColumn", () => {
   //   · availability: ✅ anonymous · ✅ member (all roles)
   //   · affordance locks: NONE today
   //   · scope: `{ type: "none" }` — chat is session-scoped, not document-scoped
-  // The flow-tree selection (`surface`) is RE-SOURCED from the mounting
-  // shell, NOT renamed to `role` (per the re-source note).
   describe("role + scope contract (widget-access-matrix)", () => {
     const roles: WidgetRole[] = ["anonymous", "member"];
 
@@ -122,17 +116,19 @@ describe("ChatColumn", () => {
         // All-roles: the onboarding conversation chrome renders for both
         // anonymous and member — no affordance is locked by role.
         expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
-        expect(screen.getByTestId("onboarding-chat-input")).toBeInTheDocument();
+        expect(screen.getByTestId("chat-live-input")).toBeInTheDocument();
       });
 
-      it(`mounts under role="${role}" with the steady surface`, () => {
+      it(`mounts under role="${role}" with the steady (bare) chat`, async () => {
         renderWithOnboardingProviders(
-          <ChatColumn role={role} scope={{ type: "none" }} surface="steady" />,
+          <SteadySessionMount role={role} scope={{ type: "none" }} />,
           { initialFrame: "f2", initialScenario: "utility" },
         );
-        // Steady surface available to both roles; same send affordance.
-        expect(screen.getByTestId("steady-chat-conversation")).toBeInTheDocument();
-        expect(screen.getByTestId("onboarding-chat-input")).toBeInTheDocument();
+        // Steady chat available to both roles; same send affordance, no
+        // onboarding chrome.
+        expect(await screen.findByTestId("conversation-flow")).toBeInTheDocument();
+        expect(screen.getByTestId("chat-live-input")).toBeInTheDocument();
+        expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
       });
     }
 
@@ -154,13 +150,9 @@ describe("ChatColumn", () => {
 
   it("on F2 with a scenario, renders the wireframe conversation chrome", () => {
     renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
-    // Wireframe markers: a header that shows the FILE NAME (was
-    // "Conversation" pre-2026-05-25, user wanted real context), the
-    // scenario name as the first user bubble, a sample-switcher
-    // subline.
+    // Wireframe markers: a header that shows the FILE NAME, the scenario
+    // name as the first user bubble, a sample-switcher subline.
     expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
-    // Header text now reads the document fileName instead of the
-    // generic "Conversation" label.
     const header = screen.getByTestId("onboarding-chat-header");
     expect(header.textContent ?? "").not.toMatch(/^Conversation/i);
     expect(header.textContent ?? "").toMatch(/\.pdf|utility/i);
@@ -169,7 +161,7 @@ describe("ChatColumn", () => {
     expect(screen.getByTestId("onboarding-chat-bot-lead")).toHaveTextContent(/Reading/i);
   });
 
-  it("the chat header G icon is a button that navigates to /onboarding", async () => {
+  it("the chat header is a button that navigates to /onboarding", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
     const { useLocation } = await import("react-router-dom");
     let pathname = "";
@@ -200,15 +192,10 @@ describe("ChatColumn", () => {
     expect(screen.queryByTestId("onboarding-chat-done")).not.toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-pick-a-view")).not.toBeInTheDocument();
 
-    // Walk forward in 1100ms ticks so each setState → effect → next
-    // setTimeout chain commits between fires. The utility manifest has
-    // 6 notes; 10 ticks is comfortably past the stream.
+    // Walk forward in 3000ms ticks so each setState → effect → next
+    // setTimeout chain commits between fires.
     for (let i = 0; i < 10; i += 1) {
       act(() => {
-        // Per-note pause is now randomized 1500..2800ms (2026-05-25);
-        // advance by the upper bound + a margin so every loop iter is
-        // guaranteed to fire at most one reveal regardless of the
-        // RNG seed.
         vi.advanceTimersByTime(3000);
       });
     }
@@ -239,13 +226,8 @@ describe("ChatColumn", () => {
       { initialFrame: "f2", initialScenario: "utility" },
     );
 
-    // Walk forward through the stream until the pills appear.
     for (let i = 0; i < 12; i += 1) {
       act(() => {
-        // Per-note pause is now randomized 1500..2800ms (2026-05-25);
-        // advance by the upper bound + a margin so every loop iter is
-        // guaranteed to fire at most one reveal regardless of the
-        // RNG seed.
         vi.advanceTimersByTime(3000);
       });
     }
@@ -262,30 +244,20 @@ describe("ChatColumn", () => {
     renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "loan" });
     for (let i = 0; i < 12; i += 1) {
       act(() => {
-        // Per-note pause is now randomized 1500..2800ms (2026-05-25);
-        // advance by the upper bound + a margin so every loop iter is
-        // guaranteed to fire at most one reveal regardless of the
-        // RNG seed.
         vi.advanceTimersByTime(3000);
       });
     }
-    // Loan schema categories are `applicant` and `risk` (per the
-    // fixture). Pills should reflect THOSE keys, not utility's
-    // statement/meters/charges.
+    // Loan schema categories are `applicant` and `risk` per the fixture.
     expect(screen.getByTestId("onboarding-chat-pick-view-applicant")).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-pick-view-meters")).not.toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-pick-view-statement")).not.toBeInTheDocument();
     // Per realign-f3a-entry-point: F2's Pick-a-view bubble SHALL NOT
-    // contain the Edit-schema pill. F3a is reached from F3's
-    // fields-panel hamburger instead.
+    // contain the Edit-schema pill.
     expect(screen.queryByTestId("onboarding-chat-pick-view-edit-schema")).not.toBeInTheDocument();
   });
 
   it("WF-17: pick-view pills derive from the LIVE workflow schema, overriding the manifest", () => {
     vi.useFakeTimers();
-    // The live schema carries `charges` — a category the utility MANIFEST
-    // does NOT have (manifest = statement + meters only). If the pills
-    // derive from live data, the charges pill MUST appear.
     vi.mocked(useLiveExtractionSchema).mockReturnValue({
       id: "wf-1",
       name: "Utility Bill",
@@ -301,7 +273,6 @@ describe("ChatColumn", () => {
         vi.advanceTimersByTime(3000);
       });
     }
-    // Live-only category present → pills come from the live schema, not the manifest.
     expect(screen.getByTestId("onboarding-chat-pick-view-charges")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-chat-pick-view-statement")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-chat-pick-view-meters")).toBeInTheDocument();
@@ -324,10 +295,6 @@ describe("ChatColumn", () => {
     );
     for (let i = 0; i < 4; i += 1) {
       act(() => {
-        // Per-note pause is now randomized 1500..2800ms (2026-05-25);
-        // advance by the upper bound + a margin so every loop iter is
-        // guaranteed to fire at most one reveal regardless of the
-        // RNG seed.
         vi.advanceTimersByTime(3000);
       });
     }
@@ -344,7 +311,6 @@ describe("ChatColumn", () => {
     act(() => {
       trigger.click();
     });
-    // Loan and Solar are listed (Utility is excluded — it's the active sample).
     expect(screen.getByTestId("onboarding-chat-sample-switch-item-loan")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-chat-sample-switch-item-solar")).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-sample-switch-item-utility")).not.toBeInTheDocument();
@@ -352,8 +318,7 @@ describe("ChatColumn", () => {
 
   // ────────────────────────────────────────────────────────────────────
   // schema-agent-chat-affordances: F3a-only chrome — Schema-Agent header
-  // and earlier-turns summary above the conversation. The header appears
-  // ONLY on F3a; F2 / F5 stay unchanged.
+  // and earlier-turns summary above the conversation.
   // ────────────────────────────────────────────────────────────────────
   describe("schema-agent-chat-affordances", () => {
     it("renders the Schema Agent header + sample switcher chip on F3a", () => {
@@ -380,19 +345,16 @@ describe("ChatColumn", () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
-  // CF-18: F2 chat input wire-up. Replaces the visual stub with a real
-  // form that posts via sendChatMessage and renders the assistant turn
-  // in the conversation body. Mirrors InteractView (F5).
+  // CF-18: chat input wire-up. Real form that posts via sendChatMessage
+  // and renders the assistant turn in the conversation body.
   // ────────────────────────────────────────────────────────────────────
-  describe("F2 chat input (CF-18)", () => {
+  describe("chat input (CF-18)", () => {
     it("renders a real input + send button (not the visual stub copy)", () => {
       renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      // The stub displayed bare placeholder text. The real bar exposes
-      // an input element + a Send action.
-      expect(screen.getByTestId("onboarding-chat-input")).toBeInTheDocument();
+      expect(screen.getByTestId("chat-live-input")).toBeInTheDocument();
       expect(screen.queryByText(/ready when you are/i)).not.toBeInTheDocument();
     });
 
@@ -419,23 +381,18 @@ describe("ChatColumn", () => {
         initialScenario: "utility",
       });
 
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "What is the bill total?");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
 
-      // The optimistic user turn renders immediately.
-      expect(screen.getByTestId("onboarding-chat-live-user")).toHaveTextContent(
-        "What is the bill total?",
-      );
+      expect(screen.getByTestId("chat-live-user")).toHaveTextContent("What is the bill total?");
 
-      // Wait for the assistant reply to land.
       await waitFor(() => {
-        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+        expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent(
           "The bill total is $214.07.",
         );
       });
 
-      // And the call carried the right payload.
       expect(sendChatMessage).toHaveBeenCalledTimes(1);
       expect(vi.mocked(sendChatMessage).mock.calls[0][0]).toMatchObject({
         newUserMessage: "What is the bill total?",
@@ -451,18 +408,18 @@ describe("ChatColumn", () => {
         initialScenario: "utility",
       });
 
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "anything");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
-        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+        expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent(
           /couldn't reach the chat service/i,
         );
       });
     });
 
-    // CF-08 — per-status copy in F2 catch site.
+    // CF-08 — per-status copy in the catch site.
     it("504 → renders 'took too long' copy (CF-08)", async () => {
       vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("timeout", 504, null));
       const user = userEvent.setup();
@@ -470,13 +427,11 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "Q");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
       await waitFor(() => {
-        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
-          /took too long/i,
-        );
+        expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent(/took too long/i);
       });
     });
 
@@ -487,13 +442,11 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "Q");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
       await waitFor(() => {
-        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
-          /sign in/i,
-        );
+        expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent(/sign in/i);
       });
     });
 
@@ -504,13 +457,11 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "Q");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
       await waitFor(() => {
-        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
-          /can't answer that yet/i,
-        );
+        expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent(/can't answer that yet/i);
       });
     });
 
@@ -520,19 +471,16 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "   ");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
       expect(sendChatMessage).not.toHaveBeenCalled();
-      expect(screen.queryByTestId("onboarding-chat-live-user")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chat-live-user")).not.toBeInTheDocument();
     });
   });
 
-  // RT-01 (round-trip contract; discipline.md Rule 9 closure gate).
-  // The chat handler persists every turn to chat_messages. Before
-  // RT-01 the UI never read them back, so a refresh wiped the live
-  // thread. These tests assert the on-mount hydration AND lock in
-  // the race rule (optimistic state wins over a slow hydrate).
+  // RT-01 (round-trip contract). The chat handler persists every turn to
+  // chat_messages; on-mount hydration replays them so a refresh survives.
   describe("RT-01 hydrate liveTurns from server on mount", () => {
     it("renders persisted turns on first mount (refresh survival)", async () => {
       vi.mocked(listChatMessages).mockResolvedValueOnce([
@@ -565,10 +513,8 @@ describe("ChatColumn", () => {
         expect(listChatMessages).toHaveBeenCalledTimes(1);
       });
       await waitFor(() => {
-        expect(screen.getByTestId("onboarding-chat-live-user")).toHaveTextContent(
-          "what is the bill total?",
-        );
-        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+        expect(screen.getByTestId("chat-live-user")).toHaveTextContent("what is the bill total?");
+        expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent(
           "The bill total is $7,613.20.",
         );
       });
@@ -590,8 +536,7 @@ describe("ChatColumn", () => {
 
       renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
 
-      const bubble = await screen.findByTestId("onboarding-chat-live-assistant");
-      // bold renders as <strong>, code as <code> — NOT literal markup
+      const bubble = await screen.findByTestId("chat-live-assistant");
       expect(bubble.querySelector("strong")?.textContent).toBe("$7,613.20");
       expect(bubble.querySelector("code")?.textContent).toBe("amount_due");
       expect(bubble.textContent ?? "").not.toContain("**");
@@ -609,14 +554,12 @@ describe("ChatColumn", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByTestId("onboarding-chat-live-user")).toHaveTextContent("hi there");
+        expect(screen.getByTestId("chat-live-user")).toHaveTextContent("hi there");
       });
       expect(screen.queryByText(/system bootstrap/i)).not.toBeInTheDocument();
     });
 
     it("empty persisted thread leaves the UI in its pre-RT-01 state (no live bubbles)", async () => {
-      // Default mock is mockResolvedValue([]) already; explicit here
-      // so the test reads cleanly.
       vi.mocked(listChatMessages).mockResolvedValueOnce([]);
 
       renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
@@ -627,8 +570,8 @@ describe("ChatColumn", () => {
       await waitFor(() => {
         expect(listChatMessages).toHaveBeenCalledTimes(1);
       });
-      expect(screen.queryByTestId("onboarding-chat-live-user")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("onboarding-chat-live-assistant")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chat-live-user")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chat-live-assistant")).not.toBeInTheDocument();
     });
 
     it("hydration failure is non-fatal — the UI still mounts + accepts new sends", async () => {
@@ -641,13 +584,11 @@ describe("ChatColumn", () => {
         initialScenario: "utility",
       });
 
-      // Component still rendered + input still works.
       expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
-      expect(screen.getByTestId("onboarding-chat-input")).toBeInTheDocument();
+      expect(screen.getByTestId("chat-live-input")).toBeInTheDocument();
     });
 
     it("does NOT clobber optimistic state — if the user types while hydrate is in flight, the optimistic turn wins", async () => {
-      // Make hydrate hang so the user-typed message lands first.
       let resolveHydrate: (msgs: never[]) => void = () => {};
       vi.mocked(listChatMessages).mockReturnValueOnce(
         new Promise((resolve) => {
@@ -676,37 +617,26 @@ describe("ChatColumn", () => {
         initialScenario: "utility",
       });
 
-      // Type + send while hydrate is still pending.
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "live typed message");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
       await waitFor(() => {
-        expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
+        expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent(
           "fresh reply from server",
         );
       });
 
-      // Now resolve hydrate with an old persisted thread. The component
-      // already has optimistic turns; hydrate must not overwrite them.
       await act(async () => {
         resolveHydrate([]);
         await Promise.resolve();
       });
 
-      // Optimistic turn + reply remain.
-      expect(screen.getByTestId("onboarding-chat-live-user")).toHaveTextContent(
-        "live typed message",
-      );
-      expect(screen.getByTestId("onboarding-chat-live-assistant")).toHaveTextContent(
-        "fresh reply from server",
-      );
+      expect(screen.getByTestId("chat-live-user")).toHaveTextContent("live typed message");
+      expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent("fresh reply from server");
     });
   });
 
-  // clickable-citations Phase 2 — until this lands, F2 chat replies
-  // arrive with citations but render bubble-only (chips invisible).
-  // The viewer can never react to a citation click because there's
-  // no chip to click. Three failing tests pin the contract:
+  // clickable-citations Phase 2 — assistant replies render [n] chips.
   describe("citation chips render on assistant bubbles (clickable-citations Phase 2)", () => {
     it("onboarding chat: assistant reply carrying citations renders [1] [2] chips with documentId + page data attrs", async () => {
       vi.mocked(sendChatMessage).mockResolvedValueOnce({
@@ -733,9 +663,9 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "what is the total?");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
         expect(screen.getByTestId("cite-chip-1")).toBeInTheDocument();
@@ -767,13 +697,13 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
+      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
-      await user.type(input, "tax?");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      const input = await screen.findByTestId("chat-live-input");
+      await user.type(input.querySelector("input")!, "tax?");
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
         expect(screen.getByTestId("cite-chip-1")).toBeInTheDocument();
@@ -817,11 +747,6 @@ describe("ChatColumn", () => {
   });
 
   it("on F6 (gate open), the chat dispatches to GateChatPanel", () => {
-    // Defensive: when the gate is active the chat column hands off to
-    // GateChatPanel. Same flow that drives the F1 BYO -> signup
-    // experience. (Pure F2+with no scenario + no gate is not a state
-    // OnboardingSession can produce — the F2 BYO path opens the gate,
-    // so the gate-active branch covers it.)
     function GateOpener() {
       const { openGate } = useOnboardingSession();
       return (
@@ -840,38 +765,23 @@ describe("ChatColumn", () => {
     act(() => {
       screen.getByTestId("open-gate-byo").click();
     });
-    // GateChatPanel mounts; the conversation chrome does NOT.
     expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
-    // GateChatPanel renders either the typing indicator or the gate
-    // card depending on its composing delay — either is fine here.
     const hasGateIndicator =
       screen.queryByTestId("gate-typing-indicator") !== null ||
       screen.queryByTestId("gate-rail-preamble") !== null;
     expect(hasGateIndicator).toBe(true);
   });
 
-  // UI-05 (2026-05-27) — steady-mode rendering. The widget contract
-  // says onboarding + steady use the same production widget with a
-  // `mode` prop. These tests pin the steady contract:
-  //   - No scripted decorations (thinking-stream, sample-switcher,
-  //     Pick-a-view pills, scenario header) — they're onboarding-only.
-  //   - RT-01 hydration still works (the persistence + render path
-  //     is the load-bearing shared surface).
-  //   - Send path still posts to /api/chat/messages and renders the reply.
-  describe("UI-05 steady mode", () => {
-    it("renders the bare steady conversation — no scripted decorations", async () => {
-      // Mount with mode="steady" outside the onboarding tree to mimic
-      // SteadyShell's parent context. We still wrap with the
-      // onboarding providers to keep ChatStore + AuthContext available;
-      // the steady branch short-circuits before reading
-      // OnboardingSession/ScenarioRegistry.
-      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
+  // The steady chat (non-onboarding session) is the bare ConversationFlow:
+  // no scripted decorations; RT-01 hydration + send path stay shared.
+  describe("steady (bare) chat", () => {
+    it("renders the bare conversation — no scripted decorations", async () => {
+      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
 
-      // Steady-specific anchor.
-      expect(screen.getByTestId("steady-chat-conversation")).toBeInTheDocument();
+      expect(await screen.findByTestId("conversation-flow")).toBeInTheDocument();
 
       // No onboarding-only decorations.
       expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
@@ -880,47 +790,7 @@ describe("ChatColumn", () => {
       expect(screen.queryByText(/Reading/i)).not.toBeInTheDocument();
     });
 
-    it("RT-01 hydration: persisted thread renders on mount", async () => {
-      vi.mocked(listChatMessages).mockResolvedValueOnce([
-        {
-          id: "m1",
-          chatSessionId: "steady-mount",
-          turnIndex: 1,
-          role: "user",
-          content: "what is the total?",
-          errorCode: null,
-          citations: [],
-        },
-        {
-          id: "m2",
-          chatSessionId: "steady-mount",
-          turnIndex: 2,
-          role: "assistant",
-          content: "The total is $42.00.",
-          errorCode: null,
-          citations: [],
-        },
-      ]);
-
-      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
-        initialScenario: "utility",
-      });
-
-      await waitFor(() => {
-        expect(listChatMessages).toHaveBeenCalledTimes(1);
-      });
-      await waitFor(() => {
-        expect(screen.getByTestId("steady-chat-live-user")).toHaveTextContent(
-          "what is the total?",
-        );
-        expect(screen.getByTestId("steady-chat-live-assistant")).toHaveTextContent(
-          "The total is $42.00.",
-        );
-      });
-    });
-
-    it("send path posts a message and renders the reply", async () => {
+    it("send path posts a message and renders the reply (isOnboarding=false from the session)", async () => {
       vi.mocked(sendChatMessage).mockResolvedValueOnce({
         userMessageId: "u-steady",
         assistantMessageId: "a-steady",
@@ -938,61 +808,26 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      // Mount on a genuine steady (non-onboarding) session so the engine's
-      // session-sourced `isOnboarding` reflects a real steady surface.
-      renderWithOnboardingProviders(<SteadySessionMount surface="steady" role="member" scope={{ type: "none" }} />, {
+      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
-      await user.type(input, "hello");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      const input = await screen.findByTestId("chat-live-input");
+      await user.type(input.querySelector("input")!, "hello");
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
-        expect(screen.getByTestId("steady-chat-live-user")).toHaveTextContent("hello");
-        expect(screen.getByTestId("steady-chat-live-assistant")).toHaveTextContent(
-          "Steady reply.",
-        );
+        expect(screen.getByTestId("chat-live-user")).toHaveTextContent("hello");
+        expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent("Steady reply.");
       });
-      // Steady sends should NOT carry isOnboarding=true — the active
-      // session is a steady (non-onboarding) one.
+      // The active session is a steady (non-onboarding) one → isOnboarding=false.
       const sendCall = vi.mocked(sendChatMessage).mock.calls[0][0];
       expect(sendCall.sessionMeta.isOnboarding).toBe(false);
     });
-
-    it("renders the empty-thread placeholder when no persisted turns exist", async () => {
-      vi.mocked(listChatMessages).mockResolvedValueOnce([]);
-      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
-        initialScenario: "utility",
-      });
-      await waitFor(() => {
-        expect(screen.getByTestId("steady-chat-empty")).toBeInTheDocument();
-      });
-      // Empty placeholder gone once a turn lands.
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
-        userMessageId: "u",
-        assistantMessageId: "a",
-        reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [], intents: [], toolFailures: [], proposedSchemaField: null },
-        compressionRan: false,
-      });
-      const user = userEvent.setup();
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
-      await user.type(input, "ping");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
-      await waitFor(() => {
-        expect(screen.queryByTestId("steady-chat-empty")).not.toBeInTheDocument();
-      });
-    });
   });
 
-  // widget-llm-integration Phase 1 — render the middleware's
-  // `suggestedActions[]` as a chip row beneath each assistant bubble.
-  // Pre-Phase-1 the array shipped on the reply and was silently
-  // dropped. These tests pin the contract: chips render, carry a
-  // stable testid, and clicking a high-confidence `suggested-intent`
-  // chip routes through the canvas orchestrator (the chat→canvas
-  // bridge for LLM-proposed navigations).
+  // widget-llm-integration Phase 1 — render `suggestedActions[]` as a chip
+  // row beneath each assistant bubble, and dispatch chip clicks.
   describe("SuggestedActionChips integration (widget-llm-integration Phase 1)", () => {
     it("onboarding: assistant reply carrying suggestedActions renders one chip per action under the bubble", async () => {
       vi.mocked(sendChatMessage).mockResolvedValueOnce({
@@ -1019,17 +854,15 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "find anything?");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
         expect(screen.getByTestId("suggested-action-chip-show-source")).toBeInTheDocument();
         expect(screen.getByTestId("suggested-action-chip-open-samples")).toBeInTheDocument();
       });
-      expect(screen.getByTestId("suggested-action-chip-show-source")).toHaveTextContent(
-        /Show source/i,
-      );
+      expect(screen.getByTestId("suggested-action-chip-show-source")).toHaveTextContent(/Show source/i);
     });
 
     it("steady: assistant reply carrying suggestedActions renders chips under the bubble", async () => {
@@ -1050,13 +883,13 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
+      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
-      await user.type(input, "anything?");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      const input = await screen.findByTestId("chat-live-input");
+      await user.type(input.querySelector("input")!, "anything?");
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
         expect(screen.getByTestId("suggested-action-chip-show-source")).toBeInTheDocument();
@@ -1110,9 +943,9 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "accept that field");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
         expect(screen.getByTestId("suggested-action-chip-tool:accept_proposal")).toBeInTheDocument();
@@ -1123,7 +956,6 @@ describe("ChatColumn", () => {
       await waitFor(() => {
         expect(dispatched.length).toBeGreaterThan(0);
       });
-      // The chip's server-emitted intent dispatched verbatim.
       expect(dispatched[0]).toMatchObject({ kind: "switchFrame", frame: "f3" });
     });
 
@@ -1154,11 +986,6 @@ describe("ChatColumn", () => {
       const dispatched: Array<Record<string, unknown>> = [];
       const Harness = () => {
         const { registerAdapter } = useCanvasOrchestrator();
-        // Register a `switchFrame` adapter so the click's dispatch
-        // lands somewhere observable. Phase 1's pragmatic mapping
-        // for `suggested-intent` with detail.intent === "show-extract"
-        // is a switchFrame → f3 (the extract surface). Phase 3 will
-        // replace this with the declarative tool registry.
         useEffect(() => {
           return registerAdapter({
             kind: "switchFrame",
@@ -1175,9 +1002,9 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "explain the totals");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
         expect(screen.getByTestId("suggested-action-chip-suggested-intent")).toBeInTheDocument();
@@ -1191,11 +1018,8 @@ describe("ChatColumn", () => {
       expect(dispatched[0]).toMatchObject({ kind: "switchFrame", frame: "f3" });
     });
 
-    // Empty-bubble guard (2026-05-28). When the LLM emits a tool_call
-    // with no text answer, `reply.answer === ""`. Rendering an empty
-    // <BotBubble/> above the chip row looks like a UI glitch (white
-    // blob). The bubble must be suppressed in that case; the chips
-    // still render.
+    // Empty-bubble guard (2026-05-28). An empty answer with chips must
+    // suppress the bot bubble but keep the chip.
     it("onboarding: empty answer with chips suppresses the bot bubble but keeps the chip", async () => {
       vi.mocked(sendChatMessage).mockResolvedValueOnce({
         userMessageId: "u-empty",
@@ -1224,15 +1048,14 @@ describe("ChatColumn", () => {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
+      const input = screen.getByTestId("chat-live-input").querySelector("input")!;
       await user.type(input, "book me a call");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
         expect(screen.getByTestId("suggested-action-chip-tool:book_call")).toBeInTheDocument();
       });
-      // The empty bot bubble must not render alongside the chip.
-      expect(screen.queryByTestId("onboarding-chat-live-assistant")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chat-live-assistant")).not.toBeInTheDocument();
     });
 
     it("steady: empty answer with chips suppresses the bot bubble but keeps the chip", async () => {
@@ -1253,18 +1076,18 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />, {
+      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
-      const input = screen.getByTestId("onboarding-chat-input").querySelector("input")!;
-      await user.type(input, "look at it");
-      await user.click(screen.getByTestId("onboarding-chat-send"));
+      const input = await screen.findByTestId("chat-live-input");
+      await user.type(input.querySelector("input")!, "look at it");
+      await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
         expect(screen.getByTestId("suggested-action-chip-show-source")).toBeInTheDocument();
       });
-      expect(screen.queryByTestId("steady-chat-live-assistant")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chat-live-assistant")).not.toBeInTheDocument();
     });
   });
 });

@@ -100,3 +100,13 @@ export const useScenarioRegistry = (): ScenarioRegistryApi => {
   }
   return ctx;
 };
+
+/**
+ * Non-throwing variant — returns `null` when no provider is present. Mirrors
+ * `useOnboardingSessionOptional`. Used by `ChatColumn`, which is mounted by
+ * BOTH shells: the steady chat (a non-onboarding session) never reads the
+ * scenario registry, so its narrower mount trees needn't supply the provider.
+ */
+export const useScenarioRegistryOptional = (): ScenarioRegistryApi | null => {
+  return useContext(ScenarioRegistryContext) ?? null;
+};

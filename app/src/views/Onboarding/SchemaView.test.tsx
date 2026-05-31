@@ -468,7 +468,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     await user.click(editBtn);
     await user.click(screen.getByTestId("schema-field-editor-rerun-peak_demand_kw"));
     await waitFor(() => {
-      const bubbles = screen.queryAllByTestId("onboarding-chat-live-assistant");
+      const bubbles = screen.queryAllByTestId("chat-live-assistant");
       expect(
         bubbles.some((b) =>
           /Re-ran on the sample: 16\.2 kW · confidence 0\.98 ↑ from 0\.83/.test(b.textContent ?? ""),

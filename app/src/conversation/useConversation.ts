@@ -87,15 +87,31 @@ export interface ConversationOptions {
 export interface ConversationApi {
   liveTurns: LiveTurn[];
   sending: boolean;
+  /**
+   * 2026-05-30-unified-conversation-flow Phase 2 — flips `true` after the
+   * FIRST real user `send()` of this hook instance and stays true. This is the
+   * engine's first-send lifecycle exposed as observable STATE so an
+   * experience's render-null `Choreography` can react to it (Rules-of-Hooks
+   * safe). It is NOT set by RT-01 hydration of a persisted user turn — only a
+   * genuine send — so a returning user with prior turns does not spuriously
+   * re-trigger first-send choreography.
+   */
+  firstUserMessageSent: boolean;
   /** Send a user message; optimistic user turn + server assistant turn. */
   send: (text: string) => Promise<void>;
   /** Map a clicked suggested-action chip onto a dispatched canvas intent. */
   handleSuggestedAction: (action: ChatSuggestedAction, citations?: Citation[]) => void;
-  // NOTE: `seedTurns` (one-shot experience seed injection) is intentionally
-  // NOT added in Phase 1 — it has no caller until the experience layer
-  // (Phase 2 `makeOnboardingExperience`) consumes it. Adding it now would
-  // be dormant plumbing (memory `feedback_no_shortcuts`). It lands with its
-  // first real caller in Phase 2.
+  /**
+   * 2026-05-30-unified-conversation-flow Phase 2 — inject a one-shot set of
+   * turns (idempotent: turns already present by id are skipped). This is how
+   * `<ConversationFlow>` mounts a `ChatExperience.seedTurns()` — its only
+   * caller. The onboarding experience doesn't seed (its scripted bubbles are
+   * inline decoration in `Intro`); the follow-on Workspace/Project experiences
+   * will (a workspace lands with a scripted "here's what's in this workspace"
+   * opener). Covered directly by `ConversationFlow.test` so the path is
+   * exercised, not dormant.
+   */
+  seedTurns: (turns: LiveTurn[]) => void;
 }
 
 /**
@@ -170,6 +186,7 @@ export function useConversation(
 
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [sending, setSending] = useState(false);
+  const [firstUserMessageSent, setFirstUserMessageSent] = useState(false);
 
   // `onFirstUserSend` must fire exactly once across the lifetime of this
   // hook instance, regardless of how `opts` re-identifies between renders.
@@ -180,6 +197,17 @@ export function useConversation(
   scopeHintRef.current = opts?.scopeHint;
   const titleRef = useRef(opts?.title);
   titleRef.current = opts?.title;
+
+  const seedTurns = useCallback((turns: LiveTurn[]) => {
+    if (turns.length === 0) return;
+    setLiveTurns((cur) => {
+      const seen = new Set(cur.map((t) => t.id));
+      const fresh = turns.filter((t) => !seen.has(t.id));
+      if (fresh.length === 0) return cur;
+      // Seeds lead the thread (a scripted opener comes first).
+      return [...fresh, ...cur];
+    });
+  }, []);
 
   const handleSuggestedAction = useCallback(
     (action: ChatSuggestedAction, citations?: Citation[]) => {
@@ -253,10 +281,13 @@ export function useConversation(
       const userTurn: LiveTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
       setLiveTurns((cur) => [...cur, userTurn]);
 
-      // Lifecycle: fire onFirstUserSend exactly once. The caller's
-      // Choreography observes this (e.g. onboarding advances to F5).
+      // Lifecycle: fire onFirstUserSend exactly once + flip the observable
+      // `firstUserMessageSent` state. The caller's Choreography observes the
+      // latter (e.g. onboarding advances to F5) — only a genuine send sets it,
+      // never RT-01 hydration of a persisted user turn.
       if (!firstSendFiredRef.current) {
         firstSendFiredRef.current = true;
+        setFirstUserMessageSent(true);
         onFirstUserSendRef.current?.();
       }
 
@@ -284,7 +315,12 @@ export function useConversation(
           chatSessionId,
           newUserMessage: trimmed,
           sessionMeta: {
-            title: titleRef.current ?? activeChatSession?.title ?? "Conversation",
+            // Session title wins; the caller's `title` is only a fallback
+            // label when the session has none. This preserves the deleted
+            // onboarding fork's `activeChatSession?.title ?? "Onboarding"`
+            // precedence (and the steady fork's `"Steady chat"` label, which
+            // a title-less steady session never overrode in practice).
+            title: activeChatSession?.title ?? titleRef.current ?? "Conversation",
             // Read from the session — NOT hardcoded. Onboarding sessions
             // carry isOnboardingSession:true; a bare chat session false.
             isOnboarding: activeChatSession?.isOnboardingSession ?? true,
@@ -343,5 +379,5 @@ export function useConversation(
     [sending, chatSessionId, activeChatSession, enqueueFieldProposal, appendMessage, dispatchIntent],
   );
 
-  return { liveTurns, sending, send, handleSuggestedAction };
+  return { liveTurns, sending, firstUserMessageSent, send, handleSuggestedAction, seedTurns };
 }

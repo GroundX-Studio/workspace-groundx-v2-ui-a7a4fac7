@@ -1,30 +1,53 @@
 # ChatColumn
 
 The production chat-column widget. The same widget powers F2-F5
-onboarding and `/c/:sessionId` steady mode — onboarding is just
-steady with scripted decorations turned on.
+onboarding and `/c/:sessionId` steady mode.
+
+2026-05-30-unified-conversation-flow Phase 2: ChatColumn no longer forks
+a steady vs onboarding flow. There is **one** chat view —
+`<ConversationFlow>` over the durable `useConversation` engine — and
+onboarding is an **optional `ChatExperience`** injected by composition.
+ChatColumn's only job is dispatch + experience selection. There is **no
+`surface`/`mode` prop** and no steady/onboarding branching.
 
 Per the no-duplicates rule (`memory/feedback_no_onboarding_duplicates.md`),
-this is **the** chat surface. `OnboardingShell` and `SteadyShell` both
-mount it; they differ only in the `surface` prop and the host shell's
-header/nav slots.
+chat is literally one production flow; onboarding is an injected
+experience, same engine/code path.
 
 ## What it does
 
-Owns the chat surface end-to-end: header chrome, scripted onboarding
-decorations (when `surface="onboarding"`), live-turn rendering, persisted
-thread hydration, send path, and orchestrator integration for
-chip-driven LLM intents (Phase 1+5 widget-llm-integration).
+Reads the active chat session + onboarding session/scenario state and
+dispatches to one of:
+
+- **Gate active** → `GateChatPanel` (the F6 typing-indicator + GateView).
+- **Steady chat** (active session is non-onboarding) → `<ConversationFlow>`
+  with **no experience** (the bare chat: live-turns + input bar).
+- **Onboarding journey** (F2–F5 with a scenario) → `<ConversationFlow>`
+  with the onboarding `ChatExperience` looked up from
+  `chatExperienceRegistry.byId("onboarding").create({ scenarioId, thinkingScript })`
+  (scripted ThinkingStream + Done bubble + Pick-a-view pills above the
+  thread; the f3/f5 auto-advances live in the experience's `Choreography`
+  + the ThinkingStream `onDone`).
+- **F1** → idle placeholder ("Ask anything about the sample…").
+- **F2 BYO without scenario** → `ByoChatPlaceholder` ("sign in to upload").
+
+The live-turn rendering, persisted-thread hydration (RT-01), send path
+(CF-18), and orchestrator integration for chip-driven LLM intents all
+live in `useConversation` / `ConversationFlow` / `chatPrimitives` (under
+`conversation/`), shared by every mount.
 
 ## Props
 
 | Prop | Type | Default | Purpose |
 |---|---|---|---|
-| `role` | `WidgetRole` (`"anonymous" \| "member"`) | — (required) | Widget AUTHORIZATION role. ChatColumn is all-roles and locks no affordance by role today; the prop satisfies the widget contract and is forwarded to children as roles get teeth. NEVER selects the surface. |
+| `role` | `WidgetRole` (`"anonymous" \| "member"`) | — (required) | Widget AUTHORIZATION role. ChatColumn is all-roles and locks no affordance by role today; the prop satisfies the widget contract and is forwarded to children (via `ConversationFlow`) as roles get teeth. NEVER selects the flow. |
 | `scope` | `WidgetScope` | — (required) | Always `{ type: "none" }` — chat is session-scoped, not document-scoped. ChatColumn is not a ScopedViewerWidget. |
-| `surface` | `"onboarding" \| "steady"` | `"onboarding"` | Which conversation SURFACE renders. FLOW/SHELL state sourced from the mounting shell, NOT from `role`. (Was the old flow `mode`; re-sourced — not renamed to `role` — by `2026-05-30-widget-role-access`. `unified-conversation-flow` removes it once the surfaces fully merge.) |
 | `overrideScenarioId` | `string \| null` | undefined | Onboarding only — used by the F2→F1 slide-out so the leaving pane shows the conversation that's sliding away. |
 | `overrideFrame` | `FFrame` | undefined | Onboarding only — same use case as `overrideScenarioId`. |
+
+The steady-vs-onboarding signal is the **active chat session's
+`isOnboardingSession` flag** (read from the source of truth, the same flag
+`useConversation` reads), NOT a flow mode prop.
 
 ## Scope
 
@@ -33,38 +56,6 @@ column is session-scoped, not document-scoped — it is not one of the
 four `ScopedViewerWidget`s (PdfViewer / Extract / SmartReport /
 Integrate) that take a real `ContentScope`. See
 `docs/agents/widget-access-matrix.md` §1b.
-
-## What each surface renders
-
-**`surface="onboarding"`** (default; mounted by `OnboardingShell`)
-- Gate-active branch hands off to `GateChatPanel`.
-- F1 → idle placeholder ("Ask anything about the sample…").
-- F2 with scenario → scripted thinking-stream + Done bubble +
-  Pick-a-view pills, then live-turns + LiveChatInputBar.
-- F3-F7 → idle placeholder.
-- F2 BYO without scenario → ByoChatPlaceholder ("sign in to upload").
-- Sample-switcher subline (so the user can pivot Utility ↔ Loan ↔ Solar
-  without leaving the chat surface).
-
-**`surface="steady"`** (mounted by `SteadyShell` — UI-05)
-- Bare conversation: empty-state placeholder until the user types,
-  then live-turns + LiveChatInputBar.
-- No scripted decorations: no ThinkingStream, no Pick-a-view pills,
-  no sample-switcher, no scenario header.
-- Hydrates from `/api/chat-sessions/:id/messages` on mount (RT-01);
-  sends to `/api/chat/messages` (CF-18); persists per RT-01..05.
-
-## Shared infrastructure (used by both surfaces)
-
-- `liveTurns` state — optimistic user+assistant turns rendered as
-  `<UserBubble>` / `<BotBubble>`.
-- RT-01 hydration effect — reads persisted thread on mount via
-  `listChatMessages(chatSessionId)`.
-- `handleSend(text)` — POSTs to `/api/chat/messages` via
-  `sendChatMessage`, renders the reply or maps the error via
-  `chatErrorToUserCopy`.
-- `<LoadingDots>` "thinking" bubble while `sending`.
-- `<LiveChatInputBar>` text input at the bottom (disabled while sending).
 
 ## Locked affordances (read-only roles)
 
@@ -75,82 +66,74 @@ on `widgetRoleCanEdit(role)` and add a matrix row.
 
 The onboarding-only chrome (scripted `ThinkingStream` reveal,
 sample-switcher subline + scenario header, Pick-a-view pills) is a
-function of `surface="onboarding"`, **not** of `role`. Under
-`surface="steady"` those are dropped while the conversation shell,
-hydration, send path, and orchestrator dispatch stay shared.
+function of the **injected onboarding experience**, **not** of `role`.
+The steady chat (non-onboarding session) drops them while the
+conversation engine, hydration, send path, and orchestrator dispatch
+stay shared.
 
 ## Events
+
+All conversation events are owned by `useConversation` / `ConversationFlow`:
 
 - POSTs `/api/chat/messages` via `sendChatMessage` on user submit.
 - Calls `enqueueFieldProposal` (ChatStore) when the reply carries a
   `proposedSchemaField`.
-- Dispatches each `reply.intents[]` entry via the canvas orchestrator
-  (Phase 5).
-- Dispatches `suggested-intent` chip clicks via the orchestrator
-  (Phase 1).
-- Auto-advances the onboarding frame when the user types a real turn
-  while sitting in F2/F3/F3a/F4.
+- Dispatches each `reply.intents[]` entry via the canvas orchestrator.
+- Dispatches `suggested-intent` / `tool:<name>` chip clicks via the
+  orchestrator.
+
+The onboarding experience's `Choreography` auto-advances the onboarding
+frame to F5 when the user types a real turn while sitting in
+F2/F3/F3a/F4, and the experience's `Intro` ThinkingStream advances F2→F3
+on completion.
 
 ## How to mount
 
 ```tsx
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 
-// Onboarding shell (role sourced from auth state, surface defaults to "onboarding"):
+// Onboarding shell (role sourced from auth state):
 <ChatColumn role={signedIn ? "member" : "anonymous"} scope={{ type: "none" }} />
 
-// Steady shell (UI-05):
-<ChatColumn surface="steady" role="member" scope={{ type: "none" }} />
+// Steady shell (same component; the non-onboarding session selects the bare chat):
+<ChatColumn role={widgetRole} scope={{ type: "none" }} />
 ```
 
 `OnboardingShell` and `SteadyShell` are the only production callers.
-`role` is sourced from the auth/session state (Phase 3 adds a
-`useWidgetRole()` selector); `surface` is sourced from the mounting
-shell. Neither is derived from the conversation flow.
+`role` is sourced from the auth/session state via `useWidgetRole()`.
+Neither shell passes a flow mode.
 
 ## LLM tools
 
 See [`no-llm.md`](./no-llm.md). The chat column is the chat surface
 itself — tools live on the widgets it composes
-(`SuggestedActionChips`, `ProposeSchemaFieldCard`, the future
-`BookingStatusCard` book_call tool, etc.).
+(`SuggestedActionChips`, `ProposeSchemaFieldCard`, etc.).
 
 ## Why the file lives here
 
 This component lives at `components/chat-widgets/ChatColumn/` so the
 widget-contract drift guard (`src/test/widget-contract.test.ts`)
 auto-discovers it and asserts:
-1. This README exists.
+1. This README exists (with the required section headers).
 2. A sibling `ChatColumn.test.tsx` exists.
 3. The main `.tsx` declares BOTH a `role` and a `scope` prop, and no
    retired `mode: "onboarding" | "steady"` literal / raw id prop.
 
-If any of those regress, CI fails.
-
-## Outer-dispatch + inner-component pattern
-
-The exported `ChatColumn` is a thin dispatcher:
-
-```tsx
-export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFrame, surface = "onboarding" }) => {
-  if (surface === "steady") return <SteadyConversationFlow />;
-  return <ChatColumnInner overrideScenarioId={overrideScenarioId} overrideFrame={overrideFrame} />;
-};
-```
-
-Each surface's inner component owns a stable hook order — the dispatch
-doesn't violate the Rules of Hooks even if `surface` were to change
-mid-life (which it doesn't in practice; OnboardingShell vs SteadyShell
-mount different parents). `role`/`scope` are contract props; they do
-not select the surface.
+If any of those regress, CI fails. The conversation engine + view +
+experience layer live OUTSIDE the widget slots, under `conversation/`,
+so the widget-contract drift guard does not apply to them.
 
 ## Related
 
+- `conversation/useConversation` — the durable conversation engine.
+- `conversation/ConversationFlow` — the single chat view.
+- `conversation/ChatExperience` + `conversation/chatExperienceRegistry`
+  — the optional pluggable experience abstraction + its data catalog.
+- `conversation/experiences/onboarding/experience` — the onboarding
+  reference experience (`makeOnboardingExperience`).
 - `chat-widgets/ThinkingStream/` — the scripted-notes widget the
-  onboarding surface embeds.
-- `chat-widgets/GateChatRail/` — the gate-state widget that takes
-  over when `gate.status === "open" | "committed"`.
-- `chat-widgets/BookingStatusCard/` — replaces the chat column when
-  the user is mid-Calendly-booking.
+  onboarding experience's `Intro` embeds.
+- `chat-widgets/GateChatRail/` — the gate-state widget that takes over
+  when `gate.status === "open" | "committed"`.
 - `viewer-widgets/PdfViewer/` — the canvas-side companion (same shell,
   different slot).

@@ -5,15 +5,14 @@
  * with mode="steady" widgets, proving the unification with onboarding —
  * one shell, different widget bundle.
  *
- * UI-05 (2026-05-27): chat slot now mounts the production chat widget
- * (`<ChatColumn surface="steady" … />` — same widget that powers F2-F5
- * onboarding) instead of the SessionSwitcher placeholder. Per
- * the no-duplicates rule, onboarding + steady share the same widget;
- * the `surface` prop (re-sourced from the old flow `mode` by
- * 2026-05-30-widget-role-access) drops the onboarding-only decorations
- * (scripted intro, Pick-a-view pills, sample-switcher). Persistence + hydration
- * come for free via RT-01..05. Canvas slot still placeholder until
- * the steady-mode PdfViewer wire-up exists (separate ticket).
+ * UI-05 (2026-05-27): chat slot mounts the production chat widget
+ * (`<ChatColumn … />` — same widget that powers F2-F5 onboarding) instead
+ * of the SessionSwitcher placeholder. Per the no-duplicates rule, onboarding
+ * + steady share the same widget. 2026-05-30-unified-conversation-flow: there
+ * is ONE chat view; the steady shell's active chat session is non-onboarding
+ * (`isOnboardingSession:false`), so ChatColumn mounts the bare ConversationFlow
+ * (no experience → no scripted intro / Pick-a-view pills / sample-switcher) —
+ * no `surface`/`mode` prop. Persistence + hydration come for free via RT-01..05.
  *
  * Per the chat session model (project_chat_session_model), the URL is
  * the source of truth for which session is active. The mount effect
@@ -117,12 +116,14 @@ export const SteadyShell: FC = () => {
         <SessionSwitcher hideOnboardingSession={false} />
       </Box>
       <Box sx={{ flex: 1, minHeight: 0, px: 2, pb: 2 }}>
-        {/* 2026-05-30-widget-role-access: the conversation SURFACE is
-            sourced from the mounting shell (steady), NOT from `role`.
-            `role` is the auth-derived `WidgetRole` (the steady shell is
-            usually `member` but an anonymous session can reach it — never
-            hardcode); chat is session-scoped (`{ type: "none" }`). */}
-        <ChatColumn surface="steady" role={widgetRole} scope={{ type: "none" }} />
+        {/* 2026-05-30-unified-conversation-flow: ONE ChatColumn → one
+            ConversationFlow. The steady shell's active chat session is
+            non-onboarding (`isOnboardingSession:false`), so ChatColumn mounts
+            the bare conversation (no experience) — no `surface`/`mode` prop.
+            `role` is the auth-derived `WidgetRole` (usually `member`, but an
+            anonymous session can reach the steady shell — never hardcode);
+            chat is session-scoped (`{ type: "none" }`). */}
+        <ChatColumn role={widgetRole} scope={{ type: "none" }} />
       </Box>
     </Box>
   );
