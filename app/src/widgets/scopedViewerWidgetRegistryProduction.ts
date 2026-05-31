@@ -32,7 +32,10 @@
  */
 import type { FC } from "react";
 
+import type { NormalizedBbox } from "@groundx/shared";
 import { canvasKindSchema, type CanvasKind, type ContentScope, type WidgetRole } from "@groundx/shared";
+
+import type { CitationTier } from "@/types/onboarding";
 
 import { Extract } from "@/components/viewer-widgets/Extract/Extract";
 import { descriptor as extractDescriptor } from "@/components/viewer-widgets/Extract/Extract.tools";
@@ -51,14 +54,26 @@ import { createScopedViewerWidgetRegistry } from "./scopedViewerWidgetRegistry";
 /**
  * The shape `<ScopedCanvas>` mounts every ScopedViewerWidget with. Every
  * widget takes a required `scope: ContentScope` (no raw `documentId` — the
- * widget-role-access scope rule) + a `role: WidgetRole`. Per-widget extra
- * props (PdfViewer's `targetPage`, the builder's `selectedSectionId`) are
- * supplied by the shell when it knows the kind; `<ScopedCanvas>` passes only
- * the universal pair, so this is the lowest common contract.
+ * widget-role-access scope rule) + a `role: WidgetRole`.
+ *
+ * The `doc-viewer` step ALSO carries a citation highlight (`page` + `bbox` +
+ * `tier`) — the region a `CiteChip` click surfaces. `<ScopedCanvas>` reads
+ * those off the `doc-viewer` step arm it already switches on and forwards them
+ * to the PdfViewer mount (so a citation click round-trips to the cited page +
+ * overlay, RT-01..05). They are OPTIONAL, so every other widget's
+ * `FC<{ scope, role }>` stays structurally assignable to this mount type (a
+ * component that declares only the required pair satisfies a widened call
+ * site). Widgets that don't take them simply ignore them.
  */
 export interface ScopedViewerWidgetComponentProps {
   scope: ContentScope;
   role: WidgetRole;
+  /** doc-viewer citation highlight — 1-indexed page to surface. */
+  targetPage?: number | null;
+  /** doc-viewer citation highlight — 0–1 page-relative region overlay. */
+  highlightBbox?: NormalizedBbox | null;
+  /** doc-viewer citation highlight — attribution tier (drives overlay precision). */
+  highlightTier?: CitationTier;
 }
 
 /**

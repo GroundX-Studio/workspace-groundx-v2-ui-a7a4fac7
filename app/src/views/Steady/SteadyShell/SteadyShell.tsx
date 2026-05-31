@@ -26,11 +26,13 @@ import Card from "@mui/material/Card";
 import { useEffect, type FC } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import type { ContentScope } from "@groundx/shared";
+
 import { AppShell } from "@/components/layout/AppShell";
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Heading } from "@/components/primitives/Heading/Heading";
 import { OnboardingNav, useOnboardingNavCollapsed } from "@/components/layout/OnboardingNav/OnboardingNav";
-import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
+import { ScopedCanvas, stepToCanvasKind } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 import {
   BODY_TEXT,
   BORDER_RADIUS_CARD,
@@ -129,30 +131,39 @@ export const SteadyShell: FC = () => {
   );
 
   // Canvas slot — read the active session's viewer step and surface
-  // the matching widget. clickable-citations Phase 5: when the active
-  // step is `doc-viewer` (pushed by a citation click via
-  // `gotoDocViewer`), mount `PdfViewerWidget` with the cited
-  // documentId + targetPage + highlightBbox. Without an active
-  // doc-viewer step (steady mode starts empty), fall back to the
-  // "pick a document" placeholder.
+  // the matching widget THROUGH the shared <ScopedCanvas> selector (the
+  // same component OnboardingShell mounts). Both shells now resolve the
+  // canvas widget through the production ScopedViewerWidget registry
+  // (componentForKind), not a direct import.
+  //
+  // 2026-05-30-onboarding-shell-shared-view Phase 4: when the active step
+  // resolves to a declared CanvasKind (e.g. a `doc-viewer` step pushed by a
+  // citation click via `gotoDocViewer`), mount <ScopedCanvas>, which feeds
+  // the registry-mounted widget the active scope + (for doc-viewer) the
+  // cited page + highlight bbox/tier off the step. Without an active
+  // declared-kind step (steady mode starts doc-less), fall back to STEADY'S
+  // OWN "pick a document" placeholder — NOT ScopedCanvas's generic "not yet
+  // available" placeholder.
   const activeStep =
     active && active.viewer.currentStep.stepIndex >= 0
       ? active.viewer.history[active.viewer.currentStep.stepIndex]
       : null;
+  // Build the scope the canvas renders over, by the active step kind. Today
+  // steady's only canvas-bearing step is `doc-viewer` (the citation sink);
+  // resolve its single document into a documents scope. Steps that resolve
+  // to no built CanvasKind (none reachable in steady today) keep the
+  // pick-a-document placeholder below.
+  const canvasScope: ContentScope | null =
+    activeStep && activeStep.kind === "doc-viewer"
+      ? { type: "documents", documentIds: [activeStep.documentId] }
+      : null;
   const canvasPane =
-    activeStep && activeStep.kind === "doc-viewer" ? (
+    activeStep && canvasScope && stepToCanvasKind(activeStep) !== null ? (
       <Box
         sx={{ height: "100%", width: "100%", backgroundColor: WHITE }}
-        data-testid="steady-shell-canvas-doc-viewer"
         aria-label="Canvas"
       >
-        <PdfViewerWidget
-          scope={{ type: "documents", documentIds: [activeStep.documentId] }}
-          role={widgetRole}
-          targetPage={activeStep.highlight?.page ?? activeStep.page ?? null}
-          highlightBbox={activeStep.highlight?.bbox ?? null}
-          highlightTier={activeStep.highlight?.tier}
-        />
+        <ScopedCanvas scope={canvasScope} step={activeStep} role={widgetRole} />
       </Box>
     ) : (
       <Box

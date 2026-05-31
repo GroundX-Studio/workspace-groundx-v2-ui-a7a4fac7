@@ -236,6 +236,85 @@ describe("SteadyShell (/c/:sessionId)", () => {
       const bbox = JSON.parse(stub.getAttribute("data-highlight-bbox") ?? "{}");
       expect(bbox).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.05 });
       expect(screen.queryByTestId("steady-shell-canvas-placeholder")).not.toBeInTheDocument();
+
+      // Phase 4 (2026-05-30-onboarding-shell-shared-view): the PdfViewer
+      // is mounted THROUGH the shared <ScopedCanvas> selector (the same
+      // component OnboardingShell mounts) — not a bespoke doc-viewer pane.
+      // The registry-mounted widget sits inside the scoped-canvas wrapper,
+      // which declares the resolved CanvasKind. This proves the canvas goes
+      // through componentForKind (the production registry), not a direct
+      // PdfViewerWidget import.
+      const scopedCanvas = screen.getByTestId("scoped-canvas");
+      expect(scopedCanvas).toHaveAttribute("data-canvas-kind", "doc-viewer");
+      expect(scopedCanvas).toContainElement(stub);
+    });
+  });
+
+  // ── Phase 4 (2026-05-30-onboarding-shell-shared-view): SteadyShell shares
+  //    the SAME <ScopedCanvas> selector OnboardingShell uses. Both shells
+  //    resolve the canvas widget THROUGH the production registry
+  //    (componentForKind), not a direct viewer-widget import.
+  describe("Phase 4: SteadyShell canvas is the shared <ScopedCanvas>", () => {
+    it("doc-less steady shell shows ITS OWN pick-a-document placeholder (NOT ScopedCanvas's generic unavailable placeholder)", () => {
+      render(
+        <Harness initialUrl="/c/c-empty">
+          <SteadyShell />
+        </Harness>,
+      );
+      // Steady starts doc-less → the bespoke steady empty state, preserved.
+      expect(screen.getByTestId("steady-shell-canvas-placeholder")).toBeInTheDocument();
+      expect(screen.getByText("Pick a document to view")).toBeInTheDocument();
+      // NOT the generic ScopedCanvas "not yet available" placeholder, and
+      // no scoped-canvas wrapper at all when there's no active step.
+      expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("scoped-canvas")).not.toBeInTheDocument();
+    });
+
+    it("an active doc-viewer step mounts <ScopedCanvas> (registry-mounted PdfViewer), not a directly-imported widget", async () => {
+      // Seed + navigate inside ONE mount (the rerender-with-new-Harness
+      // pattern would reset ChatStoreProvider and lose the seeded step) —
+      // same pattern the RT-05 e2e above uses.
+      let api: ReturnType<typeof useChatStore> | null = null;
+      let createdId = "";
+      let navigateFn: ReturnType<typeof useNavigate> | null = null;
+      function SeedAndRender() {
+        api = useChatStore();
+        navigateFn = useNavigate();
+        return null;
+      }
+      render(
+        <Harness initialUrl="/c/seed-doc-viewer">
+          <SeedAndRender />
+          <SteadyShell />
+        </Harness>,
+      );
+      expect(api).not.toBeNull();
+      expect(navigateFn).not.toBeNull();
+      act(() => {
+        createdId = api!.newSession({ title: "Doc viewer" });
+        navigateFn!(`/c/${createdId}`);
+        // Push a doc-viewer step (the citation-click sink) so the canvas
+        // has an active doc-viewer step to render.
+        api!.gotoDocViewer({
+          documentId: "doc-active",
+          page: 2,
+          bbox: { x: 0.2, y: 0.3, w: 0.4, h: 0.06 },
+        });
+      });
+
+      // The canvas resolves THROUGH <ScopedCanvas> → the registry-mounted
+      // PdfViewer. The scoped-canvas wrapper declares the doc-viewer kind;
+      // the steady bespoke doc-viewer pane testid is gone.
+      await waitFor(() => {
+        expect(screen.getByTestId("scoped-canvas")).toHaveAttribute("data-canvas-kind", "doc-viewer");
+      });
+      expect(screen.getByTestId("pdf-viewer-widget-stub")).toBeInTheDocument();
+      expect(screen.queryByTestId("steady-shell-canvas-doc-viewer")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("steady-shell-canvas-placeholder")).not.toBeInTheDocument();
+      // The scope + highlight reach the registry-mounted widget intact.
+      const stub = screen.getByTestId("pdf-viewer-widget-stub");
+      expect(stub.getAttribute("data-document-id")).toBe("doc-active");
+      expect(stub.getAttribute("data-target-page")).toBe("2");
     });
   });
 

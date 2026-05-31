@@ -93,16 +93,18 @@ export default tseslint.config(
       "src/components/viewer-widgets/SmartReportRender/*.test.{ts,tsx}",
       "src/components/viewer-widgets/SmartReportBuilder/*.test.{ts,tsx}",
       // ── GRANDFATHERED, pending step-20 retirement/alignment ──
-      // These six legacy views/shells still mount a ScopedViewerWidget
-      // component directly. They are NO LONGER on the live OnboardingShell
-      // canvas path (the shell mounts <ScopedCanvas>), but the files are not
-      // deleted yet: the 5 onboarding per-frame views are retired in
-      // onboarding-shell-shared-view Phase 3, and SteadyShell's own
-      // doc-viewer canvas fork is aligned to <ScopedCanvas> in Phase 4
-      // (both = the next execution-order step). Each exemption is removed as
-      // its file is deleted/aligned there — the ban is otherwise fully active
-      // for all new code.
-      "src/views/Steady/SteadyShell/SteadyShell.tsx",
+      // These legacy onboarding per-frame views still mount a
+      // ScopedViewerWidget component directly. They are NO LONGER on the live
+      // OnboardingShell canvas path (the shell mounts <ScopedCanvas>), but the
+      // files are not deleted yet: the 5 onboarding per-frame views are retired
+      // in onboarding-shell-shared-view Phase 3. Each exemption is removed as
+      // its file is deleted/aligned — the ban is otherwise fully active for all
+      // new code.
+      //
+      // SteadyShell was removed from this list in Phase 4
+      // (2026-05-30-onboarding-shell-shared-view): it now mounts <ScopedCanvas>
+      // instead of importing PdfViewerWidget directly, so "unregistered" ==
+      // "unreachable" holds for it too — it is no longer a legacy direct-importer.
       "src/views/Onboarding/UnderstandView.tsx",
       "src/views/Onboarding/InteractView.tsx",
       "src/views/Onboarding/ExtractView.tsx",

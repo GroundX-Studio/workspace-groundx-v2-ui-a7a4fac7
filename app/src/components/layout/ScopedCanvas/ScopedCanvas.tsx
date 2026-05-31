@@ -151,13 +151,28 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({ scope, step, role, reportS
     }
   }
 
+  // doc-viewer citation highlight — forward the cited page + bbox + tier off
+  // the `doc-viewer` step arm to the PdfViewer mount so a `CiteChip` click
+  // round-trips to the cited page + region overlay (RT-01..05). The step is
+  // the canonical source (the `gotoDocViewer` sink writes `highlight` +
+  // `page`); other step kinds carry no highlight, so the props stay
+  // `undefined` and the widgets ignore them.
+  const docViewerHighlight =
+    step.kind === "doc-viewer"
+      ? {
+          targetPage: step.highlight?.page ?? step.page ?? null,
+          highlightBbox: step.highlight?.bbox ?? null,
+          highlightTier: step.highlight?.tier,
+        }
+      : {};
+
   return (
     <Box
       data-testid="scoped-canvas"
       data-canvas-kind={kind}
       sx={{ height: "100%", width: "100%" }}
     >
-      <Widget scope={scope} role={role} />
+      <Widget scope={scope} role={role} {...docViewerHighlight} />
     </Box>
   );
 };
