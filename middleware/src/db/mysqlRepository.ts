@@ -142,8 +142,6 @@ export class MySqlAppRepository implements AppRepository {
         role VARCHAR(16) NOT NULL,
         content TEXT NOT NULL,
         citations_json JSON NULL,
-        tool_calls_json JSON NULL,
-        attachments_json JSON NULL,
         compressed_into_summary_id VARCHAR(64) NULL,
         llm_provider VARCHAR(64) NULL,
         llm_model_id VARCHAR(64) NULL,
@@ -490,10 +488,10 @@ export class MySqlAppRepository implements AppRepository {
     await this.pool.execute(
       `INSERT INTO chat_messages (
         id, chat_session_id, turn_index, role, content,
-        citations_json, tool_calls_json, attachments_json,
+        citations_json,
         compressed_into_summary_id, llm_provider, llm_model_id,
         latency_ms, prompt_tokens, completion_tokens, error_code, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id,
         record.chatSessionId,
@@ -501,8 +499,6 @@ export class MySqlAppRepository implements AppRepository {
         record.role,
         record.content,
         record.citationsJson,
-        record.toolCallsJson,
-        record.attachmentsJson,
         record.compressedIntoSummaryId,
         record.llmProvider,
         record.llmModelId,
@@ -518,7 +514,7 @@ export class MySqlAppRepository implements AppRepository {
   async listChatMessages(chatSessionId: string): Promise<ChatMessageRecord[]> {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
       `SELECT id, chat_session_id, turn_index, role, content,
-        citations_json, tool_calls_json, attachments_json,
+        citations_json,
         compressed_into_summary_id, llm_provider, llm_model_id,
         latency_ms, prompt_tokens, completion_tokens, error_code, created_at
        FROM chat_messages
@@ -840,8 +836,6 @@ function rowToChatMessage(row: mysql.RowDataPacket): ChatMessageRecord {
     role: coerceEnum(chatMessageRoleSchema, row.role, CHAT_MESSAGE_ROLE_FALLBACK),
     content: row.content,
     citationsJson: jsonColumnToString(row.citations_json),
-    toolCallsJson: jsonColumnToString(row.tool_calls_json),
-    attachmentsJson: jsonColumnToString(row.attachments_json),
     compressedIntoSummaryId: row.compressed_into_summary_id,
     llmProvider: row.llm_provider,
     llmModelId: row.llm_model_id,

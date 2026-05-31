@@ -9,11 +9,37 @@ import {
   SESSION_COOKIE,
   clearSessionCookie,
   createSessionRecord,
+  isAuthedSession,
   requireAuthenticatedUser,
   requireSession,
   sessionMiddleware,
+  sessionUsername,
   setSessionCookie,
 } from "./session.js";
+import type { SessionContext } from "./session.js";
+
+/**
+ * 2026-05-31-core-data-followups §4 #20 — session auth state is a discriminated
+ * union `{kind:"anon"} | {kind:"authed";groundxUsername;groundxApiKey}`, NOT an
+ * empty-string `groundxUsername` sentinel. The anon arm carries NO
+ * `groundxUsername` field at all, so the empty-string sentinel is gone.
+ */
+describe("SessionContext discriminated union (§4 #20)", () => {
+  it("an anon session has kind:'anon' and no groundxUsername", () => {
+    const anon: SessionContext = { id: "s", kind: "anon" };
+    expect(anon.kind).toBe("anon");
+    expect(isAuthedSession(anon)).toBe(false);
+    expect(sessionUsername(anon)).toBeNull();
+    // The anon arm exposes no `groundxUsername` at all (sentinel removed).
+    expect("groundxUsername" in anon).toBe(false);
+  });
+
+  it("an authed session carries kind:'authed' + groundxUsername", () => {
+    const authed: SessionContext = { id: "s", kind: "authed", groundxUsername: "gx-user" };
+    expect(isAuthedSession(authed)).toBe(true);
+    expect(sessionUsername(authed)).toBe("gx-user");
+  });
+});
 
 function makeReq(cookies: Record<string, string | undefined> = {}): Request {
   return { cookies } as unknown as Request;
@@ -138,16 +164,17 @@ describe("sessionMiddleware (cookie -> req.session resolution)", () => {
     expect(await repo.getSession("session-expired")).toBeNull();
   });
 
-  it("attaches an anon session (empty groundxUsername, no API key)", async () => {
+  it("attaches an anon session (kind:'anon', no API key)", async () => {
     await repo.createSession(createSessionRecord("", null, "anon-1"));
     const signed = signValue("anon-1", testEnv.SESSION_SECRET);
     const req = makeReq({ [SESSION_COOKIE]: signed });
     const next = vi.fn();
     await sessionMiddleware(testEnv, repo)(req, {} as Response, next);
+    // §4 #20 — an empty-string DB `groundx_username` maps to the anon arm; the
+    // in-memory session carries NO `groundxUsername` field at all.
     expect((req as Request).session).toEqual({
       id: "anon-1",
-      groundxUsername: "",
-      groundxApiKey: undefined,
+      kind: "anon",
     });
   });
 
@@ -162,6 +189,7 @@ describe("sessionMiddleware (cookie -> req.session resolution)", () => {
     await sessionMiddleware(testEnv, repo)(req, {} as Response, next);
     expect((req as Request).session).toEqual({
       id: "authed-1",
+      kind: "authed",
       groundxUsername: "gx-user",
       groundxApiKey: apiKey,
     });
@@ -186,7 +214,7 @@ describe("requireSession", () => {
   it("calls next when a session is present (anon or authed)", () => {
     const next = vi.fn();
     const { res } = makeRes();
-    const req = { session: { id: "s", groundxUsername: "" } } as Request;
+    const req = { session: { id: "s", kind: "anon" } } as Request;
     requireSession(req, res, next);
     expect(next).toHaveBeenCalled();
     expect(res.status).not.toHaveBeenCalled();
@@ -207,17 +235,17 @@ describe("requireAuthenticatedUser", () => {
   it("returns 401 with ANONYMOUS_SESSION code when the session is anon", () => {
     const next = vi.fn();
     const { res } = makeRes();
-    const req = { session: { id: "s", groundxUsername: "" } } as Request;
+    const req = { session: { id: "s", kind: "anon" } } as Request;
     requireAuthenticatedUser(req, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith({ error: "Sign-in required", code: "ANONYMOUS_SESSION" });
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("calls next when groundxUsername is non-empty", () => {
+  it("calls next when the session is authed", () => {
     const next = vi.fn();
     const { res } = makeRes();
-    const req = { session: { id: "s", groundxUsername: "u" } } as Request;
+    const req = { session: { id: "s", kind: "authed", groundxUsername: "u" } } as Request;
     requireAuthenticatedUser(req, res, next);
     expect(next).toHaveBeenCalled();
   });

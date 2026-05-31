@@ -34,7 +34,7 @@ import Stack from "@mui/material/Stack";
 import { alpha } from "@mui/material/styles";
 import { type FC } from "react";
 
-import type { WidgetRole, WidgetScope } from "@groundx/shared";
+import type { SuggestedAction, WidgetRole, WidgetScope } from "@groundx/shared";
 
 import {
   BORDER,
@@ -45,11 +45,10 @@ import {
   WHITE,
 } from "@/constants";
 
-export interface SuggestedAction {
-  key: string;
-  label: string;
-  detail?: Record<string, unknown>;
-}
+// 2026-05-31-core-data-followups §4 #13 — the chip shape is single-sourced on
+// `@groundx/shared`. Re-export so existing `import { SuggestedAction } from
+// "./SuggestedActionChips"` call-sites keep working while the type lives once.
+export type { SuggestedAction };
 
 export interface SuggestedActionChipsProps {
   actions: SuggestedAction[];

@@ -2,7 +2,32 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { SuggestedActionChips } from "./SuggestedActionChips";
+import { suggestedActionSchema, type SuggestedAction as SharedSuggestedAction } from "@groundx/shared";
+
+import { SuggestedActionChips, type SuggestedAction } from "./SuggestedActionChips";
+
+/**
+ * 2026-05-31-core-data-followups §4 #13 — the `SuggestedAction` chip shape was
+ * declared byte-identically in THREE places (this widget, `api/chatSessions`'s
+ * `ChatSuggestedAction`, and the middleware `chatRouterTypes.SuggestedAction`).
+ * The widget's `SuggestedAction` is now a re-export of the ONE shared shape.
+ * This compile-time assert fails to build if it ever re-forks.
+ */
+type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _assertSuggestedAction = Assert<Eq<SuggestedAction, SharedSuggestedAction>>;
+
+describe("SuggestedActionChips shared contract (§4 #13)", () => {
+  it("the shared suggested-action schema validates the chip shape", () => {
+    const parsed = suggestedActionSchema.safeParse({
+      key: "show-source",
+      label: "Show source",
+      detail: { documentId: "d1" },
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
 
 describe("SuggestedActionChips", () => {
   it("renders one chip per action with a stable testid", () => {

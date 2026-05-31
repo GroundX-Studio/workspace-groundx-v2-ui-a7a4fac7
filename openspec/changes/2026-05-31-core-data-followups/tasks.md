@@ -177,22 +177,22 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   validators in the tools files + `app.ts` `validTypes` Set — those are validators that should derive
   from `templateFieldTypeSchema`, but folding them changes runtime validation wiring (behavior-adjacent),
   tracked as a follow-up, not type duplication. App `npm run build` (tsc+vite) + middleware tsc clean.
-- [ ] **#13 `ExtractFieldResult` → shared** (the `/api/extract-field` body twin) + fold the 3rd
+- [x] **#13 `ExtractFieldResult` → shared** (the `/api/extract-field` body twin) + fold the 3rd
   `SuggestedAction` copy (`SuggestedActionChips.tsx`) onto the shared type with the chatSessions↔
   chatRouter pair.
-  — PARTIAL (ExtractFieldResult twin DONE; SuggestedAction fold NOT reached → checkbox stays open).
-  The byte-identical `ExtractFieldResult` interface declared on BOTH sides of the wire (app
-  `api/extractField.ts` + middleware `services/fieldExtractor.ts`) is now ONE shared shape:
-  `extractFieldResultSchema` / `ExtractFieldResult` in `@groundx/shared` (with `extractFieldCitationSchema`
-  for the `{documentId,page,snippet?}` citation subset — deliberately NOT the full `Citation`, the
-  field-extract path never carries bbox/tier). Both sides now `import type { ExtractFieldResult }` and
-  re-export it; the two local interface declarations are deleted. Failing-first: `extractField.test.ts`
-  imports `extractFieldResultSchema` (red — absent) + a compile-time `Eq<ExtractFieldResult,
-  SharedExtractFieldResult>` assert; green after. NOT DONE: the 3rd `SuggestedAction` copy fold
-  (`SuggestedActionChips.tsx` ↔ `chatSessions.ChatSuggestedAction` ↔ `chatRouterTypes.SuggestedAction`) —
-  the three ARE byte-identical (`{key,label,detail?}`) so it is a real fold candidate, but it belongs with
-  the #18 wire-types module work (it threads through `useConversation`/`chatPrimitives`/`ragpipeline`),
-  left unstarted to keep this run behavior-preserving + scoped.
+  — DONE (both halves; the SuggestedAction fold closed the open half in step 2-7g). The byte-identical
+  `ExtractFieldResult` interface declared on BOTH sides of the wire (app `api/extractField.ts` + middleware
+  `services/fieldExtractor.ts`) is ONE shared shape: `extractFieldResultSchema` / `ExtractFieldResult` in
+  `@groundx/shared` (with `extractFieldCitationSchema` for the `{documentId,page,snippet?}` citation subset).
+  Both sides import + re-export it; the two local interface declarations are deleted. **SuggestedAction
+  fold (step 2-7g):** the THREE byte-identical `{key,label,detail?}` copies (`SuggestedActionChips.tsx`
+  `SuggestedAction`, `chatSessions.ChatSuggestedAction`, middleware `chatRouterTypes.SuggestedAction`) are
+  now ONE `suggestedActionSchema`/`SuggestedAction` in `@groundx/shared`; all three re-export it (the widget
+  + `ChatSuggestedAction` alias + the middleware re-export) so consumers keep their local names. Real
+  consumers per side: SuggestedActionChips widget, `useConversation`/`chatPrimitives`/`ChatReply` (app),
+  `chatRouter`/`ragPipeline` (middleware) — axis earned. Failing-first: a runtime `suggestedActionSchema`
+  validate + a compile-time `Eq<SuggestedAction, SharedSuggestedAction>` assert in
+  `SuggestedActionChips.test.tsx` (red — schema absent; green after). App + middleware suites green.
 
 ### 4b. Wire-types module + description-level drift guard (◑ MIXED — fold per twin, guard green)
 - [ ] **#18 shared wire-types module.** Move onto `@groundx/shared` `z.infer`: the `/api/chat/*`
@@ -200,11 +200,26 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   inline `_debug.scope`, `CreateChatSessionResult`, `scopeHint`), `AppUserMetadata`, the 7× `eventSource`
   enum (vs `IntentSource`), the WF-03 page-dim shape, `SchemaFieldExtractionResult`, the two customer-auth
   client modules.
-- [ ] **LOW — fold remaining inline wire-twins** onto the shared module: `ProposalEnvelopeProvenance`
-  (declared twice), the debug-scope twin (`ChatRouterDebug.scope` ↔ `ChatReplyDebug.scope` → derive from
-  shared `ContentScope`), the X-Ray response shape (declared 3× with `documentPages[].number` vs `.page`
-  drift — coordinate with `wf05b`, do not double-fix), and one shared `Source` union
-  (`IntentSource = Exclude<Source,'system'>`).
+  — PARTIAL (step 2-7g — the proposal-envelope twin pair folded + the **wire-twin drift-guard mechanism
+  established and proven to fire**; the larger envelope/metadata/enum list left open → checkbox stays `[ ]`).
+  Folded `ProposedSchemaField` + `ProposalEnvelopeProvenance` onto `@groundx/shared`
+  (`proposedSchemaFieldSchema`/`proposalEnvelopeProvenanceSchema`) — these were declared on BOTH sides AND
+  had silently DRIFTED (app `provenance?` optional vs middleware `provenance` required); unified OPTIONAL
+  (middleware only ever WRITES a present value, app readers already guard `provenance?.verified` — zero
+  behavior change). Both sides re-export. **Drift guard:** a compile-time `Eq<ProposedSchemaField(app),
+  SharedProposedSchemaField>` + `Eq<…Provenance…>` in `chatSessions.test.ts` — load-bearing under app
+  `npm run build` (tsc includes `src/**/*`); VERIFIED it fires by forking the app type (got
+  `TS2344: Type 'false' does not satisfy the constraint 'true'`), then reverted. Failing-first: a runtime
+  `proposedSchemaFieldSchema` validate (red — absent; green after). NOT DONE (deferred, genuinely larger):
+  the `ChatReply`/`ChatRouterResponse` envelope fold, `AppUserMetadata`, the `eventSource`/`IntentSource`
+  enum, the WF-03 page-dim shape, `SchemaFieldExtractionResult`, the customer-auth modules — each threads
+  through many readers and is a multi-step fold of its own; left honestly open rather than half-wired.
+- [ ] **LOW — fold remaining inline wire-twins** onto the shared module: ~~`ProposalEnvelopeProvenance`
+  (declared twice)~~ — DONE in step 2-7g (folded with #18 above; both declarations replaced by a
+  `@groundx/shared` re-export, the twin can no longer drift). Still open: the debug-scope twin
+  (`ChatRouterDebug.scope` ↔ `ChatReplyDebug.scope` → derive from shared `ContentScope`), the X-Ray
+  response shape (declared 3× with `documentPages[].number` vs `.page` drift — coordinate with `wf05b`, do
+  not double-fix), and one shared `Source` union (`IntentSource = Exclude<Source,'system'>`).
 - [x] **Upgrade the tool-catalog drift guard** from name-set to NAME+DESCRIPTION parity app↔server
   (`toolCatalog.test.ts` — currently 6/8 descriptions drifted). Failing-first.
   — DONE: the description-parity assertion landed in the EXISTING cross-package consumer
@@ -282,6 +297,26 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   groundxApiKey}`, collapse the ~12 empty-string `groundxUsername` checks; `LoginReqCallback` +
   `SchemaFieldExtractionResult` flat-record→discriminated union; add a `parseChatStoreSnapshot(unknown)`
   validator on the localStorage rehydration. Failing-first per shape.
+  — PARTIAL (step 2-7g — the **session-auth union DONE** with the full reader migration; the
+  `LoginReqCallback`/`SchemaFieldExtractionResult`/`parseChatStoreSnapshot` sub-shapes left open → checkbox
+  stays `[ ]`). `middleware/src/middleware/session.ts` now models the in-memory request session as
+  `SessionContext = AnonSession | AuthedSession` (`{id;kind:"anon"} | {id;kind:"authed";groundxUsername;
+  groundxApiKey?}`) — the anon arm carries NO `groundxUsername` field, so the empty-string sentinel is
+  UNREPRESENTABLE. `sessionMiddleware` is the ONE conversion boundary (DB `SessionRecord` string column →
+  union; `""` → anon). The persistence `SessionRecord` (DB row shape) intentionally keeps the string column
+  (a DB-schema change is out of scope). Added accessors `isAuthedSession`/`sessionUsername`/`sessionApiKey`
+  (each ≥2 real consumers — axis earned) and migrated ALL ~16 readers: `requireAuthenticatedUser`
+  (`kind !== "authed"`), `assertChatSessionOwnership` (`kind === "authed"`), `app.ts` auth/me · me/metadata ·
+  onboarding/session `anonymous` flag · chat-sessions create (`ownerUserId`/`ownerAnonId`) · claim ·
+  list-sessions · POST templates · POST report-render · the 3 `groundxApiKey ?? env` fallbacks · the
+  customer-scoped-header `customerKey`. ZERO empty-string-sentinel readers remain (the surviving
+  `if (!groundxUsername)` sites read the `string|null` HELPER return or the `ChatSessionRecord.ownerUserId`
+  dep — NOT the session object). Behavior-preserving: every reader keeps its exact prior outcome. Tests:
+  new `session.test.ts` union block (`isAuthedSession`/`sessionUsername` + `"groundxUsername" in anon` ===
+  false), 4 existing session/ownership FIXTURES re-shaped to the union (assertions unchanged), failing-first
+  (red before the helpers/union existed). Middleware suite 668 green, tsc clean. NOT DONE:
+  `LoginReqCallback`/`SchemaFieldExtractionResult` flat→union + the `parseChatStoreSnapshot` localStorage
+  validator — separate shapes, deferred honestly.
 - [x] **#19 `assertChatSessionOwnership(session, req)` helper.** Failing test: all session routes return
   the SAME error code for a non-owner. Collapse the 6-way copy-pasted guard + reconcile the drifted twin
   (returns `chat_session_forbidden` not `not_session_owner`) onto one helper + one error code.
@@ -310,6 +345,28 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   on reload — wire a viewer PATCH or delete cols + `chatSessionPatch` + the migration + `hydrateViewer`);
   `chat_messages` telemetry cols (written never read); `intent_log` (`listIntentLog` test-only). Per
   item, a dead-column grep guard.
+  — PARTIAL (step 2-7g — the `chat_messages` write-only/dead cols DROPPED with a guard; the larger
+  `viewer_*`-column drop scoped out → checkbox stays `[ ]`). **chat_messages (DONE):**
+  `tool_calls_json` was WRITE-ONLY (chatHandler wrote `reply.tools`, nothing ever read it back into
+  app/LLM context) and `attachments_json` was DEAD (always written NULL, never read) — confirmed by grep
+  (no client reader; the messages-hydrate route projects only `citations`). Adding a reader would surface
+  tool-calls to the client (new behavior, out of scope), so both were DROPPED: the CREATE-TABLE columns,
+  the `appendChatMessage` INSERT, the `listChatMessages` SELECT, `rowToChatMessage`, the
+  `ChatMessageRecord.toolCallsJson`/`attachmentsJson` type fields, and the two chatHandler write sites —
+  plus the now-stale `null` fixture fields across 6 test files. **Dead-column grep guard (failing-first):**
+  new `mysqlRepository.test.ts` case asserts the DDL/INSERT/SELECT statements contain neither
+  `tool_calls_json` nor `attachments_json` (red — both present; green after the drop) — fires if either is
+  reintroduced. (These cols are CREATE-TABLE-only — no separate ALTER migration to touch.) Behavior-
+  preserving (no reader existed). Middleware suite 668 green, tsc clean. **intent_log:** NOT a dead chain —
+  it has a real WRITER (chatHandler + the `/api/intent` POST route) AND a reader method (`listIntentLog`);
+  a read-API whose only current caller is tests is not "no reader," so it is correctly left intact.
+  **NOT DONE — `viewer_history/overlays/workspace` (genuinely larger drop, deferred):** confirmed dead in
+  PRACTICE — the read+write+migration chain exists end-to-end, but the app mutators only ever PATCH
+  `activeEntityKey`/`currentIntent` (`ChatStoreContext` patchPayloads), NEVER the viewer slots, so the cols
+  are write-NULL-only. Closing this means dropping 3 JSON cols + their ALTER migration (with its
+  `information_schema` probe + dedicated migration test) + the PATCH-route viewer-field validation +
+  `chatSessionPatch`/`chatSessionsList` viewer fields + the hydrate read path across ~4 more test files —
+  a wide change that risks the behavior-preserving guarantee; left honestly open rather than rushed.
 
 ### 4f. LOW UI cleanups (⟲ WORKFLOW-OK, independent)
 - [ ] **LOW — scenario capability flag:** `ExtractView.tsx` `supportsJsonRender = scenarioId === "loan"`

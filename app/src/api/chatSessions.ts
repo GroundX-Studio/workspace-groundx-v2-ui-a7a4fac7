@@ -43,46 +43,29 @@ export interface CreateChatSessionResult {
 // `bbox` (NormalizedBbox) is threaded end-to-end for CiteChip's viewer jump;
 // `tier` drives highlight precision; both optional. Used directly as `Citation`
 // (no `ChatCitation` alias).
-import { ApiError, type Citation, type ScopeFilter, type TemplateFieldType } from "@groundx/shared";
+import {
+  ApiError,
+  type Citation,
+  type ProposalEnvelopeProvenance,
+  type ProposedSchemaField,
+  type ScopeFilter,
+  type SuggestedAction,
+} from "@groundx/shared";
 
-export interface ChatSuggestedAction {
-  key: string;
-  label: string;
-  detail?: Record<string, unknown>;
-}
+// 2026-05-31-core-data-followups §4 #13 — `ChatSuggestedAction` was a
+// byte-identical fork of the shared chip shape; it is now an alias of the ONE
+// `@groundx/shared` `SuggestedAction`. The local name is kept so its many
+// consumers (`useConversation`, `chatPrimitives`, `ChatReply`) don't churn.
+export type ChatSuggestedAction = SuggestedAction;
 
-/**
- * UI-01 Phase 2a — schema-field addition proposed by the grounded LLM
- * when the user asks to add a field to the schema. The frontend renders
- * an inline Accept/Reject card in the assistant turn; Accept dispatches
- * the ChatStore `addSchemaField` action.
- *
- * Mirrors the server-side `ProposedSchemaField` (minus `id`, which the
- * client mints when pushing into `pendingSchemaOverlay.addedFields`).
- */
-/**
- * `proposal-envelope-provenance`: present when the middleware's Zod
- * envelope parse accepted the LLM payload. The renderer surfaces a
- * `proposal_v<version> · envelope verified` label sourced from this
- * field. Optional so legacy callers (pre-envelope wire) still type.
- */
-export interface ProposalEnvelopeProvenance {
-  version: "v1";
-  verified: true;
-}
-
-export interface ProposedSchemaField {
-  categoryId: string;
-  name: string;
-  type: TemplateFieldType;
-  description: string;
-  /**
-   * Set by `parseGroundedAnswer` in the middleware on a successful
-   * `proposalEnvelopeV1Schema` parse. Renderers gate the provenance
-   * label on `provenance?.verified === true`.
-   */
-  provenance?: ProposalEnvelopeProvenance;
-}
+// 2026-05-31-core-data-followups §4 #18 — the proposal-envelope wire shapes
+// (`ProposedSchemaField` + `ProposalEnvelopeProvenance`) were declared on BOTH
+// sides of the wire and had silently DRIFTED on `provenance`'s optionality.
+// They are now single-sourced on `@groundx/shared`; re-export so the many local
+// importers (`useConversation`, `ProposeSchemaFieldCard`, `ChatReply`) keep
+// their names while the shape lives once. Mirrors the server-side shape (minus
+// `id`, which the client mints when pushing into `pendingSchemaOverlay`).
+export type { ProposalEnvelopeProvenance, ProposedSchemaField };
 
 /**
  * Dev-only diagnostic payload mirroring the middleware's `ChatRouterDebug`.

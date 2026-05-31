@@ -99,8 +99,6 @@ describe("middleware scaffold", () => {
         { page: 3 }, // malformed: missing documentId
         { documentId: "d4", page: "nope" }, // malformed: page wrong type
       ]),
-      toolCallsJson: null,
-      attachmentsJson: null,
       compressedIntoSummaryId: null,
       llmProvider: null,
       llmModelId: null,

@@ -51,8 +51,6 @@ function makeMessage(
     role,
     content,
     citationsJson: null,
-    toolCallsJson: null,
-    attachmentsJson: null,
     compressedIntoSummaryId: null,
     llmProvider: null,
     llmModelId: null,

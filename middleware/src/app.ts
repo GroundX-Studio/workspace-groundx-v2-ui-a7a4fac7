@@ -14,7 +14,7 @@ import { logger } from "./lib/logger.js";
 import { encryptSecret } from "./lib/crypto.js";
 import { ensureMetrics, httpRequestDuration, httpRequestsTotal } from "./lib/metrics.js";
 import { CSRF_COOKIE, csrfMiddleware } from "./middleware/csrf.js";
-import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
+import { createSessionRecord, clearSessionCookie, isAuthedSession, requireAuthenticatedUser, requireSession, sessionApiKey, sessionMiddleware, sessionUsername, setSessionCookie } from "./middleware/session.js";
 import { assertChatSessionOwnership, SESSION_NOT_OWNER_ERROR } from "./middleware/sessionOwnership.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { ChatHandlerError, deriveRagContentScope, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
@@ -369,11 +369,13 @@ export function createApp({
 
   app.get("/api/auth/me", requireAuthenticatedUser, async (req, res, next) => {
     try {
+      // requireAuthenticatedUser guarantees the authed arm; narrow for the type.
+      const groundxUsername = sessionUsername(req.session!)!;
       const [customer, metadata] = await Promise.all([
-        partnerClient.getCustomer(req.session!.groundxUsername),
-        repository.getMetadata(req.session!.groundxUsername),
+        partnerClient.getCustomer(groundxUsername),
+        repository.getMetadata(groundxUsername),
       ]);
-      res.json({ authenticated: true, username: req.session!.groundxUsername, ...customer, appMetadata: metadata });
+      res.json({ authenticated: true, username: groundxUsername, ...customer, appMetadata: metadata });
     } catch (error) {
       next(error);
     }
@@ -387,7 +389,7 @@ export function createApp({
         return;
       }
 
-      const groundxUsername = req.session!.groundxUsername;
+      const groundxUsername = sessionUsername(req.session!)!;
       const existingMetadata = await repository.getMetadata(groundxUsername);
       // Spread the patch (not a fixed shape) so future fields land
       // automatically — a regression that adds a metadata field and forgets
@@ -441,7 +443,10 @@ export function createApp({
   app.post("/api/onboarding/session", async (req, res, next) => {
     try {
       if (req.session) {
-        res.json({ sessionId: req.session.id, anonymous: !req.session.groundxApiKey });
+        // Anonymous iff the session has no decrypted API key (preserves the
+        // prior `!groundxApiKey` semantics; the key only exists on the authed arm).
+        const hasApiKey = isAuthedSession(req.session) && Boolean(req.session.groundxApiKey);
+        res.json({ sessionId: req.session.id, anonymous: !hasApiKey });
         return;
       }
       const session = createSessionRecord("", null);
@@ -474,14 +479,13 @@ export function createApp({
         res.status(400).json({ error: "invalid_payload" });
         return;
       }
-      const isAuthed = Boolean(session.groundxUsername);
       const now = new Date();
       const existing = await repository.getChatSession(input.id);
       const record: ChatSessionRecord = {
         id: input.id,
         onboardingSessionId: input.onboardingSessionId ?? input.id,
-        ownerUserId: isAuthed ? session.groundxUsername : existing?.ownerUserId ?? null,
-        ownerAnonId: isAuthed ? null : session.id,
+        ownerUserId: session.kind === "authed" ? session.groundxUsername : existing?.ownerUserId ?? null,
+        ownerAnonId: session.kind === "authed" ? null : session.id,
         title: input.title,
         isOnboarding: input.isOnboarding,
         activeEntityKey: input.activeEntityKey ?? null,
@@ -578,7 +582,7 @@ export function createApp({
   app.post("/api/chat-sessions/claim", apiLimiter, requireAuthenticatedUser, async (req, res, next) => {
     try {
       const session = req.session!;
-      const ownerUserId = session.groundxUsername;
+      const ownerUserId = sessionUsername(session);
       if (!ownerUserId) {
         res.status(401).json({ error: "no_signed_in_user" });
         return;
@@ -605,7 +609,7 @@ export function createApp({
   app.get("/api/chat-sessions", apiLimiter, requireAuthenticatedUser, async (req, res, next) => {
     try {
       const session = req.session!;
-      const ownerUserId = session.groundxUsername;
+      const ownerUserId = sessionUsername(session);
       if (!ownerUserId) {
         // Defensive: requireAuthenticatedUser already enforces this,
         // but the type checker doesn't know that.
@@ -1073,7 +1077,7 @@ export function createApp({
     async (req, res, next) => {
       try {
         const session = req.session!;
-        const groundxUsername = session.groundxUsername;
+        const groundxUsername = sessionUsername(session);
         if (!groundxUsername) {
           // requireAuthenticatedUser already enforced this; defensive.
           res.status(401).json({ error: "no_signed_in_user" });
@@ -1184,7 +1188,7 @@ export function createApp({
             ) ?? null
           : null;
         const contentScope = deriveRagContentScope(activeEntity, env.GROUNDX_SAMPLES_BUCKET_ID ?? null);
-        const groundxApiKey = reqSession.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY ?? null;
+        const groundxApiKey = sessionApiKey(reqSession) ?? env.GROUNDX_PARTNER_API_KEY ?? null;
 
         const result = await extractField(
           {
@@ -1292,7 +1296,7 @@ export function createApp({
     async (req, res, next) => {
       try {
         const session = req.session!;
-        const groundxUsername = session.groundxUsername;
+        const groundxUsername = sessionUsername(session);
         if (!groundxUsername) {
           res.status(401).json({ error: "no_signed_in_user" });
           return;
@@ -1348,7 +1352,7 @@ export function createApp({
       // samples bucket — anonymous visitors read it via the partner's
       // credentials. There is no separate "anonymous" identity in the
       // auth model (locked 2026-05-25).
-      const groundxApiKey = session.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY ?? null;
+      const groundxApiKey = sessionApiKey(session) ?? env.GROUNDX_PARTNER_API_KEY ?? null;
 
       const result = await handleChatMessage(payload, {
         repository,
@@ -1413,7 +1417,7 @@ export function createApp({
           return;
         }
         const fields = rawFields as Array<{ value?: unknown; label?: unknown }>;
-        const apiKey = req.session!.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY;
+        const apiKey = sessionApiKey(req.session!) ?? env.GROUNDX_PARTNER_API_KEY;
         if (!apiKey) {
           res.status(503).json({ error: "GroundX API key is not available for this session" });
           return;
@@ -1439,7 +1443,7 @@ export function createApp({
       // Per-session customer key when the user has signed up; partner
       // key as fallback for anonymous visitors reading the samples
       // bucket. There is no separate "anonymous" identity.
-      const apiKey = req.session!.groundxApiKey ?? env.GROUNDX_PARTNER_API_KEY;
+      const apiKey = sessionApiKey(req.session!) ?? env.GROUNDX_PARTNER_API_KEY;
       if (!apiKey) {
         res.status(503).json({ error: "GroundX API key is not available for this session" });
         return;
@@ -1463,7 +1467,7 @@ export function createApp({
       const response = await partnerClient.forward(path, {
         method: req.method,
         body: ["GET", "HEAD"].includes(req.method) ? undefined : JSON.stringify(req.body ?? {}),
-        ...(usesCustomerScopedHeader ? { customerKey: req.session!.groundxUsername } : {}),
+        ...(usesCustomerScopedHeader ? { customerKey: sessionUsername(req.session!)! } : {}),
       });
       await sendUpstreamResponse(response, res);
     } catch (error) {

@@ -83,6 +83,25 @@ describe("MySqlAppRepository", () => {
     expect(lower).not.toMatch(/\bcreate table.*documents?\b/);
   });
 
+  // ── 2026-05-31-core-data-followups §4 #17 — dead persist-column closeout ──
+  //
+  // `chat_messages.tool_calls_json` was WRITE-ONLY (the chat handler wrote
+  // `reply.tools` but nothing ever read it back into application/LLM context)
+  // and `attachments_json` was DEAD (always written NULL, never read). Per the
+  // §9 closeout rule a persist chain must have BOTH a reader and a writer OR be
+  // dropped; adding a reader would surface tool-calls to the client (new
+  // behavior, out of scope), so both columns were dropped. This guard fails
+  // loudly if either column is reintroduced anywhere in the DDL or the
+  // chat_messages INSERT/SELECT — i.e. if a write-only/dead column comes back.
+  it("does not reintroduce the dropped tool_calls_json / attachments_json columns (§4 #17)", async () => {
+    const repository = new MySqlAppRepository(testEnv);
+    await repository.createSchema();
+    const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
+    const joined = statements.join("\n").toLowerCase();
+    expect(joined).not.toContain("tool_calls_json");
+    expect(joined).not.toContain("attachments_json");
+  });
+
   // ── master-viewer-session Phase 1 — chat_sessions viewer-column migration ──
   //
   // Regression class: the upstream bug was "chat_sessions table was
@@ -324,7 +343,7 @@ describe("MySqlAppRepository", () => {
       mysqlMock.execute.mockResolvedValueOnce([
         [{
           id: "m1", chat_session_id: "c1", turn_index: 0, role: "assistant", content: "hi",
-          citations_json: null, tool_calls_json: null, attachments_json: null,
+          citations_json: null,
           compressed_into_summary_id: null, llm_provider: null, llm_model_id: null,
           latency_ms: null, prompt_tokens: null, completion_tokens: null, error_code: null,
           created_at: "2026-05-31T00:00:00.000Z",
@@ -340,7 +359,7 @@ describe("MySqlAppRepository", () => {
       mysqlMock.execute.mockResolvedValueOnce([
         [{
           id: "m1", chat_session_id: "c1", turn_index: 0, role: "HACKER", content: "x",
-          citations_json: null, tool_calls_json: null, attachments_json: null,
+          citations_json: null,
           compressed_into_summary_id: null, llm_provider: null, llm_model_id: null,
           latency_ms: null, prompt_tokens: null, completion_tokens: null, error_code: null,
           created_at: "2026-05-31T00:00:00.000Z",

@@ -79,8 +79,6 @@ export interface ChatMessageRecord {
   role: ChatMessageRole;
   content: string;
   citationsJson: string | null;
-  toolCallsJson: string | null;
-  attachmentsJson: string | null;
   compressedIntoSummaryId: string | null;
   llmProvider: string | null;
   llmModelId: string | null;

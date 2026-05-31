@@ -25,19 +25,19 @@ export interface ChatSessionOwnerRef {
  * session's auth state (the dominant guard semantics, used by six of the seven
  * call-sites — the seventh, the messages-hydrate route, is reconciled onto it):
  *
- *   - authed (`groundxUsername` set) → `ownerUserId === groundxUsername`
- *   - anonymous                      → `ownerAnonId === session.id` (cookie id)
+ *   - authed (`kind === "authed"`) → `ownerUserId === groundxUsername`
+ *   - anonymous                    → `ownerAnonId === session.id` (cookie id)
  *
  * The two arms are mutually exclusive by auth state — an authed caller is never
  * matched against the anon key and vice-versa — so a stale anon owner can't
- * grant access to an authed session (and the empty-string anon `groundxUsername`
- * never collides with a real `ownerUserId`).
+ * grant access to an authed session. (§4 #20 — the anon arm carries no
+ * `groundxUsername` at all, so it can never collide with a real `ownerUserId`.)
  */
 export function assertChatSessionOwnership(
   row: ChatSessionOwnerRef,
   session: SessionContext,
 ): boolean {
-  return session.groundxUsername
+  return session.kind === "authed"
     ? row.ownerUserId === session.groundxUsername
     : row.ownerAnonId === session.id;
 }

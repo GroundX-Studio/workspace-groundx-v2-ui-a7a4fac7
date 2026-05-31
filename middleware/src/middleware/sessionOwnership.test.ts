@@ -12,8 +12,10 @@ import type { SessionContext } from "./session.js";
  * twin) across the session routes.
  */
 describe("assertChatSessionOwnership (§4 #19)", () => {
-  const authed: SessionContext = { id: "cookie-1", groundxUsername: "gx-user" };
-  const anon: SessionContext = { id: "cookie-2", groundxUsername: "" };
+  // §4 #20 — session auth state is a discriminated union; the anon arm carries
+  // no `groundxUsername` field at all (the empty-string sentinel is gone).
+  const authed: SessionContext = { id: "cookie-1", kind: "authed", groundxUsername: "gx-user" };
+  const anon: SessionContext = { id: "cookie-2", kind: "anon" };
 
   it("an authed caller owns a row whose ownerUserId matches groundxUsername", () => {
     expect(

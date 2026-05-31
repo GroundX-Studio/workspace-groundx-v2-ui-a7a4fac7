@@ -10,6 +10,12 @@ vi.mock("@/lib/sentry", () => ({
 import { captureException } from "@/lib/sentry";
 
 import {
+  proposedSchemaFieldSchema,
+  type ProposalEnvelopeProvenance as SharedProvenance,
+  type ProposedSchemaField as SharedProposedSchemaField,
+} from "@groundx/shared";
+
+import {
   __markChatSessionEnsured,
   __resetEnsuredChatSessions,
   chatErrorToUserCopy,
@@ -17,7 +23,39 @@ import {
   createChatSession,
   listChatMessages,
   sendChatMessage,
+  type ProposalEnvelopeProvenance,
+  type ProposedSchemaField,
 } from "./chatSessions";
+
+/**
+ * 2026-05-31-core-data-followups §4 #18 — the `ProposedSchemaField` /
+ * `ProposalEnvelopeProvenance` proposal-envelope wire types were declared on
+ * BOTH sides of the app↔middleware boundary, and had silently DRIFTED (the app
+ * declared `provenance?` optional, the middleware declared it required). They
+ * are now single-sourced on `@groundx/shared`. These compile-time asserts are
+ * load-bearing under `npm run build` (tsc): if the app re-forks the shape, the
+ * `Eq` evaluates `false` and `Assert<false>` fails the build — a real wire-twin
+ * drift guard, not a name-set check.
+ */
+type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _assertProposedField = Assert<Eq<ProposedSchemaField, SharedProposedSchemaField>>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _assertProvenance = Assert<Eq<ProposalEnvelopeProvenance, SharedProvenance>>;
+
+describe("proposal-envelope wire twins (§4 #18)", () => {
+  it("the shared proposed-schema-field schema validates the wire shape", () => {
+    const parsed = proposedSchemaFieldSchema.safeParse({
+      categoryId: "c1",
+      name: "Total tax",
+      type: "NUMBER",
+      description: "the total tax amount",
+      provenance: { version: "v1", verified: true },
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
 
 const originalFetch = global.fetch;
 

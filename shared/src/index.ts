@@ -461,6 +461,54 @@ export const extractFieldResultSchema = z.object({
 export type ExtractFieldResult = z.infer<typeof extractFieldResultSchema>;
 
 // ──────────────────────────────────────────────────────────────────────
+// SuggestedAction — 2026-05-31-core-data-followups §4 #13. The clickable chip
+// the grounded LLM proposes (e.g. "Show source", "Open samples"). It was
+// declared byte-identically in THREE places: the `SuggestedActionChips` widget,
+// `api/chatSessions`'s `ChatSuggestedAction`, and the middleware
+// `chatRouterTypes.SuggestedAction`. All three now import this ONE shape.
+// `detail` is an opaque payload the host translates into a canvas intent.
+// ──────────────────────────────────────────────────────────────────────
+
+/** A clickable suggested-action chip — one shape, app widget + wire twins. */
+export const suggestedActionSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  detail: z.record(z.unknown()).optional(),
+});
+export type SuggestedAction = z.infer<typeof suggestedActionSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
+// ProposedSchemaField — 2026-05-31-core-data-followups §4 #18. The
+// `proposal-envelope` wire shape the grounded LLM emits ("add a field for total
+// tax"). Declared on BOTH sides of the app↔middleware wire (app
+// `api/chatSessions` + middleware `chatRouterTypes`) and had silently DRIFTED:
+// the app declared `provenance?` optional, the middleware declared it required.
+// Single-sourced here with `provenance` OPTIONAL — the middleware only ever
+// WRITES a present provenance (so required-vs-optional is runtime-identical for
+// it) and the app's readers already guard `provenance?.verified === true`, so
+// the permissive shape unifies both with zero behavior change.
+// ──────────────────────────────────────────────────────────────────────
+
+/** `proposal-envelope-provenance` — set when the server's Zod envelope parse
+ * accepted the LLM payload. Renderers gate a `proposal_v<version> · envelope
+ * verified` label on `provenance?.verified === true`. */
+export const proposalEnvelopeProvenanceSchema = z.object({
+  version: z.literal("v1"),
+  verified: z.literal(true),
+});
+export type ProposalEnvelopeProvenance = z.infer<typeof proposalEnvelopeProvenanceSchema>;
+
+/** A schema-field the grounded LLM proposed — one shape, both sides of the wire. */
+export const proposedSchemaFieldSchema = z.object({
+  categoryId: z.string(),
+  name: z.string(),
+  type: templateFieldTypeSchema,
+  description: z.string(),
+  provenance: proposalEnvelopeProvenanceSchema.optional(),
+});
+export type ProposedSchemaField = z.infer<typeof proposedSchemaFieldSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
 // ViewerStepKind — the discriminant of the app's `ViewerStep` union. Lives
 // here so the middleware tool-catalog (`toolsForStep`) shares ONE definition
 // instead of hand-mirroring the kind set across the workspace boundary. The

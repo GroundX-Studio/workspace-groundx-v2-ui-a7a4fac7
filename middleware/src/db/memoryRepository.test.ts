@@ -34,8 +34,6 @@ function makeMessage(id: string, sessionId: string, turn: number, role: ChatMess
     role,
     content,
     citationsJson: null,
-    toolCallsJson: null,
-    attachmentsJson: null,
     compressedIntoSummaryId: null,
     llmProvider: null,
     llmModelId: null,

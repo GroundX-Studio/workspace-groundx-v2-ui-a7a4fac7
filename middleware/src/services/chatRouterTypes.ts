@@ -21,9 +21,14 @@ import type { NormalizedBbox, WordMap } from "./citationGeometry.js";
 // middleware imports (`Citation` from "./chatRouter.js") keep resolving. The
 // shared shape is identical: documentId, page, snippet?, bbox? (NormalizedBbox),
 // tier? (CitationTier), confidence?, answerSpan?.
-import { ApiError, type Citation, type ContentScope, type ScopeFilter, type TemplateFieldType, type WidgetRole } from "@groundx/shared";
+import { ApiError, type Citation, type ContentScope, type ProposalEnvelopeProvenance, type ProposedSchemaField, type ScopeFilter, type SuggestedAction, type WidgetRole } from "@groundx/shared";
 
 export type { Citation };
+// 2026-05-31-core-data-followups §4 #13 — the middleware `SuggestedAction` was a
+// byte-identical fork of the shared chip shape; re-export the ONE shared type so
+// the wire twin cannot drift. Local importers (`chatRouter`, `ragPipeline`) keep
+// the `SuggestedAction` name unchanged.
+export type { SuggestedAction };
 
 /**
  * `proposal-envelope-provenance`: Zod schema for the LLM's
@@ -112,43 +117,14 @@ export interface ChatRouterRequest {
   callerRole?: WidgetRole;
 }
 
-export interface SuggestedAction {
-  key: string;
-  label: string;
-  detail?: Record<string, unknown>;
-}
-
-/**
- * UI-01 Phase 2a — schema-field addition proposed by the grounded LLM
- * in response to a user request like "add a field for total tax". The
- * frontend renders this as an Accept/Reject card in the chat live-turn
- * stream; Accept dispatches the ChatStore `addSchemaField` action.
- *
- * Shape mirrors the client-side `SchemaFieldAddition` (minus `id`,
- * which the client mints) so the round-trip is lossless. Type values
- * are restricted to the four supported primitive types — the parser
- * filters anything else out.
- */
-export interface ProposalEnvelopeProvenance {
-  /** Versioned envelope tag — currently always "v1". */
-  version: "v1";
-  /** True when the server-side Zod parse succeeded. */
-  verified: true;
-}
-
-export interface ProposedSchemaField {
-  categoryId: string;
-  name: string;
-  type: TemplateFieldType;
-  description: string;
-  /**
-   * `proposal-envelope-provenance`: present iff
-   * `proposalEnvelopeV1Schema.safeParse` accepted the LLM payload. The
-   * frontend renders a `proposal_v<version> · envelope verified` label
-   * sourced from this field.
-   */
-  provenance: ProposalEnvelopeProvenance;
-}
+// 2026-05-31-core-data-followups §4 #18 — the proposal-envelope wire shapes
+// (`ProposedSchemaField` + `ProposalEnvelopeProvenance`) were declared on BOTH
+// sides of the wire and had silently DRIFTED on `provenance`'s optionality
+// (this side required it; the app side made it optional). They are now
+// single-sourced on `@groundx/shared`; re-export so local importers
+// (`chatRouter`, `ragPipeline`) keep their names. The middleware always WRITES
+// a present provenance, so the unified-optional shape is runtime-identical here.
+export type { ProposalEnvelopeProvenance, ProposedSchemaField };
 
 /**
  * Dev-only diagnostic payload attached to chat replies in non-prod

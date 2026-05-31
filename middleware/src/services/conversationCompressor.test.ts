@@ -29,8 +29,6 @@ function makeMsg(id: string, sessionId: string, turn: number, role: ChatMessageR
     role,
     content,
     citationsJson: null,
-    toolCallsJson: null,
-    attachmentsJson: null,
     compressedIntoSummaryId: null,
     llmProvider: null,
     llmModelId: null,

@@ -294,8 +294,6 @@ describe("middleware API route contract", () => {
         role: "user",
         content: "before sign-up",
         citationsJson: null,
-        toolCallsJson: null,
-        attachmentsJson: null,
         compressedIntoSummaryId: null,
         llmProvider: null,
         llmModelId: null,
@@ -339,8 +337,6 @@ describe("middleware API route contract", () => {
         role: "user",
         content: "anon turn",
         citationsJson: null,
-        toolCallsJson: null,
-        attachmentsJson: null,
         compressedIntoSummaryId: null,
         llmProvider: null,
         llmModelId: null,
@@ -364,8 +360,6 @@ describe("middleware API route contract", () => {
         role: "assistant",
         content: "post-claim turn",
         citationsJson: null,
-        toolCallsJson: null,
-        attachmentsJson: null,
         compressedIntoSummaryId: null,
         llmProvider: null,
         llmModelId: null,
@@ -401,8 +395,6 @@ describe("middleware API route contract", () => {
         role: "user",
         content: "anon question",
         citationsJson: null,
-        toolCallsJson: null,
-        attachmentsJson: null,
         compressedIntoSummaryId: null,
         llmProvider: null,
         llmModelId: null,
@@ -421,8 +413,6 @@ describe("middleware API route contract", () => {
         role: "assistant",
         content: "post-signup reply",
         citationsJson: null,
-        toolCallsJson: null,
-        attachmentsJson: null,
         compressedIntoSummaryId: null,
         llmProvider: null,
         llmModelId: null,
@@ -460,8 +450,6 @@ describe("middleware API route contract", () => {
         role: "user",
         content: "private content",
         citationsJson: null,
-        toolCallsJson: null,
-        attachmentsJson: null,
         compressedIntoSummaryId: null,
         llmProvider: null,
         llmModelId: null,
@@ -583,13 +571,13 @@ describe("middleware API route contract", () => {
       const now = new Date();
       await repository.appendChatMessage({
         id: "m1", chatSessionId: "rt01-anon", turnIndex: 1, role: "user",
-        content: "hi", citationsJson: null, toolCallsJson: null, attachmentsJson: null,
+        content: "hi", citationsJson: null,
         compressedIntoSummaryId: null, llmProvider: null, llmModelId: null,
         latencyMs: null, promptTokens: null, completionTokens: null, errorCode: null, createdAt: now,
       });
       await repository.appendChatMessage({
         id: "m2", chatSessionId: "rt01-anon", turnIndex: 2, role: "assistant",
-        content: "hello there", citationsJson: null, toolCallsJson: null, attachmentsJson: null,
+        content: "hello there", citationsJson: null,
         compressedIntoSummaryId: null, llmProvider: null, llmModelId: null,
         latencyMs: null, promptTokens: null, completionTokens: null, errorCode: null, createdAt: now,
       });
@@ -622,7 +610,7 @@ describe("middleware API route contract", () => {
         content: "The total amount due is $7,613.20.",
         // Simulate MySQL's parsed-JSON return (array, not string).
         citationsJson: citations as unknown as string,
-        toolCallsJson: null, attachmentsJson: null, compressedIntoSummaryId: null,
+        compressedIntoSummaryId: null,
         llmProvider: null, llmModelId: null, latencyMs: null, promptTokens: null,
         completionTokens: null, errorCode: null, createdAt: new Date(),
       });
@@ -652,7 +640,7 @@ describe("middleware API route contract", () => {
         .expect(200);
       await repository.appendChatMessage({
         id: "m1", chatSessionId: "rt01-owned", turnIndex: 1, role: "user", content: "private",
-        citationsJson: null, toolCallsJson: null, attachmentsJson: null, compressedIntoSummaryId: null,
+        citationsJson: null, compressedIntoSummaryId: null,
         llmProvider: null, llmModelId: null, latencyMs: null, promptTokens: null,
         completionTokens: null, errorCode: null, createdAt: new Date(),
       });
@@ -688,7 +676,7 @@ describe("middleware API route contract", () => {
       ];
       await repository.appendChatMessage({
         id: "c1", chatSessionId: "cit-rt", turnIndex: 1, role: "user",
-        content: "what is the total?", citationsJson: null, toolCallsJson: null, attachmentsJson: null,
+        content: "what is the total?", citationsJson: null,
         compressedIntoSummaryId: null, llmProvider: null, llmModelId: null,
         latencyMs: null, promptTokens: null, completionTokens: null, errorCode: null, createdAt: now,
       });
@@ -696,7 +684,7 @@ describe("middleware API route contract", () => {
         id: "c2", chatSessionId: "cit-rt", turnIndex: 2, role: "assistant",
         content: "The total is $214.07.",
         citationsJson: JSON.stringify(citations),
-        toolCallsJson: null, attachmentsJson: null, compressedIntoSummaryId: null,
+        compressedIntoSummaryId: null,
         llmProvider: null, llmModelId: null, latencyMs: null, promptTokens: null,
         completionTokens: null, errorCode: null, createdAt: now,
       });
@@ -1642,8 +1630,6 @@ describe("middleware API route contract", () => {
         role: "user",
         content: "what is the total?",
         citationsJson: null,
-        toolCallsJson: null,
-        attachmentsJson: null,
         compressedIntoSummaryId: null,
         llmProvider: null,
         llmModelId: null,
