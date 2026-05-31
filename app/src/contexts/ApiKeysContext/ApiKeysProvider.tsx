@@ -3,36 +3,14 @@ import { FC, ReactNode, useCallback, useState } from "react";
 import { api } from "@/api";
 import { RequestOptions } from "@/api/common";
 import { GroundXApiKey } from "@/api/entities/sdkTypes";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { ApiKeysContext } from "./ApiKeysContext";
 
 export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage, setSuccessMessage } = useMessageContext();
+  const run = useSdkRunner("API key operation failed.");
   const [groundxApiKeys, setGroundXApiKeys] = useState<GroundXApiKey[]>([]);
   const [partnerApiKeys, setPartnerApiKeys] = useState<GroundXApiKey[]>([]);
-
-  const run = useCallback(
-    async <T,>(work: () => Promise<T>, successMessage?: string) => {
-      const result = createSdkResult<T>();
-      setIsLoading(true);
-      try {
-        result.response = await work();
-        result.isSuccess = true;
-        if (successMessage) setSuccessMessage(successMessage);
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("API key operation failed.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading, setSuccessMessage]
-  );
 
   const listGroundXApiKeys = useCallback(
     (options?: RequestOptions) =>

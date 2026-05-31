@@ -4,37 +4,24 @@ import { api } from "@/api";
 import { RequestOptions } from "@/api/common";
 import { SearchContentInput, SearchDocumentsInput } from "@/api/entities/groundxSearchEntity";
 import { SearchResponseBody } from "@/api/entities/sdkTypes";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { SearchContext } from "./SearchContext";
 
 export const SearchProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage } = useMessageContext();
+  const run = useSdkRunner("Search failed.");
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchResponseBody | null>(null);
 
   const runSearch = useCallback(
-    async (work: () => Promise<SearchResponseBody>, nextQuery: string) => {
-      const result = createSdkResult<SearchResponseBody>();
-      setIsLoading(true);
-      try {
+    (work: () => Promise<SearchResponseBody>, nextQuery: string) =>
+      run(async () => {
         const response = await work();
         setQuery(nextQuery);
         setSearch(response);
-        result.response = response;
-        result.isSuccess = true;
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("Search failed.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading]
+        return response;
+      }),
+    [run]
   );
 
   const searchContent = useCallback(

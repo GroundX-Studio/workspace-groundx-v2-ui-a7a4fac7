@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { Auth, AuthContext, AuthContextI } from "@/contexts/AuthContext/AuthContext";
+import { sdkSuccess } from "@/contexts/sdkContextTypes";
 import { GxThemeProvider } from "@/ThemeProvider";
 
 import { OnboardingProvider } from "./OnboardingProvider";
@@ -24,7 +25,7 @@ const baseUser = {
 
 const renderProvider = ({
   onboardingState,
-  updateAppMetadata = vi.fn().mockResolvedValue({ isSuccess: true, error: false }),
+  updateAppMetadata = vi.fn().mockResolvedValue(sdkSuccess(undefined)),
 }: {
   onboardingState?: string | null;
   updateAppMetadata?: AuthContextI["updateAppMetadata"];

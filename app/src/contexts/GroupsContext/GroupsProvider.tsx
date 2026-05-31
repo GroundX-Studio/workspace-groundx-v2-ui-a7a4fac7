@@ -5,37 +5,15 @@ import { RequestOptions, PaginationParams } from "@/api/common";
 import { CreateGroundXGroupInput } from "@/api/entities/groundxGroupsEntity";
 import { PartnerGroupInput } from "@/api/entities/partnerGroupsEntity";
 import { Group } from "@/api/entities/sdkTypes";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { GroupsContext } from "./GroupsContext";
 
 export const GroupsProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage, setSuccessMessage } = useMessageContext();
+  const run = useSdkRunner("Group operation failed.");
   const [groundxGroups, setGroundXGroups] = useState<Group[]>([]);
   const [partnerGroups, setPartnerGroups] = useState<Group[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
-
-  const run = useCallback(
-    async <T,>(work: () => Promise<T>, successMessage?: string) => {
-      const result = createSdkResult<T>();
-      setIsLoading(true);
-      try {
-        result.response = await work();
-        result.isSuccess = true;
-        if (successMessage) setSuccessMessage(successMessage);
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("Group operation failed.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading, setSuccessMessage]
-  );
 
   const listGroundXGroups = useCallback(
     (params?: PaginationParams, options?: RequestOptions) =>

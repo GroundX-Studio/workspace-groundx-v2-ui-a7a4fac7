@@ -118,7 +118,7 @@ describe("BucketsProvider (TS-02)", () => {
       { wrapper },
     );
 
-    let actionResult: { isSuccess: boolean; error: unknown } | undefined;
+    let actionResult: { isSuccess: boolean; response?: unknown; error?: unknown } | undefined;
     await act(async () => {
       actionResult = await combined.result.current.buckets.listGroundXBuckets();
     });

@@ -81,20 +81,79 @@ independent, against a fixed base.
 SEQUENTIAL (the factory contracts). Migrating the ~30 `api/entities/*` wrappers + the 8 contexts onto
 them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed factory.
 
-- [ ] **Failing test:** the `{ isSuccess: false; response: null; error: null }` limbo no longer
+- [x] **Failing test:** the `{ isSuccess: false; response: null; error: null }` limbo no longer
   type-checks; an `isSuccess:true` value exposes `response` and an `isSuccess:false` value exposes
-  `error` (discriminated-union narrowing).
-- [ ] Define `SdkActionResult<T>` as a discriminated union
-  (`{isSuccess:true;response:T} | {isSuccess:false;error}`).
-- [ ] Author `createEntityClient<T>()` (api) over `SdkActionResult<T>`.
-- [ ] Author `createEntityContext<T>()` (context) over `SdkActionResult<T>`.
-- [ ] Migrate the ~30 `api/entities/*` CRUD wrappers (list/create/get/update/delete) onto
-  `createEntityClient<T>()`. ⟲ per-wrapper.
-- [ ] Migrate the 8 hand-rolled CRUD contexts (Buckets/Documents/Groups/Projects/Workflows/ApiKeys/
-  Search/Health) onto `createEntityContext<T>()`. ⟲ per-context.
-- [ ] Route `AuthProvider`'s `{isSuccess, error}` two-boolean twin through `SdkActionResult<T>`.
-- [ ] Adversarial review: no hand-rolled CRUD wrapper/context remains off the factory; the limbo state
-  is unrepresentable; app suite green.
+  `error` (discriminated-union narrowing). — DONE: new `contexts/sdkContextTypes.test.ts` — two
+  `@ts-expect-error` cases (the `{isSuccess:false;response:null;error:null}` limbo + a success with
+  `response:null`) plus runtime narrowing asserts. Failed red first (`sdkSuccess`/`sdkFailure` absent),
+  green after. The `@ts-expect-error` cases are load-bearing under `npm run build` (tsc): if the limbo
+  ever re-typechecked, tsc flags the directive UNUSED and the build fails.
+- [x] Define `SdkActionResult<T>` as a discriminated union
+  (`{isSuccess:true;response:T} | {isSuccess:false;error}`). — DONE: `contexts/sdkContextTypes.ts` now
+  `type SdkActionResult<T> = {isSuccess:true; response:T; error?:undefined} | {isSuccess:false;
+  response:null; error:NonNullable<unknown>}`. Failure keeps `response:null` so the many callers that
+  read `result.response` without narrowing (Extract.tsx, useLiveExtractionSchema, PdfViewerWidget,
+  AppInitialization) still compile, AND the existing context failure-path tests that assert
+  `toMatchObject({isSuccess:false, response:null})` stay green unchanged. The old mutable
+  `createSdkResult()` builder (which produced the limbo) is REPLACED by `sdkSuccess(response)` /
+  `sdkFailure(error)` constructors — zero `createSdkResult` references remain.
+- [~] Author `createEntityClient<T>()` (api) over `SdkActionResult<T>`. — DELIBERATELY NOT BUILT
+  (earn-every-axis GUARDRAIL, project_anti_overengineering). The ~30 `api/entities/*` wrappers do NOT
+  share an `SdkActionResult` shape — they are 4-7-line thin axios calls returning RAW response bodies
+  (`BucketResponse`/`GroupResponse`/`MessageResponse`/…). Their only common core is
+  `(await axios.<verb>(url, ...args)).data`; they vary on EVERY other axis (verb · url-template ·
+  request body · response-unwrap key · groundx-vs-partner config builder · pagination · path-encoding)
+  and many carry genuinely-bespoke methods (`addBucketToGroundXGroup`, `attachBucketToPartnerProject`,
+  `customerEntity` x-jwt-token header extraction, `documentsEntity` ingest/crawl/copy). A
+  `createEntityClient<T>()` generating uniform list/create/get/update/delete would need per-method
+  config objects LONGER than the current one-liners and could not cover the bespoke methods — a forced
+  abstraction with awkward escape hatches, the exact pattern the GUARDRAIL forbids. Kept the concrete
+  wrappers; noted here rather than orphaning a one-true-shape abstraction.
+- [x] Author `createEntityContext<T>()` (context) over `SdkActionResult<T>`. — DONE:
+  `contexts/createEntityContext.tsx` exports (1) `useSdkRunner(defaultErrorMessage)` — the context-side
+  runner that BUILDS an `SdkActionResult<T>` (so the limbo can't be hand-constructed at a call-site),
+  replacing the byte-identical `run = useCallback(...)` helper that lived in 6 providers + the inlined
+  twins in Search/Health; (2) `createContextHook(Context, msg)` — replacing the duplicated
+  `useContext; if(!c) throw; return c;` hook body in 8 context `index.tsx` files. Both factories have
+  ≥6 real consumers (axis earned). New `contexts/createEntityContext.test.tsx` (failing-first) covers
+  success/failure/override + in-provider/out-of-provider.
+- [~] Migrate the ~30 `api/entities/*` CRUD wrappers (list/create/get/update/delete) onto
+  `createEntityClient<T>()`. ⟲ per-wrapper. — N/A: `createEntityClient<T>()` deliberately not built
+  (see above). The concrete wrappers are unchanged and remain the source of truth; `entityCoverage.test.ts`
+  (15) stays green.
+- [x] Migrate the 8 hand-rolled CRUD contexts (Buckets/Documents/Groups/Projects/Workflows/ApiKeys/
+  Search/Health) onto `createEntityContext<T>()`. ⟲ per-context. — DONE: all 8 providers now call
+  `useSdkRunner("<entity> operation failed.")` instead of an inline `run`; Search/Health rewrote their
+  inlined variants onto the runner (state-setting stays inside the `work` closure); all 8 `index.tsx`
+  hooks now `createContextHook(...)` with byte-identical error messages. Existing `sdkContexts.test.tsx`
+  (14) + the 6 per-provider `*Provider.test.tsx` suites stay green; only an INCIDENTAL `let
+  actionResult: {isSuccess:boolean; error:unknown}` annotation in the 6 failure-path tests was widened
+  to `{isSuccess:boolean; response?:unknown; error?:unknown}` to match the union (assertions untouched,
+  not a retarget). NOTE on `run` signature: the old Buckets `run(work, errorMessage, successMessage)`
+  arg order is unified to the runner's `(work, successMessage?, errorMessage?)`; the 6 Bucket call-sites
+  that passed the redundant default error string were rewritten to pass only the success message —
+  behavior identical (the explicit string equalled the default).
+- [x] Route `AuthProvider`'s `{isSuccess, error}` two-boolean twin through `SdkActionResult<T>`. — DONE:
+  `register`/`resetPassword`/`confirmChangingPassword`/`updateAppMetadata` now return
+  `SdkActionResult<void>` and `getUserData` returns `SdkActionResult<User>`, built via
+  `sdkSuccess`/`sdkFailure` (`AuthContext.tsx` interface + `AuthProvider.tsx` bodies). `login` keeps its
+  distinct `LoginReqCallback` (has `banned`) — not a simple twin, left alone. This ELIMINATES the
+  hand-rolled limbo in `register` (old code returned `{isSuccess:false, error:false}` when
+  `api.register` returned falsy). Consumers verified behavior-preserving: Register.tsx (`if
+  result.isSuccess`), ResetPassword.tsx (×2), OnboardingProvider (`if result.isSuccess`),
+  AppInitialization (`if result.error || !result.response`). Their test mocks were updated to emit
+  `SdkActionResult` values (`sdkSuccess`/`sdkFailure`) — AppInitialization.test, Home.test,
+  OnboardingProvider.test — assertions unchanged.
+- [x] Adversarial review: no hand-rolled CRUD wrapper/context remains off the factory; the limbo state
+  is unrepresentable; app suite green. — DONE: zero `createSdkResult` references remain; zero inline
+  `run = useCallback` helpers remain across the 8 contexts; all 8 `useXContext` hooks go through
+  `createContextHook`; the `{isSuccess:false;response:null;error:null}` limbo + the hand-rolled
+  `{isSuccess:false,error:false}` limbo in AuthProvider are both unrepresentable (tsc-enforced). EARNED:
+  `SdkActionResult` (8 contexts + Auth + external readers), `useSdkRunner` (8 providers), `createContextHook`
+  (8 hooks) — each ≥2 real consumers; `createEntityClient` deliberately not built (forced-abstraction
+  guardrail, documented above). Gates: app suite 1424 green (existing tests unchanged, not retargeted),
+  middleware suite 653 green (untouched), app `npm run build` (tsc+vite) clean, `openspec validate
+  --strict` clean, widget-contract (164) + no-hardcoded-styles (72) + entityCoverage (15) guards green.
 
 ## 4. Type-unification + row-mapper validation + wire-types module + illegal-states unions
 

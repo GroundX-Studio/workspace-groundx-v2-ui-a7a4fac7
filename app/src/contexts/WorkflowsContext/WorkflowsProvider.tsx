@@ -4,37 +4,15 @@ import { api } from "@/api";
 import { RequestOptions } from "@/api/common";
 import { WorkflowInput, WorkflowRelationshipInput } from "@/api/entities/groundxWorkflowsEntity";
 import { Workflow } from "@/api/entities/sdkTypes";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { WorkflowsContext } from "./WorkflowsContext";
 
 export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage, setSuccessMessage } = useMessageContext();
+  const run = useSdkRunner("Workflow operation failed.");
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
   const [accountWorkflow, setAccountWorkflow] = useState<Workflow | null>(null);
-
-  const run = useCallback(
-    async <T,>(work: () => Promise<T>, successMessage?: string) => {
-      const result = createSdkResult<T>();
-      setIsLoading(true);
-      try {
-        result.response = await work();
-        result.isSuccess = true;
-        if (successMessage) setSuccessMessage(successMessage);
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("Workflow operation failed.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading, setSuccessMessage]
-  );
 
   const listWorkflows = useCallback(
     (options?: RequestOptions) =>

@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AuthContext, type AuthContextI } from "@/contexts/AuthContext/AuthContext";
+import { sdkFailure } from "@/contexts/sdkContextTypes";
 
 import { Home } from "./Home";
 
@@ -30,12 +31,12 @@ const makeAuth = (isLoggedIn: boolean): AuthContextI => ({
   user: null,
   setAuth: () => undefined,
   login: async () => ({ isLoggedIn: false, error: false, banned: false }),
-  register: async () => ({ isSuccess: false, error: false }),
+  register: async () => sdkFailure<void>(new Error("not implemented")),
   logout: async () => undefined,
-  getUserData: async () => ({ response: null, error: false }),
-  updateAppMetadata: async () => ({ isSuccess: false, error: false }),
-  resetPassword: async () => ({ isSuccess: false, error: false }),
-  confirmChangingPassword: async () => ({ isSuccess: false, error: false }),
+  getUserData: async () => sdkFailure(new Error("not implemented")),
+  updateAppMetadata: async () => sdkFailure<void>(new Error("not implemented")),
+  resetPassword: async () => sdkFailure<void>(new Error("not implemented")),
+  confirmChangingPassword: async () => sdkFailure<void>(new Error("not implemented")),
 });
 
 const ChatRouteMarker = () => {

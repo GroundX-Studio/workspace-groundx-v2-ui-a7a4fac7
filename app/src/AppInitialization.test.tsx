@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { AppInitialization } from "@/AppInitialization";
 import { Auth, AuthContext, AuthContextI } from "@/contexts/AuthContext/AuthContext";
+import { sdkFailure, sdkSuccess } from "@/contexts/sdkContextTypes";
 
 const emptyAuth: Auth = {
   userName: "",
@@ -17,7 +18,7 @@ const Harness = ({ children }: { children: ReactNode }) => {
   const [auth, setAuth] = useState<Auth>(emptyAuth);
   const getUserData = vi.fn(async () => {
     setAuth({ isLoggedIn: true, userName: "acct-1", token: "", xJwtToken: "" });
-    return { response: { username: "acct-1", email: "pat@example.com", first: "Pat", last: "Lee" }, error: false };
+    return sdkSuccess({ username: "acct-1", email: "pat@example.com", first: "Pat", last: "Lee" });
   });
   const contextValue: AuthContextI = {
     auth,
@@ -75,7 +76,7 @@ describe("AppInitialization", () => {
         login: vi.fn(),
         register: vi.fn(),
         logout: vi.fn(),
-        getUserData: vi.fn().mockResolvedValue({ response: null, error: true }),
+        getUserData: vi.fn().mockResolvedValue(sdkFailure(new Error("no user"))),
         updateAppMetadata: vi.fn(),
         resetPassword: vi.fn(),
         confirmChangingPassword: vi.fn(),

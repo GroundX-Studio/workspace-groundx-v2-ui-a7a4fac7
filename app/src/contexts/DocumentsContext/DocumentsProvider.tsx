@@ -10,37 +10,15 @@ import {
   UpdateDocumentsInput,
 } from "@/api/entities/groundxDocumentsEntity";
 import { GroundXDocument, IngestProcess } from "@/api/entities/sdkTypes";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { DocumentsContext } from "./DocumentsContext";
 
 export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage, setSuccessMessage } = useMessageContext();
+  const run = useSdkRunner("Document operation failed.");
   const [documents, setDocuments] = useState<GroundXDocument[]>([]);
   const [selectedDocument, setSelectedDocument] = useState<GroundXDocument | null>(null);
   const [processes, setProcesses] = useState<IngestProcess[]>([]);
-
-  const run = useCallback(
-    async <T,>(work: () => Promise<T>, successMessage?: string) => {
-      const result = createSdkResult<T>();
-      setIsLoading(true);
-      try {
-        result.response = await work();
-        result.isSuccess = true;
-        if (successMessage) setSuccessMessage(successMessage);
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("Document operation failed.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading, setSuccessMessage]
-  );
 
   const listDocuments = useCallback(
     (params?: PaginationParams, options?: RequestOptions) =>

@@ -4,37 +4,15 @@ import { api } from "@/api";
 import { RequestOptions, PaginationParams } from "@/api/common";
 import { PartnerBucketInput } from "@/api/entities/partnerBucketsEntity";
 import { Bucket } from "@/api/entities/sdkTypes";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { BucketsContext } from "./BucketsContext";
 
 export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage, setSuccessMessage } = useMessageContext();
+  const run = useSdkRunner("Bucket operation failed.");
   const [groundxBuckets, setGroundXBuckets] = useState<Bucket[]>([]);
   const [partnerBuckets, setPartnerBuckets] = useState<Bucket[]>([]);
   const [selectedBucket, setSelectedBucket] = useState<Bucket | null>(null);
-
-  const run = useCallback(
-    async <T,>(work: () => Promise<T>, errorMessage = "Bucket operation failed.", successMessage?: string) => {
-      const result = createSdkResult<T>();
-      setIsLoading(true);
-      try {
-        result.response = await work();
-        result.isSuccess = true;
-        if (successMessage) setSuccessMessage(successMessage);
-      } catch (error) {
-        result.error = error;
-        setErrorMessage(errorMessage);
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading, setSuccessMessage]
-  );
 
   const listGroundXBuckets = useCallback(
     (params?: PaginationParams, options?: RequestOptions) =>
@@ -62,7 +40,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         const response = await api.groundxBuckets.createGroundXBucket(name, options);
         setGroundXBuckets((buckets) => [response.bucket, ...buckets]);
         return response.bucket;
-      }, "Bucket operation failed.", "Bucket created."),
+      }, "Bucket created."),
     [run]
   );
 
@@ -73,7 +51,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setGroundXBuckets((buckets) => buckets.map((bucket) => (bucket.bucketId === bucketId ? response.bucket : bucket)));
         setSelectedBucket(response.bucket);
         return response.bucket;
-      }, "Bucket operation failed.", "Bucket updated."),
+      }, "Bucket updated."),
     [run]
   );
 
@@ -83,7 +61,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         await api.groundxBuckets.deleteGroundXBucket(bucketId, options);
         setGroundXBuckets((buckets) => buckets.filter((bucket) => bucket.bucketId !== bucketId));
         setSelectedBucket((bucket) => (bucket?.bucketId === bucketId ? null : bucket));
-      }, "Bucket operation failed.", "Bucket deleted."),
+      }, "Bucket deleted."),
     [run]
   );
 
@@ -113,7 +91,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         const response = await api.partnerBuckets.createPartnerBucket(bucket, options);
         setPartnerBuckets((buckets) => [response.bucket, ...buckets]);
         return response.bucket;
-      }, "Bucket operation failed.", "Bucket created."),
+      }, "Bucket created."),
     [run]
   );
 
@@ -122,7 +100,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
       run(async () => {
         await api.partnerBuckets.updatePartnerBucket(bucketId, bucket, options);
         setPartnerBuckets((buckets) => buckets.map((item) => (item.bucketId === bucketId ? { ...item, ...bucket } : item)));
-      }, "Bucket operation failed.", "Bucket updated."),
+      }, "Bucket updated."),
     [run]
   );
 
@@ -131,7 +109,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
       run(async () => {
         await api.partnerBuckets.deletePartnerBucket(bucketId, options);
         setPartnerBuckets((buckets) => buckets.filter((bucket) => bucket.bucketId !== bucketId));
-      }, "Bucket operation failed.", "Bucket deleted."),
+      }, "Bucket deleted."),
     [run]
   );
 

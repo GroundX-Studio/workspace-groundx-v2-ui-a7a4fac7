@@ -1,11 +1,6 @@
-import { useContext } from "react";
+import { createContextHook } from "@/contexts/createEntityContext";
 
 import { WorkflowsContext, WorkflowsContextI } from "./WorkflowsContext";
 export { WorkflowsProvider } from "./WorkflowsProvider";
 
-export const useWorkflowsContext = (): WorkflowsContextI => {
-  const context = useContext(WorkflowsContext);
-  if (!context) throw new Error("useWorkflowsContext must be used inside a WorkflowsProvider");
-  return context;
-};
-
+export const useWorkflowsContext = createContextHook(WorkflowsContext, "useWorkflowsContext must be used inside a WorkflowsProvider");

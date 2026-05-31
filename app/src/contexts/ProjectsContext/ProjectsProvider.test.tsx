@@ -98,7 +98,7 @@ describe("ProjectsProvider (TS-02)", () => {
       { wrapper: ({ children }) => combinedWrapper(children) },
     );
 
-    let actionResult: { isSuccess: boolean; error: unknown } | undefined;
+    let actionResult: { isSuccess: boolean; response?: unknown; error?: unknown } | undefined;
     await act(async () => {
       actionResult = await result.current.projects.listProjects();
     });

@@ -1,6 +1,7 @@
 import { createContext } from "react";
 
 import { LoginI, RegisterI, UpdateAppMetadataInput, User } from "@/api/entities/customerEntity";
+import { SdkActionResult } from "@/contexts/sdkContextTypes";
 
 export interface Auth {
   userName: string;
@@ -20,16 +21,12 @@ export interface AuthContextI {
   user: User | null;
   setAuth: React.Dispatch<React.SetStateAction<Auth>>;
   login: (data: LoginI) => Promise<LoginReqCallback>;
-  register: (data: RegisterI) => Promise<{ isSuccess: boolean; error: boolean }>;
+  register: (data: RegisterI) => Promise<SdkActionResult<void>>;
   logout: () => Promise<void>;
-  getUserData: (username?: string) => Promise<{ response: User | null; error: boolean }>;
-  updateAppMetadata: (metadata: UpdateAppMetadataInput) => Promise<{ isSuccess: boolean; error: boolean }>;
-  resetPassword: (email: string) => Promise<{ isSuccess: boolean; error: boolean }>;
-  confirmChangingPassword: (
-    code: string,
-    email: string,
-    password: string
-  ) => Promise<{ isSuccess: boolean; error: boolean }>;
+  getUserData: (username?: string) => Promise<SdkActionResult<User>>;
+  updateAppMetadata: (metadata: UpdateAppMetadataInput) => Promise<SdkActionResult<void>>;
+  resetPassword: (email: string) => Promise<SdkActionResult<void>>;
+  confirmChangingPassword: (code: string, email: string, password: string) => Promise<SdkActionResult<void>>;
 }
 
 export const AuthContext = createContext<AuthContextI | undefined>(undefined);

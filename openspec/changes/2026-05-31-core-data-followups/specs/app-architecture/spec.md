@@ -24,12 +24,16 @@ fields. A drift guard SHALL fail if a `*Error` class does not extend the base.
 - **WHEN** the drift guard runs
 - **THEN** the guard fails loudly, naming the offending class.
 
-### Requirement: Entity CRUD SHALL be built from a shared factory over a discriminated SdkActionResult
+### Requirement: Entity CRUD contexts SHALL be built from a shared factory over a discriminated SdkActionResult
 
-Entity list/create/get/update/delete clients and their contexts SHALL be produced by a shared
-`createEntityClient<T>()` / `createEntityContext<T>()` factory over an `SdkActionResult<T>`
-discriminated union, so the hand-rolled per-entity duplication is removed and the success/error limbo
-is unrepresentable.
+Entity CRUD context results SHALL be a discriminated `SdkActionResult<T>` union, and the entity
+contexts SHALL be produced by a shared context-side factory over that union, so the hand-rolled
+per-context duplication is removed and the success/error limbo is unrepresentable.
+
+The api-side per-entity wrappers (`api/entities/*`) are NOT required to go through a generated client
+factory: they are thin axios calls returning raw response bodies and share no `SdkActionResult` shape;
+forcing them through one `createEntityClient<T>()` would be a forced abstraction (per the
+earn-every-axis guardrail). They remain concrete; only the context layer is factored.
 
 #### Scenario: SdkActionResult makes the limbo state unrepresentable
 
@@ -38,12 +42,12 @@ is unrepresentable.
 - **THEN** it fails type-checking
 - **AND** narrowing on `isSuccess` exposes exactly `response` (true) or `error` (false).
 
-#### Scenario: Entity wrappers and contexts use the factory
+#### Scenario: Entity contexts use the factory
 
-- **GIVEN** an entity surface (Buckets/Documents/Groups/Projects/Workflows/ApiKeys/Search/Health)
-- **WHEN** its client and context are constructed
-- **THEN** they are produced by `createEntityClient<T>()` / `createEntityContext<T>()`
-- **AND** no hand-rolled CRUD wrapper or context remains off the factory.
+- **GIVEN** an entity context surface (Buckets/Documents/Groups/Projects/Workflows/ApiKeys/Search/Health)
+- **WHEN** its provider runner and its `useXContext` hook are constructed
+- **THEN** they are produced by the shared context factory (`useSdkRunner` + `createContextHook`)
+- **AND** no hand-rolled `run`-helper or `useContext`-guard hook remains off the factory.
 
 ### Requirement: App↔middleware wire twins SHALL derive from one shared module with a description-level drift guard
 
