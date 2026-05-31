@@ -172,45 +172,65 @@ export type SchemaFieldEdit = Partial<{
   identifiers: string[];
 }>;
 
-export interface PendingSchemaOverlay {
-  /** Fields added by the user via SchemaView / LLM propose-card. */
-  addedFields: SchemaFieldAddition[];
-  /** Field ids the user removed (covers both manifest + added fields). */
+/**
+ * The GENERIC editing-overlay shell — the per-session, in-memory draft over a
+ * shared `Template` (`Template + Scope + Results`). Generalized from the
+ * Extract-only `PendingSchemaOverlay` in 2026-05-29-smart-report-screen Phase 4,
+ * driven by its **real second consumer**, the Report builder
+ * (`SmartReportBuilder`, f4a/S3a).
+ *
+ * The shell is the MECHANISM (added items · removed ids · per-item edits ·
+ * proposal queue · pinned samples · focused group); the item shape is the DATA
+ * that varies by template kind:
+ *   • Extract → `PendingSchemaOverlay` = shell of `SchemaField*` (fields).
+ *   • Report  → `PendingReportOverlay` = shell of `ReportSection*` (sections).
+ *
+ * The member names are kept generic-but-Extract-compatible (`addedFields`,
+ * `editedFields`, `focusedCategoryId`, …) so the Extract arm aliases the shell
+ * with ZERO churn — its live code reads the exact same members. For the report
+ * arm, read `addedFields` as "added sections", `focusedCategoryId` as "focused
+ * sub-tab", etc.
+ */
+export interface PendingTemplateOverlay<TItem, TEdit, TProposal> {
+  /** Items (fields / sections) added by the user via the editor / LLM propose-card. */
+  addedFields: TItem[];
+  /** Item ids the user removed (covers both manifest + added items). */
   removedFieldIds: ReadonlySet<string>;
   /**
-   * Per-field overrides committed via the inline F3a editor. Keyed by
-   * field id. Empty until the user clicks Save on a row. SchemaView
-   * merges these onto the manifest field at render time.
+   * Per-item overrides committed via the inline editor. Keyed by item id.
+   * Empty until the user saves a row. The view merges these onto the base
+   * item at render time.
    */
-  editedFields: ReadonlyMap<string, SchemaFieldEdit>;
+  editedFields: ReadonlyMap<string, TEdit>;
   /**
-   * Propose-cards the user hasn't acted on yet. Surfaced by SchemaView
-   * ABOVE the field list (per spec: "ProposalCard suggestions appear
-   * above the list with Accept / Dismiss"). The chat-side propose-card
-   * dispatches `enqueueFieldProposal` whenever an assistant turn
-   * carries `reply.proposedSchemaField`; Accept moves the proposal
-   * into `addedFields` + clears it from the queue; Dismiss just
-   * clears it.
+   * Propose-cards the user hasn't acted on yet, surfaced ABOVE the row list.
+   * Accept moves the proposal into `addedFields` + clears it from the queue;
+   * Dismiss just clears it.
    */
-  pendingFieldProposals: SchemaFieldProposal[];
+  pendingFieldProposals: TProposal[];
   /**
-   * `add-pinned-samples-row` — sample document ids the user has pinned
-   * for the Designer + Stress Test surfaces. Maximum of 3. The first
-   * is auto-pinned on F3a entry from the active scenario's primary
-   * document; the user can unpin via the `×` on each chip or pin more
-   * (subject to sign-in for non-sample docs).
+   * Sample document ids the user has pinned for the Designer / Stress Test
+   * surfaces. Maximum of 3.
    */
   pinnedSamples: string[];
   /**
-   * `add-pinned-samples-row` — the schema category the user is
-   * currently focusing inside the Fields/Results sub-tabs. Drives the
-   * topbar title (`Designing <sample> · <category>`) AND the Fields
-   * tab's render scope (per the `category-scoped-fields-view` change).
-   * Null means "no scope set"; SchemaView's render falls back to the
-   * first manifest category.
+   * The group the user is currently focusing inside the sub-tabs (Extract:
+   * schema category id; Report: sub-tab id). Null means "no scope set".
    */
   focusedCategoryId: string | null;
 }
+
+/**
+ * UI-01 — the Extract schema overlay. Now an INSTANCE of the generic
+ * `PendingTemplateOverlay` shell (the rename in Phase 4 is non-breaking: the
+ * member names + types are identical to the pre-generalization interface, so
+ * SchemaView / ExtractView read it unchanged).
+ */
+export type PendingSchemaOverlay = PendingTemplateOverlay<
+  SchemaFieldAddition,
+  SchemaFieldEdit,
+  SchemaFieldProposal
+>;
 
 /**
  * UI-01 — proposal queue entry. Each proposal carries the same
@@ -238,6 +258,68 @@ export const EMPTY_PENDING_SCHEMA_OVERLAY: PendingSchemaOverlay = {
   addedFields: [],
   removedFieldIds: new Set<string>(),
   editedFields: new Map<string, SchemaFieldEdit>(),
+  pendingFieldProposals: [],
+  pinnedSamples: [],
+  focusedCategoryId: null,
+};
+
+// ── Report builder overlay (2026-05-29-smart-report-screen Phase 4) ──────
+//
+// The Report builder's draft over a `report`-kind Template. The item is a
+// SECTION (name + renderAs + question + instructions + manual literal-only
+// variables — #12), NOT a field; there is deliberately NO per-section scope
+// (the template is scope-independent; render scope is supplied at render time).
+
+/** How a report section's generated body renders (¶ / • / ▦). Mirrors `ReportSectionRenderAs`. */
+export type ReportSectionRenderAs = "PARAGRAPH" | "BULLETS" | "TABLE";
+
+/** A report section added by the user via the builder / LLM propose-card. */
+export interface ReportSectionItem {
+  /** Generated client-side; survives until template save. */
+  id: string;
+  /** snake_case section name, e.g. "charge_breakdown". */
+  name: string;
+  renderAs: ReportSectionRenderAs;
+  /** The prompt run at render time. */
+  question: string;
+  /** One rule per line. */
+  instructions: string[];
+  /** Manual literal-only variables (#12 — no auto-inference). */
+  variables: string[];
+  /** Set when the section was pinned from an assistant turn (Phase 5). */
+  pinnedFromTurnId?: string;
+}
+
+/** A committed per-section override from the inline editor (partial). */
+export type ReportSectionEdit = Partial<{
+  name: string;
+  renderAs: ReportSectionRenderAs;
+  question: string;
+  instructions: string[];
+  variables: string[];
+}>;
+
+/** An LLM-proposed section addition (the report sibling of `SchemaFieldProposal`). */
+export interface ReportSectionProposal {
+  id: string;
+  name: string;
+  renderAs: ReportSectionRenderAs;
+  question: string;
+  provenance?: { version: "v1"; verified: true };
+}
+
+/** The Report builder overlay — an INSTANCE of the generic shell. */
+export type PendingReportOverlay = PendingTemplateOverlay<
+  ReportSectionItem,
+  ReportSectionEdit,
+  ReportSectionProposal
+>;
+
+/** Shared default — every new ChatSession starts with an empty report overlay. */
+export const EMPTY_PENDING_REPORT_OVERLAY: PendingReportOverlay = {
+  addedFields: [],
+  removedFieldIds: new Set<string>(),
+  editedFields: new Map<string, ReportSectionEdit>(),
   pendingFieldProposals: [],
   pinnedSamples: [],
   focusedCategoryId: null,
@@ -361,6 +443,13 @@ export interface ChatSession {
   // `viewer.workspace.schemaOverlay`; for one release cycle a
   // deprecated getter here can proxy to the viewer slot.
   pendingSchemaOverlay: PendingSchemaOverlay;
+
+  // Report-builder overlay (2026-05-29-smart-report-screen Phase 4). The
+  // `report`-kind sibling of `pendingSchemaOverlay`, instantiated on the same
+  // generic shell. Empty by default; the builder's add/edit/remove section
+  // actions mutate it. Save bridge to the `report`-kind Template + render
+  // endpoint is Phase 6.
+  reportOverlay: PendingReportOverlay;
 
   // `master-viewer-session` Phase 1 — paired ViewerSession. Phase 1
   // ships the slot + persistence; Phase 2+ wire the surfaces against
@@ -548,6 +637,31 @@ export interface ChatStoreApi {
    * topbar title AND the Fields tab's render scope.
    */
   setFocusedCategory: (categoryId: string | null) => void;
+
+  // ── Report-builder section actions (smart-report Phase 4) ──────────
+  // The `report`-kind siblings of `addSchemaField` / `editSchemaField` /
+  // `removeSchemaField`, mutating `reportOverlay` on the active session. The
+  // builder's UI controls call these directly; the matching `*.tools.ts`
+  // (chat-driven) land in Phase 5 calling the same actions.
+
+  /**
+   * Append a section to the active session's `reportOverlay.addedFields`.
+   * Idempotent on id. No-op when no session is active.
+   */
+  addReportSection: (input: ReportSectionItem) => void;
+
+  /**
+   * Commit (or update) a per-section override into
+   * `reportOverlay.editedFields`. Shallow-merges onto any existing patch.
+   * No-op when no active session.
+   */
+  editReportSection: (sectionId: string, edit: ReportSectionEdit) => void;
+
+  /**
+   * Mark a section id removed in `reportOverlay.removedFieldIds` (covers both
+   * base + added sections). No-op when no active session.
+   */
+  removeReportSection: (sectionId: string) => void;
 
   /**
    * `schema-agent-chat-affordances` — append an assistant-role

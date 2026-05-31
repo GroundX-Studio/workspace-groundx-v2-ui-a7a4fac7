@@ -36,6 +36,7 @@ Roles today: `anonymous` (uncommitted / pre-sign-up) · `member` (signed in).
 | BookCallView | ✅ | ✅ | `mode` = layout chrome → re-source from layout, NOT role |
 | PdfViewer | ✅ | ✅ | cosmetic → drop |
 | SmartReportRender | ✅ | ✅ | **ScopedViewerWidget** (Report render, f4/S3). Available to both roles; export / Save are locked-for-anonymous as a DISABLED affordance (`widgetRoleCanEdit`) + `preview_only` badge, not a hidden control. (2026-05-29-smart-report-screen Phase 3) |
+| SmartReportBuilder | ✅ | ✅ | **ScopedViewerWidget** (Report builder, f4a/S3a). Available to both roles; Save is sign-in-gated — anonymous Save opens the gate (`commitGate`), member Save persists (Phase 6); export is locked-for-anonymous (`widgetRoleCanEdit`), a DISABLED `🔒` affordance not a hidden control. Reuses the F3a schema-editor chrome; drives the `report`-kind `reportOverlay` sibling of the Extract schema overlay. (2026-05-29-smart-report-screen Phase 4) |
 | SignUpWidget | ✅ | ❌ | **anonymous only** (the sign-up *form*) — a member never sees the form. NUANCE: the widget also renders a committed-state *celebration* (`signup-celebration`) at the anon→member boundary (`gate.status === "committed"`), driven by gate-state not role; that transient is not "a member browsing the form". `commitGate` is gate-state, not role. |
 | GateChatRail | ✅ | ❌ | **gate context** (anonymous) — gate variant re-sourced from gate-state, not role |
 | GateValueProp | ✅ | ❌ | **gate context** (anonymous) — shown beside the gate |
@@ -49,7 +50,7 @@ ScopedViewerWidgets take a real `ContentScope`; everything else declares `{ type
 | PdfViewer | **ContentScope** (`documents` for a single doc, or `bucket`/`group` `+ filter`) | active experience scope / `ScopedCanvas`; **replaces the raw `documentId` prop** |
 | Extract (unbuilt) | **ContentScope** | active experience scope |
 | SmartReportRender | **ContentScope** (the demos open on `bucket + project filter`; doc-count-agnostic so `group` renders the same) | render-time scope inherited from the transition surface (Extract / Interact / Report pill) — recorded on the result, NOT stored on the template |
-| SmartReportBuilder (Phase 4) | **ContentScope** | active experience scope |
+| SmartReportBuilder | **ContentScope** (the demos open on `bucket + project filter`; the template is scope-independent so the scope only selects which template's sections to seed) | active experience scope inherited from the transition surface (the render scope is supplied at render time, NOT stored on the template) |
 | Integrate (unbuilt) | **ContentScope** | active experience scope |
 | ChatColumn | `{ type: "none" }` | chat is session-scoped, not document-scoped |
 | ThinkingStream | `{ type: "none" }` | display |

@@ -8,7 +8,11 @@ import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } fr
 import type { FFrame } from "@/types/onboarding";
 import type { NormalizedBbox } from "@groundx/shared";
 
-import { EMPTY_PENDING_SCHEMA_OVERLAY, EMPTY_VIEWER_SESSION } from "./types";
+import {
+  EMPTY_PENDING_REPORT_OVERLAY,
+  EMPTY_PENDING_SCHEMA_OVERLAY,
+  EMPTY_VIEWER_SESSION,
+} from "./types";
 import type {
   CanvasIntent,
   ChatMessage,
@@ -264,6 +268,7 @@ function deserialize(raw: string): ChatStoreState | null {
         viewerHistory: [],
         currentIntent: null,
         pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
+        reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
         viewer: EMPTY_VIEWER_SESSION,
         gate: { status: "idle" },
         signupOpen: s.signupOpen,
@@ -327,6 +332,7 @@ function migrateLegacyEntityRegistry(): ChatStoreState | null {
       viewerHistory: [],
       currentIntent: null,
       pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
+      reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
       viewer: EMPTY_VIEWER_SESSION,
       gate: { status: "idle" },
       signupOpen: false,
@@ -456,6 +462,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         viewerHistory: [],
         currentIntent: null,
         pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
+        reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
         viewer: EMPTY_VIEWER_SESSION,
         gate: { status: "idle" },
         signupOpen: false,
@@ -518,6 +525,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
           viewerHistory: [],
           currentIntent: null,
           pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
+          reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
           viewer: EMPTY_VIEWER_SESSION,
           gate: { status: "idle" },
           signupOpen: false,
@@ -924,6 +932,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
                 viewerHistory: [],
                 currentIntent: coerceHydratedIntent(remote.currentIntent),
                 pendingSchemaOverlay: hydratedOverlay,
+                // Report overlay is client-only (not DB-hydrated, like
+                // messages/entities); a server-only session starts empty.
+                reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
                 viewer: hydratedViewer,
                 gate: { status: "idle" },
                 signupOpen: false,
@@ -1187,6 +1198,77 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         pendingSchemaOverlay: {
           ...current.pendingSchemaOverlay,
           focusedCategoryId: categoryId,
+        },
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+  }, []);
+
+  // ── Report-builder section actions (smart-report Phase 4) ──────────
+  // The `report`-kind siblings of addSchemaField / editSchemaField /
+  // removeSchemaField, mutating `reportOverlay` on the active session. The
+  // builder's UI controls call these; Phase 5's `*.tools.ts` reuse them.
+
+  const addReportSection = useCallback((input: import("./types").ReportSectionItem) => {
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      // Idempotent on id.
+      if (current.reportOverlay.addedFields.some((s) => s.id === input.id)) return prev;
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        reportOverlay: {
+          ...current.reportOverlay,
+          addedFields: [...current.reportOverlay.addedFields, input],
+        },
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+  }, []);
+
+  const editReportSection = useCallback(
+    (sectionId: string, edit: import("./types").ReportSectionEdit) => {
+      setState((prev) => {
+        if (!prev.activeSessionId) return prev;
+        const current = prev.sessions.get(prev.activeSessionId);
+        if (!current) return prev;
+        const existing = current.reportOverlay.editedFields.get(sectionId) ?? {};
+        const merged: import("./types").ReportSectionEdit = { ...existing, ...edit };
+        const nextEdited = new Map(current.reportOverlay.editedFields);
+        nextEdited.set(sectionId, merged);
+        const sessions = new Map(prev.sessions);
+        sessions.set(prev.activeSessionId, {
+          ...current,
+          reportOverlay: {
+            ...current.reportOverlay,
+            editedFields: nextEdited,
+          },
+          updatedAt: Date.now(),
+        });
+        return { ...prev, sessions };
+      });
+    },
+    [],
+  );
+
+  const removeReportSection = useCallback((sectionId: string) => {
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      if (current.reportOverlay.removedFieldIds.has(sectionId)) return prev;
+      const nextRemoved = new Set(current.reportOverlay.removedFieldIds);
+      nextRemoved.add(sectionId);
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        reportOverlay: {
+          ...current.reportOverlay,
+          removedFieldIds: nextRemoved,
         },
         updatedAt: Date.now(),
       });
@@ -1478,6 +1560,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       pinSample,
       unpinSample,
       setFocusedCategory,
+      addReportSection,
+      editReportSection,
+      removeReportSection,
       appendAgentMessage,
       pushOverlay,
       mutateOverlay,
@@ -1506,6 +1591,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       pinSample,
       unpinSample,
       setFocusedCategory,
+      addReportSection,
+      editReportSection,
+      removeReportSection,
       appendAgentMessage,
       pushOverlay,
       mutateOverlay,

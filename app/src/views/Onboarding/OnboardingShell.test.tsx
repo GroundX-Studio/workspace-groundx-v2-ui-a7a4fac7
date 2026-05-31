@@ -968,9 +968,11 @@ describe("OnboardingShell", () => {
     // f4 render surface is up.
     expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
 
-    // ✎ edit §1 → f4a builder.
+    // ✎ edit §1 → f4a builder. Phase 4: the f4a wrapper now mounts the
+    // production `SmartReportBuilder` widget (was a placeholder
+    // `report-builder-view` in Phase 1).
     await user.click(screen.getByTestId("report-section-edit-billing_summary"));
-    expect(await screen.findByTestId("report-builder-view")).toBeInTheDocument();
+    expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
     await waitFor(() => expect(snapshot.frame).toBe("f4a"));
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
 

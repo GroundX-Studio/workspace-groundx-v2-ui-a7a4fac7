@@ -1,6 +1,6 @@
 import { useMemo, type FC, type ReactNode } from "react";
 
-import { ChatStoreProvider, EMPTY_PENDING_SCHEMA_OVERLAY, EMPTY_VIEWER_SESSION, useChatStore, type ChatSession } from "@/contexts/ChatStoreContext";
+import { ChatStoreProvider, EMPTY_PENDING_REPORT_OVERLAY, EMPTY_PENDING_SCHEMA_OVERLAY, EMPTY_VIEWER_SESSION, useChatStore, type ChatSession } from "@/contexts/ChatStoreContext";
 import { ChatStoreServerHydrator } from "@/contexts/ChatStoreContext/ChatStoreServerHydrator";
 
 import type { EntityKey, EntitySessionStoreApi, EntitySessionStoreState, EntitySession } from "./types";
@@ -81,6 +81,7 @@ export const EntitySessionStoreProvider: FC<EntitySessionStoreProviderProps> = (
       viewerHistory: [],
       currentIntent: null,
       pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
+      reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
       viewer: EMPTY_VIEWER_SESSION,
       gate: { status: "idle" },
       signupOpen: false,

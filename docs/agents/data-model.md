@@ -51,8 +51,11 @@ the planned `Template` / `ScopedViewerWidget` / `ApiError` / `Catalog<T>` bases.
 | `ViewerStep` | union | `doc-viewer{documentId,page?,highlight?}` · `extract-workbench{scenarioId,focusedCategoryId?}` · `interact-chat{scenarioId}` · `report` · `integrate` · `ingest-picker` | canvas surface |
 | `ViewerOverlay` | union | `sign-up{state,cause?}` · `citation-peek{documentId,page,bbox?}` · `book-call` | z-stack overlays |
 | `ViewerWorkspace` | composes `PendingSchemaOverlay` | `schemaOverlay` | sticky workspace state |
-| `PendingSchemaOverlay` | composes `SchemaFieldAddition[]`,`SchemaFieldProposal[]` | `addedFields[], removedFieldIds, edits, proposals` | Extract builder overlay |
+| `PendingTemplateOverlay<TItem,TEdit,TProposal>` | GENERIC shell | `addedFields[], removedFieldIds, editedFields, pendingFieldProposals, pinnedSamples, focusedCategoryId` | the one editing-overlay shell — mechanism; item shape varies by kind (smart-report Phase 4) |
+| `PendingSchemaOverlay` | = `PendingTemplateOverlay<SchemaFieldAddition,SchemaFieldEdit,SchemaFieldProposal>` | (alias) | Extract builder overlay (`pendingSchemaOverlay` slot) — non-breaking alias post-generalization |
+| `PendingReportOverlay` | = `PendingTemplateOverlay<ReportSectionItem,ReportSectionEdit,ReportSectionProposal>` | (alias) | Report builder overlay (`reportOverlay` slot); `addReportSection`/`editReportSection`/`removeReportSection` actions; SmartReportBuilder (f4a) |
 | `SchemaFieldProposal` / `SchemaFieldAddition` / `SchemaFieldEdit` / `SchemaFieldExtractionResult` | — | field draft/edit/result shapes | propose-cards, F3a |
+| `ReportSectionItem` / `ReportSectionEdit` / `ReportSectionProposal` | — | section draft/edit/proposal shapes (`name+renderAs+question+instructions+variables`, NO per-section scope) | SmartReportBuilder (f4a/S3a) |
 | `CanvasIntent` (here) | re-exports the orchestrator union | ChatStore `currentIntent: CanvasIntent \| null` | ✅ B1 — placeholder removed; ONE union (type-only re-export from `CanvasOrchestratorContext/types`, cycle-free); contract test locks it |
 | `ChatStoreState` / `ChatStoreApi` | — | sessions map, activeSessionId, actions | the store |
 

@@ -18,6 +18,7 @@ import { captureException } from "@/lib/sentry";
 import { AuthContext } from "@/contexts/AuthContext/AuthContext";
 
 import { ChatStoreProvider, useChatStore } from "./ChatStoreContext";
+import { EMPTY_PENDING_REPORT_OVERLAY } from "./types";
 import { ChatStoreServerHydrator } from "./ChatStoreServerHydrator";
 
 import type { FC, ReactNode } from "react";
@@ -135,6 +136,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
             pinnedSamples: [],
             focusedCategoryId: null,
           },
+          reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
           viewer: {
             history: [],
             currentStep: { stepIndex: -1 },
