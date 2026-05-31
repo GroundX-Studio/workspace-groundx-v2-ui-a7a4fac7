@@ -28,8 +28,8 @@
 - [x] Add `all()` to `ScenarioRegistryApi`; have the ready-state data view satisfy `Catalog<ScenarioConfig>` (async wrapper stays).
 
 ## Phase 3 · Rename `EntityRegistry` → `EntitySessionStore` (atomic, tsc-guarded)
-- [ ] **Failing test:** `useEntitySessionStore()` returns the same API the old `useEntityRegistry()` did (behavior identical); the old name no longer resolves.
-- [ ] Rename `EntityRegistryContext`→`EntitySessionStoreContext`, `EntityRegistryProvider`→`EntitySessionStoreProvider`, `useEntityRegistry`→`useEntitySessionStore`; update all consumers (contexts/views/tests) in one pass. Do NOT rename the `EntitySession` data-type export (already used by ChatStore/OnboardingSession) — the "Store" suffix exists precisely to avoid that collision. `npm run build` (tsc) green proves no missed reference.
+- [x] **Failing test:** `useEntitySessionStore()` returns the same API the old `useEntityRegistry()` did (behavior identical); the old name no longer resolves.
+- [x] Rename `EntityRegistryContext`→`EntitySessionStoreContext`, `EntityRegistryProvider`→`EntitySessionStoreProvider`, `useEntityRegistry`→`useEntitySessionStore`; update all consumers (contexts/views/tests) in one pass. Do NOT rename the `EntitySession` data-type export (already used by ChatStore/OnboardingSession) — the "Store" suffix exists precisely to avoid that collision. `npm run build` (tsc) green proves no missed reference. **— DONE 2026-05-31 (step 14, commit 4441811): old dir/names gone, `EntitySession` type preserved, tsc clean.**
 
 ## Phase 4 · Declare `chatExperienceRegistry` against the contract
 - [ ] Once unified-conversation-flow has shipped `chatExperienceRegistry`, declare it `Catalog<ChatExperienceEntry>` (it natively has `all()`/`byId()`); add a test that it satisfies the shared contract. *(If this change lands first, leave a tracked checkbox; do NOT pre-create the catalog here.)*
