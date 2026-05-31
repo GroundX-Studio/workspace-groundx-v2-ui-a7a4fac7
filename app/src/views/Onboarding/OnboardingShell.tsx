@@ -440,9 +440,11 @@ export const OnboardingShell: FC = () => {
   // viewer step + the experience's resolved `ContentScope`. The shell no
   // longer mounts `UnderstandView`/`ExtractView`/`InteractView`/
   // `IntegrateView`/`ReportRenderView`/`ReportBuilderView` — those views
-  // are retired in Phase 3 (next step). The unbuilt surfaces
-  // (`extract-workbench` / `integrate`) resolve to ScopedCanvas's labelled
-  // placeholder; their production widgets join `CanvasKind` when built.
+  // are retired. As of Phase 3a/3b ALL production frame surfaces are packaged
+  // ScopedViewerWidgets (`doc-viewer`/`extract-workbench`/`report`/
+  // `report-builder`/`integrate`) that `<ScopedCanvas>` mounts for real — no
+  // canvas placeholder remains for any production frame. The ONLY remaining
+  // ScopedCanvas placeholder kind is `ingest-picker` (the F1 overlay).
   //
   // Gate / book-call remain WIDGET mounts the shell shows directly (NOT
   // views routed through ScopedCanvas) — they're anonymous-context

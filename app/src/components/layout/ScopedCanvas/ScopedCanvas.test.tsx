@@ -6,9 +6,11 @@
  * mounts it with the active `scope` + `role`. As of
  * 2026-05-30-onboarding-shell-shared-view Phase 3a `extract-workbench` is a
  * BUILT kind (the packaged Extract workbench widget) and `interact-chat`
- * resolves to the doc-viewer mount (its canvas is doc-only). Only genuinely
- * future kinds (`integrate` — next step — / `ingest-picker` — the F1 overlay)
- * resolve to the labelled "not yet available" placeholder, NOT a crash.
+ * resolves to the doc-viewer mount (its canvas is doc-only). Phase 3b adds
+ * `integrate` as a BUILT kind (the packaged Integrate connectors widget). The
+ * ONLY remaining placeholder kind is `ingest-picker` — the F1 overlay handled
+ * separately, NOT a canvas widget — which resolves to the labelled "not yet
+ * available" placeholder, NOT a crash.
  *
  * This is the runtime mount test the tasks.md "Runtime mount test + import
  * ban" line calls for: every DECLARED CanvasKind mounts a real widget that
@@ -97,11 +99,26 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
     // The real workbench, NOT the "not yet available" placeholder.
     expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
   });
+
+  it("integrate step → the packaged Integrate connectors widget, fed the scope (Phase 3b)", () => {
+    const step: ViewerStep = { kind: "integrate" };
+    renderWithOnboardingProviders(
+      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" />,
+      { initialFrame: "f7", initialScenario: "utility" },
+    );
+    const widget = screen.getByTestId("integrate");
+    expect(widget).toBeInTheDocument();
+    expect(widget).toHaveAttribute("data-role", "member");
+    // The real connectors surface, NOT the "not yet available" placeholder.
+    expect(screen.getByTestId("plugin-claude")).toBeInTheDocument();
+    expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
+  });
 });
 
 describe("ScopedCanvas — undeclared kinds hit the placeholder (no crash)", () => {
   it.each<ViewerStep>([
-    { kind: "integrate" },
+    // The ONLY remaining placeholder kind is `ingest-picker` (the F1 overlay,
+    // handled separately — not a canvas widget). `integrate` is now BUILT.
     { kind: "ingest-picker" },
   ])("renders a labelled placeholder for $kind", (step) => {
     renderWithOnboardingProviders(
@@ -113,5 +130,6 @@ describe("ScopedCanvas — undeclared kinds hit the placeholder (no crash)", () 
     expect(screen.queryByTestId("pdf-viewer-widget")).not.toBeInTheDocument();
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
     expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("integrate")).not.toBeInTheDocument();
   });
 });

@@ -1069,6 +1069,35 @@ describe("OnboardingShell", () => {
     expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
   });
 
+  // ── 2026-05-30-onboarding-shell-shared-view Phase 3b ──
+  //
+  // F7 (Integrate) is the LAST onboarding canvas placeholder. Phase 3b
+  // packages the connectors surface (Claude / OpenAI / Gemini / Cursor) as
+  // the production Integrate ScopedViewerWidget and routes `integrate`
+  // through <ScopedCanvas> — the placeholder is gone. The connector DOWNLOAD
+  // buttons stay honestly disabled-future (UI-02), NOT faked.
+  it("Phase 3b: F7 renders the real connector surface through <ScopedCanvas> (no placeholder)", async () => {
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialAuthState: "signed-in",
+      initialFrame: "f7",
+      initialScenario: "utility",
+    });
+    expect(await screen.findByTestId("integrate")).toBeInTheDocument();
+    expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
+      "data-canvas-kind",
+      "integrate",
+    );
+    // The real connector cards, NOT the "not yet available" placeholder.
+    expect(screen.getByTestId("plugin-claude")).toBeInTheDocument();
+    expect(screen.getByTestId("plugin-cursor")).toBeInTheDocument();
+    expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
+    // The download action stays honestly disabled (UI-02), not faked.
+    expect(screen.getByTestId("plugin-claude-download")).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
   // Regression: clicking a citation while on F3 pushes a doc-viewer
   // ViewerStep — canvas swaps to UnderstandView, but the StepStrip
   // pill was reading `session.currentFrame` directly, so the nav

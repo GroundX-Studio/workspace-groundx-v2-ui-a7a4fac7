@@ -613,6 +613,34 @@ describe("CanvasOrchestratorContext", () => {
       expect(result.current.session.state.selectedReportSectionId).toBeNull();
     });
 
+    // 2026-05-30-onboarding-shell-shared-view Phase 3b — the
+    // `show_integrate` canvas-dispatch tool emits `showIntegrate`, routed
+    // (mirroring showExtract → f3 / showReport → f4) through the built-in
+    // orchestrator handler to `OnboardingSession.advanceFrame("f7")`.
+    it("showIntegrate advances the canvas to the Integrate frame (f7)", () => {
+      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+      expect(result.current.session.state.currentFrame).toBe("f3");
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showIntegrate", scope: { type: "bucket", bucketId: 28454 } },
+          "agent",
+        );
+      });
+      expect(result.current.session.state.currentFrame).toBe("f7");
+    });
+
+    it("showIntegrate is a no-op (no throw) without an OnboardingSessionProvider", () => {
+      const plainWrapper2 = ({ children }: { children: React.ReactNode }) => (
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      );
+      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper2 });
+      expect(() => {
+        act(() => {
+          result.current.dispatch({ kind: "showIntegrate", scope: { type: "bucket", bucketId: 1 } });
+        });
+      }).not.toThrow();
+    });
+
     it("showReport / editTemplate are no-ops (no throw) without an OnboardingSessionProvider", () => {
       const plainWrapper = ({ children }: { children: React.ReactNode }) => (
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>

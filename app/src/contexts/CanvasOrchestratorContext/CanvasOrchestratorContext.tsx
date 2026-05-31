@@ -207,6 +207,16 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         if (intent.kind === "showExtract") {
           onboardingSession.advanceFrame("f3");
         }
+        // 2026-05-30-onboarding-shell-shared-view Phase 3b — the
+        // `show_integrate` canvas-dispatch tool MOVES the canvas to the
+        // Integrate connectors surface (frame f7). This is the SAME
+        // `advanceFrame` the Integrate step-strip pill calls, so the tool
+        // drives the identical canvas move as the on-screen control.
+        // Soft-fail in the steady tree (no OnboardingSessionProvider),
+        // matching the frames above.
+        if (intent.kind === "showIntegrate") {
+          onboardingSession.advanceFrame("f7");
+        }
         if (intent.kind === "showReport") {
           onboardingSession.advanceFrame("f4");
         }

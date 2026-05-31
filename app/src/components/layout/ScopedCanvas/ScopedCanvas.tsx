@@ -18,11 +18,11 @@
  * or `null`. When it returns a `CanvasKind`, the `switch` over it has a
  * `never` default (compiler) and the registry guarantees exactly one
  * descriptor + component per declared kind — so every DECLARED kind
- * provably resolves to a widget. When it returns `null` (an unbuilt /
- * unknown step kind — `integrate` (next step), `ingest-picker` (the F1
- * overlay)), the canvas renders a labelled "not yet available" placeholder
- * rather than crashing. (Gate / book-call surfaces are widget mounts the
- * shell handles, NOT views routed through here.)
+ * provably resolves to a widget. When it returns `null` (`ingest-picker`,
+ * the F1 overlay — the ONLY remaining placeholder kind as of Phase 3b,
+ * which packaged Integrate), the canvas renders a labelled "not yet
+ * available" placeholder rather than crashing. (Gate / book-call surfaces
+ * are widget mounts the shell handles, NOT views routed through here.)
  */
 import Box from "@mui/material/Box";
 import type { FC } from "react";
@@ -60,8 +60,8 @@ export interface ScopedCanvasProps {
  *                                             the conversation is the chat slot)
  *   • extract-workbench → "extract-workbench" (the packaged Extract workbench)
  *   • report            → "report" | "report-builder" (render vs builder)
- *   • integrate / ingest-picker → null (no widget yet — integrate joins next
- *                                       step; ingest-picker = the F1 overlay)
+ *   • integrate         → "integrate"        (the packaged Integrate connectors)
+ *   • ingest-picker     → null (the F1 overlay, NOT a canvas widget)
  */
 export function stepToCanvasKind(
   step: ViewerStep,
@@ -76,11 +76,12 @@ export function stepToCanvasKind(
     case "report":
       return reportSurface === "builder" ? "report-builder" : "report";
     case "integrate":
+      return "integrate";
     case "ingest-picker":
-      // No built ScopedViewerWidget for these surfaces yet — the canvas
-      // renders the placeholder. `integrate` joins `CanvasKind` when its
-      // widget is built (next execution-order step); `ingest-picker` is
-      // handled by the F1 overlay.
+      // The F1 ingest picker is rendered by the F1 overlay, NOT a canvas
+      // ScopedViewerWidget — the canvas underneath renders the placeholder.
+      // This is the ONLY remaining placeholder kind (Phase 3b packaged
+      // Integrate).
       return null;
     default: {
       // Exhaustiveness over `ViewerStep["kind"]`: a new step kind must be
@@ -140,6 +141,7 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({ scope, step, role, reportS
     case "extract-workbench":
     case "report":
     case "report-builder":
+    case "integrate":
       Widget = componentForKind(kind);
       break;
     default: {

@@ -36,6 +36,8 @@ import { canvasKindSchema, type CanvasKind, type ContentScope, type WidgetRole }
 
 import { Extract } from "@/components/viewer-widgets/Extract/Extract";
 import { descriptor as extractDescriptor } from "@/components/viewer-widgets/Extract/Extract.tools";
+import { Integrate } from "@/components/viewer-widgets/Integrate/Integrate";
+import { descriptor as integrateDescriptor } from "@/components/viewer-widgets/Integrate/Integrate.tools";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { descriptor as pdfViewerDescriptor } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget.tools";
 import { SmartReportRender } from "@/components/viewer-widgets/SmartReportRender/SmartReportRender";
@@ -76,6 +78,7 @@ const mounts: readonly ScopedViewerWidgetMount[] = [
   { descriptor: extractDescriptor, component: Extract },
   { descriptor: smartReportRenderDescriptor, component: SmartReportRender },
   { descriptor: smartReportBuilderDescriptor, component: SmartReportBuilder },
+  { descriptor: integrateDescriptor, component: Integrate },
 ];
 
 /**

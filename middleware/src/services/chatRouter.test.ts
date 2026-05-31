@@ -1678,6 +1678,8 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       "reject_report_section",
       // onboarding-shell-shared-view Phase 3a — show_extraction lists `report`.
       "show_extraction",
+      // onboarding-shell-shared-view Phase 3b — show_integrate lists `report`.
+      "show_integrate",
       "show_smart_report_edit",
       "show_smart_report_render",
       "suggest_intent",

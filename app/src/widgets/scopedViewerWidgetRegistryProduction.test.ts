@@ -7,7 +7,8 @@
  * factory, holding the real descriptors (PdfViewer · Extract · SmartReportRender ·
  * SmartReportBuilder), and asserts the Direction-1 invariant — exactly one
  * descriptor per DECLARED `CanvasKind`. (Extract joined in
- * 2026-05-30-onboarding-shell-shared-view Phase 3a.)
+ * 2026-05-30-onboarding-shell-shared-view Phase 3a; Integrate joined in
+ * Phase 3b.)
  *
  * TDD: failing-first. The module under test does not exist yet.
  */
@@ -28,7 +29,7 @@ describe("scopedViewerWidgetRegistry (production singleton)", () => {
         .map((m) => m.descriptor.id)
         .sort(),
     ).toEqual(
-      ["extract-workbench", "pdf-viewer", "smart-report-builder", "smart-report-render"].sort(),
+      ["extract-workbench", "integrate", "pdf-viewer", "smart-report-builder", "smart-report-render"].sort(),
     );
     // Each catalog entry carries its mountable component — the catalog is the
     // single source of truth for BOTH the descriptor and the component.
@@ -58,6 +59,7 @@ describe("scopedViewerWidgetRegistry (production singleton)", () => {
     expect(idForKind("extract-workbench")).toBe("extract-workbench");
     expect(idForKind("report")).toBe("smart-report-render");
     expect(idForKind("report-builder")).toBe("smart-report-builder");
+    expect(idForKind("integrate")).toBe("integrate");
   });
 
   it("componentForKind resolves THROUGH the catalog singleton (load-bearing)", () => {

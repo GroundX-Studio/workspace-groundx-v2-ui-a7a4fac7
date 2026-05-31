@@ -429,18 +429,21 @@ export type ViewerStepKind = z.infer<typeof viewerStepKindSchema>;
 //     adding a CanvasKind value WITHOUT a registered widget fails to compile.
 //
 // `extract-workbench` joined the set in 2026-05-30-onboarding-shell-shared-view
-// Phase 3a (the packaged Extract workbench widget). `integrate` is NOT yet
-// listed — declaring it here with no widget would break the total-registry
-// construction + the exhaustive switch; it joins when its widget is built (the
-// NEXT execution-order step). `report` and `report-builder` are SEPARATE kinds
-// (render surface vs builder surface), each backed by its own widget
-// (SmartReportRender / SmartReportBuilder).
+// Phase 3a (the packaged Extract workbench widget). `integrate` joined in
+// Phase 3b (the packaged Integrate connectors widget) — it now has a registered
+// widget so it can be a declared CanvasKind without breaking the total-registry
+// construction or the exhaustive switch. `report` and `report-builder` are
+// SEPARATE kinds (render surface vs builder surface), each backed by its own
+// widget (SmartReportRender / SmartReportBuilder). The ONLY remaining
+// ViewerStepKind with no CanvasKind is `ingest-picker` — the F1 overlay, NOT a
+// canvas widget — which resolves to the labelled placeholder.
 // ──────────────────────────────────────────────────────────────────────
 export const canvasKindSchema = z.enum([
   "doc-viewer",
   "extract-workbench",
   "report",
   "report-builder",
+  "integrate",
 ]);
 export type CanvasKind = z.infer<typeof canvasKindSchema>;
 

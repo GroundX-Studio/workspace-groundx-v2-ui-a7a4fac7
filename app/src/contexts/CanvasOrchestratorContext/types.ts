@@ -34,6 +34,11 @@ export type CanvasIntent =
   | { kind: "jumpToPage"; documentId: string; page: number }
   | { kind: "showExtract"; scope: ContentScope; schemaId: string }
   | { kind: "editSchema"; schemaId: string }
+  // 2026-05-30-onboarding-shell-shared-view Phase 3b — the canvas-dispatch
+  // intent for the Integrate connectors surface (frame f7). Mirrors
+  // showExtract / showReport: a navigation intent the orchestrator routes to
+  // `advanceFrame("f7")`.
+  | { kind: "showIntegrate"; scope: ContentScope }
   | { kind: "showReport"; templateId: string; scope: ContentScope }
   /**
    * Open the report builder (f4a) for a template. `selectedSectionId` (when

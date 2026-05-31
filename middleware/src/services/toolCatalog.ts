@@ -325,6 +325,31 @@ const showExtraction: ServerTool = {
   }),
 };
 
+// onboarding-shell-shared-view Phase 3b — mirror of the app-side Integrate
+// widget's show_integrate canvas-dispatch tool. Moves the canvas to the
+// Integrate connectors surface (frame f7). Returns the `showIntegrate`
+// CanvasIntent the orchestrator routes to advanceFrame("f7").
+const showIntegrate: ServerTool = {
+  name: "show_integrate",
+  description:
+    "Move the canvas to the Integrate surface (frame f7) — the connectors / agent " +
+    "plugins + API snippets for shipping this sample into a stack. Use when " +
+    "the user asks to integrate, ship, connect an agent (Claude / OpenAI / Gemini / " +
+    "Cursor), or get the API / SDK snippet for the content being analyzed.",
+  category: "read",
+  inputSchema: z.object({
+    scope: z
+      .object({})
+      .passthrough()
+      .describe("The ContentScope the user is shipping (documents / bucket+filter / group); scope-independent today but threaded for context."),
+  }),
+  availableSteps: ["integrate", "doc-viewer", "extract-workbench", "interact-chat", "report"],
+  intentBuilder: (input) => ({
+    kind: "showIntegrate",
+    scope: (input as { scope: unknown }).scope,
+  }),
+};
+
 const showSmartReportRender: ServerTool = {
   name: "show_smart_report_render",
   description:
@@ -517,6 +542,9 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   // onboarding-shell-shared-view Phase 3a — extract canvas-dispatch tool
   // (mirror of the app-side Extract widget's show_extraction).
   showExtraction,
+  // onboarding-shell-shared-view Phase 3b — integrate canvas-dispatch tool
+  // (mirror of the app-side Integrate widget's show_integrate).
+  showIntegrate,
   // smart-report Phase 5 — report tool surface (mirror of the app-side
   // SmartReportRender / SmartReportBuilder / PinToReportAction tools).
   showSmartReportRender,
