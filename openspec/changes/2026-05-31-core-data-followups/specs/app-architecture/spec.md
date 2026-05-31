@@ -89,14 +89,22 @@ corrupt value is rejected or coerced rather than cast straight into application 
 ### Requirement: Orchestrator dispatch SHALL be exhaustive over the CanvasIntent union
 
 The orchestrator's `dispatch()` SHALL switch over `intent.kind` with a `never` exhaustiveness check so a
-new `CanvasIntent` kind without a handler fails type-checking, and the retired `registerAdapter`
-mechanism (zero non-test callers) SHALL be removed.
+new `CanvasIntent` kind without a handler fails type-checking (replacing the chain of independent
+`if (intent.kind === …)` blocks that silently no-op'd an unhandled kind). Every `CanvasIntent` kind
+SHALL be named by a `case` in that switch: kinds with a built-in orchestrator side effect run it in
+their case; kinds routed only through the `registerAdapter` adapter registry (e.g. `submitSignup`,
+`wizardNext`/`wizardBack`/`wizardFinish`, `dismissWizard`, `closeDialog`, `showSample`, `openDocument`,
+`editSchema`, `switchFrame`) are explicit no-op cases so the exhaustiveness check still names them. The
+`registerAdapter` mechanism is RETAINED — it has live non-test callers (the SignUpWidget, DialogTitle,
+and OnboardingWizard adapters), and the `adaptersRef.get(intent.kind)` dispatch path runs after the
+switch unchanged.
 
 #### Scenario: A new intent kind fails type-check
 
-- **GIVEN** a new `CanvasIntent` kind added to the union with no `dispatch` handler
+- **GIVEN** a new `CanvasIntent` kind added to the union with no `case` in the `dispatch` switch
 - **WHEN** the project is type-checked
-- **THEN** the `never` exhaustiveness assertion fails (rather than the dispatch silently no-opping).
+- **THEN** the `never` exhaustiveness assertion (`assertNeverIntent(intent)`) fails with an error naming
+  the unhandled kind (rather than the dispatch silently no-opping).
 
 ### Requirement: Session auth state SHALL be a discriminated union, not an empty-string sentinel
 

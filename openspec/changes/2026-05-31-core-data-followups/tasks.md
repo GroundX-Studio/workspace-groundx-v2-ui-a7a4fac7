@@ -190,10 +190,27 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   guard + the middleware cast). Failing-first.
 
 ### 4d. dispatch() exhaustiveness + selector + illegal-states (→ SEQUENTIAL/TDD)
-- [ ] **#14 orchestrator `dispatch()` conforms to `app-architecture/spec.md`.** Failing test: a new
+- [x] **#14 orchestrator `dispatch()` conforms to `app-architecture/spec.md`.** Failing test: a new
   `CanvasIntent` kind without a handler fails type-check (today the if-chain silently no-ops). Replace
   the 9-branch if-chain with one `switch (intent.kind)` + `const _never: never = intent`; delete the
   retired-but-live `registerAdapter` (zero non-test callers).
+  — DONE: the three independent `if (intent.kind === …)` blocks in
+  `CanvasOrchestratorContext.tsx` are now ONE `switch (intent.kind)` whose `default` calls the new
+  exported `assertNeverIntent(intent: never): never` sentinel — a new union kind without a `case` now
+  FAILS `tsc` (verified: a synthetic `__synthetic_unhandled__` kind triggers
+  `TS2345: … not assignable to parameter of type 'never'` at the `assertNeverIntent(intent)` line, NOT a
+  silent no-op). Behavior-preserving: every case keeps its exact prior context guard (`if (chatStore)` /
+  `if (onboardingSession)` / `typeof window`) + handler; the ChatStore triple-write
+  (`setCurrentIntent`/`appendViewerEvent`/`recordIntent`) stays a pre-switch block; the
+  `adaptersRef.get(intent.kind)` dispatch runs after the switch unchanged. Failing-first test:
+  `dispatchExhaustive.test.ts` (red first — `assertNeverIntent` absent; green after) + a `@ts-expect-error`
+  proving the sentinel rejects a concrete kind. Existing `CanvasOrchestratorContext.test.tsx` (33) UNCHANGED
+  + green. **CORRECTION to the stale task text + the change's spec delta:** `registerAdapter` is NOT
+  "retired-but-live (zero non-test callers)" — it has 6 REAL non-test callers (SignUpWidget×1,
+  DialogTitle×1, OnboardingWizard×4) added by `2026-05-31-tool-system-completion`. It is RETAINED (deleting
+  it would break those widgets); the adapter-only kinds are enumerated as explicit no-op `case`s so the
+  exhaustiveness check still names them. The change's `specs/app-architecture/spec.md` delta was reconciled
+  to drop the false "SHALL be removed" clause.
 - [ ] **#16 `selectActiveStep(session)` selector** (co-located with ChatStore/viewer state) replaces the
   `stepIndex >= 0 ? history[stepIndex] : null` idiom at the 9 sites.
 - [ ] **#20 illegal-states.** Session auth → `{kind:"anon"} | {kind:"authed";groundxUsername;
@@ -231,6 +248,18 @@ independent test file with its own pass/fail. **AUTHOR THESE AFTER the bases the
   that doesn't build on `ScopedViewerWidget` / lacks a `show_*` tool; (b) a duplicate exported type name
   across files; (c) a `Record<string,unknown>` placeholder in a context's typed state; (d) a `*Error`
   not extending the base `ApiError`; (e) a persisted DB column with no in-memory type field.
+- [ ] **Chat-widget reachability guard (migrated from `core-data-model-hardening` on its 2026-05-31
+  archive — the canvas `CanvasKind` registry covers VIEWER widgets only; chat widgets mount imperatively
+  in `ChatColumn`).** For TOOL-triggered cards (`propose_schema_field`→ProposeSchemaFieldCard,
+  `book_call`→BookingStatusCard, `save_to_account`/`suggestedActions`→SuggestedActionChips): add a
+  `rendersWidget?: "<slot>/<name>"` binding on the relevant `*.tools.ts` + `SERVER_TOOL_CATALOG` entries
+  + a coverage test (every UI-card tool names a real mounted chat widget; every tool-triggered chat widget
+  is named by ≥1 tool), riding the existing app↔server tool-catalog parity guard — not a second list.
+  Always-on widgets (ThinkingStream, input bar, GateChatRail-by-gate-state) are a DELIBERATE exemption
+  covered by `ChatColumn`'s render tests. Phase 2 (data-driven `ChatColumn` dispatch registry) deferred —
+  earn the axis first. (`knip --production` backstop was DROPPED on the hardening archive: the mandatory
+  sibling-test rule defeats it, and registry-as-sole-mount-path + the ESLint import ban are the real
+  orphan catches.)
 - [ ] **Docs/memory:** the "before you add a widget/type/tool/context" checklist lives in
   `docs/agents/data-model.md` header + AGENTS.md + memory, so future agents consult it.
 
