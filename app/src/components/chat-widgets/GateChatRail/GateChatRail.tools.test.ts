@@ -8,9 +8,23 @@ import { tools } from "./GateChatRail.tools";
 const byName = (n: string) => tools.find((t) => t.name === n)!;
 
 describe("GateChatRail tools", () => {
-  it("declares commit_gate + dismiss_gate (both mutate)", () => {
-    expect(tools.map((t) => t.name).sort()).toEqual(["commit_gate", "dismiss_gate"]);
+  it("declares commit_gate + dismiss_gate + save_to_account (all mutate)", () => {
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "commit_gate",
+      "dismiss_gate",
+      "save_to_account",
+    ]);
     for (const t of tools) expect(t.category).toBe("mutate");
+  });
+
+  describe("save_to_account", () => {
+    const t = byName("save_to_account");
+    it("takes no arguments and produces an openGate(save) intent", () => {
+      expect(t.handler(t.input.parse({}))).toEqual({ kind: "openGate", trigger: "save" });
+    });
+    it("is exposed on the analysis surfaces where a user saves mid-flow", () => {
+      expect(t.availableSteps).toEqual(expect.arrayContaining(["doc-viewer", "interact-chat"]));
+    });
   });
 
   describe("commit_gate", () => {

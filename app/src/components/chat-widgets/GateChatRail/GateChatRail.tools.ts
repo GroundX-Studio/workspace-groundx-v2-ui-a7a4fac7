@@ -48,4 +48,27 @@ const dismissGate: WidgetTool = {
   handler: () => ({ kind: "dismissGate" }),
 };
 
-export const tools: WidgetTool[] = [commitGate, dismissGate];
+/**
+ * 2026-05-31-shared-canvas-affordance-restoration — `save_to_account` is the
+ * chat-driven successor to the retired F5 Interact "💾 Save 🔒" button. The
+ * shared `PdfViewer` (the live Interact canvas) must NOT grow an onboarding-only
+ * Save affordance (`no-onboarding-duplicates`), so saving mid-analysis OPENS the
+ * sign-in gate via this tool's `openGate` intent. Distinct from `submit_signup`
+ * (which submits the form): this only surfaces the sign-in offer. Mutate-category
+ * → it surfaces as a `tool:save_to_account` chip the user confirms (never an
+ * auto-open). Exposed on the analysis surfaces a user saves from.
+ */
+const saveToAccount: WidgetTool = {
+  name: "save_to_account",
+  description:
+    "Open the sign-in offer so the user can save their current analysis to an " +
+    "account. Use when the user says \"save\", \"keep this\", or asks to save " +
+    "their progress but has NOT yet entered sign-up details (use submit_signup " +
+    "once they have). Surfaces the gate; it does not create the account.",
+  category: "mutate",
+  input: z.object({}),
+  handler: () => ({ kind: "openGate", trigger: "save" }),
+  availableSteps: ["doc-viewer", "interact-chat"],
+};
+
+export const tools: WidgetTool[] = [commitGate, dismissGate, saveToAccount];

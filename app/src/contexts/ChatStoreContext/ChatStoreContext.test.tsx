@@ -597,4 +597,47 @@ describe("ChatStoreContext", () => {
       expect(ensureServerChatSession).not.toHaveBeenCalled();
     });
   });
+
+  // 2026-05-31-onboarding-experiences task 3 — per-scope session resolution.
+  describe("resolveSessionForScope", () => {
+    const WORKSPACE_SCOPE = { type: "bucket" as const, bucketId: 28454 };
+    const PROJECT_SCOPE = {
+      type: "bucket" as const,
+      bucketId: 28454,
+      filter: { project: "utility" },
+    };
+
+    it("opening Workspace, then Project, then re-opening Workspace resolves DISTINCT, STABLE per-scope sessions", () => {
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      let workspaceId = "";
+      let projectId = "";
+      let workspaceIdAgain = "";
+      act(() => {
+        workspaceId = result.current.resolveSessionForScope(WORKSPACE_SCOPE, { title: "Workspace" });
+      });
+      act(() => {
+        projectId = result.current.resolveSessionForScope(PROJECT_SCOPE, { title: "Project" });
+      });
+      act(() => {
+        workspaceIdAgain = result.current.resolveSessionForScope(WORKSPACE_SCOPE, { title: "Workspace" });
+      });
+      // Distinct rows per scope; re-opening Workspace returns the SAME row
+      // (no collision on one shared session).
+      expect(workspaceId).toBeTruthy();
+      expect(projectId).toBeTruthy();
+      expect(workspaceId).not.toBe(projectId);
+      expect(workspaceIdAgain).toBe(workspaceId);
+      // Only two sessions were ensure-created across three opens.
+      expect(result.current.state.sessions.size).toBe(2);
+    });
+
+    it("makes the resolved scope session the active session", () => {
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      let workspaceId = "";
+      act(() => {
+        workspaceId = result.current.resolveSessionForScope(WORKSPACE_SCOPE, { title: "Workspace" });
+      });
+      expect(result.current.state.activeSessionId).toBe(workspaceId);
+    });
+  });
 });

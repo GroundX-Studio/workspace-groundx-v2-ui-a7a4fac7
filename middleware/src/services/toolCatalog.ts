@@ -239,6 +239,26 @@ const dismissGate: ServerTool = {
 };
 
 /**
+ * 2026-05-31-shared-canvas-affordance-restoration — mirror of the app-side
+ * `GateChatRail.tools.ts` → `save_to_account`. The chat-driven successor to the
+ * retired F5 Interact "Save" button: opens the sign-in gate (the `openGate`
+ * intent the orchestrator routes to `OnboardingSession.openGate("save")`).
+ * Exposed on the analysis surfaces a user saves from (doc-viewer / interact).
+ */
+const saveToAccount: ServerTool = {
+  name: "save_to_account",
+  description:
+    "Open the sign-in offer so the user can save their current analysis to an " +
+    "account. Use when the user says \"save\", \"keep this\", or asks to save " +
+    "their progress but has NOT yet entered sign-up details (use submit_signup " +
+    "once they have). Surfaces the gate; it does not create the account.",
+  category: "mutate",
+  inputSchema: z.object({}),
+  availableSteps: ["doc-viewer", "interact-chat"],
+  intentBuilder: () => ({ kind: "openGate", trigger: "save" }),
+};
+
+/**
  * widget-llm-integration follow-up A.2 — `suggest_intent` is a
  * server-only catalog entry (no widget owns it). Replaces the
  * legacy fenced-JSON `suggestedIntent` envelope.
@@ -659,6 +679,9 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   suggestIntent,
   commitGate,
   dismissGate,
+  // 2026-05-31-shared-canvas-affordance-restoration — gate-open tool (mirror of
+  // the app-side GateChatRail.tools.ts save_to_account).
+  saveToAccount,
   bookCall,
   // onboarding-shell-shared-view Phase 3a — extract canvas-dispatch tool
   // (mirror of the app-side Extract widget's show_extraction).

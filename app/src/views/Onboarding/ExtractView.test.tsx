@@ -1,13 +1,44 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useMemo, type FC } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ContentScope } from "@groundx/shared";
+
+import { Extract } from "@/components/viewer-widgets/Extract/Extract";
+import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import { useWidgetRole } from "@/lib/widgetRole";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 import { utilityTestScenario } from "@/test/scenarioFixtures";
 import type { ScenarioConfig } from "@/types/scenarios";
 
-import { ExtractView } from "./ExtractView";
+/**
+ * 2026-05-31-shared-canvas-affordance-restoration — the production
+ * `views/Onboarding/ExtractView.tsx` thin wrapper was retired (the live canvas
+ * mounts `Extract` via `<ScopedCanvas>`). These tests cover the Extract
+ * extraction-WORKBENCH behavior (topbar / tabs / field cards / provenance /
+ * F3a pinning) that is owned by the `Extract` widget — NOT by `Extract.test.tsx`
+ * (which covers only scope adaptation). To preserve that coverage without the
+ * retired view file, this local shim reproduces the deleted wrapper verbatim
+ * (derive the scenario's documents scope + auth role, mount `Extract`). The
+ * tests below are unchanged.
+ */
+const ExtractView: FC = () => {
+  const { state: appMode } = useAppMode();
+  const { state: session } = useOnboardingSession();
+  const { byId } = useScenarioRegistry();
+  const widgetRole = useWidgetRole();
+  const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
+  const scenario = byId(scenarioId);
+  const docId = scenario?.documents?.[0]?.documentId ?? null;
+  const scope: ContentScope = useMemo(
+    () => ({ type: "documents", documentIds: docId ? [docId] : [] }),
+    [docId],
+  );
+  return <Extract scope={scope} role={widgetRole} />;
+};
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -150,7 +181,6 @@ describe("ExtractView (F3/F4)", () => {
     // with default `grid-auto-flow: row`).
     expect(viewer).toBeInTheDocument();
     expect(fields).toBeInTheDocument();
-    // eslint-disable-next-line no-bitwise
     const beforeFields = viewer.compareDocumentPosition(fields) & Node.DOCUMENT_POSITION_FOLLOWING;
     expect(beforeFields).toBeTruthy();
   });

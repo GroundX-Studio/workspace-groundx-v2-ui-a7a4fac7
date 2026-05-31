@@ -85,6 +85,7 @@ added here and asserted by the owning widget's test.
 | book_call | BookingStatusCard | mutate | all roles | anonymous may book a call |
 | commit_gate | GateChatRail | mutate | all roles | anonymous commits the gate = signs up |
 | dismiss_gate | GateChatRail | mutate | all roles | anonymous may dismiss |
+| save_to_account | GateChatRail | mutate | all roles | the chat-driven successor to the retired F5 Interact Save button — opens the sign-in gate (`openGate` `trigger:"save"`) so the user can save their analysis; surfaces as a confirmed `tool:save_to_account` chip, never auto-opened. (2026-05-31-shared-canvas-affordance-restoration) |
 | propose_schema_field | ProposeSchemaFieldCard | mutate | all roles | core onboarding interaction for the anonymous user |
 | accept_proposal | ProposeSchemaFieldCard | mutate | all roles | "" |
 | reject_proposal | ProposeSchemaFieldCard | mutate | all roles | "" |

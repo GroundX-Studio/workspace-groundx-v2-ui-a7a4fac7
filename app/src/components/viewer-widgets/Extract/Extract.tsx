@@ -54,7 +54,7 @@ import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewer
 import { track } from "@/lib/analytics";
 import type { ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
-import { SchemaView } from "@/views/Onboarding/SchemaView";
+import { SchemaView } from "./SchemaView";
 
 /**
  * Extract — the production extraction-workbench ScopedViewerWidget.

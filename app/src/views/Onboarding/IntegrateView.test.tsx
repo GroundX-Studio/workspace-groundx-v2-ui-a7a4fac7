@@ -1,10 +1,38 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useMemo, type FC } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ContentScope } from "@groundx/shared";
+
+import { Integrate } from "@/components/viewer-widgets/Integrate/Integrate";
+import { useAppMode } from "@/contexts/AppModeContext";
+import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import { useWidgetRole } from "@/lib/widgetRole";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
-import { IntegrateView } from "./IntegrateView";
+/**
+ * 2026-05-31-shared-canvas-affordance-restoration — the production
+ * `views/Onboarding/IntegrateView.tsx` thin wrapper was retired (the live canvas
+ * mounts `Integrate` via `<ScopedCanvas>`). This shim reproduces the deleted
+ * wrapper verbatim so the connector/snippet coverage (not in `Integrate.test.tsx`)
+ * is preserved without the view file.
+ */
+const IntegrateView: FC = () => {
+  const { state: appMode } = useAppMode();
+  const { state: session } = useOnboardingSession();
+  const { byId } = useScenarioRegistry();
+  const widgetRole = useWidgetRole();
+  const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
+  const scenario = byId(scenarioId);
+  const docId = scenario?.documents?.[0]?.documentId ?? null;
+  const scope: ContentScope = useMemo(
+    () => ({ type: "documents", documentIds: docId ? [docId] : [] }),
+    [docId],
+  );
+  return <Integrate scope={scope} role={widgetRole} />;
+};
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});

@@ -654,4 +654,46 @@ describe("CanvasOrchestratorContext", () => {
       }).not.toThrow();
     });
   });
+
+  // 2026-05-31-shared-canvas-affordance-restoration — the previously-DORMANT
+  // `openGate` intent is now routed through the OPTIONAL OnboardingSession to
+  // `openGate(trigger)`. This is the single mechanism the chat-driven
+  // `save_to_account` tool (the chat successor to the retired F5 Interact Save
+  // button) uses to open the sign-in gate on the live canvas — no parallel path.
+  describe("openGate intent routes to OnboardingSession.openGate", () => {
+    const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
+      <ChatStoreProvider autoSeedDefaultSession>
+        <OnboardingSessionProvider initialFrame="f5" initialScenario="utility">
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </OnboardingSessionProvider>
+      </ChatStoreProvider>
+    );
+    function useBoth() {
+      return { orchestrator: useCanvasOrchestrator(), session: useOnboardingSession() };
+    }
+
+    it("openGate opens the sign-in gate with the dispatched trigger", () => {
+      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+      expect(result.current.session.state.gate.status).not.toBe("open");
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "openGate", trigger: "save" }, "agent");
+      });
+      const gate = result.current.session.state.gate;
+      expect(gate.status).toBe("open");
+      // Narrow the GateStatus union — `trigger` lives on the open/dismissed arms.
+      expect(gate.status === "open" ? gate.trigger : undefined).toBe("save");
+    });
+
+    it("openGate is a no-op (no throw) without an OnboardingSessionProvider", () => {
+      const plainWrapper = ({ children }: { children: React.ReactNode }) => (
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      );
+      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
+      expect(() => {
+        act(() => {
+          result.current.dispatch({ kind: "openGate", trigger: "save" });
+        });
+      }).not.toThrow();
+    });
+  });
 });

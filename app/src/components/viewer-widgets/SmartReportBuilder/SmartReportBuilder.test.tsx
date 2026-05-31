@@ -1,5 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { FC } from "react";
+import { useEffect, useRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
@@ -47,7 +49,7 @@ import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProvid
 import { SmartReportBuilder } from "./SmartReportBuilder";
 
 /** Probe that surfaces the gate status so the anon-Save test can assert it. */
-const GateProbe: React.FC = () => {
+const GateProbe: FC = () => {
   const { state } = useOnboardingSession();
   return <span data-testid="gate-status">{state.gate.status}</span>;
 };
@@ -129,6 +131,33 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     // The named section's editor is open WITHOUT a click (the hand-off carried the id).
     expect(screen.getByTestId("report-builder-editor-charge_breakdown")).toBeInTheDocument();
     // Sibling rows stay collapsed (one editor at a time — the F3a invariant).
+    expect(screen.queryByTestId("report-builder-editor-billing_summary")).not.toBeInTheDocument();
+  });
+
+  it("pre-opens the inline editor from `session.selectedReportSectionId` when no prop is supplied (live ScopedCanvas path)", async () => {
+    // 2026-05-31-shared-canvas-affordance-restoration: <ScopedCanvas> mounts the
+    // builder with only `{ scope, role }`, so the render→builder hand-off can't
+    // thread `selectedSectionId` as a prop. The builder must fall back to
+    // `session.selectedReportSectionId` (set by the orchestrator's editTemplate
+    // routing → advanceFrame("f4a", { selectedReportSectionId })).
+    const SelectProbe: FC = () => {
+      const { advanceFrame } = useOnboardingSession();
+      const fired = useRef(false);
+      useEffect(() => {
+        if (fired.current) return;
+        fired.current = true;
+        advanceFrame("f4a", { selectedReportSectionId: "anomalies" });
+      }, [advanceFrame]);
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <SmartReportBuilder role="member" scope={UTILITY_SCOPE} />
+        <SelectProbe />
+      </>,
+      { initialScenario: "utility", initialFrame: "f4a", initialAuthState: "signed-in" },
+    );
+    expect(await screen.findByTestId("report-builder-editor-anomalies")).toBeInTheDocument();
     expect(screen.queryByTestId("report-builder-editor-billing_summary")).not.toBeInTheDocument();
   });
 

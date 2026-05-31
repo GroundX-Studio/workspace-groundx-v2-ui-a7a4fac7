@@ -19,6 +19,7 @@ import type { RenderReportResult } from "@/api/smartReport";
 import type { RenderedReport } from "@/types/report";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 
 import { SmartReportRender } from "./SmartReportRender";
 
@@ -171,14 +172,36 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     expect(exportControl).toHaveTextContent("🔒");
   });
 
-  it("fires onEditSection when the per-heading edit affordance is clicked", async () => {
+  it("dispatches editTemplate (render→builder hand-off) when the per-heading edit affordance is clicked", async () => {
+    // 2026-05-31-shared-canvas-affordance-restoration: the `✎ edit §N` control
+    // no longer relies on a host `onEditSection` callback (the `{ scope, role }`
+    // ScopedCanvas contract can't supply it). It dispatches the `editTemplate`
+    // CanvasIntent through the orchestrator — the SAME intent the
+    // `show_smart_report_edit` tool emits — which routes to
+    // `advanceFrame("f4a", { selectedReportSectionId })`. We assert the
+    // user-visible result of that routing via a session probe.
     const user = userEvent.setup();
-    const onEditSection = vi.fn();
+    let snapshot: { frame: string; selectedSectionId: string | null } = {
+      frame: "",
+      selectedSectionId: null,
+    };
+    const SessionProbe: FC = () => {
+      const { state } = useOnboardingSession();
+      snapshot = { frame: state.currentFrame, selectedSectionId: state.selectedReportSectionId };
+      return null;
+    };
     renderWithOnboardingProviders(
-      <SmartReportRender role="member" scope={UTILITY_SCOPE} onEditSection={onEditSection} />,
+      <>
+        <SmartReportRender role="member" scope={UTILITY_SCOPE} />
+        <SessionProbe />
+      </>,
+      { initialFrame: "f4", initialScenario: "utility" },
     );
     await user.click(await screen.findByTestId("report-section-edit-billing_summary"));
-    expect(onEditSection).toHaveBeenCalledWith("billing_summary");
+    await waitFor(() => {
+      expect(snapshot.frame).toBe("f4a");
+      expect(snapshot.selectedSectionId).toBe("billing_summary");
+    });
   });
 
   it("re-resolves the report when the scope IDENTITY changes (useScopeAdapter is load-bearing)", async () => {

@@ -32,8 +32,6 @@ interface SmartReportRenderProps {
   scope: ContentScope;
   /** REQUIRED authorization role (anonymous | member). Gates export / Save. */
   role: WidgetRole;
-  /** Fired by `✎ edit §N` — host routes to f4a with this section selected. */
-  onEditSection?: (sectionId: string) => void;
 }
 ```
 
@@ -59,8 +57,14 @@ re-resolves the report whenever the scope IDENTITY changes.
 
 ## Events
 
-- `onEditSection(sectionId)` — fires when the user activates `✎ edit §N` on a
-  section heading (the host opens the builder f4a with that section selected).
+- `✎ edit §N` — dispatches the `editTemplate` `CanvasIntent` through the canvas
+  orchestrator (`useCanvasOrchestratorOptional`), the SAME intent the
+  `show_smart_report_edit` tool emits. The orchestrator routes it to
+  `advanceFrame("f4a", { selectedReportSectionId })`, opening the builder with
+  that section pre-selected. No host callback prop — the `{ scope, role }`
+  ScopedCanvas mount contract can't supply one, so the control drives its
+  cross-surface effect through the orchestrator (works with zero per-frame
+  wiring; a no-op when no orchestrator is mounted, e.g. a standalone test).
 - `CiteChip` click — dispatches `highlightCitation` (the shipped clickable-
   citation path) → the `PdfViewerWidget` jumps to the cited page + lit region.
 
@@ -72,12 +76,11 @@ import { SmartReportRender } from "@/components/viewer-widgets/SmartReportRender
 <SmartReportRender
   role={role}
   scope={{ type: "bucket", bucketId: 28454, filter: { project: "utility" } }}
-  onEditSection={(id) => advanceToBuilder(id)}
 />
 ```
 
-Mounted by `ReportRenderView` (the f4 thin layout wrapper). The onboarding view
-passes the active scenario's scope + the auth-derived role.
+Mounted by `<ScopedCanvas>` (the SOLE canvas mount path) for the `report`
+canvas kind, which passes the active experience's scope + the auth-derived role.
 
 ## LLM tools
 
@@ -98,5 +101,6 @@ middleware `SERVER_TOOL_CATALOG`. Its `_edit` sibling
 2. Renders the Utility fixture's four sections + CiteChips over a
    `bucket + project filter` scope.
 3. Export / Save lock state differs by role + `preview_only`.
-4. `✎ edit §N` fires `onEditSection`.
+4. `✎ edit §N` dispatches the `editTemplate` intent through the orchestrator
+   (the render→builder hand-off; routes to `advanceFrame("f4a", { selectedReportSectionId })`).
 5. The empty state renders when the scope has no fixture.

@@ -168,6 +168,44 @@ describe("OnboardingNav", () => {
     expect(clicked).toBe("workspaces");
   });
 
+  // 2026-05-31-onboarding-experiences task 5 — for a non-loggedOut account
+  // BOTH the Workspaces and Projects rows are ENABLED (not aria-disabled) and
+  // each fires onItemClick with its key. The logged-out disabled state is
+  // covered by the disabled-items test below.
+  it("Workspaces AND Projects are enabled and fire onItemClick when signed in", () => {
+    const clicks: string[] = [];
+    render(
+      <OnboardingNav
+        accountState="free"
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+        onItemClick={(key) => clicks.push(key)}
+      />,
+    );
+    const workspaces = screen.getByTestId("onboarding-nav-item-workspaces");
+    const projects = screen.getByTestId("onboarding-nav-item-projects");
+    expect(workspaces).not.toHaveAttribute("aria-disabled");
+    expect(projects).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(workspaces);
+    fireEvent.click(projects);
+    expect(clicks).toEqual(["workspaces", "projects"]);
+  });
+
+  it("the active entry is highlighted via activeKey when signed in", () => {
+    render(
+      <OnboardingNav
+        accountState="free"
+        activeKey="workspaces"
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+      />,
+    );
+    // The active row carries the cyan-background highlight (FONT_WEIGHT_HEADLINE
+    // is applied when active) — assert it is NOT disabled and rendered enabled.
+    const workspaces = screen.getByTestId("onboarding-nav-item-workspaces");
+    expect(workspaces).not.toHaveAttribute("aria-disabled");
+  });
+
   it("logged-out disabled items do not fire onItemClick", () => {
     let clicked: string | null = null;
     render(

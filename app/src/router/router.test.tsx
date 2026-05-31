@@ -22,4 +22,15 @@ describe("router config", () => {
     expect(paths).toContain(`${ROUTER_PATHS.ONBOARDING}/signup`);
     expect(paths).toContain(`${ROUTER_PATHS.ONBOARDING}/:bucketId/:scenarioId`);
   });
+
+  // 2026-05-31-onboarding-experiences — the Workspaces / Projects nav entries
+  // assign to these routes; they must resolve (not 404) so the authenticated
+  // user lands in the scoped conversation.
+  it("the /workspaces and /projects surfaces are registered routes", () => {
+    const paths = router.routes.map((r) => r.path);
+    expect(paths).toContain(ROUTER_PATHS.WORKSPACES);
+    expect(paths).toContain(ROUTER_PATHS.PROJECTS);
+    expect(ROUTER_PATHS.WORKSPACES).toBe("/workspaces");
+    expect(ROUTER_PATHS.PROJECTS).toBe("/projects");
+  });
 });

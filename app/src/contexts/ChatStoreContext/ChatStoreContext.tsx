@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
 import { ensureServerChatSession } from "@/api/chatSessions";
 import { upsertChatSessionEntity } from "@/api/chatSessionEntities";
@@ -6,7 +6,7 @@ import { patchChatSession } from "@/api/chatSessionPatch";
 import { recordViewerEvent } from "@/api/viewerEvents";
 import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntitySessionStoreContext";
 import type { FFrame } from "@/types/onboarding";
-import type { NormalizedBbox } from "@groundx/shared";
+import { compileScopeFilter, type ContentScope, type NormalizedBbox } from "@groundx/shared";
 
 import { resolvePinTarget, type PinResolution, type PinTargetTemplate } from "./resolvePinTarget";
 import {
@@ -56,6 +56,28 @@ function coerceHydratedIntent(raw: unknown): CanvasIntent | null {
  * Concrete shape: every field in ChatStoreApi EXCEPT `state`.
  */
 type ChatStoreActions = Omit<ChatStoreApi, "state">;
+
+/**
+ * A deterministic, stable string key for a `ContentScope`. Used to title the
+ * per-scope chat session so re-resolving the same Workspace / Project nav
+ * entry returns the same session row (rather than collide on one shared
+ * session). Stable across reload because it derives only from the scope's own
+ * fields; the compiled filter normalizes value/array forms.
+ */
+export function scopeSessionKey(scope: ContentScope): string {
+  const filter = compileScopeFilter(scope.filter);
+  const filterPart = filter ? `|${JSON.stringify(filter)}` : "";
+  switch (scope.type) {
+    case "bucket":
+      return `scope:bucket:${scope.bucketId}${filterPart}`;
+    case "group":
+      return `scope:group:${scope.groupId}${filterPart}`;
+    case "documents":
+      return `scope:documents:${[...scope.documentIds].sort().join(",")}${filterPart}`;
+    default:
+      return "scope:unknown";
+  }
+}
 const ChatStoreStateContext = createContext<ChatStoreState | null>(null);
 const ChatStoreActionsContext = createContext<ChatStoreActions | null>(null);
 
@@ -141,6 +163,8 @@ interface SerializedSession {
   activeEntityKey: EntityKey | null;
   isOnboardingSession: boolean;
   signupOpen: boolean;
+  /** 2026-05-31-onboarding-experiences — per-scope session key (optional). */
+  scopeKey?: string;
   // gate, summaries, viewerHistory, currentIntent left out of v1
   // serialization; they're either ephemeral (currentIntent, signupOpen,
   // viewerHistory cached from intent_log) or not yet populated
@@ -190,6 +214,7 @@ function serialize(state: ChatStoreState): string {
       activeEntityKey: session.activeEntityKey,
       isOnboardingSession: session.isOnboardingSession,
       signupOpen: session.signupOpen,
+      ...(session.scopeKey ? { scopeKey: session.scopeKey } : {}),
     });
   }
   const snapshot: SerializedSnapshot = {
@@ -274,6 +299,7 @@ function deserialize(raw: string): ChatStoreState | null {
         gate: { status: "idle" },
         signupOpen: s.signupOpen,
         isOnboardingSession: s.isOnboardingSession,
+        ...(s.scopeKey ? { scopeKey: s.scopeKey } : {}),
       });
     }
     return { ownerKey: parsed.ownerKey, sessions, activeSessionId: parsed.activeSessionId };
@@ -478,6 +504,13 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     return { ownerKey: mintAnonOwnerKey(), sessions: new Map(), activeSessionId: null };
   });
 
+  // Latest-state ref so synchronous actions (e.g. resolveSessionForScope,
+  // which must RETURN a session id in the same tick) can read the current
+  // sessions without waiting for a functional-updater to flush. Assigned
+  // during render — committed before any event handler that calls an action.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   // Persist on every commit (except in ephemeral mode).
   useEffect(() => {
     if (ephemeral) return;
@@ -510,7 +543,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
   // ----- session-level actions ---------------------------------------
 
   const newSession = useCallback(
-    (options?: { isOnboardingSession?: boolean; title?: string }): string => {
+    (options?: { isOnboardingSession?: boolean; title?: string; scopeKey?: string }): string => {
       const id = mintSessionId();
       setState((prev) => {
         const now = Date.now();
@@ -531,6 +564,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
           gate: { status: "idle" },
           signupOpen: false,
           isOnboardingSession: Boolean(options?.isOnboardingSession),
+          ...(options?.scopeKey ? { scopeKey: options.scopeKey } : {}),
         };
         const sessions = new Map(prev.sessions);
         sessions.set(id, session);
@@ -548,6 +582,27 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       return { ...prev, activeSessionId: id };
     });
   }, []);
+
+  // 2026-05-31-onboarding-experiences — resolve (ensure-create + activate) the
+  // stable session for a `ContentScope`. Idempotent per scope: the deterministic
+  // `scopeSessionKey` is stored on the session, so a second resolve for the
+  // same scope returns the SAME row. Reuses `newSession` (no forked creation).
+  const resolveSessionForScope = useCallback(
+    (scope: ContentScope, options?: { title?: string }): string => {
+      const key = scopeSessionKey(scope);
+      // Synchronous decision off the latest-state ref so we can RETURN the id
+      // in the same tick (the caller routes to it immediately).
+      const match = [...stateRef.current.sessions.values()].find((s) => s.scopeKey === key);
+      if (match) {
+        switchTo(match.id);
+        return match.id;
+      }
+      // Ensure-create via the shared newSession path (no forked creation),
+      // tagging the new row with the scope key so re-resolve is idempotent.
+      return newSession({ title: options?.title, scopeKey: key });
+    },
+    [newSession, switchTo],
+  );
 
   const appendMessage = useCallback((input: NewMessageInput) => {
     setState((prev) => {
@@ -1677,6 +1732,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     () => ({
       newSession,
       switchTo,
+      resolveSessionForScope,
       appendMessage,
       activateEntity,
       upsertEntityAndActivate,
@@ -1712,6 +1768,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     [
       newSession,
       switchTo,
+      resolveSessionForScope,
       appendMessage,
       activateEntity,
       upsertEntityAndActivate,

@@ -228,6 +228,17 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
               : undefined,
           );
         }
+        // 2026-05-31-shared-canvas-affordance-restoration — route the
+        // previously-DORMANT `openGate` intent to the onboarding gate. This is
+        // the chat-driven successor to the retired F5 Interact "Save" button:
+        // the `save_to_account` tool / `tool:save_to_account` chip emit
+        // `{ kind: "openGate", trigger: "save" }`, and this is the SINGLE
+        // mechanism that opens the gate on the shared canvas (no parallel path,
+        // no dormant plumbing). Soft-fails in the steady tree (no provider),
+        // matching the gate-lifecycle handlers above.
+        if (intent.kind === "openGate") {
+          onboardingSession.openGate(intent.trigger);
+        }
       }
       // widget-llm-integration follow-up B.3 — book-call routing.
       // The OnboardingShell watches `?bookCall=1` to swap the

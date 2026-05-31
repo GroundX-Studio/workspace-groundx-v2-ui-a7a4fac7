@@ -25,6 +25,9 @@ const EXPECTED_NAMES = [
   "suggest_intent",
   "commit_gate",
   "dismiss_gate",
+  // 2026-05-31-shared-canvas-affordance-restoration — gate-open tool (the chat
+  // successor to the retired F5 Interact Save button).
+  "save_to_account",
   "book_call",
   // 2026-05-30-onboarding-shell-shared-view Phase 3a — extract canvas-dispatch.
   "show_extraction",
@@ -108,6 +111,9 @@ describe("server tool catalog", () => {
         "pin_to_report",
         "propose_schema_field",
         "reject_proposal",
+        // shared-canvas-affordance-restoration — save_to_account opens the gate
+        // from the doc-viewer / interact canvas (the chat Save successor).
+        "save_to_account",
         // onboarding-shell-shared-view Phase 3a — show_extraction is reachable
         // from the doc-viewer (the user can ask to see the extraction).
         "show_extraction",

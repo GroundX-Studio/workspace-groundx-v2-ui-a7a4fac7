@@ -1,0 +1,182 @@
+/**
+ * 2026-05-31-onboarding-experiences — the surface that mounts the SINGLE
+ * `ConversationFlow` composed with a looked-up Workspace / Project
+ * `ChatExperience`.
+ *
+ * Composition, not dispatch: this surface looks the experience up by id in
+ * `chatExperienceRegistry` (lookup-only catalog), builds the entry's
+ * `ContentScope` (the INPUT-NEEDED decision: Workspace → its workspace bucket;
+ * Project → bucket + project filter), selects the per-scope chat session
+ * (`resolveSessionForScope`), and hands the constructed experience to
+ * `<ConversationFlow>`. There is NO new flow component and NO flow `mode` —
+ * the same `ConversationFlow` the steady + onboarding surfaces mount.
+ *
+ * `/workspaces` → experience id `workspace`; `/projects` → `project`.
+ */
+import Box from "@mui/material/Box";
+import { useEffect, useMemo, type FC } from "react";
+import { useNavigate } from "react-router-dom";
+
+import type { ContentScope } from "@groundx/shared";
+
+import { AppShell } from "@/components/layout/AppShell";
+import {
+  OnboardingNav,
+  useOnboardingNavCollapsed,
+  type OnboardingNavItemKey,
+} from "@/components/layout/OnboardingNav/OnboardingNav";
+import {
+  ONBOARDING_NAV_WIDTH_COLLAPSED,
+  ONBOARDING_NAV_WIDTH_FULL,
+  WARM_OFFWHITE,
+  WHITE,
+} from "@/constants";
+import { chatExperienceRegistry } from "@/conversation/chatExperienceRegistry";
+import { ConversationFlow } from "@/conversation/ConversationFlow";
+import { useChatStore } from "@/contexts/ChatStoreContext";
+import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+
+// The demo workspace bucket, mirroring OnboardingShell's `scenarioRegistry
+// .bucketId ?? 28454` fallback (the seeded shared demo bucket). When the
+// scenario registry has resolved a real bucket id, that wins.
+const FALLBACK_DEMO_BUCKET = 28454;
+
+export interface ScopedConversationShellProps {
+  /** The experience id to look up + compose (`workspace` | `project`). */
+  experienceId: "workspace" | "project";
+  /**
+   * The project filter-field value for the `project` experience (the demos
+   * key projects off a `project` filter whose value is the scenario id).
+   * Ignored for `workspace`. Defaults to the first ready scenario / "utility".
+   */
+  projectValue?: string;
+  /** Which nav entry is active (highlights the rail row). */
+  navActiveKey: OnboardingNavItemKey;
+  /** Human title for the ensure-created chat session. */
+  sessionTitle: string;
+}
+
+export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
+  experienceId,
+  projectValue,
+  navActiveKey,
+  sessionTitle,
+}) => {
+  const navigate = useNavigate();
+  const { state: registryState } = useScenarioRegistry();
+  const { state: chatState, resolveSessionForScope } = useChatStore();
+  const [navCollapsed, setNavCollapsed] = useOnboardingNavCollapsed();
+
+  const bucketId = registryState.status === "ready" && registryState.bucketId != null
+    ? registryState.bucketId
+    : FALLBACK_DEMO_BUCKET;
+
+  const resolvedProjectValue =
+    projectValue ??
+    (registryState.status === "ready" ? registryState.scenarios[0]?.id : undefined) ??
+    "utility";
+
+  // The scope each entry opens on (the INPUT-NEEDED decision):
+  //   workspace → its workspace bucket id
+  //   project   → bucket + the project filter field/value
+  const scope: ContentScope = useMemo(() => {
+    if (experienceId === "project") {
+      return { type: "bucket", bucketId, filter: { project: resolvedProjectValue } };
+    }
+    return { type: "bucket", bucketId };
+  }, [experienceId, bucketId, resolvedProjectValue]);
+
+  // Look the experience up (lookup-only catalog) and construct it over the scope.
+  const experience = useMemo(() => {
+    const entry = chatExperienceRegistry.byId(experienceId);
+    return entry ? entry.create({ scope }) : undefined;
+  }, [experienceId, scope]);
+
+  // Select the per-scope chat session (ensure-created if absent). Re-opening
+  // the same entry returns to its own conversation.
+  const scopeSig = JSON.stringify(scope);
+  useEffect(() => {
+    resolveSessionForScope(scope, { title: sessionTitle });
+    // scopeSig is the stable scope identity; resolveSessionForScope is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeSig, sessionTitle]);
+
+  const activeSessionId = chatState.activeSessionId;
+
+  const handleNavItemClick = (key: OnboardingNavItemKey) => {
+    if (key === "workspaces") return void navigate("/workspaces");
+    if (key === "projects") return void navigate("/projects");
+    if (key === "docs") return void window.open("https://docs.groundx.ai", "_blank", "noopener,noreferrer");
+    if (key === "settings") return void navigate("/settings");
+  };
+
+  const chatPane = (
+    <Box
+      data-testid="scoped-shell-chat-pane"
+      sx={{
+        width: "100%",
+        flex: 1,
+        height: "100%",
+        backgroundColor: WARM_OFFWHITE,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        p: 2,
+      }}
+      aria-label="Chat column"
+    >
+      <ConversationFlow chatSessionId={activeSessionId} experience={experience} />
+    </Box>
+  );
+
+  const canvasPane = (
+    <Box
+      data-testid="scoped-shell-canvas-pane"
+      sx={{ width: "100%", flex: 1, height: "100%", backgroundColor: WHITE }}
+      aria-label="Canvas"
+    />
+  );
+
+  return (
+    <Box
+      data-testid="scoped-shell"
+      data-experience={experienceId}
+      sx={{ position: "relative", height: "100vh", overflow: "hidden", backgroundColor: WHITE }}
+    >
+      <AppShell
+        nav={
+          <OnboardingNav
+            accountState="free"
+            activeKey={navActiveKey}
+            collapsed={navCollapsed}
+            onToggleCollapsed={() => setNavCollapsed(!navCollapsed)}
+            onItemClick={handleNavItemClick}
+            onLogoClick={() => navigate("/")}
+          />
+        }
+        chat={chatPane}
+        canvas={canvasPane}
+        initialChatWidth={420}
+        navWidth={navCollapsed ? ONBOARDING_NAV_WIDTH_COLLAPSED : ONBOARDING_NAV_WIDTH_FULL}
+      />
+    </Box>
+  );
+};
+
+/** `/workspaces` route surface. */
+export const WorkspacesView: FC = () => (
+  <ScopedConversationShell
+    experienceId="workspace"
+    navActiveKey="workspaces"
+    sessionTitle="Workspace"
+  />
+);
+
+/** `/projects` route surface. */
+export const ProjectsView: FC = () => (
+  <ScopedConversationShell
+    experienceId="project"
+    navActiveKey="projects"
+    sessionTitle="Project"
+  />
+);

@@ -4,7 +4,7 @@ import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
 // module (type-only → erased → cycle-free with the orchestrator's runtime
 // dependency on ChatStore). Re-exported below for back-compat consumers.
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
-import type { Citation, NormalizedBbox } from "@groundx/shared";
+import type { Citation, ContentScope, NormalizedBbox } from "@groundx/shared";
 
 /**
  * Chat session foundation — see /memory/project_chat_session_model.md.
@@ -486,6 +486,14 @@ export interface ChatSession {
   gate: GateStatus;
   signupOpen: boolean;
   isOnboardingSession: boolean;
+
+  // 2026-05-31-onboarding-experiences — the deterministic `ContentScope`
+  // key (see `scopeSessionKey`) this session was ensure-created for, when it
+  // is a Workspace / Project scoped conversation. Absent for onboarding +
+  // ad-hoc steady sessions. Used by `resolveSessionForScope` to return the
+  // SAME session row on re-open rather than collide on one shared session;
+  // serialized so the mapping is stable across reload.
+  scopeKey?: string;
 }
 
 export interface ChatStoreState {
@@ -511,6 +519,20 @@ export interface ChatStoreApi {
   newSession: (options?: { isOnboardingSession?: boolean; title?: string }) => string;
   /** Activate an existing session. No-op if id is unknown. */
   switchTo: (id: string) => void;
+  /**
+   * 2026-05-31-onboarding-experiences — resolve the stable chat session for a
+   * `ContentScope` (a Workspace / Project nav entry's scope), ensure-creating
+   * it if absent, and activate it. Idempotent: re-resolving the same scope
+   * returns the same session row rather than colliding on one shared session.
+   * Reuses `newSession` for the ensure-create path (no forked creation). The
+   * session is keyed off a deterministic scope label persisted as its title,
+   * so it survives reload + the existing reset (which clears all sessions).
+   * Returns the resolved session id.
+   */
+  resolveSessionForScope: (
+    scope: ContentScope,
+    options?: { title?: string },
+  ) => string;
   /** Append a message to the active session. No-op if no session is active. */
   appendMessage: (input: NewMessageInput) => void;
 

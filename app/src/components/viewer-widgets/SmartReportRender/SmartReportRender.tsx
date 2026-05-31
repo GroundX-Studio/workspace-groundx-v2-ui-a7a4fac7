@@ -39,8 +39,11 @@
  *
  * Per `widget-role-access`: `role: WidgetRole` is the authorization axis.
  * Export / Save are locked-for-anonymous (`widgetRoleCanEdit`); a sample-doc
- * render is `preview_only` (#9). The `✎ edit §N` affordance per heading fires
- * `onEditSection` (the host routes it to f4a with the section pre-selected).
+ * render is `preview_only` (#9). The `✎ edit §N` affordance per heading dispatches
+ * the `editTemplate` CanvasIntent through the orchestrator (the same intent the
+ * `show_smart_report_edit` tool emits), routing to the builder (f4a) with the
+ * section pre-selected — no host callback prop (the `{ scope, role }` ScopedCanvas
+ * contract can't supply one).
  */
 
 import Box from "@mui/material/Box";
@@ -68,6 +71,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
 import { reportTemplateIdForScope } from "@/widgets/reportFixtures";
 import type { RenderedReport, RenderedReportSection } from "@/types/report";
@@ -85,8 +89,6 @@ export interface SmartReportRenderProps {
    * both. Surfaced via `data-role`.
    */
   role: WidgetRole;
-  /** Fired by `✎ edit §N` — the host routes to f4a with this section selected. */
-  onEditSection?: (sectionId: string) => void;
 }
 
 /** Single-character glyph for a section's render mode (¶ / • / ▦). */
@@ -109,8 +111,15 @@ function humanizeName(name: string): string {
     .join(" ");
 }
 
-export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role, onEditSection }) => {
+export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) => {
   const { state: chatState } = useChatStore();
+  // 2026-05-31-shared-canvas-affordance-restoration — the `✎ edit §N` control
+  // drives the render→builder hand-off through the orchestrator (the SAME
+  // `editTemplate` intent the `show_smart_report_edit` tool emits), NOT a host
+  // callback prop the `{ scope, role }` ScopedCanvas contract can't supply.
+  // Soft-optional: no orchestrator (standalone widget tests outside the shell)
+  // makes the control a no-op rather than forcing a provider into every mount.
+  const orchestrator = useCanvasOrchestratorOptional();
 
   // The displayed report, once the endpoint has answered. `null` until then
   // (or when the scope has no template / no sections → the empty state).
@@ -334,14 +343,26 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role, onE
                   {humanizeName(section.name)}
                 </Box>
                 {/* ✎ edit §N — opens the builder (f4a) with this section
-                    pre-selected. Rendered for every role; whether the edit
-                    *persists* is gated at the builder Save boundary. */}
+                    pre-selected, by dispatching the `editTemplate` intent
+                    through the orchestrator (the same intent
+                    `show_smart_report_edit` emits → advanceFrame("f4a", {
+                    selectedReportSectionId })). Rendered for every role; whether
+                    the edit *persists* is gated at the builder Save boundary. */}
                 <Box
                   component="button"
                   type="button"
                   data-testid={`report-section-edit-${section.sectionId}`}
                   aria-label={`Edit section ${i + 1}`}
-                  onClick={() => onEditSection?.(section.sectionId)}
+                  onClick={() =>
+                    orchestrator?.dispatch(
+                      {
+                        kind: "editTemplate",
+                        templateId: report.templateId,
+                        selectedSectionId: section.sectionId,
+                      },
+                      "user",
+                    )
+                  }
                   sx={{
                     border: "none",
                     background: "none",

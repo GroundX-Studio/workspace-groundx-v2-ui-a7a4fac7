@@ -1057,6 +1057,36 @@ describe("OnboardingShell", () => {
     await waitFor(() => expect(snapshot.frame).toBe("f4"));
   });
 
+  it("Restoration: clicking ✎ edit §N on the live f4 render surface reaches the builder with the section pre-opened", async () => {
+    // 2026-05-31-shared-canvas-affordance-restoration: the render→builder edit
+    // hand-off is restored WITHOUT per-frame view wiring — the on-screen
+    // `✎ edit §N` button dispatches the `editTemplate` intent through the
+    // orchestrator (the same intent `show_smart_report_edit` emits), which
+    // routes to advanceFrame("f4a", { selectedReportSectionId }); the builder
+    // pre-opens that section from session.selectedReportSectionId.
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f4",
+      initialScenario: "utility",
+    });
+
+    // f4 render surface is up with its sections.
+    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
+    await screen.findByText(/billing summary/i);
+
+    // Click the on-screen edit affordance for the billing_summary section.
+    await user.click(screen.getByTestId("report-section-edit-billing_summary"));
+
+    // The canvas swaps to the builder (report-builder CanvasKind)…
+    expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
+    expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
+      "data-canvas-kind",
+      "report-builder",
+    );
+    // …with that section's inline editor pre-opened (no host callback prop).
+    expect(await screen.findByTestId("report-builder-editor-billing_summary")).toBeInTheDocument();
+  });
+
   it("Phase 1: Extract → Report carries the source ContentScope (bucket+project filter, no re-pick)", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, {

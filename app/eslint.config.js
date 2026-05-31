@@ -92,25 +92,19 @@ export default tseslint.config(
       "src/components/viewer-widgets/Extract/Extract.tsx",
       "src/components/viewer-widgets/SmartReportRender/*.test.{ts,tsx}",
       "src/components/viewer-widgets/SmartReportBuilder/*.test.{ts,tsx}",
-      // ── GRANDFATHERED, pending step-20 retirement/alignment ──
-      // These legacy onboarding per-frame views still mount a
-      // ScopedViewerWidget component directly. They are NO LONGER on the live
-      // OnboardingShell canvas path (the shell mounts <ScopedCanvas>), but the
-      // files are not deleted yet: the 5 onboarding per-frame views are retired
-      // in onboarding-shell-shared-view Phase 3. Each exemption is removed as
-      // its file is deleted/aligned — the ban is otherwise fully active for all
-      // new code.
-      //
-      // SteadyShell was removed from this list in Phase 4
-      // (2026-05-30-onboarding-shell-shared-view): it now mounts <ScopedCanvas>
-      // instead of importing PdfViewerWidget directly, so "unregistered" ==
-      // "unreachable" holds for it too — it is no longer a legacy direct-importer.
-      "src/views/Onboarding/UnderstandView.tsx",
-      "src/views/Onboarding/InteractView.tsx",
-      "src/views/Onboarding/ExtractView.tsx",
-      "src/views/Onboarding/IntegrateView.tsx",
-      "src/views/Onboarding/ReportRenderView.tsx",
-      "src/views/Onboarding/ReportBuilderView.tsx",
+      // 2026-05-31-shared-canvas-affordance-restoration — the six legacy
+      // onboarding per-frame views (UnderstandView / InteractView / ExtractView /
+      // IntegrateView / ReportRenderView / ReportBuilderView) are now DELETED:
+      // the live shell mounts every canvas via <ScopedCanvas>, so "unregistered"
+      // == "unreachable" holds with no grandfathered direct-importer. The
+      // workbench/connector behavior tests that used to mount the ExtractView /
+      // IntegrateView thin wrappers were retargeted to mount the production
+      // widget through an in-file shim; those test files are exempted here (a
+      // widget's own behavior test may import it directly — same allowance as
+      // the co-located `viewer-widgets/*/*.test` exemptions above).
+      "src/views/Onboarding/ExtractView.test.tsx",
+      "src/views/Onboarding/SchemaView.test.tsx",
+      "src/views/Onboarding/IntegrateView.test.tsx",
     ],
     rules: {
       "no-restricted-imports": [

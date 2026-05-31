@@ -1,7 +1,14 @@
 # Spec Delta — conversation-flow (Workspace/Project experiences + enabled nav entries)
 
-Two new directed experiences as catalog VALUES on the existing axis, the authenticated nav entries that
-open them, and the retirement of SchemaView's manifest fallback so live extract is the sole path.
+Two new directed experiences as catalog VALUES on the existing axis, plus the authenticated nav entries
+that open them.
+
+> NOTE: The retirement of SchemaView's `live ?? manifest` fallback (originally What-Changes #6) is NOT
+> part of this change's durable spec. Retiring the manifest arm is breaking under MOCK_MODE (SchemaView's
+> own tests and the ProposeSchemaFieldCard round-trip mount `<SchemaView />` with no live props), so it is
+> deferred to its own tracked change: `2026-05-31-schemaview-live-only-extract`. The manifest arm remains
+> in the shipped code until that change provides a live extract under MOCK_MODE and lands the failing test
+> first.
 
 ## ADDED Requirements
 
@@ -56,18 +63,3 @@ entries disabled with the "Sign in to use" affordance.
 - **WHEN** an authenticated user activates either
 - **THEN** the route is registered and the scoped conversation mounts (no 404)
 - **AND** for a logged-out user both entries remain disabled with `aria-disabled` and the "Sign in to use" title.
-
-### Requirement: SchemaView SHALL read the live extract as its sole source
-
-`SchemaView` SHALL render from the live extraction schema/values only; it SHALL NOT fall back to
-`scenario.manifest.extractionSchema` or `scenario.manifest.sampleExtractionValues`. When live data is
-absent, `SchemaView` SHALL surface the real empty/error state rather than stale manifest fixtures, and
-its `data-extraction-status` SHALL reflect the live state, not a `"manifest"` default.
-
-#### Scenario: No live data surfaces the real state, not the manifest
-
-- **GIVEN** a scenario whose live extraction schema/values are unavailable
-- **WHEN** `SchemaView` renders
-- **THEN** it shows the empty/error ("live extract unavailable") state
-- **AND** it does NOT read `scenario.manifest.extractionSchema` or `scenario.manifest.sampleExtractionValues`
-- **AND** `data-extraction-status` reflects the live extraction state rather than `"manifest"`.

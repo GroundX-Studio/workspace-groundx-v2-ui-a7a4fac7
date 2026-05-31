@@ -10,6 +10,7 @@ import { Register } from "@/views/Auth/Register";
 import { ResetPassword } from "@/views/Auth/ResetPassword";
 import { OnboardingShell } from "@/views/Onboarding/OnboardingShell";
 import { SteadyShell } from "@/views/Steady/SteadyShell";
+import { WorkspacesView, ProjectsView } from "@/views/Scoped/ScopedConversationShell";
 import { ROUTER_PATHS } from "@/router/routerPaths";
 
 export const router = createBrowserRouter([
@@ -71,4 +72,12 @@ export const router = createBrowserRouter([
   // the onboarding flow completes; the URL carries the active chat
   // session so refresh / share keeps you in the same conversation.
   { path: ROUTER_PATHS.STEADY_SESSION, element: <SteadyShell /> },
+  // 2026-05-31-onboarding-experiences — the Workspace / Project scoped
+  // conversations the authenticated nav-rail entries open. Top-level routes
+  // (like onboarding/steady): the core contexts — ScenarioRegistry, ChatStore
+  // — are provided app-wide by AppProviders, so each surface mounts its own
+  // AppShell + the shared ConversationFlow composed with the looked-up
+  // ChatExperience. No new flow component, no flow `mode`.
+  { path: ROUTER_PATHS.WORKSPACES, element: <WorkspacesView /> },
+  { path: ROUTER_PATHS.PROJECTS, element: <ProjectsView /> },
 ]);

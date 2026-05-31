@@ -12,15 +12,41 @@ vi.mock("@/api/extractField", async () => {
 import { extractField } from "@/api/extractField";
 
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
+import { Extract } from "@/components/viewer-widgets/Extract/Extract";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
+import { useAppMode } from "@/contexts/AppModeContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import { useWidgetRole } from "@/lib/widgetRole";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 import { IngestView } from "@/views/Onboarding/IngestView/IngestView";
 
-import { ExtractView } from "./ExtractView";
-import { SchemaView } from "./SchemaView";
-import { useEffect, useRef } from "react";
+import { SchemaView } from "@/components/viewer-widgets/Extract/SchemaView";
+import { useEffect, useMemo, useRef, type FC } from "react";
+import type { ContentScope } from "@groundx/shared";
+
+/**
+ * 2026-05-31-shared-canvas-affordance-restoration — the production
+ * `views/Onboarding/ExtractView.tsx` thin wrapper was retired. This test mounts
+ * `SchemaView` jointly with the Extract workbench shell, which the deleted
+ * wrapper provided; the shim below reproduces it verbatim (scenario documents
+ * scope + auth role → `Extract`) so the joint-mount tests are unchanged.
+ */
+const ExtractView: FC = () => {
+  const { state: appMode } = useAppMode();
+  const { state: session } = useOnboardingSession();
+  const { byId } = useScenarioRegistry();
+  const widgetRole = useWidgetRole();
+  const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
+  const scenario = byId(scenarioId);
+  const docId = scenario?.documents?.[0]?.documentId ?? null;
+  const scope: ContentScope = useMemo(
+    () => ({ type: "documents", documentIds: docId ? [docId] : [] }),
+    [docId],
+  );
+  return <Extract scope={scope} role={widgetRole} />;
+};
 
 /**
  * Test harness that enqueues a propose-card on the active session

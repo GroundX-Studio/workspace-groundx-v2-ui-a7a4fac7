@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
 import type { ProposedSchemaField } from "@/api/chatSessions";
-import { SchemaView } from "@/views/Onboarding/SchemaView";
+import { SchemaView } from "@/components/viewer-widgets/Extract/SchemaView";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
 import { ProposeSchemaFieldCard } from "./ProposeSchemaFieldCard";

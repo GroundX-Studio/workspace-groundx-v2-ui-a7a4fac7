@@ -1,0 +1,103 @@
+/**
+ * 2026-05-31-shared-canvas-affordance-restoration — the F5 Interact "Save" →
+ * sign-in-gate path, restored as chat-driven, verified END-TO-END on the live
+ * canvas.
+ *
+ * The retired `InteractView` rendered a "💾 Save 🔒" button that called
+ * `openGate("save")`. The f5 canvas is now the shared `PdfViewer` via
+ * `<ScopedCanvas>`, which must NOT grow an onboarding-only Save button
+ * (`no-onboarding-duplicates`). The successor is the `save_to_account` chat
+ * tool: it surfaces as a `tool:save_to_account` suggested-action chip whose
+ * `detail.intent` is `{ kind: "openGate", trigger: "save" }`. Clicking it
+ * dispatches through the canvas orchestrator, which routes `openGate` to
+ * `OnboardingSession.openGate("save")` — opening the gate on the live canvas.
+ *
+ * This drives a real chat reply carrying the chip, clicks it, and asserts the
+ * canvas swaps to the gate value-prop (the gate is open) — proving the path is
+ * reachable on the live f5 surface with no per-frame view wiring.
+ */
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import { OnboardingShell } from "./OnboardingShell";
+
+const apiMocks = vi.hoisted(() => ({
+  issueOnboardingSession: vi.fn(),
+}));
+
+vi.mock("@/api/entities/onboardingSessionEntity", () => ({
+  issueOnboardingSession: apiMocks.issueOnboardingSession,
+}));
+
+vi.mock("@/api/chatSessions", async () => {
+  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
+  return { ...actual, sendChatMessage: vi.fn(), listChatMessages: vi.fn() };
+});
+import { listChatMessages, sendChatMessage } from "@/api/chatSessions";
+import type { SendChatMessageResult } from "@/api/chatSessions";
+
+/** A reply that offers the "save to account" chip beneath the assistant turn. */
+const SAVE_CHIP_REPLY: SendChatMessageResult = {
+  userMessageId: "um-1",
+  assistantMessageId: "am-1",
+  compressionRan: false,
+  reply: {
+    mode: "rag",
+    answer: "The April 2026 statement totals $18,742.16.",
+    citations: [],
+    // The chip carries the server-constructed CanvasIntent on `detail.intent`
+    // (the Phase-8 `tool:<name>` chip contract). `intents: []` so the gate is
+    // opened by the CLICK, not an auto-dispatched agent intent.
+    suggestedActions: [
+      {
+        key: "tool:save_to_account",
+        label: "💾 Save to account",
+        detail: { intent: { kind: "openGate", trigger: "save" } },
+      },
+    ],
+    tools: [],
+    intents: [],
+    toolFailures: [],
+    proposedSchemaField: null,
+  },
+};
+
+beforeEach(() => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  apiMocks.issueOnboardingSession.mockReset();
+  apiMocks.issueOnboardingSession.mockResolvedValue({ sessionId: "anon-session-1", anonymous: true });
+  vi.mocked(listChatMessages).mockReset();
+  vi.mocked(listChatMessages).mockResolvedValue([]);
+  vi.mocked(sendChatMessage).mockReset();
+  vi.mocked(sendChatMessage).mockResolvedValue(SAVE_CHIP_REPLY);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("OnboardingShell — save_to_account chip opens the gate on the live f5 canvas", () => {
+  it("clicking the tool:save_to_account chip opens the sign-in gate (canvas → gate value-prop)", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f5",
+      initialScenario: "utility",
+    });
+
+    // Pre-condition: the gate is NOT open on the live Interact canvas.
+    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
+
+    // Send a chat message → the mocked reply carries the save chip.
+    const input = (await screen.findByTestId("chat-live-input")).querySelector("input")!;
+    await user.type(input, "save this analysis");
+    await user.click(screen.getByTestId("chat-live-send"));
+
+    // The save chip surfaces beneath the assistant turn…
+    const chip = await screen.findByTestId("suggested-action-chip-tool:save_to_account");
+    // …and clicking it opens the sign-in gate on the live canvas.
+    await user.click(chip);
+    expect(await screen.findByTestId("gate-value-prop")).toBeInTheDocument();
+  });
+});

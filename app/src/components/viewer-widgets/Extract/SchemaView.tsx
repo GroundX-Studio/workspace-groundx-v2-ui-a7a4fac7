@@ -159,7 +159,19 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
 
   const scenarioId = appMode.scenario ?? session.scenario ?? null;
   const scenario = scenarioId ? byId(scenarioId) : null;
-  // WF-12 — prefer the live schema/values passed from ExtractView; manifest is the fallback.
+  // WF-12 — prefer the live schema/values passed from the Extract widget;
+  // manifest is the fallback.
+  //
+  // DEFERRED (kept, not retired) — tracked change:
+  // openspec/changes/2026-05-31-schemaview-live-only-extract.
+  // 2026-05-31-onboarding-experiences originally proposed dropping this
+  // `?? scenario?.manifest.*` arm so live is the sole source, but retiring it is
+  // BREAKING under MOCK_MODE: SchemaView's own ~27 tests + the
+  // ProposeSchemaFieldCard round-trip mount `<SchemaView />` with NO live props
+  // and rely on the manifest arm to render, and MOCK_MODE has no live extract to
+  // substitute. The tracked change provides a live extract under MOCK_MODE
+  // (failing test first), THEN drops this arm. Do NOT remove it until live is
+  // the genuine sole source under test + MOCK_MODE.
   const manifestSchema = liveSchema ?? scenario?.manifest.extractionSchema ?? null;
   const sampleValues = liveValues ?? scenario?.manifest.sampleExtractionValues ?? [];
 

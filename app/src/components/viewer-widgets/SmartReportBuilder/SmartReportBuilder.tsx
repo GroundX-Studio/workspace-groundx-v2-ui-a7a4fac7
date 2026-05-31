@@ -77,10 +77,13 @@ export interface SmartReportBuilderProps {
   /** REQUIRED authorization role (anonymous | member). Gates Save / export. */
   role: WidgetRole;
   /**
-   * Optional section to pre-select (open its inline editor on mount). The
-   * render→builder hand-off (`✎ edit §N` → `onEditSection(sectionId)`) and the
-   * `show_smart_report_edit` LLM tool both carry a section id here. Omitted →
-   * no editor open initially.
+   * Optional explicit section to pre-select (open its inline editor on mount).
+   * On the live `<ScopedCanvas>` path this prop is absent (the `{ scope, role }`
+   * mount contract can't supply it); the builder then falls back to
+   * `session.selectedReportSectionId`, which the orchestrator sets from the
+   * render→builder `✎ edit §N` control and the `show_smart_report_edit` LLM tool
+   * (both emit the `editTemplate` intent → `advanceFrame("f4a", {
+   * selectedReportSectionId })`). Omitted with no session value → no editor open.
    */
   selectedSectionId?: string;
 }
@@ -162,10 +165,16 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
 
   // Sub-tab: Sections (the editor) vs Render (a preview hand-off, Phase 5/6).
   const [tab, setTab] = useState<"sections" | "render">("sections");
+  // The section to pre-open the inline editor on. The `selectedSectionId` prop
+  // is the explicit caller value; on the live `<ScopedCanvas>` path that prop
+  // is absent (the `{ scope, role }` mount contract can't supply it), so fall
+  // back to `session.selectedReportSectionId` — set by the orchestrator's
+  // editTemplate routing (advanceFrame("f4a", { selectedReportSectionId })),
+  // which is the render→builder + `show_smart_report_edit` hand-off.
+  const effectiveSelectedSectionId = selectedSectionId ?? session.selectedReportSectionId ?? undefined;
   // Only one row's inline editor is open at a time (the F3a invariant). Seeded
-  // from `selectedSectionId` — the render→builder + `show_smart_report_edit`
-  // hand-off pre-opens that section's editor.
-  const [openRowId, setOpenRowId] = useState<string | null>(selectedSectionId ?? null);
+  // from the effective selected section.
+  const [openRowId, setOpenRowId] = useState<string | null>(effectiveSelectedSectionId ?? null);
 
   const canEdit = widgetRoleCanEdit(role);
 
@@ -206,9 +215,11 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
 
   // Re-open when the hand-off targets a different section after mount (a fresh
   // `✎ edit §N` / `show_smart_report_edit` while the builder is already shown).
+  // Tracks the effective id so a session-driven hand-off (live ScopedCanvas
+  // path, no prop) re-opens too.
   useEffect(() => {
-    if (selectedSectionId !== undefined) setOpenRowId(selectedSectionId);
-  }, [selectedSectionId]);
+    if (effectiveSelectedSectionId !== undefined) setOpenRowId(effectiveSelectedSectionId);
+  }, [effectiveSelectedSectionId]);
 
   const handleSave = useCallback(async () => {
     // Save is sign-in-gated. An anonymous user's Save opens the gate

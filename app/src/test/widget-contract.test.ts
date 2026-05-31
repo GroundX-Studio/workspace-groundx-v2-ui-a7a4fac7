@@ -174,13 +174,13 @@ function resolvesIntoSlot(specifier: string, fileAbs: string): (typeof SLOTS)[nu
  * this guard can ship GREEN today without pre-empting work owned elsewhere.
  */
 const KNOWN_VIEW_IMPORT_ALLOWLIST = new Set<string>([
-  // `Extract` widget still imports the `SchemaView` Design surface from
-  // `views/Onboarding/`. Retiring/relocating SchemaView is owned by
-  // `onboarding-shell-shared-view` Phase 3-4 (cross-plan-execution-order
-  // step 20), which sweeps the per-frame views into thin wrappers/deletions.
-  // Tracked there, not here; this change only untangles the ChatColumn → gate
-  // inversion (the one the rule-5 ticket on the unified plan named).
-  "components/viewer-widgets/Extract/Extract.tsx -> @/views/Onboarding/SchemaView",
+  // 2026-05-31-onboarding-experiences RELOCATED `SchemaView` out of
+  // `views/Onboarding/` into the Extract widget dir
+  // (`components/viewer-widgets/Extract/SchemaView.tsx`), so the Extract widget
+  // now imports it as a within-slot sibling (`./SchemaView`) — the prior
+  // `Extract.tsx -> @/views/Onboarding/SchemaView` inversion is GONE and its
+  // allowlist entry removed (the staleness guard below requires this once the
+  // import is gone). The allowlist is intentionally empty.
 ]);
 
 describe("widget contract drift guard", () => {
