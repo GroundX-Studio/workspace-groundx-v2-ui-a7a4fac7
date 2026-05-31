@@ -3,38 +3,42 @@ import { useMemo, type FC, type ReactNode } from "react";
 import { ChatStoreProvider, EMPTY_PENDING_SCHEMA_OVERLAY, EMPTY_VIEWER_SESSION, useChatStore, type ChatSession } from "@/contexts/ChatStoreContext";
 import { ChatStoreServerHydrator } from "@/contexts/ChatStoreContext/ChatStoreServerHydrator";
 
-import type { EntityKey, EntityRegistryApi, EntityRegistryState, EntitySession } from "./types";
+import type { EntityKey, EntitySessionStoreApi, EntitySessionStoreState, EntitySession } from "./types";
 import { makeEntityKey } from "./types";
 
 /**
- * EntityRegistry — historically the source of truth for per-entity
- * onboarding state. As of the chat-session-model refactor
- * (2026-05-23), entities live INSIDE the active chat session
- * (`ChatStore.activeSession.entities`). This module is now a thin
- * compatibility layer:
+ * EntitySessionStore — historically the source of truth for
+ * per-entity onboarding state (formerly named "EntityRegistry"). As
+ * of the chat-session-model refactor (2026-05-23), entities live
+ * INSIDE the active chat session (`ChatStore.activeSession.entities`).
+ * This module is now a thin compatibility layer:
  *
- *   - `EntityRegistryProvider` mounts a `ChatStoreProvider` and
+ *   - `EntitySessionStoreProvider` mounts a `ChatStoreProvider` and
  *     seeds it with a single "onboarding" session containing the
  *     initial entities (if provided). This keeps existing call
  *     sites — including OnboardingSessionProvider's
  *     `initialFrame`/`initialScenario` seeding — working without
  *     reshaping.
- *   - `useEntityRegistry()` reads from the active chat session and
+ *   - `useEntitySessionStore()` reads from the active chat session and
  *     returns the same API shape (state + activate +
  *     upsertAndActivate + updateActive). All mutations delegate to
  *     ChatStore.
  *
  * F2–F7 view code is unchanged. The chat-session-model phases (B,
  * C, D) all converge here.
+ *
+ * This is mutable per-entity session state, NOT a read catalog —
+ * the "Store" name (vs. the old "Registry") is deliberate so the
+ * "registry/catalog = read lookup" convention stays reliable.
  */
 
-interface EntityRegistryProviderProps {
+interface EntitySessionStoreProviderProps {
   children: ReactNode;
   /**
    * Seed entities. When provided, this mounts a fresh ChatStore
    * with one onboarding session containing those entities.
    *
-   * Tests use this to drop the registry into a known state, and
+   * Tests use this to drop the store into a known state, and
    * OnboardingSessionProvider uses it to translate
    * initialFrame/initialScenario props into seed entities.
    */
@@ -42,7 +46,7 @@ interface EntityRegistryProviderProps {
   initialActiveKey?: EntityKey | null;
 }
 
-export const EntityRegistryProvider: FC<EntityRegistryProviderProps> = ({
+export const EntitySessionStoreProvider: FC<EntitySessionStoreProviderProps> = ({
   children,
   initialEntities,
   initialActiveKey = null,
@@ -108,14 +112,14 @@ export const EntityRegistryProvider: FC<EntityRegistryProviderProps> = ({
 
 /**
  * Derived facade. Reads from the active chat session in ChatStore
- * and exposes the legacy EntityRegistryApi shape so F2-F7 views and
- * OnboardingSessionContext don't need to change. All mutations
+ * and exposes the legacy EntitySessionStoreApi shape so F2-F7 views
+ * and OnboardingSessionContext don't need to change. All mutations
  * delegate to ChatStore's entity actions.
  */
-export const useEntityRegistry = (): EntityRegistryApi => {
+export const useEntitySessionStore = (): EntitySessionStoreApi => {
   const chatStore = useChatStore();
 
-  const state = useMemo<EntityRegistryState>(() => {
+  const state = useMemo<EntitySessionStoreState>(() => {
     const active = chatStore.state.activeSessionId
       ? chatStore.state.sessions.get(chatStore.state.activeSessionId)
       : null;
@@ -125,7 +129,7 @@ export const useEntityRegistry = (): EntityRegistryApi => {
     };
   }, [chatStore.state]);
 
-  return useMemo<EntityRegistryApi>(
+  return useMemo<EntitySessionStoreApi>(
     () => ({
       state,
       activate: chatStore.activateEntity,

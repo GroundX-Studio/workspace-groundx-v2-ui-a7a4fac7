@@ -1,4 +1,4 @@
-import type { EntityKey, EntityKind, EntitySession } from "@/contexts/EntityRegistryContext";
+import type { EntityKey, EntityKind, EntitySession } from "@/contexts/EntitySessionStoreContext";
 import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
 // The ONE CanvasIntent union. Imported from the orchestrator's leaf `/types`
 // module (type-only → erased → cycle-free with the orchestrator's runtime
@@ -402,7 +402,7 @@ export interface ChatStoreApi {
 
   // --- Entity actions (formerly on EntityRegistryContext) ----------
   // These mutate the active chat session's `entities` map.
-  // `useEntityRegistry()` is now a thin facade over these.
+  // `useEntitySessionStore()` is now a thin facade over these.
 
   /**
    * Set the active entity within the active session. Pass null to

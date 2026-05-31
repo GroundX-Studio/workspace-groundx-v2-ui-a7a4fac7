@@ -5,7 +5,7 @@
  * pattern: ChatStore's upsert/update entity mutators call this
  * after the in-memory mutation; failures route to Sentry and
  * never block the optimistic UI update. The frontend's
- * EntityRegistry state is the source of truth for the visible
+ * EntitySessionStore state is the source of truth for the visible
  * session; the durable row is what informs the next chat turn's
  * bundled context.
  *

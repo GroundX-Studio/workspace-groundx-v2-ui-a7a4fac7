@@ -1,7 +1,7 @@
 import type { FFrame } from "@/types/onboarding";
 
 /**
- * Kinds of "entities" that can live in the registry. Each kind is a
+ * Kinds of "entities" that can live in the store. Each kind is a
  * REAL persistent thing the user can navigate to and resume — a
  * sample, a customer project, an uploaded document, a schema, a
  * report. Singleton UI surfaces (the F1 picker, the BYO sign-up
@@ -9,15 +9,15 @@ import type { FFrame } from "@/types/onboarding";
  * state. Putting them in the entity model meant carrying empty
  * lastFrame / completedFrames / gate fields that nobody read.
  *
- * The registry is kind-agnostic — adding a new kind doesn't require
- * changes to the registry itself, only to the discriminated union
+ * The store is kind-agnostic — adding a new kind doesn't require
+ * changes to the store itself, only to the discriminated union
  * below and any UI that knows how to render that kind.
  */
 export type EntityKind = "sample"; // future: | "project" | "document" | "schema" | "report"
 
 /**
  * Stable identifier for an entity. Encodes both kind and id so the
- * registry's Map can be keyed by a single string. Format: `${kind}:${id}`.
+ * store's Map can be keyed by a single string. Format: `${kind}:${id}`.
  *
  * Examples:
  *   - sample:utility
@@ -55,15 +55,15 @@ export interface EntitySession {
   lastVisitedAt: number;
 }
 
-export interface EntityRegistryState {
+export interface EntitySessionStoreState {
   /** All entities the user has touched in this session. */
   entities: ReadonlyMap<EntityKey, EntitySession>;
   /** Currently-active entity, or `null` when the user is on the F1 picker. */
   activeKey: EntityKey | null;
 }
 
-export interface EntityRegistryApi {
-  state: EntityRegistryState;
+export interface EntitySessionStoreApi {
+  state: EntitySessionStoreState;
   /**
    * Activate an existing entity, or `null` to return to the F1 picker.
    * If a previously-touched entity is activated, its lastVisitedAt is

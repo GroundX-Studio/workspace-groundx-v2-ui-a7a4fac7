@@ -117,7 +117,7 @@ describe("ChatStoreContext", () => {
     expect(result.current.state.sessions.size).toBe(0);
   });
 
-  // Phase B — entity actions live on ChatStore. EntityRegistry's
+  // Phase B — entity actions live on ChatStore. EntitySessionStore's
   // legacy API stays available via a derived hook; the storage is
   // here.
   it("upsertEntityAndActivate adds an entity to the active session and activates it", () => {

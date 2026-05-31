@@ -31,7 +31,7 @@ import { useChatStore } from "./ChatStoreContext";
 
 export const ChatStoreServerHydrator: FC = () => {
   // Read AuthContext via useContext (not useAuthContext) so tests
-  // that mount EntityRegistryProvider without AuthProvider don't
+  // that mount EntitySessionStoreProvider without AuthProvider don't
   // crash. The hydrator is a no-op until/unless AuthProvider mounts
   // above us — production has AuthProvider in the tree, tests opt
   // in only when they need auth.

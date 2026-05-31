@@ -885,7 +885,7 @@ describe("middleware API route contract", () => {
   // by chatHandler.ts:249 and structuredHandler at three sites for
   // LLM context bundling, but written ONLY by test fixtures, so
   // the reads always returned []. This endpoint is the missing
-  // write side: EntityRegistry's upsert/update paths PUT here
+  // write side: EntitySessionStore's upsert/update paths PUT here
   // after each in-memory mutation, persisting the entity's
   // last-frame + completed-frames + scope refs.
   //
@@ -1063,7 +1063,7 @@ describe("middleware API route contract", () => {
   // never updated. chatHandler reads getChatSession.currentIntent
   // every turn for the bundled LLM context — always stale/null
   // after the first canvas navigation. This PATCH endpoint fixes
-  // that: CanvasOrchestrator's setCurrentIntent + EntityRegistry's
+  // that: CanvasOrchestrator's setCurrentIntent + EntitySessionStore's
   // activation PATCH the row alongside the in-memory update.
   //
   // Merge semantics: only fields present in the body are updated.

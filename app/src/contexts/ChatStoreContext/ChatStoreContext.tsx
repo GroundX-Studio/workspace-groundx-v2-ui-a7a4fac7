@@ -4,7 +4,7 @@ import { ensureServerChatSession } from "@/api/chatSessions";
 import { upsertChatSessionEntity } from "@/api/chatSessionEntities";
 import { patchChatSession } from "@/api/chatSessionPatch";
 import { recordViewerEvent } from "@/api/viewerEvents";
-import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntityRegistryContext";
+import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntitySessionStoreContext";
 import type { FFrame } from "@/types/onboarding";
 import type { NormalizedBbox } from "@groundx/shared";
 
@@ -388,7 +388,7 @@ interface ChatStoreProviderProps {
   /**
    * If true and rehydration returns nothing AND no `initialSessions`,
    * auto-create a single default onboarding session so consumers
-   * always have an active session to operate on. EntityRegistryProvider
+   * always have an active session to operate on. EntitySessionStoreProvider
    * sets this; ChatStore-only tests leave it false to verify the
    * "no sessions" baseline.
    */
@@ -438,7 +438,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       // Mint a fresh "implicit onboarding" session. F1 picker views
       // and other consumers that call upsertEntityAndActivate need
       // an active session to operate on. Default for production +
-      // EntityRegistryProvider; off for ChatStore-only tests.
+      // EntitySessionStoreProvider; off for ChatStore-only tests.
       const now = Date.now();
       const sessionId = mintSessionId();
       const session: ChatSession = {
@@ -563,8 +563,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
 
   // ----- entity actions ---------------------------------------------
   // These replace the standalone EntityRegistry's mutation API. The
-  // legacy `useEntityRegistry()` hook is now a derived facade over
-  // these (see EntityRegistryContext.tsx).
+  // legacy `useEntitySessionStore()` hook is now a derived facade over
+  // these (see EntitySessionStoreContext.tsx).
 
   const activateEntity = useCallback((key: EntityKey | null) => {
     // RT-04 — capture the post-mutation activeEntityKey so we PATCH

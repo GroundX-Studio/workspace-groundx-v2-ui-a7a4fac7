@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChatStore } from "@/contexts/ChatStoreContext";
-import { useEntityRegistry } from "@/contexts/EntityRegistryContext";
+import { useEntitySessionStore } from "@/contexts/EntitySessionStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -67,7 +67,7 @@ const NavigateProbe = ({ onReady }: { onReady: (navigate: (to: string) => void) 
  * leave anything in the registry.
  */
 const RegistryProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { entityKeys: string[] }) => void }) => {
-  const { state } = useEntityRegistry();
+  const { state } = useEntitySessionStore();
   onSnapshot({ entityKeys: [...state.entities.keys()] });
   return null;
 };
@@ -759,7 +759,7 @@ describe("OnboardingShell", () => {
     // F3, returning to the picker, visiting sample B, advancing it
     // to F5, then returning and re-picking sample A → must resume A
     // at F3 (not the default F2, and not B's F5). Each sample has
-    // its own entity in the EntityRegistry with its own state.
+    // its own entity in the EntitySessionStore with its own state.
     const user = userEvent.setup();
     let snapshot = { frame: "", scenario: null as string | null };
     let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void } | null = null;
@@ -821,7 +821,7 @@ describe("OnboardingShell", () => {
     // sample, advances to a later frame, then returns to F1 (Ingest
     // pill), then re-picks the SAME sample, they should resume at the
     // later frame — not restart at F2. State is keyed per-entity in
-    // the EntityRegistry (sample:utility, sample:loan, etc.), so each
+    // the EntitySessionStore (sample:utility, sample:loan, etc.), so each
     // sample remembers its own progress independently.
     const user = userEvent.setup();
     let snapshot = { frame: "" };

@@ -710,7 +710,7 @@ export function createApp({
   // table. chatHandler.ts:249 + structuredHandler read this every
   // chat turn for the "active entity context" axis of LLM bundling,
   // but before RT-03 nothing in application code wrote rows (only
-  // tests did), so the reads always returned []. EntityRegistry's
+  // tests did), so the reads always returned []. EntitySessionStore's
   // upsert/update paths now PUT here after each in-memory mutation.
   //
   // Merge semantics: the thin client knows about lastFrame +

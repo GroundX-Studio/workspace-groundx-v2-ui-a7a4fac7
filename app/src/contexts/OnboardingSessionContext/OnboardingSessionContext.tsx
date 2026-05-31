@@ -4,12 +4,12 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { track } from "@/lib/analytics";
 import { gaSetDefaults } from "@/lib/ga";
 import {
-  EntityRegistryProvider,
+  EntitySessionStoreProvider,
   makeEntityKey,
-  useEntityRegistry,
+  useEntitySessionStore,
   type EntityKey,
   type EntitySession,
-} from "@/contexts/EntityRegistryContext";
+} from "@/contexts/EntitySessionStoreContext";
 import type { FFrame, GateTrigger, Scenario } from "@/types/onboarding";
 
 import type { GateCause, GateStatus, OnboardingSessionApi, OnboardingSessionState } from "./types";
@@ -63,7 +63,7 @@ interface OnboardingSessionProviderProps {
  * views, tests, and Skill code keep working without modification.
  */
 function useSessionFacade(): OnboardingSessionApi {
-  const registry = useEntityRegistry();
+  const registry = useEntitySessionStore();
   // Destructure the STABLE action functions (useCallback []) from the
   // registry. The registry's `state` field changes per update, but
   // these action refs don't. Using them as deps in our own
@@ -371,7 +371,7 @@ function useSessionFacade(): OnboardingSessionApi {
 }
 
 /**
- * Inner provider — assumes EntityRegistryProvider is mounted above
+ * Inner provider — assumes EntitySessionStoreProvider is mounted above
  * it. Exposes the legacy `OnboardingSessionApi` to consumers.
  */
 const InnerSessionProvider: FC<{ children: ReactNode }> = ({ children }) => {
@@ -380,8 +380,8 @@ const InnerSessionProvider: FC<{ children: ReactNode }> = ({ children }) => {
 };
 
 /**
- * Public provider — mounts the EntityRegistryProvider itself so
- * existing call sites don't have to know about the new registry
+ * Public provider — mounts the EntitySessionStoreProvider itself so
+ * existing call sites don't have to know about the new store
  * layer. Tests and app code keep wrapping with
  * `<OnboardingSessionProvider>` and everything works as before, plus
  * sample state now persists across F1 round-trips.
@@ -418,9 +418,9 @@ export const OnboardingSessionProvider: FC<OnboardingSessionProviderProps> = ({
   }, [initialFrame, initialScenario]);
 
   return (
-    <EntityRegistryProvider initialEntities={initialEntities} initialActiveKey={initialActiveKey}>
+    <EntitySessionStoreProvider initialEntities={initialEntities} initialActiveKey={initialActiveKey}>
       <InnerSessionProvider>{children}</InnerSessionProvider>
-    </EntityRegistryProvider>
+    </EntitySessionStoreProvider>
   );
 };
 
