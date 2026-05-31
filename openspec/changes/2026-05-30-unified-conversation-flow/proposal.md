@@ -80,5 +80,7 @@ Onboarding becomes the reference experience, not a fork.
 ## Affected
 
 `app/src/components/chat-widgets/ChatColumn/` (the flow), a new `conversation/` engine + experience
-module + `chatExperienceRegistry` catalog, `views/Onboarding` wiring. Tests: `ChatColumn.test` stays
-green (testids + chip-dispatch + auto-advance). Net **deletion** of ~one duplicated ~400-line flow component.
+module + `chatExperienceRegistry` catalog, `views/Onboarding` wiring. Tests: `ChatColumn.test` is
+RETARGETED in Phase 2 (testids → `chat-live-*`, the `mode`/`surface` prop removed) while preserving
+equivalent user-level coverage — chip-dispatch + auto-advance + onboarding chrome + steady + gate (see
+`tasks.md`, which is authoritative). Net **deletion** of ~one duplicated ~400-line flow component.

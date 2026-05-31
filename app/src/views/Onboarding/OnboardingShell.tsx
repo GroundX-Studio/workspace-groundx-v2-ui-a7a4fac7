@@ -605,8 +605,9 @@ export const OnboardingShell: FC = () => {
           locks no affordance by role today; `role` is sourced from the
           auth state (uncommitted onboarding → `anonymous`, signed-in →
           `member`), NEVER from the conversation flow. Chat is
-          session-scoped → `scope: { type: "none" }`. The onboarding
-          shell leaves `surface` at its default ("onboarding"). */}
+          session-scoped → `scope: { type: "none" }`. (The flow
+          `mode`/`surface` prop was removed by unified-conversation-flow
+          Phase 2 — chat is now one `ConversationFlow` + an experience.) */}
       {bookCallActive ? (
         <BookingStatusCard role={widgetRole} scope={{ type: "none" }} />
       ) : (
