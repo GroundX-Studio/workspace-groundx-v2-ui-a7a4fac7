@@ -13,6 +13,7 @@ vi.mock("@/api/chatSessions", () => ({
 }));
 
 import type { ContentScope } from "@groundx/shared";
+import { ApiError } from "@groundx/shared";
 
 import { SmartReportApiError, renderReport, saveReportTemplate } from "./smartReport";
 
@@ -142,6 +143,15 @@ describe("renderReport (smart-report Phase 6 client caller)", () => {
     expect(result.gated).toBe(true);
     if (!result.gated) throw new Error("expected a gate envelope");
     expect(result.gate).toBe("byo");
+  });
+
+  it("SmartReportApiError extends the shared ApiError base (status + detail, no own fields)", () => {
+    const err = new SmartReportApiError("boom", 403, { error: "not_session_owner" });
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe("SmartReportApiError");
+    expect(err.status).toBe(403);
+    expect(err.detail).toEqual({ error: "not_session_owner" });
   });
 
   it("throws SmartReportApiError with status on a non-2xx response", async () => {

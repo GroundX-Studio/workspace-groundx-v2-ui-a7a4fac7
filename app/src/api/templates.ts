@@ -13,9 +13,10 @@
  * — renamed in the Phase-3 flag-day cutover.)
  */
 
+import { ApiError, type TemplateSaveInput } from "@groundx/shared";
+
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
-import type { TemplateSaveInput } from "@groundx/shared";
 
 export type { TemplateSaveInput };
 
@@ -26,14 +27,10 @@ export interface SaveTemplateResult {
   updatedAt: string;
 }
 
-export class TemplateApiError extends Error {
-  status: number;
-  detail: unknown;
+export class TemplateApiError extends ApiError {
   constructor(message: string, status: number, detail: unknown) {
-    super(message);
+    super(message, status, detail);
     this.name = "TemplateApiError";
-    this.status = status;
-    this.detail = detail;
   }
 }
 

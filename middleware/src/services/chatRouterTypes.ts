@@ -21,7 +21,7 @@ import type { NormalizedBbox, WordMap } from "./citationGeometry.js";
 // middleware imports (`Citation` from "./chatRouter.js") keep resolving. The
 // shared shape is identical: documentId, page, snippet?, bbox? (NormalizedBbox),
 // tier? (CitationTier), confidence?, answerSpan?.
-import type { Citation, ContentScope, ScopeFilter, WidgetRole } from "@groundx/shared";
+import { ApiError, type Citation, type ContentScope, type ScopeFilter, type WidgetRole } from "@groundx/shared";
 
 export type { Citation };
 
@@ -325,10 +325,10 @@ export interface ChatRouterDeps {
  * mode — that path returned plausible-looking but fake data in
  * production, which is worse than failing fast.
  */
-export class ChatRouteNotImplementedError extends Error {
+export class ChatRouteNotImplementedError extends ApiError {
   readonly mode: ChatMode;
   constructor(mode: ChatMode) {
-    super(`chat mode '${mode}' is not wired for live use yet`);
+    super(`chat mode '${mode}' is not wired for live use yet`, 501);
     this.name = "ChatRouteNotImplementedError";
     this.mode = mode;
   }

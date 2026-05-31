@@ -566,3 +566,68 @@ SHALL NOT be auth-gated — anonymous users reach Report and preview it (Save/Ex
 - **THEN** the Report sub-pill has `role="button"`, `tabindex="0"`, and is clickable
 - **AND** clicking it advances the canvas to `f4` and previews the report.
 
+### Requirement: On-canvas controls SHALL drive host effects through the orchestrator, not host callback props
+
+A ScopedViewerWidget control whose effect lives outside the widget SHALL dispatch a `CanvasIntent` via the canvas orchestrator (the SAME intent the equivalent LLM tool emits) rather than rely on a callback prop the `{ scope, role }` mount contract cannot supply. The render-to-builder
+edit-section control SHALL dispatch the `editTemplate` intent (the
+`show_smart_report_edit` intent); the report builder SHALL pre-open the targeted
+section from `session.selectedReportSectionId` when no `selectedSectionId` prop
+is supplied, so the hand-off completes on the live `<ScopedCanvas>` path.
+
+#### Scenario: Edit-section reaches the builder with the section pre-opened
+
+- **GIVEN** the report render surface (f4) mounted via `<ScopedCanvas>`
+- **WHEN** the user clicks a section's `✎ edit §N` control
+- **THEN** an `editTemplate` intent dispatches through the orchestrator, the
+  canvas moves to the report builder (f4a / `report-builder`), and that section's
+  inline editor is open — with no `onEditSection` host callback involved.
+
+#### Scenario: Save-to-account reaches the gate from the Interact canvas
+
+- **GIVEN** the Interact (f5) canvas (the shared `PdfViewer`) mounted via `<ScopedCanvas>`
+- **WHEN** the `save_to_account` chat tool / chip fires
+- **THEN** the sign-in gate opens via the orchestrator's `openGate` routing — the
+  shared `PdfViewer` grows no onboarding-only Save affordance.
+
+### Requirement: The orphaned per-frame onboarding views SHALL be removed
+
+The standalone per-frame views (`UnderstandView`, `ExtractView`, `InteractView`, `IntegrateView`, `ReportRenderView`, `ReportBuilderView`) SHALL be deleted once the production ScopedViewerWidgets are the SOLE canvas surfaces — they
+hold no production importers and their host wiring is superseded by the
+orchestrator-driven controls above. No dead per-frame view SHALL remain as
+"reference."
+
+#### Scenario: No per-frame view file remains
+
+- **WHEN** the onboarding canvas renders any frame
+- **THEN** it mounts a production ScopedViewerWidget through `<ScopedCanvas>` and
+  no `*View.tsx` per-frame view file exists under `views/Onboarding/`.
+
+### Requirement: Widgets SHALL sit at the top of the dependency tree and import no view or other widget slot
+
+A widget under `components/chat-widgets/` or `components/viewer-widgets/` SHALL import only from the
+lower tiers (`brand/`, `primitives/`, `layout/`) and, within its own slot, sibling widgets — and SHALL
+NOT import from `views/` nor from the other widget slot. This dependency direction SHALL be enforced by
+a `widget-contract` test assertion (rule 5), not by prose convention alone.
+
+#### Scenario: A widget importing a view fails the guard
+
+- **GIVEN** a widget source under `components/chat-widgets/` or `components/viewer-widgets/`
+- **WHEN** it imports a module resolving into `views/` (via the `@/views/` alias or a relative path)
+- **THEN** the `widget-contract` rule-5 assertion fails
+- **AND** the failure names the offending file and import specifier.
+
+#### Scenario: A within-slot widget composite is allowed
+
+- **GIVEN** `ChatColumn` (a `chat-widgets/` widget) mounting the gate composite
+- **WHEN** the gate composite lives in `components/chat-widgets/GateChatPanel/` and itself mounts the
+  `chat-widgets/GateChatRail` widget
+- **THEN** the `ChatColumn` → `GateChatPanel` → `GateChatRail` chain is entirely within the
+  `chat-widgets/` slot and passes rule 5
+- **AND** no widget imports from `views/`.
+
+#### Scenario: A cross-slot widget import fails the guard
+
+- **GIVEN** a widget source under one widget slot
+- **WHEN** it imports a widget from the *other* widget slot (chat-widgets ↔ viewer-widgets)
+- **THEN** the `widget-contract` rule-5 assertion fails.
+

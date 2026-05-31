@@ -20,6 +20,38 @@
 import { z } from "zod";
 
 /**
+ * 2026-05-31-core-data-followups §2 — the single error contract that crosses
+ * (and is shared across) the app ↔ middleware boundary.
+ *
+ * Before this, ~7 hand-rolled `*Error` classes each re-declared their own
+ * `status` (or `statusCode`) + `detail` fields, drifting on field name and
+ * shape. `ApiError` is the one base they all extend: it owns `status` +
+ * `detail`, so a subclass never declares those fields itself. Subclasses add
+ * only error-specific extras (e.g. `upstreamStatus`, `mode`) and set `name`.
+ *
+ * It is a plain isomorphic class — `extends Error`, no Node- or browser-only
+ * API — so it is allowed to live here alongside the type-only + Zod contracts.
+ *
+ * `Object.setPrototypeOf` restores the prototype chain after `super()` so that
+ * `instanceof ApiError` (and `instanceof <Subclass>`) survives the TS→ES5/ES
+ * `extends Error` transpilation pitfall regardless of compile target.
+ */
+export class ApiError extends Error {
+  /** HTTP-ish status code the error maps to (route/global handler reads it). */
+  readonly status: number;
+  /** Optional structured detail (e.g. the parsed upstream error body). */
+  readonly detail: unknown;
+
+  constructor(message: string, status: number, detail?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+/**
  * WF-06b — graduated source-attribution precision.
  *   exact      verified verbatim quote + atom box → word-level highlight
  *   paraphrase verified quote → chunk-region highlight (translucent)

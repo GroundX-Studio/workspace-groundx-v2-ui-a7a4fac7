@@ -1,3 +1,5 @@
+import { ApiError } from "@groundx/shared";
+
 export async function readJson(response: Response): Promise<unknown> {
   const text = await response.text();
   if (!text) return {};
@@ -8,14 +10,13 @@ export async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-export class UpstreamHttpError extends Error {
-  readonly status: number;
+export class UpstreamHttpError extends ApiError {
+  /** Mirrors `status` for the global error handler's `upstreamStatus` payload field. */
   readonly upstreamStatus: number;
 
   constructor(label: string, status: number, detail?: string) {
-    super(detail ? `${label}: ${detail}` : `${label}: HTTP ${status}`);
+    super(detail ? `${label}: ${detail}` : `${label}: HTTP ${status}`, status);
     this.name = "UpstreamHttpError";
-    this.status = status;
     this.upstreamStatus = status;
   }
 }
@@ -59,11 +60,11 @@ export function ensureJsonHeaders(init: RequestInit = {}): Headers {
  */
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000;
 
-export class UpstreamTimeoutError extends Error {
-  readonly status = 504;
+export class UpstreamTimeoutError extends ApiError {
+  /** Mirrors `status` for the global error handler's `upstreamStatus` payload field. */
   readonly upstreamStatus = 504;
   constructor(label: string, timeoutMs: number) {
-    super(`${label}: upstream timed out after ${timeoutMs}ms`);
+    super(`${label}: upstream timed out after ${timeoutMs}ms`, 504);
     this.name = "UpstreamTimeoutError";
   }
 }

@@ -37,8 +37,6 @@ form, whereas this OPENS the sign-in offer).
   `.describe()` pass, the name set matches on both sides, and there is no
   app-only / server-only orphan.
 
-## MODIFIED Requirements
-
 ### Requirement: The canvas orchestrator SHALL route the `openGate` intent to the onboarding gate
 
 The `openGate` `CanvasIntent` (`{ kind: "openGate", trigger }`) SHALL be routed by

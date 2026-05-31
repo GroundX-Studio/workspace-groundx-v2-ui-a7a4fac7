@@ -42,14 +42,39 @@ safely parallelized. One hand, tests green after each extraction.
 hand-rolled errors onto it is ⟲ WORKFLOW-OK once the base lands — each error in its own file,
 independent, against a fixed base.
 
-- [ ] **Failing test:** assert a base `ApiError extends Error` exists with `status` + `detail`, and
-  that an instance is `instanceof Error` + `instanceof ApiError`.
-- [ ] Introduce the base `ApiError extends Error` (`status`, `detail`).
-- [ ] Refactor app errors onto it: `ExtractFieldApiError`, `TemplateApiError`, `ChatApiError`.
-- [ ] Refactor middleware errors onto it: `ChatHandlerError`, `ChatRouteNotImplementedError`,
-  `UpstreamHttpError`, `UpstreamTimeoutError`.
-- [ ] Adversarial review: every `*Error` extends the base; no error class declares its own `status`/
-  `detail` fields; suites green both sides.
+- [x] **Failing test:** assert a base `ApiError extends Error` exists with `status` + `detail`, and
+  that an instance is `instanceof Error` + `instanceof ApiError`. — DONE: new
+  `middleware/src/services/apiError.test.ts` asserts the base shape + that each middleware `*Error` is
+  `instanceof ApiError` + preserves its observable envelope (`.statusCode`/`.status`/`.upstreamStatus`/
+  `.mode`). Failed red (ApiError absent), green after.
+- [x] Introduce the base `ApiError extends Error` (`status`, `detail`). — DONE: added to
+  `@groundx/shared` (`shared/src/index.ts`) — isomorphic plain class, `readonly status`/`detail`,
+  `detail` optional, `Object.setPrototypeOf(this, new.target.prototype)` so `instanceof` survives.
+- [x] Refactor app errors onto it: `ExtractFieldApiError`, `TemplateApiError`, `ChatApiError`,
+  `SmartReportApiError`. — DONE: all four now `extends ApiError`, call `super(message, status, detail)`,
+  set only `this.name`; their own `status`/`detail` field declarations removed. (`SmartReportApiError`
+  in `app/src/api/smartReport.ts` was missed in the first pass — it predates §2, created by the archived
+  `2026-05-29-smart-report-screen` change — and swept here: new `instanceof ApiError` test in
+  `smartReport.test.ts` failed red, then green after the refactor; its live consumer
+  `SmartReportBuilder.tsx:257` reads `.status` unchanged.) Existing error-path tests unchanged + green.
+- [x] Refactor middleware errors onto it: `ChatHandlerError`, `ChatRouteNotImplementedError`,
+  `UpstreamHttpError`, `UpstreamTimeoutError`. — DONE: all four `extends ApiError`. `ChatHandlerError`
+  keeps `.statusCode` as a getter aliasing base `.status` (route reads it). `ChatRouteNotImplementedError`
+  passes `status:501`, keeps `.mode`. Upstream errors pass `status` to super, keep `.upstreamStatus`
+  (mirror) for the global handler payload. Envelope unchanged.
+- [x] Adversarial review: every `*Error` extends the base; no error class declares its own `status`/
+  `detail` fields; suites green both sides. — DONE (re-verified after the SmartReportApiError sweep):
+  all 8 hand-rolled errors extend `ApiError` with real non-test throw-sites — app: ExtractFieldApiError,
+  TemplateApiError, ChatApiError, SmartReportApiError (smartReport.ts:159 & :236, consumed at
+  SmartReportBuilder.tsx:257); middleware: ChatHandlerError×9, NotImplemented×1, UpstreamHttp via
+  `upstreamError()` helper w/ 2 callers, UpstreamTimeout×1 — none dormant. CORRECTION to the prior note:
+  an earlier completion claim asserted "only the base declares status/detail fields" — that was FALSE.
+  `grep -rn '^\s*status:' app/src/api/*.ts` had surfaced `smartReport.ts:36` (`status: number;`) and
+  `detail:` at `:37` — real class-field declarations on a then-`extends Error` subclass, not ctor
+  params/getters. Those fields are now removed (the class extends `ApiError` and defers to `super`), so the
+  acceptance criterion "no error class declares its own status/detail fields" now holds across the codebase.
+  Re-ran: middleware 653 + app 1414+ suites green (error-path tests unchanged, not retargeted); middleware
+  tsc clean; app `npm run build` (tsc+vite) clean; `openspec validate --strict` clean.
 
 ## 3. Entity CRUD factory + 8-context factory + SdkActionResult union
 **Execution: ◑ MIXED.** Author `SdkActionResult<T>`, `createEntityClient<T>()`, `createEntityContext<T>()`

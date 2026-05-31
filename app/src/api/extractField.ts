@@ -8,6 +8,8 @@
  * session row hasn't been created yet.
  */
 
+import { ApiError } from "@groundx/shared";
+
 import { ensureServerChatSession } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
@@ -29,14 +31,10 @@ export interface ExtractFieldResult {
   citation?: { documentId: string; page: number; snippet?: string } | null;
 }
 
-export class ExtractFieldApiError extends Error {
-  status: number;
-  detail: unknown;
+export class ExtractFieldApiError extends ApiError {
   constructor(message: string, status: number, detail: unknown) {
-    super(message);
+    super(message, status, detail);
     this.name = "ExtractFieldApiError";
-    this.status = status;
-    this.detail = detail;
   }
 }
 

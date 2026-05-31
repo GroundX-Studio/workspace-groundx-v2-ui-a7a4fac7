@@ -26,20 +26,17 @@
 import { ensureServerChatSession } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
+import { ApiError } from "@groundx/shared";
 import type { Citation, ContentScope, RenderedSection } from "@groundx/shared";
 import type { RenderedReport, ReportSectionRenderAs } from "@/types/report";
 
 const RENDER_ROUTE = "/api/widgets/smart-report/reports/render";
 const SAVE_ROUTE = "/api/widgets/smart-report/reports";
 
-export class SmartReportApiError extends Error {
-  status: number;
-  detail: unknown;
+export class SmartReportApiError extends ApiError {
   constructor(message: string, status: number, detail: unknown) {
-    super(message);
+    super(message, status, detail);
     this.name = "SmartReportApiError";
-    this.status = status;
-    this.detail = detail;
   }
 }
 

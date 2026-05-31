@@ -44,7 +44,7 @@ import {
   type ChatRouterRequest,
   type ChatRouterResponse,
 } from "./chatRouter.js";
-import type { ContentScope } from "@groundx/shared";
+import { ApiError, type ContentScope } from "@groundx/shared";
 import { runCompression, runMetaCompaction, selectActiveSummaries } from "./conversationCompressor.js";
 import { UpstreamTimeoutError } from "./http.js";
 import { logger } from "../lib/logger.js";
@@ -564,10 +564,19 @@ export function deriveRagContentScope(
  * Typed handler error so the route layer can map exit codes back to
  * HTTP status codes without catching every Error.
  */
-export class ChatHandlerError extends Error {
-  constructor(message: string, public readonly statusCode: number) {
-    super(message);
+export class ChatHandlerError extends ApiError {
+  constructor(message: string, statusCode: number) {
+    super(message, statusCode);
     this.name = "ChatHandlerError";
+  }
+
+  /**
+   * The route layer reads `.statusCode` to set the HTTP response status.
+   * Backed by the base `status` — this is an alias getter, NOT a re-declared
+   * field, so the one error contract stays single-sourced.
+   */
+  get statusCode(): number {
+    return this.status;
   }
 }
 

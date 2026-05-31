@@ -43,7 +43,7 @@ export interface CreateChatSessionResult {
 // `bbox` (NormalizedBbox) is threaded end-to-end for CiteChip's viewer jump;
 // `tier` drives highlight precision; both optional. Used directly as `Citation`
 // (no `ChatCitation` alias).
-import type { Citation, ScopeFilter } from "@groundx/shared";
+import { ApiError, type Citation, type ScopeFilter } from "@groundx/shared";
 
 export interface ChatSuggestedAction {
   key: string;
@@ -210,14 +210,10 @@ export interface SendChatMessageInput {
   activeStepKind?: string | null;
 }
 
-export class ChatApiError extends Error {
-  status: number;
-  detail: unknown;
+export class ChatApiError extends ApiError {
   constructor(message: string, status: number, detail: unknown) {
-    super(message);
+    super(message, status, detail);
     this.name = "ChatApiError";
-    this.status = status;
-    this.detail = detail;
   }
 }
 
