@@ -141,3 +141,103 @@ describe("ChatStore reportOverlay (Phase 4 — generalized editing overlay)", ()
     expect(session.reportOverlay.editedFields.get("sec-1")?.variables).toEqual(["project"]);
   });
 });
+
+// ── Phase 5: pin + section-proposal actions ──────────────────────────────
+
+describe("ChatStore pinToReport (Phase 5 — existing-or-new, no auto-create)", () => {
+  it("landing a pin appends a section carrying the literal turn text + provenance", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    act(() => {
+      result.current.newSession();
+    });
+    let resolution: ReturnType<typeof result.current.pinToReport>;
+    act(() => {
+      resolution = result.current.pinToReport({
+        turnId: "m-7",
+        text: "The total due is $142.18, driven by the delivery charge.",
+      });
+    });
+    // With no existing templates, the resolution is prompt-new-only — but the
+    // user confirmed (the affordance calls with no template = land into the
+    // draft), so the section still lands (NO silent auto-create of a SAVED
+    // template; the in-memory draft overlay is the v1 target).
+    expect(resolution!.mode).toBe("prompt-new-only");
+    const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+    expect(session.reportOverlay.addedFields).toHaveLength(1);
+    expect(session.reportOverlay.addedFields[0]).toMatchObject({
+      question: "The total due is $142.18, driven by the delivery charge.",
+      pinnedFromTurnId: "m-7",
+    });
+  });
+
+  it("does NOT auto-create a section when only resolving the target (resolveOnly)", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    act(() => {
+      result.current.newSession();
+    });
+    let resolution: ReturnType<typeof result.current.pinToReport>;
+    act(() => {
+      resolution = result.current.pinToReport({
+        turnId: "m-7",
+        text: "literal",
+        resolveOnly: true,
+      });
+    });
+    expect(resolution!.mode).toBe("prompt-new-only");
+    const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+    expect(session.reportOverlay.addedFields).toHaveLength(0);
+  });
+});
+
+describe("ChatStore report-section proposals (Phase 5 — shared family)", () => {
+  it("enqueueReportProposal queues a section proposal; acceptReportProposal lands it", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    act(() => {
+      result.current.newSession();
+    });
+    act(() => {
+      result.current.enqueueReportProposal({
+        name: "anomalies",
+        renderAs: "BULLETS",
+        question: "List anomalies in the bill.",
+      });
+    });
+    let session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+    expect(session.reportOverlay.pendingFieldProposals).toHaveLength(1);
+    const proposalId = session.reportOverlay.pendingFieldProposals[0].id;
+
+    act(() => {
+      result.current.acceptReportProposal(proposalId);
+    });
+    session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+    expect(session.reportOverlay.pendingFieldProposals).toHaveLength(0);
+    expect(session.reportOverlay.addedFields).toHaveLength(1);
+    expect(session.reportOverlay.addedFields[0]).toMatchObject({
+      name: "anomalies",
+      renderAs: "BULLETS",
+      question: "List anomalies in the bill.",
+    });
+  });
+
+  it("dismissReportProposal drops a queued proposal without adding a section", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    act(() => {
+      result.current.newSession();
+    });
+    act(() => {
+      result.current.enqueueReportProposal({
+        name: "anomalies",
+        renderAs: "BULLETS",
+        question: "List anomalies.",
+      });
+    });
+    let session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+    const proposalId = session.reportOverlay.pendingFieldProposals[0].id;
+    act(() => {
+      result.current.dismissReportProposal(proposalId);
+    });
+    session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+    expect(session.reportOverlay.pendingFieldProposals).toHaveLength(0);
+    expect(session.reportOverlay.addedFields).toHaveLength(0);
+  });
+});

@@ -1658,17 +1658,26 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       },
     );
     const body = JSON.parse((llmForward.mock.calls[0][1] as RequestInit).body as string);
-    // `report` step doesn't expose PdfViewer's scoped tools, but it
-    // DOES expose the universal/unscoped tools (suggest_intent +
-    // commit_gate / dismiss_gate / book_call). The request still
-    // includes a `tools` key with the universal subset.
+    // `report` step doesn't expose PdfViewer's scoped tools, but it DOES
+    // expose the smart-report tool surface (2026-05-29-smart-report-screen
+    // Phase 5 — render/edit/pin + section-mutation tools, all scoped to the
+    // `report` step) PLUS the universal/unscoped tools (suggest_intent +
+    // commit_gate / dismiss_gate / book_call).
     const toolNames = (body.tools as Array<{ function: { name: string } }>)
       .map((t) => t.function.name)
       .sort();
     expect(toolNames).toEqual([
+      "accept_report_section",
       "book_call",
       "commit_gate",
+      "delete_report_section",
       "dismiss_gate",
+      "edit_report_section",
+      "pin_to_report",
+      "propose_report_section",
+      "reject_report_section",
+      "show_smart_report_edit",
+      "show_smart_report_render",
       "suggest_intent",
     ]);
   });

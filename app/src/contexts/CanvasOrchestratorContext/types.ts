@@ -35,7 +35,13 @@ export type CanvasIntent =
   | { kind: "showExtract"; scope: ContentScope; schemaId: string }
   | { kind: "editSchema"; schemaId: string }
   | { kind: "showReport"; templateId: string; scope: ContentScope }
-  | { kind: "editTemplate"; templateId: string }
+  /**
+   * Open the report builder (f4a) for a template. `selectedSectionId` (when
+   * present) is the section the builder pre-opens its inline editor on — the
+   * render→builder `✎ edit §N` hand-off and the `show_smart_report_edit` LLM
+   * tool both carry it. Omitted → builder opens with no editor expanded.
+   */
+  | { kind: "editTemplate"; templateId: string; selectedSectionId?: string }
   | { kind: "openGate"; trigger: "save" | "export" | "byo" | "threshold" }
   | { kind: "switchFrame"; frame: import("@/types/onboarding").FFrame }
   /**
@@ -82,7 +88,60 @@ export type CanvasIntent =
    * `BookCallView` + `BookingStatusCard`. The orchestrator
    * handler manipulates `window.location.search` directly.
    */
-  | { kind: "openBookCall" };
+  | { kind: "openBookCall" }
+  /**
+   * 2026-05-29-smart-report-screen Phase 5 — pin an assistant turn
+   * into the report as a section. Produced by the `pin_to_report`
+   * LLM tool and the `📌 pin to report` chat affordance. The
+   * orchestrator routes to `ChatStore.pinToReport` (existing-or-new
+   * UX, NO silent auto-create). `text` is the literal turn text
+   * (#12); `templateId` is the explicit target when the user chose one.
+   */
+  | { kind: "pinToReport"; turnId: string; text: string; templateId?: string }
+  /**
+   * smart-report Phase 5 — an LLM-proposed report section. Produced by
+   * `propose_report_section`. The orchestrator routes to
+   * `ChatStore.enqueueReportProposal` so the builder surfaces a
+   * ProposalCard (the report sibling of `proposeSchemaField`).
+   */
+  | {
+      kind: "proposeReportSection";
+      name: string;
+      renderAs: "PARAGRAPH" | "BULLETS" | "TABLE";
+      question: string;
+    }
+  /**
+   * smart-report Phase 5 — accept a queued report-section proposal.
+   * The orchestrator routes to `ChatStore.acceptReportProposal`.
+   */
+  | { kind: "acceptReportSection"; proposalId: string }
+  /**
+   * smart-report Phase 5 — reject a queued report-section proposal.
+   * The orchestrator routes to `ChatStore.dismissReportProposal`.
+   */
+  | { kind: "rejectReportSection"; proposalId: string }
+  /**
+   * smart-report Phase 5 — edit a report section (the chat-driven twin
+   * of the builder's inline editor). The orchestrator routes to
+   * `ChatStore.editReportSection` (shallow-merge patch). Fields mirror
+   * the inline editor: name / renderAs / question / instructions /
+   * variables (all optional — a partial patch).
+   */
+  | {
+      kind: "editReportSection";
+      sectionId: string;
+      name?: string;
+      renderAs?: "PARAGRAPH" | "BULLETS" | "TABLE";
+      question?: string;
+      instructions?: string[];
+      variables?: string[];
+    }
+  /**
+   * smart-report Phase 5 — delete a report section (the chat-driven twin
+   * of the builder's `⋮ → Remove section`). The orchestrator routes to
+   * `ChatStore.removeReportSection`.
+   */
+  | { kind: "deleteReportSection"; sectionId: string };
 
 export type IntentSource = "user" | "agent" | "tour";
 

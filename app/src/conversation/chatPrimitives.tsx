@@ -20,6 +20,7 @@ import { useState, type FC, type FormEvent, type ReactNode } from "react";
 import type { ChatSuggestedAction } from "@/api/chatSessions";
 import type { Citation, WidgetRole } from "@groundx/shared";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { PinToReportAction } from "@/components/chat-widgets/PinToReportAction/PinToReportAction";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
@@ -168,7 +169,7 @@ export function LiveTurnList({
   if (liveTurns.length === 0 && !sending) return null;
   return (
     <Stack spacing={1} sx={{ mt: 0.5 }}>
-      {liveTurns.map((turn) =>
+      {liveTurns.map((turn, idx) =>
         turn.role === "user" ? (
           <UserBubble key={turn.id} testid="chat-live-user">
             {turn.content}
@@ -206,6 +207,16 @@ export function LiveTurnList({
                 scope={{ type: "none" }}
               />
             )}
+            {/* 📌 pin-to-report — carried on EVERY assistant turn (smart-report
+                Phase 5). Disabled + click-queued while this turn is still
+                streaming (the last turn during an in-flight send). */}
+            <PinToReportAction
+              role={role}
+              scope={{ type: "none" }}
+              turnId={turn.id}
+              turnText={turn.content}
+              streaming={sending && idx === liveTurns.length - 1}
+            />
           </Stack>
         ),
       )}

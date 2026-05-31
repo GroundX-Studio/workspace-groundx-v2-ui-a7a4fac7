@@ -67,14 +67,16 @@ import { SmartReportRender } from "@/components/viewer-widgets/SmartReportRender
 Mounted by `ReportRenderView` (the f4 thin layout wrapper). The onboarding view
 passes the active scenario's scope + the auth-derived role.
 
-## No LLM tools
+## LLM tools
 
-This widget ships `no-llm.md` (not a `.tools.ts`): its canvas-dispatch `show_*`
-tool plus the full per-control LLM tool surface (`show_` verb allowlist + pin /
-section-mutation tools + `SERVER_TOOL_CATALOG` mirror) are authored together in
-**Phase 5** (step 17), where the real chat→canvas dispatch lands. Registering a
-`show_*` descriptor now would be a no-op tool with no caller. See `no-llm.md`
-for the rationale.
+`SmartReportRender.tools.ts` declares `show_smart_report_render({ scope,
+template_id? })` — the canvas-dispatch tool for the render surface. `show_` is
+the canonical canvas-dispatch verb for every ScopedViewerWidget, allowlisted
+once in `check-tool-quality` by this phase. The handler returns the same
+`showReport` `CanvasIntent` the step-strip pill / "make me a report" path
+dispatches, so the tool drives the identical canvas move. Mirrored on the
+middleware `SERVER_TOOL_CATALOG`. Its `_edit` sibling
+(`show_smart_report_edit`) lives on `SmartReportBuilder.tools.ts`.
 
 ## Tests
 

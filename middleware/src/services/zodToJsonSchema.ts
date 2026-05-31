@@ -19,7 +19,7 @@ import type { ServerTool } from "./toolCatalog.js";
 
 /** Minimal subset of JSON Schema this converter emits. */
 export interface JsonSchemaNode {
-  type?: "string" | "number" | "integer" | "boolean" | "object";
+  type?: "string" | "number" | "integer" | "boolean" | "object" | "array";
   description?: string;
   minimum?: number;
   maximum?: number;
@@ -29,6 +29,8 @@ export interface JsonSchemaNode {
   required?: string[];
   additionalProperties?: boolean;
   enum?: readonly string[];
+  /** Element schema for `type: "array"`. */
+  items?: JsonSchemaNode;
 }
 
 /**
@@ -53,6 +55,10 @@ interface ZodDefLike {
   shape?: () => Record<string, z.ZodTypeAny>;
   innerType?: z.ZodTypeAny;
   values?: readonly string[];
+  /** `ZodArray` element type. */
+  type?: z.ZodTypeAny;
+  /** `ZodObject` unknown-key policy (`strip` | `strict` | `passthrough`). */
+  unknownKeys?: string;
 }
 
 function defOf(schema: z.ZodTypeAny): ZodDefLike {
@@ -117,6 +123,15 @@ function convertNode(schema: z.ZodTypeAny): JsonSchemaNode {
       if (def.description) node.description = def.description;
       return node;
     }
+    case "ZodArray": {
+      // ZodArray stores its element schema on `_def.type`.
+      const node: JsonSchemaNode = {
+        type: "array",
+        items: convertNode(def.type!),
+      };
+      if (def.description) node.description = def.description;
+      return node;
+    }
     case "ZodObject": {
       const shape = def.shape!();
       const properties: Record<string, JsonSchemaNode> = {};
@@ -126,10 +141,14 @@ function convertNode(schema: z.ZodTypeAny): JsonSchemaNode {
         const childDef = defOf(child);
         if (childDef.typeName !== "ZodOptional") required.push(key);
       }
+      // A `.passthrough()` object (e.g. the loose `scope` hint) permits
+      // unknown keys; `strip` (default) / `strict` do not. The runtime Zod
+      // parse + the shared `contentScopeSchema` remain the source of truth —
+      // this JSON Schema is only an LLM hint.
       const node: JsonSchemaNode = {
         type: "object",
         properties,
-        additionalProperties: false,
+        additionalProperties: def.unknownKeys === "passthrough",
       };
       if (required.length > 0) node.required = required;
       if (def.description) node.description = def.description;

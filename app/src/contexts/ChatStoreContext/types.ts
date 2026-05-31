@@ -315,6 +315,28 @@ export type PendingReportOverlay = PendingTemplateOverlay<
   ReportSectionProposal
 >;
 
+/**
+ * smart-report Phase 5 — input to `ChatStore.pinToReport`. The pinned section's
+ * `question` is the turn's LITERAL text (#12 — no auto-variable inference); the
+ * citations come from the source turn's `ChatMessage.citations`.
+ */
+export interface PinToReportInput {
+  /** The assistant turn being pinned (recorded as `pinnedFromTurnId`). */
+  turnId: string;
+  /** The literal turn text → the pinned section's `question`. */
+  text: string;
+  /** Source-turn citations carried onto the section (provenance). */
+  citations?: Citation[];
+  /** Explicit target template id, when the user already chose one. */
+  templateId?: string;
+  /**
+   * When true, ONLY resolve the existing-or-new target (return the
+   * `PinResolution`) — do NOT land a section. The affordance uses this to
+   * render the prompt before the user confirms.
+   */
+  resolveOnly?: boolean;
+}
+
 /** Shared default — every new ChatSession starts with an empty report overlay. */
 export const EMPTY_PENDING_REPORT_OVERLAY: PendingReportOverlay = {
   addedFields: [],
@@ -662,6 +684,44 @@ export interface ChatStoreApi {
    * base + added sections). No-op when no active session.
    */
   removeReportSection: (sectionId: string) => void;
+
+  /**
+   * smart-report Phase 5 — pin an assistant turn into the report as a section.
+   * The real caller of `resolvePinTarget`: it resolves the existing-or-new
+   * target (NEVER silently auto-creating a SAVED template) and, unless
+   * `resolveOnly` is set, lands a section into the active session's
+   * `reportOverlay.addedFields` carrying the turn's LITERAL text as the
+   * `question` (#12 — no auto-variable inference) + the turn id as
+   * `pinnedFromTurnId` + the turn's `citations`. Returns the `PinResolution`
+   * so the affordance can render the existing-or-new prompt. No-op (returns
+   * `prompt-new-only`) when no session is active.
+   */
+  pinToReport: (input: PinToReportInput) => import("./resolvePinTarget").PinResolution;
+
+  /**
+   * smart-report Phase 5 — enqueue an LLM-proposed section into the active
+   * session's `reportOverlay.pendingFieldProposals` (the report sibling of
+   * `enqueueFieldProposal`). Idempotent on `name`. The builder surfaces a
+   * ProposalCard above the row list. No-op when no session is active.
+   */
+  enqueueReportProposal: (
+    proposal: Omit<ReportSectionProposal, "id">,
+  ) => void;
+
+  /**
+   * smart-report Phase 5 — accept a queued section proposal: move it into
+   * `reportOverlay.addedFields` + clear it from the queue in one transition
+   * (the report sibling of `acceptFieldProposal`). Returns the minted section
+   * id, or `null` when no session / no such proposal.
+   */
+  acceptReportProposal: (proposalId: string) => string | null;
+
+  /**
+   * smart-report Phase 5 — drop a queued section proposal without adding it
+   * (the report sibling of `dismissFieldProposal`). No-op when no session /
+   * no such proposal.
+   */
+  dismissReportProposal: (proposalId: string) => void;
 
   /**
    * `schema-agent-chat-affordances` — append an assistant-role

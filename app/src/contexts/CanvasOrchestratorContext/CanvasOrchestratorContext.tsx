@@ -133,6 +133,46 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         if (intent.kind === "rejectSchemaField") {
           chatStore.dismissFieldProposal(intent.proposalId);
         }
+        // 2026-05-29-smart-report-screen Phase 5 — report pin +
+        // section-proposal routing. The `pin_to_report` /
+        // `propose_report_section` / `accept_report_section` /
+        // `reject_report_section` LLM tools (and the `📌 pin to report`
+        // chat affordance) produce these intents; the orchestrator
+        // routes them to the SAME ChatStore actions the on-screen
+        // controls call (the interim AgentToolBus bridge — Extract's
+        // pattern). Pin uses the existing-or-new UX (no auto-create).
+        if (intent.kind === "pinToReport") {
+          chatStore.pinToReport({
+            turnId: intent.turnId,
+            text: intent.text,
+            ...(intent.templateId !== undefined ? { templateId: intent.templateId } : {}),
+          });
+        }
+        if (intent.kind === "proposeReportSection") {
+          chatStore.enqueueReportProposal({
+            name: intent.name,
+            renderAs: intent.renderAs,
+            question: intent.question,
+          });
+        }
+        if (intent.kind === "acceptReportSection") {
+          chatStore.acceptReportProposal(intent.proposalId);
+        }
+        if (intent.kind === "rejectReportSection") {
+          chatStore.dismissReportProposal(intent.proposalId);
+        }
+        if (intent.kind === "editReportSection") {
+          chatStore.editReportSection(intent.sectionId, {
+            ...(intent.name !== undefined ? { name: intent.name } : {}),
+            ...(intent.renderAs !== undefined ? { renderAs: intent.renderAs } : {}),
+            ...(intent.question !== undefined ? { question: intent.question } : {}),
+            ...(intent.instructions !== undefined ? { instructions: intent.instructions } : {}),
+            ...(intent.variables !== undefined ? { variables: intent.variables } : {}),
+          });
+        }
+        if (intent.kind === "deleteReportSection") {
+          chatStore.removeReportSection(intent.sectionId);
+        }
       }
       // widget-llm-integration follow-up B.2 — gate-lifecycle
       // routing. Soft-fail when no OnboardingSessionProvider is
@@ -144,6 +184,29 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         }
         if (intent.kind === "dismissGate") {
           onboardingSession.dismissGate();
+        }
+        // 2026-05-29-smart-report-screen Phase 5 — the canvas-dispatch
+        // `show_*` report tools MOVE the canvas. `show_smart_report_render`
+        // emits `showReport` (→ render frame f4); `show_smart_report_edit`
+        // emits `editTemplate` (→ builder frame f4a), threading the
+        // section to pre-open via `advanceFrame`'s `selectedReportSectionId`
+        // option (read back by `ReportBuilderView` → the builder's
+        // `selectedSectionId` prop). This is the SAME `advanceFrame` the
+        // step-strip pill / render `✎ edit §N` affordance calls — so the
+        // tool drives the identical canvas move as the on-screen control.
+        // Soft-fail in the steady tree (no OnboardingSessionProvider):
+        // these report frames are onboarding-only, matching the gate block
+        // above.
+        if (intent.kind === "showReport") {
+          onboardingSession.advanceFrame("f4");
+        }
+        if (intent.kind === "editTemplate") {
+          onboardingSession.advanceFrame(
+            "f4a",
+            intent.selectedSectionId !== undefined
+              ? { selectedReportSectionId: intent.selectedSectionId }
+              : undefined,
+          );
         }
       }
       // widget-llm-integration follow-up B.3 — book-call routing.

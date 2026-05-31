@@ -98,6 +98,10 @@ function useSessionFacade(): OnboardingSessionApi {
   // NOT an entity — it has no per-instance state, just a session
   // boolean + the session-level gate.
   const [signupOpen, setSignupOpen] = useState<boolean>(false);
+  // The report section the builder (f4a) should pre-open. Set by the
+  // render→builder `✎ edit §N` hand-off via `advanceFrame`; cleared when the
+  // user leaves the builder frame.
+  const [selectedReportSectionId, setSelectedReportSectionId] = useState<string | null>(null);
 
   // Live ref to the registry's current activeKey. Action callbacks
   // need to peek at `activeKey` to decide whether to upsert or
@@ -127,8 +131,9 @@ function useSessionFacade(): OnboardingSessionApi {
       completedFrames: active?.completedFrames ?? new Set<FFrame>(),
       scenario: active?.kind === "sample" ? (active.id as Scenario) : null,
       gate,
+      selectedReportSectionId,
     };
-  }, [sessionId, active, signupOpen, gate]);
+  }, [sessionId, active, signupOpen, gate, selectedReportSectionId]);
 
   const bootstrapSession = useCallback((id: string) => {
     setSessionId(id);
@@ -184,7 +189,13 @@ function useSessionFacade(): OnboardingSessionApi {
   // level function (hoisted above the hook); see top of file.
 
   const advanceFrame = useCallback(
-    (frame: FFrame) => {
+    (frame: FFrame, options?: { selectedReportSectionId?: string }) => {
+      // Carry (or clear) the builder's pre-selected section. Only the builder
+      // frame (f4a) keeps a selection; advancing anywhere else clears it so a
+      // stale section can't pre-open a later builder visit.
+      setSelectedReportSectionId(
+        frame === "f4a" ? options?.selectedReportSectionId ?? null : null,
+      );
       if (frame === "f1") {
         // Capture the entity key BEFORE deactivating so the "left"
         // event references the right entity.

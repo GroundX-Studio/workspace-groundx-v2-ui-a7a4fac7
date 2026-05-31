@@ -23,6 +23,15 @@ const EXPECTED_NAMES = [
   "commit_gate",
   "dismiss_gate",
   "book_call",
+  // 2026-05-29-smart-report-screen Phase 5 — report tool surface.
+  "show_smart_report_render",
+  "show_smart_report_edit",
+  "pin_to_report",
+  "propose_report_section",
+  "accept_report_section",
+  "reject_report_section",
+  "edit_report_section",
+  "delete_report_section",
 ].sort();
 
 describe("server tool catalog", () => {
@@ -77,17 +86,28 @@ describe("server tool catalog", () => {
         "dismiss_gate",
         "jump_to_page",
         "open_document",
+        // smart-report Phase 5 — pin + render are reachable from the doc-viewer.
+        "pin_to_report",
         "propose_schema_field",
         "reject_proposal",
+        "show_smart_report_render",
         "suggest_intent",
       ],
     );
-    // `report` step still has no step-scoped tools, but the universal
-    // tools surface there too.
+    // `report` step now exposes the smart-report tool surface (Phase 5) +
+    // the universal tools. `pin_to_report` also lists `report` among its steps.
     expect(toolsForStep("report").map((t) => t.name).sort()).toEqual([
+      "accept_report_section",
       "book_call",
       "commit_gate",
+      "delete_report_section",
       "dismiss_gate",
+      "edit_report_section",
+      "pin_to_report",
+      "propose_report_section",
+      "reject_report_section",
+      "show_smart_report_edit",
+      "show_smart_report_render",
       "suggest_intent",
     ]);
   });
@@ -119,6 +139,30 @@ describe("server tool catalog", () => {
 
     it("rejects bad input (non-string documentId)", () => {
       expect(tool.inputSchema.safeParse({ documentId: 42 }).success).toBe(false);
+    });
+  });
+
+  describe("show_smart_report_edit intentBuilder", () => {
+    const tool = getServerTool("show_smart_report_edit")!;
+
+    it("threads selected_section_id into the editTemplate intent", () => {
+      const parsed = tool.inputSchema.parse({
+        template_id: "tpl-1",
+        selected_section_id: "charge_breakdown",
+      });
+      expect(tool.intentBuilder(parsed)).toEqual({
+        kind: "editTemplate",
+        templateId: "tpl-1",
+        selectedSectionId: "charge_breakdown",
+      });
+    });
+
+    it("omits selectedSectionId when not supplied", () => {
+      const parsed = tool.inputSchema.parse({ template_id: "tpl-1" });
+      expect(tool.intentBuilder(parsed)).toEqual({
+        kind: "editTemplate",
+        templateId: "tpl-1",
+      });
     });
   });
 

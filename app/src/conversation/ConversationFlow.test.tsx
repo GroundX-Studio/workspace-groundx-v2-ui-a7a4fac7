@@ -126,6 +126,24 @@ describe("ConversationFlow (experience.seedTurns → one-shot opener injected on
       "Here is what is in this workspace.",
     );
   });
+
+  it("mounts the 📌 pin-to-report affordance under an assistant turn (not just defined)", async () => {
+    // Regression guard (step-17 review): PinToReportAction existed + was
+    // unit-tested + its tool path was live, but it was NEVER mounted in the
+    // production conversation flow — dormant UI plumbing. This asserts the
+    // affordance is actually reachable under a rendered assistant turn.
+    const seedExperience: ChatExperience = {
+      seedTurns: () => [
+        { id: "seed-1", role: "assistant", content: "Here is what is in this workspace." },
+      ],
+    };
+    renderWithOnboardingProviders(<ActiveConversationFlow experience={seedExperience} />, {
+      initialFrame: "f2",
+      initialScenario: "utility",
+    });
+    await screen.findByTestId("chat-live-assistant");
+    expect(screen.getByTestId("pin-to-report-action")).toBeInTheDocument();
+  });
 });
 
 describe("ConversationFlow (onboarding experience → scripted intro + choreography)", () => {

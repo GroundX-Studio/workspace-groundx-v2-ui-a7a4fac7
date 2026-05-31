@@ -45,8 +45,44 @@ describe("zodToJsonSchema → toOpenAiTools", () => {
     expect(jumpTool.function.parameters.properties?.page?.minimum).toBe(1);
   });
 
+  it("converts a string array field into type:array with string items", () => {
+    const schema = z.object({
+      tags: z.array(z.string()).describe("free-text tags"),
+    });
+    const out = toOpenAiTools([
+      {
+        name: "test_array",
+        description:
+          "Test stub for array fields. Use when verifying array element conversion.",
+        category: "read",
+        inputSchema: schema,
+        intentBuilder: () => ({}),
+      },
+    ]);
+    expect(out[0].function.parameters.properties?.tags?.type).toBe("array");
+    expect(out[0].function.parameters.properties?.tags?.items?.type).toBe("string");
+  });
+
+  it("marks a .passthrough() object field additionalProperties:true (loose scope hint)", () => {
+    const schema = z.object({
+      scope: z.object({}).passthrough().describe("a loose ContentScope hint"),
+    });
+    const out = toOpenAiTools([
+      {
+        name: "test_passthrough",
+        description:
+          "Test stub for passthrough objects. Use when verifying the loose-object branch.",
+        category: "read",
+        inputSchema: schema,
+        intentBuilder: () => ({}),
+      },
+    ]);
+    expect(out[0].function.parameters.properties?.scope?.type).toBe("object");
+    expect(out[0].function.parameters.properties?.scope?.additionalProperties).toBe(true);
+  });
+
   it("throws on unsupported Zod types (clear error mode)", () => {
-    const schema = z.object({ tags: z.array(z.string()) });
+    const schema = z.object({ anything: z.record(z.string(), z.string()) });
     expect(() =>
       toOpenAiTools([
         {
@@ -58,7 +94,7 @@ describe("zodToJsonSchema → toOpenAiTools", () => {
           intentBuilder: () => ({}),
         },
       ]),
-    ).toThrow(/unsupported Zod type "ZodArray"/);
+    ).toThrow(/unsupported Zod type "ZodRecord"/);
   });
 
   it("converts string z.min() into minLength", () => {

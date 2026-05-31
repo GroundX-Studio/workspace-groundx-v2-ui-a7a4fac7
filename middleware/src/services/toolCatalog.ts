@@ -284,6 +284,195 @@ const bookCall: ServerTool = {
   intentBuilder: () => ({ kind: "openBookCall" }),
 };
 
+// ── 2026-05-29-smart-report-screen Phase 5 — report tool surface ─────
+//
+// Hand-mirrors the app-side `SmartReportRender.tools.ts` /
+// `SmartReportBuilder.tools.ts` / `PinToReportAction.tools.ts`. The `show_`
+// canvas-dispatch verb is the canonical verb for ScopedViewerWidgets
+// (allowlisted once in the app's `check-tool-quality` this phase). The report
+// + Extract template-mutation tools are a SHARED family (same Template+Scope+
+// Results lifecycle). `scope` is the shared `ContentScope` — kept loose here
+// (`z.object({}).passthrough()`) because the server doesn't re-validate the
+// scope shape (the app + shared Zod own it); the drift guard only pins names.
+
+const reportRenderAsEnum = z
+  .enum(["PARAGRAPH", "BULLETS", "TABLE"])
+  .describe("How the section body renders: PARAGRAPH (¶) / BULLETS (•) / TABLE (▦).");
+
+const showSmartReportRender: ServerTool = {
+  name: "show_smart_report_render",
+  description:
+    "Move the canvas to the Report render surface (frame f4) for a scope. Use when " +
+    "the user asks to see the report, says \"make me a report\", or you've reasoned a " +
+    "rendered IC-brief is the natural next surface for what they're analyzing.",
+  category: "read",
+  inputSchema: z.object({
+    scope: z
+      .object({})
+      .passthrough()
+      .describe("The render-time ContentScope the report renders over (bucket+filter / documents / group)."),
+    template_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional report template id; defaults to the active draft template when omitted."),
+  }),
+  availableSteps: ["report", "extract-workbench", "interact-chat", "doc-viewer"],
+  intentBuilder: (input) => ({
+    kind: "showReport",
+    templateId: (input as { template_id?: string }).template_id ?? "draft",
+    scope: (input as { scope: unknown }).scope,
+  }),
+};
+
+const showSmartReportEdit: ServerTool = {
+  name: "show_smart_report_edit",
+  description:
+    "Open the Report builder (frame f4a) with a section pre-selected. Use when the " +
+    "user asks to edit the report, change a section's question, or you want to surface " +
+    "the section editor for a specific section.",
+  category: "read",
+  inputSchema: z.object({
+    template_id: z
+      .string()
+      .min(1)
+      .describe("The report template id to open in the builder (the active draft when in onboarding)."),
+    selected_section_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional section id to pre-select / expand in the builder's row list."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "editTemplate",
+    templateId: input.template_id,
+    ...(input.selected_section_id !== undefined
+      ? { selectedSectionId: input.selected_section_id }
+      : {}),
+  }),
+};
+
+const pinToReport: ServerTool = {
+  name: "pin_to_report",
+  description:
+    "Pin an assistant answer into the report as a section. Use when the user says " +
+    "\"pin that\", \"add this to the report\", or you've reasoned a turn's answer belongs " +
+    "in the IC brief. The turn's literal text becomes the section's question.",
+  category: "mutate",
+  inputSchema: z.object({
+    turn_id: z
+      .string()
+      .min(1)
+      .describe("The assistant turn id being pinned (recorded as the section's source provenance)."),
+    text: z
+      .string()
+      .min(1)
+      .describe("The turn's literal text — becomes the pinned section's question (#12, no variable inference)."),
+    template_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Explicit target template id; omit to prompt the user existing-or-new (no auto-create)."),
+  }),
+  availableSteps: ["interact-chat", "doc-viewer", "extract-workbench", "report"],
+  intentBuilder: (input) => ({
+    kind: "pinToReport",
+    turnId: input.turn_id,
+    text: input.text,
+    ...(input.template_id !== undefined ? { templateId: input.template_id } : {}),
+  }),
+};
+
+const proposeReportSection: ServerTool = {
+  name: "propose_report_section",
+  description:
+    "Propose adding a new report section. Use when the user asks to add a section to " +
+    "the report (\"add an anomalies section\", \"include a recommendation\"). A " +
+    "ProposalCard surfaces in the builder for the user to Accept or Reject.",
+  category: "mutate",
+  inputSchema: z.object({
+    name: z.string().min(1).max(80).describe("Snake_case section id, lowercase (anomalies, charge_breakdown)."),
+    render_as: reportRenderAsEnum,
+    question: z
+      .string()
+      .min(1)
+      .max(400)
+      .describe("The question this section answers at render time (the literal prompt)."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "proposeReportSection",
+    name: input.name,
+    renderAs: input.render_as,
+    question: input.question,
+  }),
+};
+
+const acceptReportSection: ServerTool = {
+  name: "accept_report_section",
+  description:
+    "Accept a previously-proposed report section on the user's behalf. Use when an " +
+    "agentic flow has high confidence the user wants the proposed section added.",
+  category: "mutate",
+  inputSchema: z.object({
+    proposal_id: z.string().min(1).describe("Proposal id (from the builder's pending proposal queue) to accept."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({ kind: "acceptReportSection", proposalId: input.proposal_id }),
+};
+
+const rejectReportSection: ServerTool = {
+  name: "reject_report_section",
+  description:
+    "Reject (dismiss) a previously-proposed report section on the user's behalf. Use " +
+    "when an agentic flow determines the proposed section does not fit the report.",
+  category: "mutate",
+  inputSchema: z.object({
+    proposal_id: z.string().min(1).describe("Proposal id (from the builder's pending proposal queue) to reject."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({ kind: "rejectReportSection", proposalId: input.proposal_id }),
+};
+
+const editReportSection: ServerTool = {
+  name: "edit_report_section",
+  description:
+    "Edit an existing report section's name / renderAs / question / instructions. Use " +
+    "when the user asks to tweak a section (\"make the summary a bulleted list\", " +
+    "\"rephrase the anomalies question\"). Mirrors the builder's inline editor.",
+  category: "mutate",
+  inputSchema: z.object({
+    section_id: z.string().min(1).describe("The section id to edit (a draft or saved section)."),
+    name: z.string().min(1).max(80).optional().describe("New snake_case section name (optional)."),
+    render_as: reportRenderAsEnum.optional(),
+    question: z.string().min(1).max(400).optional().describe("New render-time question (optional)."),
+    instructions: z.array(z.string()).optional().describe("New instruction rules, one per array entry (optional)."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "editReportSection",
+    sectionId: input.section_id,
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    ...(input.render_as !== undefined ? { renderAs: input.render_as } : {}),
+    ...(input.question !== undefined ? { question: input.question } : {}),
+    ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+  }),
+};
+
+const deleteReportSection: ServerTool = {
+  name: "delete_report_section",
+  description:
+    "Delete (remove) a report section from the template. Use when the user asks to drop " +
+    "a section (\"remove the recommendation\"). Mirrors the builder's ⋮ → Remove section.",
+  category: "mutate",
+  inputSchema: z.object({
+    section_id: z.string().min(1).describe("The section id to remove (a draft or saved section)."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({ kind: "deleteReportSection", sectionId: input.section_id }),
+};
+
 /**
  * The authoritative server catalog. Phase 7 backfill extends this
  * array as widgets are mirrored. The order here is stable (matches
@@ -299,6 +488,16 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   commitGate,
   dismissGate,
   bookCall,
+  // smart-report Phase 5 — report tool surface (mirror of the app-side
+  // SmartReportRender / SmartReportBuilder / PinToReportAction tools).
+  showSmartReportRender,
+  showSmartReportEdit,
+  pinToReport,
+  proposeReportSection,
+  acceptReportSection,
+  rejectReportSection,
+  editReportSection,
+  deleteReportSection,
 ];
 
 /**

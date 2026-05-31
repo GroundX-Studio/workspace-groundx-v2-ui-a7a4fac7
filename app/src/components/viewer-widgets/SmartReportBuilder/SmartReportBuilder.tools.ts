@@ -1,0 +1,166 @@
+/**
+ * SmartReportBuilder — LLM tool declarations (2026-05-29-smart-report-screen
+ * Phase 5).
+ *
+ * The builder's controls are all chat-drivable (smart-report spec "Every report
+ * control SHALL be drivable from chat"). These are the SAME shared family as the
+ * Extract schema-builder's field-mutation tools — same allowlisted verbs
+ * (`show_` / `propose_` / `accept_` / `reject_` / `edit_` / `delete_`), same Zod
+ * validation, same chip routing, same both-side mirror — since both operate on
+ * the one shared Template lifecycle:
+ *
+ *   • `show_smart_report_edit` — open the builder (f4a) at a section (the
+ *     `_edit` sibling of `show_smart_report_render`). `read`-category nav.
+ *   • `propose_report_section` — surface a ProposalCard in the builder.
+ *   • `accept_report_section` / `reject_report_section` — act on a queued proposal.
+ *   • `edit_report_section` / `delete_report_section` — the chat twins of the
+ *     inline editor + `⋮ → Remove`.
+ *
+ * Interim AgentToolBus bridge: each handler returns the SAME `CanvasIntent` the
+ * on-screen control dispatches, which the orchestrator routes to the identical
+ * ChatStore action (`editReportSection`, `removeReportSection`,
+ * `enqueueReportProposal`, …). The builder's mouse controls and these tools
+ * therefore perform the same mutation.
+ */
+import { z } from "zod";
+
+import type { WidgetTool } from "@/tools/types";
+
+const showSmartReportEdit: WidgetTool = {
+  name: "show_smart_report_edit",
+  description:
+    "Open the Report builder (frame f4a) with a section pre-selected. Use when the " +
+    "user asks to edit the report, change a section's question, or you want to surface " +
+    "the section editor for a specific section.",
+  category: "read",
+  input: z.object({
+    template_id: z
+      .string()
+      .min(1)
+      .describe("The report template id to open in the builder (the active draft when in onboarding)."),
+    selected_section_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional section id to pre-select / expand in the builder's row list."),
+  }),
+  handler: (input) => ({
+    kind: "editTemplate",
+    templateId: input.template_id,
+    ...(input.selected_section_id !== undefined
+      ? { selectedSectionId: input.selected_section_id }
+      : {}),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+};
+
+const proposeReportSection: WidgetTool = {
+  name: "propose_report_section",
+  description:
+    "Propose adding a new report section. Use when the user asks to add a section to " +
+    "the report (\"add an anomalies section\", \"include a recommendation\"). A " +
+    "ProposalCard surfaces in the builder for the user to Accept or Reject.",
+  category: "mutate",
+  input: z.object({
+    name: z
+      .string()
+      .min(1)
+      .max(80)
+      .describe("Snake_case section id, lowercase (anomalies, charge_breakdown)."),
+    render_as: z.enum(["PARAGRAPH", "BULLETS", "TABLE"]).describe("How the section body renders: PARAGRAPH paragraph, BULLETS bullet list, TABLE table."),
+    question: z
+      .string()
+      .min(1)
+      .max(400)
+      .describe("The question this section answers at render time (the literal prompt)."),
+  }),
+  handler: (input) => ({
+    kind: "proposeReportSection",
+    name: input.name,
+    renderAs: input.render_as,
+    question: input.question,
+  }),
+  availableSteps: ["report", "extract-workbench"],
+};
+
+const acceptReportSection: WidgetTool = {
+  name: "accept_report_section",
+  description:
+    "Accept a previously-proposed report section on behalf of the user. Use when an " +
+    "agentic flow has high confidence the proposed section should be added.",
+  category: "mutate",
+  input: z.object({
+    proposal_id: z
+      .string()
+      .min(1)
+      .describe("Proposal id (from the builder's pending proposal queue) to accept."),
+  }),
+  handler: (input) => ({ kind: "acceptReportSection", proposalId: input.proposal_id }),
+  availableSteps: ["report", "extract-workbench"],
+};
+
+const rejectReportSection: WidgetTool = {
+  name: "reject_report_section",
+  description:
+    "Reject (dismiss) a previously-proposed report section on behalf of the user. Use " +
+    "when an agentic flow determines the proposed section does not fit the report.",
+  category: "mutate",
+  input: z.object({
+    proposal_id: z
+      .string()
+      .min(1)
+      .describe("Proposal id (from the builder's pending proposal queue) to reject."),
+  }),
+  handler: (input) => ({ kind: "rejectReportSection", proposalId: input.proposal_id }),
+  availableSteps: ["report", "extract-workbench"],
+};
+
+const editReportSection: WidgetTool = {
+  name: "edit_report_section",
+  description:
+    "Edit an existing report section name, renderAs, question, or instructions. Use " +
+    "when the user asks to tweak a section, such as making the summary a bulleted " +
+    "list or rephrasing the question. Mirrors the builder inline editor.",
+  category: "mutate",
+  input: z.object({
+    section_id: z.string().min(1).describe("The section id to edit (a draft or saved section)."),
+    name: z.string().min(1).max(80).optional().describe("New snake_case section name (optional)."),
+    render_as: z.enum(["PARAGRAPH", "BULLETS", "TABLE"]).optional().describe("How the section body renders: PARAGRAPH paragraph, BULLETS bullet list, TABLE table."),
+    question: z.string().min(1).max(400).optional().describe("New render-time question (optional)."),
+    instructions: z
+      .array(z.string())
+      .optional()
+      .describe("New instruction rules, one per array entry (optional)."),
+  }),
+  handler: (input) => ({
+    kind: "editReportSection",
+    sectionId: input.section_id,
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    ...(input.render_as !== undefined ? { renderAs: input.render_as } : {}),
+    ...(input.question !== undefined ? { question: input.question } : {}),
+    ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+};
+
+const deleteReportSection: WidgetTool = {
+  name: "delete_report_section",
+  description:
+    "Delete (remove) a report section from the template. Use when the user asks to drop " +
+    "a section (\"remove the recommendation\"). Mirrors the builder's ⋮ → Remove section.",
+  category: "mutate",
+  input: z.object({
+    section_id: z.string().min(1).describe("The section id to remove (a draft or saved section)."),
+  }),
+  handler: (input) => ({ kind: "deleteReportSection", sectionId: input.section_id }),
+  availableSteps: ["report", "extract-workbench"],
+};
+
+export const tools: WidgetTool[] = [
+  showSmartReportEdit,
+  proposeReportSection,
+  acceptReportSection,
+  rejectReportSection,
+  editReportSection,
+  deleteReportSection,
+];

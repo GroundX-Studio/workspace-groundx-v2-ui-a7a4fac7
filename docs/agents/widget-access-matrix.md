@@ -37,6 +37,7 @@ Roles today: `anonymous` (uncommitted / pre-sign-up) · `member` (signed in).
 | PdfViewer | ✅ | ✅ | cosmetic → drop |
 | SmartReportRender | ✅ | ✅ | **ScopedViewerWidget** (Report render, f4/S3). Available to both roles; export / Save are locked-for-anonymous as a DISABLED affordance (`widgetRoleCanEdit`) + `preview_only` badge, not a hidden control. (2026-05-29-smart-report-screen Phase 3) |
 | SmartReportBuilder | ✅ | ✅ | **ScopedViewerWidget** (Report builder, f4a/S3a). Available to both roles; Save is sign-in-gated — anonymous Save opens the gate (`commitGate`), member Save persists (Phase 6); export is locked-for-anonymous (`widgetRoleCanEdit`), a DISABLED `🔒` affordance not a hidden control. Reuses the F3a schema-editor chrome; drives the `report`-kind `reportOverlay` sibling of the Extract schema overlay. (2026-05-29-smart-report-screen Phase 4) |
+| PinToReportAction | ✅ | ✅ | chat-widget (`📌 pin to report`) on every assistant turn. Available to both roles; the only lock is DISABLED-mid-stream (queues the click) — not role-driven. Pins the turn's literal text as a report section via `pinToReport` (existing-or-new UX, no auto-create). (2026-05-29-smart-report-screen Phase 5) |
 | SignUpWidget | ✅ | ❌ | **anonymous only** (the sign-up *form*) — a member never sees the form. NUANCE: the widget also renders a committed-state *celebration* (`signup-celebration`) at the anon→member boundary (`gate.status === "committed"`), driven by gate-state not role; that transient is not "a member browsing the form". `commitGate` is gate-state, not role. |
 | GateChatRail | ✅ | ❌ | **gate context** (anonymous) — gate variant re-sourced from gate-state, not role |
 | GateValueProp | ✅ | ❌ | **gate context** (anonymous) — shown beside the gate |
@@ -56,6 +57,7 @@ ScopedViewerWidgets take a real `ContentScope`; everything else declares `{ type
 | ThinkingStream | `{ type: "none" }` | display |
 | SuggestedActionChips | `{ type: "none" }` | display/actions |
 | ProposeSchemaFieldCard | `{ type: "none" }` | operates on the draft template, not a doc set |
+| PinToReportAction | `{ type: "none" }` | operates on the draft report template + the source turn, not a doc set |
 | BookingStatusCard | `{ type: "none" }` | — |
 | BookCallView | `{ type: "none" }` | — |
 | GateValueProp | `{ type: "none" }` | — |
@@ -86,6 +88,14 @@ added here and asserted by the owning widget's test.
 | jump_to_page | PdfViewer | read | all roles | viewing is open |
 | open_template | _template | read | all roles | viewing a template is open |
 | **edit_template** | _template | mutate | **`["member"]`** | editing a *saved* template requires a signed-in member — the only role-restricted tool |
+| show_smart_report_render | SmartReportRender | read | all roles | navigating to the render surface is open (the canvas-dispatch `show_` verb) |
+| show_smart_report_edit | SmartReportBuilder | read | all roles | opening the builder is open; *persisting* a Save is gated at the Save boundary, not the tool |
+| pin_to_report | PinToReportAction | mutate | all roles | anonymous may pin into the draft report (existing-or-new, no auto-create); Save is gated, not the pin |
+| propose_report_section | SmartReportBuilder | mutate | all roles | shared family with `propose_schema_field` — proposing a section is open |
+| accept_report_section | SmartReportBuilder | mutate | all roles | shared family with `accept_proposal` |
+| reject_report_section | SmartReportBuilder | mutate | all roles | shared family with `reject_proposal` |
+| edit_report_section | SmartReportBuilder | mutate | all roles | edits the in-memory draft section; *persisting* is gated at Save, not the tool |
+| delete_report_section | SmartReportBuilder | mutate | all roles | removes a draft section; *persisting* is gated at Save, not the tool |
 
 > `category` (`read`/`mutate`) drives the confirmation model (auto-run vs. confirm-chip), NOT
 > visibility. Visibility is `availableIn` only (absent = all roles). Whether a mutation is *persisted*

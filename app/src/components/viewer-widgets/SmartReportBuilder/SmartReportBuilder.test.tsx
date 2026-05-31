@@ -78,6 +78,21 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     expect(editor.queryByLabelText(/scope/i)).not.toBeInTheDocument();
   });
 
+  it("pre-opens the inline editor for `selectedSectionId` (the render→builder + show_smart_report_edit hand-off)", () => {
+    renderWithOnboardingProviders(
+      <SmartReportBuilder role="member" scope={UTILITY_SCOPE} selectedSectionId="charge_breakdown" />,
+      {
+        initialScenario: "utility",
+        initialFrame: "f4a",
+        initialAuthState: "signed-in",
+      },
+    );
+    // The named section's editor is open WITHOUT a click (the hand-off carried the id).
+    expect(screen.getByTestId("report-builder-editor-charge_breakdown")).toBeInTheDocument();
+    // Sibling rows stay collapsed (one editor at a time — the F3a invariant).
+    expect(screen.queryByTestId("report-builder-editor-billing_summary")).not.toBeInTheDocument();
+  });
+
   it("offers a manual `make variable` affordance (no auto-inference, #12) and no version-history UI (#13)", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
@@ -89,6 +104,29 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     expect(screen.getByTestId("report-builder-make-variable-billing_summary")).toBeInTheDocument();
     // No version-history surface anywhere on the builder.
     expect(screen.queryByTestId("report-builder-version-history")).not.toBeInTheDocument();
+  });
+
+  it("make variable records the USER-CHOSEN token (step-16 follow-up), not a hardcoded literal", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+      initialScenario: "utility",
+      initialFrame: "f4a",
+      initialAuthState: "signed-in",
+    });
+    await user.click(screen.getByTestId("report-builder-edit-billing_summary"));
+    // The user names the variable (not a hardcoded "project").
+    const tokenInput = screen.getByTestId("report-builder-variable-name-billing_summary");
+    await user.clear(tokenInput);
+    await user.type(tokenInput, "billing_period");
+    await user.click(screen.getByTestId("report-builder-make-variable-billing_summary"));
+    // The chosen token is recorded as a chip with its exact value.
+    expect(
+      screen.getByTestId("report-builder-variable-billing_summary-billing_period"),
+    ).toHaveTextContent("{billing_period}");
+    // A blank token is NOT recordable — no empty-name chip appears.
+    expect(
+      screen.queryByTestId("report-builder-variable-billing_summary-"),
+    ).not.toBeInTheDocument();
   });
 
   it("locks Save for an anonymous viewer (sign-in gate) — clicking opens the gate, does not persist", async () => {

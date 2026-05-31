@@ -15,6 +15,7 @@ vi.mock("@/api/intentLog", () => ({
 import { captureException } from "@/lib/sentry";
 import { recordIntent } from "@/api/intentLog";
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
+import { OnboardingSessionProvider, useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 
 import { CanvasOrchestratorProvider, useCanvasOrchestrator } from "./CanvasOrchestratorContext";
 
@@ -55,7 +56,7 @@ describe("CanvasOrchestratorContext", () => {
   it("intent with no registered adapter still stamps + advances lastAppliedIntentId", () => {
     const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper });
     act(() => {
-      result.current.dispatch({ kind: "showReport", templateId: "tpl", scope: { type: "bucket", bucketId: 1 } });
+      result.current.dispatch({ kind: "openDocument", documentId: "d-no-adapter" });
     });
     expect(result.current.lastAppliedIntentId).toBe(1);
   });
@@ -471,6 +472,156 @@ describe("CanvasOrchestratorContext", () => {
       expect(() => {
         act(() => {
           result.current.dispatch({ kind: "highlightCitation", documentId: "d-1", page: 1 }, "user");
+        });
+      }).not.toThrow();
+    });
+  });
+
+  // ── 2026-05-29-smart-report-screen Phase 5 — report pin + section
+  //    proposal intents route to the SAME ChatStore actions the on-screen
+  //    controls call (the interim AgentToolBus bridge). This is the
+  //    "each tool performs the same mutation as its UI control" guarantee.
+  describe("smart-report Phase 5 — pin + section proposal routing", () => {
+    const wiredWrapper = ({ children }: { children: React.ReactNode }) => (
+      <ChatStoreProvider autoSeedDefaultSession>
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      </ChatStoreProvider>
+    );
+    function useBoth() {
+      return { orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() };
+    }
+
+    it("pinToReport intent lands a section carrying the literal turn text", () => {
+      const { result } = renderHook(useBoth, { wrapper: wiredWrapper });
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "pinToReport", turnId: "m-9", text: "Total due is $142.18." },
+          "agent",
+        );
+      });
+      const session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      expect(session.reportOverlay.addedFields).toHaveLength(1);
+      expect(session.reportOverlay.addedFields[0]).toMatchObject({
+        question: "Total due is $142.18.",
+        pinnedFromTurnId: "m-9",
+      });
+    });
+
+    it("proposeReportSection enqueues a proposal; acceptReportSection lands it", () => {
+      const { result } = renderHook(useBoth, { wrapper: wiredWrapper });
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "proposeReportSection", name: "anomalies", renderAs: "BULLETS", question: "List anomalies." },
+          "agent",
+        );
+      });
+      let session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      expect(session.reportOverlay.pendingFieldProposals).toHaveLength(1);
+      const proposalId = session.reportOverlay.pendingFieldProposals[0].id;
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "acceptReportSection", proposalId }, "agent");
+      });
+      session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      expect(session.reportOverlay.pendingFieldProposals).toHaveLength(0);
+      expect(session.reportOverlay.addedFields).toHaveLength(1);
+      expect(session.reportOverlay.addedFields[0]).toMatchObject({ name: "anomalies", renderAs: "BULLETS" });
+    });
+
+    it("rejectReportSection drops the proposal without adding a section", () => {
+      const { result } = renderHook(useBoth, { wrapper: wiredWrapper });
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "proposeReportSection", name: "anomalies", renderAs: "BULLETS", question: "List anomalies." },
+          "agent",
+        );
+      });
+      let session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      const proposalId = session.reportOverlay.pendingFieldProposals[0].id;
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "rejectReportSection", proposalId }, "agent");
+      });
+      session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      expect(session.reportOverlay.pendingFieldProposals).toHaveLength(0);
+      expect(session.reportOverlay.addedFields).toHaveLength(0);
+    });
+  });
+
+  // ── 2026-05-29-smart-report-screen Phase 5 (step-17 gate fix) — the
+  //    canvas-dispatch `show_*` tools must actually MOVE the canvas. The
+  //    `show_smart_report_render` tool emits `showReport` and
+  //    `show_smart_report_edit` emits `editTemplate`; both are routed
+  //    through a built-in orchestrator handler (mirroring commitGate/
+  //    dismissGate) to `OnboardingSession.advanceFrame`. Without this the
+  //    tools are no-op telemetry. These tests dispatch the intent and
+  //    assert the frame advances + the builder section pre-selects.
+  describe("smart-report Phase 5 — showReport / editTemplate advance the canvas frame", () => {
+    // The orchestrator routes these through the OPTIONAL OnboardingSession,
+    // so the wrapper mounts it with an active scenario entity (advanceFrame
+    // only flips non-f1 frames when an entity is active). The scenario seeds
+    // at f3 so an advance to f4/f4a is an observable transition.
+    const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
+      <ChatStoreProvider autoSeedDefaultSession>
+        <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </OnboardingSessionProvider>
+      </ChatStoreProvider>
+    );
+    function useBoth() {
+      return { orchestrator: useCanvasOrchestrator(), session: useOnboardingSession() };
+    }
+
+    it("showReport advances the canvas to the render frame (f4)", () => {
+      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+      expect(result.current.session.state.currentFrame).toBe("f3");
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showReport", templateId: "draft", scope: { type: "bucket", bucketId: 28454 } },
+          "agent",
+        );
+      });
+      expect(result.current.session.state.currentFrame).toBe("f4");
+    });
+
+    it("editTemplate advances the canvas to the builder frame (f4a) and pre-selects the section", () => {
+      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "editTemplate", templateId: "draft", selectedSectionId: "anomalies" },
+          "agent",
+        );
+      });
+      expect(result.current.session.state.currentFrame).toBe("f4a");
+      expect(result.current.session.state.selectedReportSectionId).toBe("anomalies");
+    });
+
+    it("editTemplate without a selectedSectionId advances to f4a with no pre-selected section", () => {
+      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "editTemplate", templateId: "draft" }, "agent");
+      });
+      expect(result.current.session.state.currentFrame).toBe("f4a");
+      expect(result.current.session.state.selectedReportSectionId).toBeNull();
+    });
+
+    it("showReport / editTemplate are no-ops (no throw) without an OnboardingSessionProvider", () => {
+      const plainWrapper = ({ children }: { children: React.ReactNode }) => (
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      );
+      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
+      expect(() => {
+        act(() => {
+          result.current.dispatch({ kind: "showReport", templateId: "draft", scope: { type: "bucket", bucketId: 1 } });
+          result.current.dispatch({ kind: "editTemplate", templateId: "draft" });
         });
       }).not.toThrow();
     });

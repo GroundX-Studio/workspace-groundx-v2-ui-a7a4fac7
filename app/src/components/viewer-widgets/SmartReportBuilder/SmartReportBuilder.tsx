@@ -39,7 +39,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
-import { type FC, useCallback, useMemo, useState } from "react";
+import { type FC, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 import { widgetRoleCanEdit } from "@groundx/shared";
@@ -72,10 +72,13 @@ export interface SmartReportBuilderProps {
   scope: ContentScope;
   /** REQUIRED authorization role (anonymous | member). Gates Save / export. */
   role: WidgetRole;
-  // NOTE: render→builder section *pre-selection* (the `✎ edit §N` hand-off
-  // carrying a section id) lands in Phase 5 with the `show_smart_report_edit`
-  // tool that carries the id — not shipped here as a dormant prop with no
-  // production caller (per the locked "no code with no caller" rule).
+  /**
+   * Optional section to pre-select (open its inline editor on mount). The
+   * render→builder hand-off (`✎ edit §N` → `onEditSection(sectionId)`) and the
+   * `show_smart_report_edit` LLM tool both carry a section id here. Omitted →
+   * no editor open initially.
+   */
+  selectedSectionId?: string;
 }
 
 /** A builder row = a section's effective editable shape (base ⊕ overlay edit). */
@@ -121,7 +124,7 @@ function baseRowsForScope(scope: ContentScope): BuilderSectionRow[] {
   }));
 }
 
-export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role }) => {
+export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, selectedSectionId }) => {
   const { addReportSection, editReportSection, removeReportSection, state: chatState } = useChatStore();
   const { state: session, openGate } = useOnboardingSession();
 
@@ -134,8 +137,10 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role })
 
   // Sub-tab: Sections (the editor) vs Render (a preview hand-off, Phase 5/6).
   const [tab, setTab] = useState<"sections" | "render">("sections");
-  // Only one row's inline editor is open at a time (the F3a invariant).
-  const [openRowId, setOpenRowId] = useState<string | null>(null);
+  // Only one row's inline editor is open at a time (the F3a invariant). Seeded
+  // from `selectedSectionId` — the render→builder + `show_smart_report_edit`
+  // hand-off pre-opens that section's editor.
+  const [openRowId, setOpenRowId] = useState<string | null>(selectedSectionId ?? null);
 
   const canEdit = widgetRoleCanEdit(role);
 
@@ -173,6 +178,12 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role })
 
   const openEditor = useCallback((id: string) => setOpenRowId(id), []);
   const closeEditor = useCallback(() => setOpenRowId(null), []);
+
+  // Re-open when the hand-off targets a different section after mount (a fresh
+  // `✎ edit §N` / `show_smart_report_edit` while the builder is already shown).
+  useEffect(() => {
+    if (selectedSectionId !== undefined) setOpenRowId(selectedSectionId);
+  }, [selectedSectionId]);
 
   const handleSave = useCallback(() => {
     // Save is sign-in-gated. An anonymous user's Save opens the gate
@@ -402,6 +413,9 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
   const [question, setQuestion] = useState(row.question);
   const [instructions, setInstructions] = useState(row.instructions.join("\n"));
   const [variables, setVariables] = useState<string[]>(row.variables);
+  // The user-chosen variable token (step-16 follow-up — no longer a hardcoded
+  // literal). Sanitized to a `{token}`-safe slug on record.
+  const [variableName, setVariableName] = useState("");
   // The `⋮` menu open state (reused from the F3a row menu).
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -418,13 +432,19 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
     });
   }, [name, renderAs, question, instructions, variables, onSave]);
 
-  // Manual "make variable" (#12): wrap the first un-wrapped `{token}`-able
-  // word? No — literal-only + manual. We surface the affordance that records
-  // a literal variable the user names; for the inline editor we add the
-  // section's own name token as the canonical example.
+  // Manual "make variable" (#12 — literal-only, no auto-inference): the user
+  // NAMES the token (step-16 follow-up — was a hardcoded "project"). The chosen
+  // name is slugged to a `{token}`-safe identifier; a blank name is a no-op.
   const handleMakeVariable = useCallback(() => {
-    setVariables((prev) => (prev.includes("project") ? prev : [...prev, "project"]));
-  }, []);
+    const token = variableName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    if (token.length === 0) return;
+    setVariables((prev) => (prev.includes(token) ? prev : [...prev, token]));
+    setVariableName("");
+  }, [variableName]);
 
   return (
     <Box
@@ -566,8 +586,19 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
           />
           {/* NO per-section scope field — the template is scope-independent. */}
 
-          {/* Manual "make variable" (#12 — no auto-inference). */}
+          {/* Manual "make variable" (#12 — no auto-inference). The user NAMES
+              the token (step-16 follow-up — no hardcoded literal). */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            <TextField
+              size="small"
+              placeholder="variable name"
+              value={variableName}
+              onChange={(e) => setVariableName(e.target.value)}
+              inputProps={{
+                "aria-label": "Variable name",
+                "data-testid": `report-builder-variable-name-${row.id}`,
+              }}
+            />
             <Box
               component="button"
               type="button"

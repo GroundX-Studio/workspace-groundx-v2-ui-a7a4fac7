@@ -30,13 +30,16 @@ interface SmartReportBuilderProps {
   scope: ContentScope;
   /** REQUIRED authorization role (anonymous | member). Gates Save / export. */
   role: WidgetRole;
+  /** Optional section to pre-open the inline editor on (the edit hand-off). */
+  selectedSectionId?: string;
 }
 ```
 
-The render→builder section *pre-selection* (the `✎ edit §N` hand-off carrying a
-section id) lands in **Phase 5** with the `show_smart_report_edit` tool that
-carries the id — it is NOT shipped here as a dormant prop with no production
-caller.
+`selectedSectionId` (optional) pre-opens that section's inline editor on mount —
+the render→builder `✎ edit §N` hand-off and the `show_smart_report_edit` tool
+both carry it. `ReportBuilderView` reads `OnboardingSession.selectedReportSectionId`
+(set by `advanceFrame("f4a", { selectedReportSectionId })`) and passes it through.
+Omitted → the builder opens with no editor expanded.
 
 Both `role` and `scope` are REQUIRED by the widget contract. No raw
 `documentId` / `bucketId` / `projectId` prop — they collapse into `scope`.
@@ -74,7 +77,11 @@ sections share the report's single render-time scope.
   `report`-kind sibling of the Extract schema overlay).
 - An anonymous Save dispatches `openGate("save")` (the `commitGate` entry).
 - The render surface's `✎ edit §N` routes the frame f4 → f4a (live since
-  Phase 1); the section-id pre-selection hand-off lands in Phase 5.
+  Phase 1) AND carries the section id via
+  `advanceFrame("f4a", { selectedReportSectionId })`, which the builder consumes
+  through its `selectedSectionId` prop to pre-open that row's editor. The
+  `show_smart_report_edit` tool carries `selected_section_id` into the same
+  `editTemplate` intent field (`selectedSectionId`).
 
 ## How to mount
 
@@ -90,15 +97,28 @@ import { SmartReportBuilder } from "@/components/viewer-widgets/SmartReportBuild
 Mounted by `ReportBuilderView` (the f4a thin layout wrapper). The onboarding
 view passes the active scenario's scope + the auth-derived role.
 
-## No LLM tools
+## LLM tools
 
-This widget ships `no-llm.md` (not a `.tools.ts`): its canvas-dispatch
-`show_smart_report_edit` tool plus the per-control mutation tools
-(`add`/`edit`/`remove` section, `render_report`) — and the `show_` verb
-allowlist add + the middleware `SERVER_TOOL_CATALOG` mirror — are authored
-together in **Phase 5** (step 17), where the real chat→canvas dispatch lands.
-Registering a `show_*` descriptor now would be a no-op tool with no caller. See
-`no-llm.md` for the rationale.
+`SmartReportBuilder.tools.ts` declares the builder's chat-drivable controls —
+the SAME shared family as the Extract schema-builder's field-mutation tools:
+
+- `show_smart_report_edit({ template_id, selected_section_id? })` — open the
+  builder (f4a) at a section (the `_edit` sibling of
+  `show_smart_report_render`). `read`-category nav → `editTemplate` intent.
+- `propose_report_section({ name, render_as, question })` — surface a
+  ProposalCard → `proposeReportSection` intent → `enqueueReportProposal`.
+- `accept_report_section` / `reject_report_section({ proposal_id })` — act on a
+  queued proposal → `acceptReportProposal` / `dismissReportProposal`.
+- `edit_report_section({ section_id, … })` — the chat twin of the inline editor
+  → `editReportSection` (shallow-merge patch).
+- `delete_report_section({ section_id })` — the chat twin of `⋮ → Remove` →
+  `removeReportSection`.
+
+Each handler returns the SAME `CanvasIntent` the on-screen control dispatches;
+the orchestrator routes both to the identical ChatStore action (the interim
+AgentToolBus bridge), so a chat tool performs the same mutation as its UI
+control. Every tool is mirrored on the middleware `SERVER_TOOL_CATALOG`. The
+`show_` verb is allowlisted in `check-tool-quality` (once, by this phase).
 
 ## Tests
 

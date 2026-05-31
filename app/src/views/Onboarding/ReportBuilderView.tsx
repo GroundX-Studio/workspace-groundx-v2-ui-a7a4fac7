@@ -74,7 +74,13 @@ export const ReportBuilderView: FC = () => {
         ← back
       </Box>
       <Box sx={{ flex: 1, minHeight: 0 }}>
-        <SmartReportBuilder role={role} scope={scope} />
+        <SmartReportBuilder
+          role={role}
+          scope={scope}
+          {...(session.selectedReportSectionId
+            ? { selectedSectionId: session.selectedReportSectionId }
+            : {})}
+        />
       </Box>
     </Box>
   );

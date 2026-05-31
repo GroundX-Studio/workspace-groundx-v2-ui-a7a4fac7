@@ -166,6 +166,25 @@ export const tools = [t];
   assert(r.code === 0, `expected conforming fixture to pass, got code=${r.code} stderr=${r.stderr}`);
 });
 
+// Test 8 — smart-report Phase 5: the `show_` canvas-dispatch verb is
+// allowlisted (the canonical verb for all ScopedViewerWidgets). A
+// `show_smart_report_render` tool passes the verb-prefix rule.
+withFixture("ShowVerb", `
+import { z } from "zod";
+import type { WidgetTool } from "@/tools/types";
+const t: WidgetTool = {
+  name: "show_quality_fixture",
+  description: "Move the canvas to the quality fixture surface. Use when the test exercises the show_ verb.",
+  category: "read",
+  input: z.object({ scopeKey: z.string().describe("scope identity key") }),
+  handler: () => null,
+};
+export const tools = [t];
+`, () => {
+  const r = runScript();
+  assert(r.code === 0, `expected show_ prefix to pass, got code=${r.code} stderr=${r.stderr}`);
+});
+
 if (failures.length === 0) {
   console.log("check-tool-quality.test.mjs: all assertions passed");
   process.exit(0);

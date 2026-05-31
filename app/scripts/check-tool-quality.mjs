@@ -33,6 +33,12 @@ const APP_ROOT = resolve(HERE, "..");
 const SRC = resolve(APP_ROOT, "src");
 
 const ALLOWED_VERBS = [
+  // `show_` — the canonical canvas-dispatch verb for ALL ScopedViewerWidgets
+  // (`show_understand` / `show_document` / `show_extraction`(+`_edit`) /
+  // `show_smart_report_render`(+`_edit`) / `show_integrate`). Allowlisted ONCE
+  // here by 2026-05-29-smart-report-screen Phase 5 (the first real `show_*`
+  // tools), per the agent-tools spec "The verb allowlist SHALL admit `show_`".
+  "show_",
   "open_",
   "jump_",
   "propose_",

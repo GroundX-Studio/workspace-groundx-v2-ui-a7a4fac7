@@ -11,9 +11,10 @@
  * field value IS the active scenario id, so the user never re-picks what they
  * were already analyzing.
  *
- * `✎ edit §N` from the render surface advances to the builder (f4a) — the
- * builder's real implementation is Phase 4 (step 16); for now the affordance
- * routes the frame so the render→builder seam is live.
+ * `✎ edit §N` from the render surface advances to the builder (f4a), carrying
+ * the section id so the builder pre-opens that section's inline editor
+ * (`advanceFrame("f4a", { selectedReportSectionId })` → the builder's
+ * `selectedSectionId` prop).
  */
 
 import { type FC, useCallback } from "react";
@@ -44,11 +45,14 @@ export const ReportRenderView: FC = () => {
     filter: { project: scenarioId },
   };
 
-  const handleEditSection = useCallback(() => {
-    // f4 → f4a edit affordance. Section pre-selection is wired in Phase 4
-    // (the builder is a placeholder route until then).
-    advanceFrame("f4a");
-  }, [advanceFrame]);
+  const handleEditSection = useCallback(
+    (sectionId: string) => {
+      // f4 → f4a edit affordance, carrying the section id so the builder
+      // pre-opens that section's inline editor (the render→builder hand-off).
+      advanceFrame("f4a", { selectedReportSectionId: sectionId });
+    },
+    [advanceFrame],
+  );
 
   return <SmartReportRender role={role} scope={scope} onEditSection={handleEditSection} />;
 };

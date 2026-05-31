@@ -27,13 +27,25 @@ export interface OnboardingSessionState {
   scenario: Scenario | null;
   /** Gate lifecycle (LC3) — single source of truth for F6. */
   gate: GateStatus;
+  /**
+   * The report section the builder (f4a) should pre-open its inline editor on.
+   * Set by the render→builder `✎ edit §N` hand-off (and the
+   * `show_smart_report_edit` tool). `null` when the builder opens with no
+   * pre-selection. Cleared whenever the user leaves the builder frame.
+   */
+  selectedReportSectionId: string | null;
 }
 
 export interface OnboardingSessionApi {
   state: OnboardingSessionState;
   bootstrapSession: (sessionId: string) => void;
   pickScenario: (scenario: Scenario) => void;
-  advanceFrame: (frame: FFrame) => void;
+  /**
+   * Advance the F-series frame. Pass `options.selectedReportSectionId` to carry
+   * the report section the builder (f4a) should pre-open — the render→builder
+   * `✎ edit §N` hand-off uses it. Advancing to any non-f4a frame clears it.
+   */
+  advanceFrame: (frame: FFrame, options?: { selectedReportSectionId?: string }) => void;
   /**
    * Open the F6 gate. Pass `options.cause` to mark the post-commit
    * intent so an effect can fire the dropped action after sign-in

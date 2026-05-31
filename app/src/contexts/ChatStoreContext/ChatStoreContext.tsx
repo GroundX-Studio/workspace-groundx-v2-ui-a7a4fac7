@@ -8,6 +8,7 @@ import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } fr
 import type { FFrame } from "@/types/onboarding";
 import type { NormalizedBbox } from "@groundx/shared";
 
+import { resolvePinTarget, type PinResolution, type PinTargetTemplate } from "./resolvePinTarget";
 import {
   EMPTY_PENDING_REPORT_OVERLAY,
   EMPTY_PENDING_SCHEMA_OVERLAY,
@@ -1276,6 +1277,140 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
   }, []);
 
+  // ── Pin + section-proposal actions (smart-report Phase 5) ──────────────
+  // The pin affordance + `pin_to_report` tool are the real callers of the pure
+  // `resolvePinTarget` resolver. The proposal actions are the `report`-kind
+  // siblings of enqueue/accept/dismissFieldProposal.
+
+  const pinToReport = useCallback((input: import("./types").PinToReportInput): PinResolution => {
+    // The available SAVED report templates the user could target. v1
+    // (onboarding) has none yet — the Save/persist endpoint is Phase 6 — so
+    // the resolution is `prompt-new-only`. The in-memory `reportOverlay` IS the
+    // single draft target; landing into it is NOT auto-creating a saved
+    // template (the "no silent auto-create" rule is about saved templates).
+    // Phase 6 sources this list from `listTemplates({kind:"report"})`.
+    const available: PinTargetTemplate[] = [];
+    const resolution = resolvePinTarget(available, {
+      ...(input.templateId !== undefined ? { templateId: input.templateId } : {}),
+    });
+    if (input.resolveOnly) return resolution;
+
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      const id = `sec-pin-${cryptoRandom().slice(0, 8)}`;
+      const section: import("./types").ReportSectionItem = {
+        id,
+        // The pinned section's display name derives from the turn; the user
+        // can rename it in the builder. Literal-only (#12).
+        name: "pinned_answer",
+        renderAs: "PARAGRAPH",
+        // The question IS the literal turn text (#12 — no auto-variable inference).
+        question: input.text,
+        instructions: [],
+        variables: [],
+        pinnedFromTurnId: input.turnId,
+      };
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        reportOverlay: {
+          ...current.reportOverlay,
+          addedFields: [...current.reportOverlay.addedFields, section],
+        },
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+    return resolution;
+  }, []);
+
+  const enqueueReportProposal = useCallback(
+    (proposal: Omit<import("./types").ReportSectionProposal, "id">) => {
+      setState((prev) => {
+        if (!prev.activeSessionId) return prev;
+        const current = prev.sessions.get(prev.activeSessionId);
+        if (!current) return prev;
+        // Idempotent on name (the report sibling of the (categoryId,name) dedupe).
+        const dup = current.reportOverlay.pendingFieldProposals.some((p) => p.name === proposal.name);
+        if (dup) return prev;
+        const id = `rprop-${cryptoRandom()}`;
+        const sessions = new Map(prev.sessions);
+        sessions.set(prev.activeSessionId, {
+          ...current,
+          reportOverlay: {
+            ...current.reportOverlay,
+            pendingFieldProposals: [
+              ...current.reportOverlay.pendingFieldProposals,
+              { id, ...proposal },
+            ],
+          },
+          updatedAt: Date.now(),
+        });
+        return { ...prev, sessions };
+      });
+    },
+    [],
+  );
+
+  const acceptReportProposal = useCallback((proposalId: string): string | null => {
+    let mintedSectionId: string | null = null;
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      const proposal = current.reportOverlay.pendingFieldProposals.find((p) => p.id === proposalId);
+      if (!proposal) return prev;
+      mintedSectionId = `sec_${proposal.name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${cryptoRandom().slice(0, 6)}`;
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        reportOverlay: {
+          ...current.reportOverlay,
+          addedFields: [
+            ...current.reportOverlay.addedFields,
+            {
+              id: mintedSectionId,
+              name: proposal.name,
+              renderAs: proposal.renderAs,
+              question: proposal.question,
+              instructions: [],
+              variables: [],
+            },
+          ],
+          pendingFieldProposals: current.reportOverlay.pendingFieldProposals.filter(
+            (p) => p.id !== proposalId,
+          ),
+        },
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+    return mintedSectionId;
+  }, []);
+
+  const dismissReportProposal = useCallback((proposalId: string) => {
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      if (!current.reportOverlay.pendingFieldProposals.some((p) => p.id === proposalId)) return prev;
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        reportOverlay: {
+          ...current.reportOverlay,
+          pendingFieldProposals: current.reportOverlay.pendingFieldProposals.filter(
+            (p) => p.id !== proposalId,
+          ),
+        },
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+  }, []);
+
   // `schema-agent-chat-affordances`: emit an assistant bubble from the
   // Schema-Agent flow (e.g. confidence-delta narration after a rerun).
   // Pushes a new ChatMessage with `agent-<rand>` id prefix so ChatColumn
@@ -1563,6 +1698,10 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       addReportSection,
       editReportSection,
       removeReportSection,
+      pinToReport,
+      enqueueReportProposal,
+      acceptReportProposal,
+      dismissReportProposal,
       appendAgentMessage,
       pushOverlay,
       mutateOverlay,
@@ -1594,6 +1733,10 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       addReportSection,
       editReportSection,
       removeReportSection,
+      pinToReport,
+      enqueueReportProposal,
+      acceptReportProposal,
+      dismissReportProposal,
       appendAgentMessage,
       pushOverlay,
       mutateOverlay,
