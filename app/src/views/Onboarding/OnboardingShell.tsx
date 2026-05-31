@@ -133,7 +133,8 @@ function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["subst
  *   • F2–F7 — the right-of-nav slot is the AppShell chat | canvas
  *     split. Chat column hosts GateChatPanel (the chat-widget at
  *     `components/chat-widgets/GateChatPanel/`); canvas hosts the
- *     active frame view (UnderstandView / ExtractView / etc.).
+ *     active ScopedViewerWidget via `<ScopedCanvas>` (the per-frame
+ *     views were retired — the shell no longer mounts them).
  *   • The F1 ↔ shell transition slides ONLY chat + canvas; the nav
  *     is stable.
  *

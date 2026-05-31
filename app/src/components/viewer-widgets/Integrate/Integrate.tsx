@@ -32,9 +32,10 @@ import { CODE_FOR, PLUGINS } from "./integrateConnectors";
  * surface (previously `views/Onboarding/IntegrateView.tsx`) as a
  * `ScopedViewerWidget` (PdfViewer · Extract · SmartReport · Integrate). Per
  * `feedback_no_onboarding_duplicates` onboarding + steady share ONE widget set;
- * `IntegrateView` is now a thin wrapper that mounts this. NOT a
+ * the live shell mounts this via `<ScopedCanvas>` (the per-frame `IntegrateView`
+ * wrapper was retired in 2026-05-31-shared-canvas-affordance-restoration). NOT a
  * reimplementation — the connector/plugin cards + API snippets + next-steps
- * guts are lifted verbatim from `IntegrateView`.
+ * guts were lifted verbatim from the retired `IntegrateView`.
  *
  * The widget-contract requires a `scope: ContentScope` for every
  * ScopedViewerWidget; the connectors list is scope-independent today (the same

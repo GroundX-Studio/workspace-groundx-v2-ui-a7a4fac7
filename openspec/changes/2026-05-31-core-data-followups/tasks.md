@@ -13,17 +13,29 @@
 **Execution: → SEQUENTIAL.** Behavior-preserving refactor of a single 1637-line file — cannot be
 safely parallelized. One hand, tests green after each extraction.
 
-- [ ] **Failing/guard test:** lock the public surface of `chatRouter.ts` (exported entry points +
+- [x] **Failing/guard test:** lock the public surface of `chatRouter.ts` (exported entry points +
   observable behavior) with the existing `chatRouter.test.ts` suite green as the regression baseline
-  BEFORE moving any code.
-- [ ] Extract the **wire types** into their own module; re-export from `chatRouter.ts`. tsc + tests green.
-- [ ] Extract the **deterministic classifier** into its own module. tsc + tests green.
-- [ ] Extract **`searchGroundX` + `composeFilters`** into their own module. tsc + tests green.
-- [ ] Extract the **RAG pipeline** (`runRagPipeline`/`callGroundedLlm`/`parseGroundedAnswer`/
-  `buildSnippetBlock`) into its own module. tsc + tests green.
-- [ ] Extract the **mocks** into their own module. tsc + tests green.
-- [ ] Adversarial review: `chatRouter.ts` is now a thin composition; no behavior change; full
-  middleware suite + app suite green.
+  BEFORE moving any code. — DONE: new `chatRouter.split.test.ts` asserts each sub-module exists +
+  `chatRouter.ts` re-exports the SAME bindings (`===` identity); failed red before extraction (modules
+  absent), green after. Existing `chatRouter.test.ts` (90 tests) kept unchanged as the behavior baseline.
+- [x] Extract the **wire types** into their own module; re-export from `chatRouter.ts`. tsc + tests green.
+  — DONE: `chatRouterTypes.ts` (request/response/debug/deps types, `proposalEnvelopeV1Schema`,
+  `ChatRouteNotImplementedError`, `GroundXSearchResult`, shared tuning constants).
+- [x] Extract the **deterministic classifier** into its own module. tsc + tests green. — DONE:
+  `chatClassifier.ts` (`classifyChatMode`).
+- [x] Extract **`searchGroundX` + `composeFilters`** into their own module. tsc + tests green. — DONE:
+  `groundxSearch.ts` (`searchGroundX`, `composeFilters`, `SearchGroundXOptions`).
+- [x] Extract the **RAG pipeline** (`runRagPipeline`/`callGroundedLlm`/`parseGroundedAnswer`/
+  `buildSnippetBlock`) into its own module. tsc + tests green. — DONE: `ragPipeline.ts`. Live seams
+  preserved verbatim: server-side role filter (`toolsForStep(activeStepKind, callerRole)`), word-level
+  `assignTier(v, { hasAtomBox })` + `wordMapFetch`, inline `ContentScope` derivation.
+- [x] Extract the **mocks** into their own module. tsc + tests green. — DONE: `chatMocks.ts`
+  (`mockResponseFor` + per-scenario fixtures).
+- [x] Adversarial review: `chatRouter.ts` is now a thin composition; no behavior change; full
+  middleware suite + app suite green. — DONE: `chatRouter.ts` 1698→150 lines (entry `routeChat` +
+  re-export barrel). Verified no test weakened/retargeted (chatRouter.test.ts 90 / chatHandler.test.ts 36
+  / structuredHandler.test.ts 27 all unchanged + green); middleware suite 649 green, app suite 1414 green,
+  middleware tsc clean, app `npm run build` (tsc+vite) clean, `openspec validate --strict` clean.
 
 ## 2. Shared ApiError base + 7-error refactor
 **Execution: ◑ MIXED.** Author the base `ApiError` SEQUENTIAL (the contract). Refactoring the 7

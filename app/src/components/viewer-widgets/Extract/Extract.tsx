@@ -63,9 +63,11 @@ import { SchemaView } from "./SchemaView";
  * workbench (previously `views/Onboarding/ExtractView.tsx` + `SchemaView.tsx`)
  * as a `ScopedViewerWidget` (PdfViewer · Extract · SmartReport · Integrate).
  * Per `feedback_no_onboarding_duplicates` onboarding + steady share ONE widget
- * set; `ExtractView` is now a thin wrapper that mounts this with a scenario-
- * derived scope. NOT a reimplementation — the F3/F3a/F4 guts are lifted
- * verbatim, the only change being where the document comes from:
+ * set; the live shell mounts this via `<ScopedCanvas>` (the per-frame
+ * `ExtractView` wrapper was retired in
+ * 2026-05-31-shared-canvas-affordance-restoration). NOT a reimplementation —
+ * the F3/F3a/F4 guts are lifted verbatim, the only change being where the
+ * document comes from:
  *
  *   • The primary `documentId` / doc set is derived FROM `scope`
  *     (`scope.documentIds[0]`), NOT from scenario context.
