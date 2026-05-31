@@ -56,6 +56,9 @@ const proposeSchemaField: WidgetTool = {
     description: input.description,
   }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
+  // §5 reachability — this tool's result renders as the inline ProposeSchemaFieldCard
+  // (mounted by `conversation/chatPrimitives.tsx` under the assistant bubble).
+  rendersWidget: "chat-widgets/ProposeSchemaFieldCard",
 };
 
 const acceptProposal: WidgetTool = {

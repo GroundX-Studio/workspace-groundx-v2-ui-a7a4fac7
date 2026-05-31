@@ -69,6 +69,9 @@ const saveToAccount: WidgetTool = {
   input: z.object({}),
   handler: () => ({ kind: "openGate", trigger: "save" }),
   availableSteps: ["doc-viewer", "interact-chat"],
+  // §5 reachability — surfaces as a `tool:save_to_account` suggested-action chip
+  // rendered by SuggestedActionChips (the `reply.suggestedActions[]` renderer).
+  rendersWidget: "chat-widgets/SuggestedActionChips",
 };
 
 export const tools: WidgetTool[] = [commitGate, dismissGate, saveToAccount];

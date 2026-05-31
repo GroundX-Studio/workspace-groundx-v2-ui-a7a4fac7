@@ -76,6 +76,23 @@ export interface WidgetTool<TSchema extends ZodTypeAny = ZodTypeAny> {
    * (design.md §E). Default: every step.
    */
   availableSteps?: ViewerStep["kind"][];
+  /**
+   * 2026-05-31-core-data-followups §5 — chat-widget reachability binding.
+   *
+   * For a TOOL-triggered CHAT card (a widget that mounts imperatively in the
+   * chat column when a tool fires — not a `CanvasKind`-registered VIEWER widget),
+   * names the chat widget this tool's result RENDERS as, in
+   * `"<slot>/<WidgetName>"` form (e.g. `"chat-widgets/ProposeSchemaFieldCard"`).
+   *
+   * The reachability coverage test (riding the app↔server parity guard) asserts
+   * every binding resolves to a REAL mounted chat widget dir. Viewer-widget
+   * canvas-dispatch tools (resolved through the `ScopedViewerWidget` registry)
+   * and always-on chat widgets (ThinkingStream / input bar / GateChatRail) do NOT
+   * set this — they are covered by the registry + ChatColumn render tests
+   * respectively. Optional by design; only the enumerated card-triggering tools
+   * carry it.
+   */
+  rendersWidget?: string;
 }
 
 /**

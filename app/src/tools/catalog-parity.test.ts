@@ -24,6 +24,9 @@
  * SERVER-ONLY tools (no widget owns them) are an explicit, documented
  * exception — they have no app mirror by design.
  */
+import { existsSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { toolRegistry } from "./registry";
@@ -113,5 +116,97 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
       expect(appNames, `${name} missing on the app side`).toContain(name);
       expect(serverNames, `${name} missing on the server side`).toContain(name);
     }
+  });
+
+  // ── 2026-05-31-core-data-followups §5 — chat-widget reachability guard ─────
+  //
+  // The `ScopedViewerWidget` registry covers VIEWER widgets only — `<ScopedCanvas>`
+  // resolves `step.kind → CanvasKind → mount → component`. CHAT widgets mount
+  // IMPERATIVELY in the chat column when a tool fires, so they have no registry.
+  // This guard closes that gap: a TOOL-triggered chat card declares a
+  // `rendersWidget: "<slot>/<WidgetName>"` binding (on BOTH the app `*.tools.ts`
+  // and the `SERVER_TOOL_CATALOG` mirror), and this coverage test asserts:
+  //   1. each enumerated card tool DECLARES a binding on both sides;
+  //   2. the app↔server bindings AGREE (riding the existing parity guard — NOT a
+  //      second tool list);
+  //   3. every binding resolves to a REAL mounted chat-widget directory.
+  //
+  // Always-on chat widgets (ThinkingStream, the input bar, GateChatRail-by-gate-
+  // state) are a DELIBERATE exemption — they are not tool-triggered; ChatColumn's
+  // render tests cover them. Phase-2 data-driven ChatColumn dispatch is deferred
+  // (earn the axis — these three bindings are the only real consumers today).
+  describe("chat-widget reachability (rendersWidget bindings)", () => {
+    const HERE = dirname(fileURLToPath(import.meta.url));
+    const CHAT_WIDGETS_DIR = resolve(HERE, "..", "components", "chat-widgets");
+
+    // The TOOL-triggered chat cards (tasks.md §5 item 4). The binding string is
+    // the ONLY hand-maintained datum; everything else is derived from the live
+    // catalogs + the filesystem, so this is not a parallel catalog.
+    const CARD_TOOL_BINDINGS: Record<string, string> = {
+      propose_schema_field: "chat-widgets/ProposeSchemaFieldCard",
+      book_call: "chat-widgets/BookingStatusCard",
+      save_to_account: "chat-widgets/SuggestedActionChips",
+    };
+
+    /** Resolve a `"<slot>/<WidgetName>"` binding to a real mounted widget dir. */
+    function bindingResolvesToMountedWidget(binding: string): boolean {
+      const [slot, name] = binding.split("/");
+      if (slot !== "chat-widgets" || !name) return false;
+      const dir = join(CHAT_WIDGETS_DIR, name);
+      return existsSync(dir) && statSync(dir).isDirectory();
+    }
+
+    it("every enumerated card tool declares a rendersWidget binding on the APP side", () => {
+      for (const [toolName, expected] of Object.entries(CARD_TOOL_BINDINGS)) {
+        const tool = toolRegistry.byName(toolName);
+        expect(tool, `${toolName} not found in the app tool registry`).toBeDefined();
+        expect(
+          tool!.rendersWidget,
+          `${toolName} (app) must declare rendersWidget: "${expected}"`,
+        ).toBe(expected);
+      }
+    });
+
+    it("every enumerated card tool declares the SAME rendersWidget binding on the SERVER side", () => {
+      for (const [toolName, expected] of Object.entries(CARD_TOOL_BINDINGS)) {
+        const tool = serverByName.get(toolName);
+        expect(tool, `${toolName} not found in SERVER_TOOL_CATALOG`).toBeDefined();
+        expect(
+          tool!.rendersWidget,
+          `${toolName} (server) must declare rendersWidget: "${expected}" (app↔server parity)`,
+        ).toBe(expected);
+      }
+    });
+
+    it("every rendersWidget binding (either catalog) resolves to a REAL mounted chat widget", () => {
+      const dangling: string[] = [];
+      for (const tool of toolRegistry.all()) {
+        if (tool.rendersWidget && !bindingResolvesToMountedWidget(tool.rendersWidget)) {
+          dangling.push(`app ${tool.name} → "${tool.rendersWidget}"`);
+        }
+      }
+      for (const tool of SERVER_TOOL_CATALOG) {
+        if (tool.rendersWidget && !bindingResolvesToMountedWidget(tool.rendersWidget)) {
+          dangling.push(`server ${tool.name} → "${tool.rendersWidget}"`);
+        }
+      }
+      expect(
+        dangling.length === 0,
+        `rendersWidget binding(s) point at a NON-mounted chat widget (dangling):\n  ${dangling.join("\n  ")}`,
+      ).toBe(true);
+    });
+
+    // Coverage direction-2: every tool that DECLARES a binding is one of the
+    // enumerated cards (no untracked binding sneaks in unmirrored). New
+    // card-triggering tools must extend CARD_TOOL_BINDINGS in the same change.
+    it("every app tool that declares a rendersWidget binding is enumerated above", () => {
+      const declared = toolRegistry
+        .all()
+        .filter((t) => t.rendersWidget)
+        .map((t) => t.name)
+        .sort();
+      const enumerated = Object.keys(CARD_TOOL_BINDINGS).sort();
+      expect(declared).toEqual(enumerated);
+    });
   });
 });

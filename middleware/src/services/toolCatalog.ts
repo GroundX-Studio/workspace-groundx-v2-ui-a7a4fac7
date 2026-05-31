@@ -57,6 +57,16 @@ export interface ServerTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
    * role-restricted tool ships.
    */
   availableIn?: WidgetRole[];
+  /**
+   * 2026-05-31-core-data-followups §5 — chat-widget reachability binding,
+   * mirroring the app-side `WidgetTool.rendersWidget`. For a TOOL-triggered CHAT
+   * card, names the chat widget this tool's result renders as, in
+   * `"<slot>/<WidgetName>"` form. The app-side reachability coverage test (which
+   * imports BOTH catalogs) asserts the server binding matches the app binding AND
+   * resolves to a real mounted chat widget dir. Optional; only the enumerated
+   * card-triggering tools carry it.
+   */
+  rendersWidget?: string;
   /** Builds the CanvasIntent shape from validated input. */
   intentBuilder: (input: z.infer<TSchema>) => Record<string, unknown>;
 }
@@ -167,6 +177,8 @@ const proposeSchemaField: ServerTool = {
     description: z.string().min(1).max(200).describe("One-sentence description"),
   }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
+  // §5 reachability — mirror of the app-side ProposeSchemaFieldCard binding.
+  rendersWidget: "chat-widgets/ProposeSchemaFieldCard",
   intentBuilder: (input) => ({
     kind: "proposeSchemaField",
     categoryId: input.categoryId,
@@ -248,6 +260,8 @@ const saveToAccount: ServerTool = {
   category: "mutate",
   inputSchema: z.object({}),
   availableSteps: ["doc-viewer", "interact-chat"],
+  // §5 reachability — mirror of the app-side GateChatRail save_to_account binding.
+  rendersWidget: "chat-widgets/SuggestedActionChips",
   intentBuilder: () => ({ kind: "openGate", trigger: "save" }),
 };
 
@@ -322,6 +336,8 @@ const bookCall: ServerTool = {
     "Open the Calendly booking surface for a 15-minute engineer call. Use when the user has signaled they want a human-assisted path forward — uncertainty about fit, complex documents, evaluation questions a sales engineer can answer. The user confirms by clicking the chip; the iframe is not opened automatically.",
   category: "mutate",
   inputSchema: z.object({}),
+  // §5 reachability — mirror of the app-side BookingStatusCard binding.
+  rendersWidget: "chat-widgets/BookingStatusCard",
   intentBuilder: () => ({ kind: "openBookCall" }),
 };
 

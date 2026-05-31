@@ -10,6 +10,20 @@ and update the slot line above. The drift-guard test
 (`app/src/test/widget-contract.test.ts`) skips directories whose name
 starts with `_`, so this template doesn't pollute the catalog.
 
+**Two variants ship in this dir** — copy the one that matches:
+
+- **`Template.*`** — a NON-scope-bound widget (a chat card / overlay /
+  value-prop surface). Declares `scope: WidgetScope` and passes
+  `{ type: "none" }`. This is the common case for `chat-widgets/`.
+- **`ScopedViewerTemplate.*`** — a **ScopedViewerWidget**: a VIEWER-pane
+  widget that IS a canvas surface (the four real ones: PdfViewer ·
+  Extract · SmartReport · Integrate). Declares a REQUIRED, non-`none`
+  `scope: ContentScope`, drives its data fetch from it via the base
+  `useScopeAdapter`, exports a `defineScopedViewerWidget(...)` descriptor
+  + a canvas-dispatch tool, and is registered in
+  `widgets/scopedViewerWidgetRegistryProduction.ts`. See the `## ScopedViewerWidget variant`
+  section below and `docs/agents/data-model.md` "New viewer surface".
+
 ## What it does
 
 The placeholder describes the surface the new widget exposes to the
@@ -128,3 +142,40 @@ scope contract:
 Mount each widget under both `"anonymous"` and `"member"` and assert
 its matrix row; pass the widget's declared `scope`. Add scenario-
 specific tests after these; don't delete them.
+
+## ScopedViewerWidget variant
+
+For a VIEWER-pane widget that IS a canvas surface, copy
+`ScopedViewerTemplate.tsx` + `ScopedViewerTemplate.tools.ts` +
+`ScopedViewerTemplate.test.tsx` instead of the plain `Template.*`. A
+ScopedViewerWidget (the four real ones: PdfViewer · Extract ·
+SmartReport · Integrate) differs from a plain widget on three axes
+(`docs/agents/data-model.md` "New viewer surface" +
+`docs/agents/template-scope-results.md`):
+
+1. **Scope is a required, non-`none` `ContentScope`.** It narrows
+   `WidgetScope` to a real scope (a document set / bucket+filter /
+   group) and drives its data fetch from it — never a raw
+   `documentId`/`bucketId`/`projectId` prop (the §5(a) drift guard +
+   the widget-contract guard both enforce this).
+2. **It re-loads on scope IDENTITY change** via the base
+   `useScopeAdapter(scope, adapt)` hook (keyed on `scopeKey(scope)`),
+   not a bespoke `useEffect`.
+3. **It exports a `defineScopedViewerWidget({ id, kind, slot, tools })`
+   descriptor** + a canvas-dispatch tool (`show_*` canonical; PdfViewer's
+   `open_`/`jump_` also accepted — verb policed by `check-tool-quality`).
+   The `kind` must be a `CanvasKind` (`@groundx/shared`). Register
+   `{ descriptor, component }` in
+   `widgets/scopedViewerWidgetRegistryProduction.ts` — that registry is
+   the SOLE mount path (`<ScopedCanvas>` resolves `step.kind → CanvasKind
+   → mount → component`), so "uncatalogued == unreachable".
+
+The shared bases (reuse, don't fork): `ContentScope`/`WidgetRole`/
+`contentScopeSchema` (`@groundx/shared`), `defineScopedViewerWidget`/
+`useScopeAdapter`/`scopeKey` (`@/widgets/scopedViewerWidget`), the
+production registry (`@/widgets/scopedViewerWidgetRegistryProduction`).
+
+The §5(a) recurrence drift guard
+(`app/src/test/recurrence-drift-guards.test.ts`) fails any
+`viewer-widgets/<Name>/` that does NOT call `defineScopedViewerWidget`
+(or isn't a documented `SCOPED_VIEWER_WIDGET_EXEMPT` overlay).

@@ -7,19 +7,45 @@ OpenSpec change, not here). Keep simple; append as the model grows.
 ## Before you add a widget / type / tool / context (READ THIS FIRST)
 
 Reuse the shared base; do not fork or placeholder. The codebase's good patterns to follow:
-`AppRepository` (interface + `implements`), `SdkActionResult<T>`, `WidgetTool` (`tools/types.ts`),
-the planned `Template` / `ScopedViewerWidget` / `ApiError` / `Catalog<T>` bases.
+`AppRepository` (interface + `implements`), `SdkActionResult<T>` (`@groundx/shared`), `WidgetTool`
+(`tools/types.ts`), the SHIPPED `ApiError` (`@groundx/shared`) / `ScopedViewerWidget`
+(`widgets/scopedViewerWidget.ts`) / `Catalog<T>` (`@groundx/shared`) bases, and the planned shared
+`Template` lifecycle. **Each bullet below is backed by a recurrence drift guard — adding the debt back
+turns a test RED** (see the §5 guards: `app/src/test/recurrence-drift-guards.test.ts` (a/b/c/d) +
+`middleware/src/db/persistedColumnPolicy.test.ts` (e) + the reachability guard in
+`app/src/tools/catalog-parity.test.ts`).
 
-- **New data catalog** (looked up by id + enumerated) → satisfy the shared `Catalog<T>` read contract (`all(): readonly T[]`, `byId(id): T | undefined` — never a `resolve(context)` dispatcher, never a state store); enforce id uniqueness with `assertUniqueIds(items, idOf, sourceOf?)`. Contract + helper land via `registry-catalog-consistency` (in `@groundx/shared` if isomorphic, else `app/src/lib/catalog`) — NOT yet shipped; build NEW catalogs against it. Targets: `toolRegistry`, `ScenarioRegistry`, `chatExperienceRegistry`. (A mutable state store is NOT a catalog — see `EntitySessionStore`.)
+- **New data catalog** (looked up by id + enumerated) → satisfy the shared `Catalog<T>` read contract (`all(): readonly T[]`, `byId(id): T | undefined` — never a `resolve(context)` dispatcher, never a state store); enforce id uniqueness with `assertUniqueIds(items, idOf, sourceOf?)` (`@groundx/shared`). Targets already on it: `scopedViewerWidgetRegistry`, `toolRegistry`. (A mutable state store is NOT a catalog — see `EntitySessionStore`.)
 
-- **New viewer surface** → build on `ScopedViewerWidget` (props `{scope: WidgetScope (required), role: WidgetRole}` + a `show_*` tool + registry); copy `components/_template/`. NOTE: code TODAY ships `mode` (not `role`) and `scope` is not yet required everywhere (`PdfViewerWidget` still takes a raw `documentId`); `scope`-required + `role` are the migration target via `widget-role-access` — build NEW work against `{scope, role}`.
-- **New widget** → copy `components/_template/`; ship README + sibling test + `role` prop (today `mode` — migrating via `widget-role-access`) + a `*.tools.ts` (or `no-llm.md`).
+- **New viewer surface** → build on `ScopedViewerWidget` (props `{scope: ContentScope (required, non-`none`), role: WidgetRole}` + a canvas-dispatch tool + `defineScopedViewerWidget(...)` descriptor registered in `widgets/scopedViewerWidgetRegistryProduction.ts`); copy `components/_template/ScopedViewerTemplate.*`. Drive the data fetch from `scope` via `useScopeAdapter`; never take a raw `documentId`/`bucketId`/`projectId`. **Guard: §5(a)** fails a `viewer-widgets/<Name>/` with no `defineScopedViewerWidget` call.
+- **New chat widget** → copy `components/_template/Template.*`; ship README + sibling test + `role` + required `scope` props + a `*.tools.ts` (or `no-llm.md`). If it's a TOOL-triggered card (not always-on), give its triggering tool a `rendersWidget: "chat-widgets/<Name>"` binding on BOTH the app `*.tools.ts` and the `SERVER_TOOL_CATALOG` mirror. **Guard: the reachability test** in `catalog-parity.test.ts` fails a dangling binding.
 - **New "questions+output" feature** → instantiate the shared `Template` lifecycle; do NOT make a new schema/template object or table.
 - **New scope need** → extend `ContentScope` (filter is composable); never hardcode a shape.
-- **New API error** → extend the base `ApiError`; don't hand-roll `extends Error`.
-- **New type** → check it isn't a dup (e.g. `Citation`); no `Record<string,unknown>` placeholder in typed state.
-- **New tool** → mirror app `*.tools.ts` + middleware `SERVER_TOOL_CATALOG`, allowlisted verb, drift guard green.
-- **Always** update this file in the same change (closeout step). Unfinished → a backlog task, never a stub.
+- **New API error** → extend the base `ApiError` (`@groundx/shared`); don't hand-roll `extends Error`. **Guard: §5(d)** (both sides) fails any `class XError extends Error`.
+- **New type** → check it isn't a dup (e.g. `Citation`); no `Record<string,unknown>` placeholder in a context `*State` field. **Guards: §5(b)** (duplicate exported type name across files) + **§5(c)** (`Record<string,unknown>` in a `*State` interface).
+- **New tool** → mirror app `*.tools.ts` + middleware `SERVER_TOOL_CATALOG`, allowlisted verb, NAME+DESCRIPTION parity. **Guard: `catalog-parity.test.ts`.**
+- **New persisted DB column** → give it an in-memory record field + a read site in the row→object mapper, or DROP it (no write-only / dead column). **Guard: §5(e)** fails a guarded-table column with no `row.<col>` read in its mapper.
+- **Always** update this file (incl. the reconciliation matrix below) in the same change (closeout step). Unfinished → a backlog task, never a stub.
+
+## Cross-layer reconciliation matrix (concept × layer — assert agreement)
+
+The one table that says "this concept is THE SAME shape at every layer it crosses." When a concept
+spans app type · wire/middleware type · DB column · persisted JSON, all four must agree (the §5 guards
+above keep them honest). `—` = the concept does not reach that layer. Append a row when a new concept
+crosses ≥2 layers.
+
+| Concept | App type | Wire / middleware type | DB column(s) | Persisted JSON | Reconciled by |
+|---|---|---|---|---|---|
+| Citation | `Citation` (re-export `@groundx/shared`) | `Citation` (re-export `@groundx/shared`) | `chat_messages.citations_json` | array of `Citation` | one shared Zod schema; `parseCitations` sanitizes the hydrate boundary |
+| ContentScope | `ContentScope` (re-export) | `ContentScope` (`deriveRagContentScope` returns it) | `chat_session_entities.bucket_id` + `project_ids_json` + `group_id` + `document_ids_json` (decomposed) | — (columns, not a blob) | one shared Zod union; `compileScopeFilter` materializes the filter |
+| Template (Extract schema / Report template) | `Template` (re-export) + `api/templates.ts` | `Template` (re-export); `POST /api/templates` | `templates.{id,kind,body_json,…}` | `body_json` = `ExtractBody`\|`ReportBody` | one shared Zod schema; `parseTemplate` row-mapper sanitizer; `rowToTemplate` guards `kind` via `templateKindSchema` |
+| GeneratedResult (Extract value / Report section) | `ExtractedFieldValue` / `RenderedSection` (both `@groundx/shared`) | same | — (computed at render) | — | shared `GeneratedResult` base + `parseGeneratedResult` |
+| ViewerStepKind | `ViewerStep["kind"]` | `ViewerStepKind` (re-export `@groundx/shared`) | — | — | one shared `viewerStepKindSchema`; `ViewerStepKind.contract.test` locks app==shared |
+| CanvasIntent | `CanvasIntent` union (orchestrator) + ChatStore `currentIntent` (type-only re-export) | intentBuilder `Record<string,unknown>` shapes | `intent_log.intent_json` (+ `intent_kind`) | a `CanvasIntent` | ONE union (B1); §5(c) guards the ChatStore `currentIntent` doesn't regress to a placeholder |
+| ViewerEvent | `ViewerEvent` (ChatStore) | `ViewerEventRecord` | `viewer_events.{id,chat_session_id,ts_ms,entity_key,action,source,detail_json}` | `detail_json` (`CanvasIntent`\|JSON bag) | `action`/`source` Zod-enum-coerced in `rowToViewerEvent` (§4c); §5(e) guards every column round-trips |
+| ApiError | `ExtractFieldApiError` / `TemplateApiError` / `ChatApiError` / `SmartReportApiError` (all `extends ApiError`) | `ChatHandlerError` / `ChatRouteNotImplementedError` / `UpstreamHttpError` / `UpstreamTimeoutError` (all `extends ApiError`) | — | — (envelope: `{status,detail}`) | one shared `ApiError` base (§2); §5(d) guards no subclass forks back to `extends Error` |
+| SuggestedAction | `SuggestedAction` (re-export `@groundx/shared`) + `ChatSuggestedAction` alias | `SuggestedAction` (re-export) | — | on `reply.suggestedActions[]` | one shared `suggestedActionSchema` (§4) |
+| Tool (LLM) | `WidgetTool` (`tools/types.ts`); `rendersWidget?` binding | `ServerTool` (`SERVER_TOOL_CATALOG`); `rendersWidget?` mirror | — | — | `catalog-parity.test.ts` — NAME+DESCRIPTION parity + reachability (§5) |
 
 ## Domain value types — `app/src/types/`
 
@@ -76,11 +102,11 @@ the planned `Template` / `ScopedViewerWidget` / `ApiError` / `Catalog<T>` bases.
 | Object | Inheritance / composes | Key properties | Where used |
 |---|---|---|---|
 | Widget contract | test-enforced (no class) | folder + README + sibling test + `role` prop + required `scope` | `widget-contract.test.ts`. Code TODAY enforces a `mode` prop (`"onboarding"\|"steady"`); `role` prop + required `scope: WidgetScope` are the migration target via `widget-role-access` (`mode`→`role`, `scope` made required), not yet shipped |
-| `_template/` scaffold | files to copy | `Template.tsx/.test.tsx/.tools.ts/README` | starting point for every new widget |
-| `WidgetTool<TSchema>` | generic | `name, description, input(Zod), category, handler` | `tools/types.ts`; registry auto-discovers; `availableIn?: ToolMode[]` (migrating to `WidgetRole[]`) |
+| `_template/` scaffold | files to copy | `Template.*` (chat card / overlay — `scope:{type:"none"}`) + `ScopedViewerTemplate.*` (ScopedViewerWidget — required `ContentScope` + `defineScopedViewerWidget` descriptor + `useScopeAdapter`) + README | starting point for every new widget; copy the variant matching the slot |
+| `WidgetTool<TSchema>` | generic | `name, description, input(Zod), category, handler, rendersWidget?` | `tools/types.ts`; registry auto-discovers; `availableIn?: ToolMode[]` (migrating to `WidgetRole[]`); `rendersWidget?: "<slot>/<Name>"` (§5) binds a TOOL-triggered chat card to its mounted widget (reachability guard) |
 | `ToolCategory` / `ToolMode` | unions | `read\|mutate` / `onboarding\|steady` | tool confirmation model. Code TODAY ships `ToolMode` + `availableIn?: ToolMode[]` (`tools/types.ts:20,71`); these migrate to `WidgetRole` + `availableIn?: WidgetRole[]` (a source-of-truth Zod enum in `@groundx/shared`, tool visibility gated by `availableIn` only) via `widget-role-access` — NOT shipped. Build NEW tools against `WidgetRole`. |
 | App tool decl | `*.tools.ts` → `WidgetTool[]` | per widget | auto-discovered glob → `registry.ts` |
-| `ServerTool<TSchema>` | — | `name, schema, …` | `SERVER_TOOL_CATALOG[]` |
+| `ServerTool<TSchema>` | — | `name, description, inputSchema, intentBuilder, availableIn?, rendersWidget?` | `SERVER_TOOL_CATALOG[]`; `rendersWidget?` mirrors the app binding (§5 reachability) |
 | `ViewerStepKind` | string union | same kinds as `ViewerStep` | server mirror |
 | `ALLOWED_VERBS` | const | verb prefixes | `check-tool-quality.mjs` |
 
@@ -90,8 +116,9 @@ the planned `Template` / `ScopedViewerWidget` / `ApiError` / `Catalog<T>` bases.
 |---|---|---|---|
 | `SdkActionResult<T>` | generic | `isSuccess, response:T\|null, error` | all SDK contexts |
 | `SaveExtractionSchemaInput`/`Result` | — | `id, name, schema` / `id, name, updatedAt` | save-schema API |
-| `ExtractionSchemaApiError`, `ExtractFieldApiError`, `ChatApiError` | each **extends `Error`** (no shared base) | `status, detail` | app API clients |
-| `ChatHandlerError`, `ChatRouteNotImplementedError`, `UpstreamHttpError`, `UpstreamTimeoutError` | each **extends `Error`** | ad-hoc | middleware services |
+| `ExtractFieldApiError`, `TemplateApiError`, `ChatApiError`, `SmartReportApiError` | each **extends shared `ApiError`** (§2, 2026-05-31) | `status, detail` (from the base) | app API clients. §5(d) drift guard forbids reverting to `extends Error`. |
+| `ChatHandlerError`, `ChatRouteNotImplementedError`, `UpstreamHttpError`, `UpstreamTimeoutError` | each **extends shared `ApiError`** (§2) | base `status`/`detail` + mirrors (`statusCode`/`upstreamStatus`/`mode`) | middleware services. §5(d) drift guard (middleware half) forbids `extends Error`. |
+| `ApiError` (base) | `@groundx/shared`, **extends `Error`** | `readonly status, detail?` | the ONE error base both sides extend (isomorphic; `instanceof` survives transpile) |
 | `SdkListResponse<T>` / `SdkMessageResponse` + GroundX domain types (`Bucket`, `GroundXApiKey`, …) | interfaces | list/message envelopes + entity shapes | `api/entities/sdkTypes.ts`, **16** entity wrappers (more if root `api/*.ts` counted) |
 
 ## Middleware persistence — `middleware/src/db/`
@@ -101,11 +128,11 @@ the planned `Template` / `ScopedViewerWidget` / `ApiError` / `Catalog<T>` bases.
 | `AppRepository` | interface | persistence methods | the contract |
 | `MySqlAppRepository`, `MemoryAppRepository` | **implement `AppRepository`** | — | prod / mock |
 | DB tables | SQL | `sessions, app_user_metadata, chat_sessions, chat_messages, conversation_summaries, chat_session_entities, viewer_events, intent_log, extraction_schemas, templates` | `templates` (shared-template-lifecycle Phase 2): `id,kind,groundx_username,name,body_json,created_at,updated_at` (no `version`). Idempotent copy from `extraction_schemas` (kind='extract') at startup; legacy table kept (deprecated). Repo: `saveTemplate`/`getTemplate`/`listTemplates(user,kind)` + `TemplateRecord`; `rowToTemplate` guards `kind` via shared `templateKindSchema`. **Phase 3 (DONE):** `POST /api/templates` (owner from session), `saved_schemas` reader + client `templates.ts`/`saveTemplate` all cut over; the legacy `extraction_schemas` repo methods + `ExtractionSchemaRecord` were removed (table kept, read only by the copy-migration). |
-| `chat_messages` cols | SQL | `citations_json` + `tool_calls_json` are **persisted AND projected** to the client on hydrate (`chatHandler.ts:454-455`, `app.ts:487-504`); `attachments_json` is the **only dead write column** (always null). Gap is **client-side**: `ChatMessage` type omits the `citations` the server already sends | + `llm_provider/model_id/latency_ms/tokens` |
+| `chat_messages` cols | SQL | `citations_json` is **persisted AND projected** to the client on hydrate. `tool_calls_json` + `attachments_json` were **DROPPED** (§4e, 2026-05-31): both were write-only/dead (no reader) — column + INSERT + SELECT + record field removed, with a dead-column grep guard in `mysqlRepository.test.ts`. Remaining telemetry cols (`llm_provider/model_id/latency_ms/tokens`) are written-not-read by design (telemetry sink) | §5(e) guards round-trip on `viewer_events`/`intent_log` |
 | `chat_session_entities` cols | SQL | `bucket_id`, `project_ids_json`, `group_id`, `document_ids_json`, `extracted_values_json`, `scan_progress_json`, `completed_frames_json`, `last_frame` | The four scope columns are READ by `deriveRagContentScope` (`chatHandler.ts`). **Producer (2026-05-31-steady-scope-producer, DONE):** `bucket_id` + `project_ids_json` are **produced by `entityScopeProducer.produceEntityScope`**, wired at the entity-write seam (PUT `/api/chat-sessions/:id/entities/:entityKey`, `app.ts`). For the existing `sample` EntityKind, `sample:<scenarioId>` → `{bucketId: <samplesBucket>, projectIdsJson: [scenarioId]}` (the demo scope), so `deriveRagContentScope` resolves `{type:"bucket", bucketId, filter:{projectId:[scenarioId]}}` — the real persisted scope, NOT the bare samples-bucket fallback. Producer is idempotent (first write only) and fires only when a samples bucket is configured + the key is a recognized `sample:*`; otherwise columns stay NULL → anon-onboarding samples-bucket fallback (unchanged, by design). **§9 column-drop outcome: NO column dropped.** `group_id` is KEPT as `cf19`'s multi-bucket→group substrate (backlogged, tracked); `document_ids_json` is KEPT as the single-doc-viewer / wf05b substrate (tracked) — both have a tracked future consumer, so dropping them would break that rework. Drift guard `entityScopeColumnPolicy.test.ts` enforces "every read column has a producer OR a tracked-keep reason — no read-only column." BYO upload producer is **deferred** (its upload path does not exist yet). |
 | `MessageResponse` / `SdkMessageResponse` | interfaces | `{message}` (dup) | `api/common.ts` + `api/entities/sdkTypes.ts` |
 | citations hydrate projection | code | **VALIDATED (B1, 2026-05-29):** `app.ts` messages-hydrate now runs `citations_json` through `parseCitations` (`@groundx/shared`) — drops malformed, strips unknown keys; no longer ships `unknown[]` | guarded boundary |
-| union-typed DB columns | SQL | `role`, `last_frame`, `entity_key`, `action`, `source`, `intent_kind` are bare `VARCHAR` (no CHECK/ENUM); row mappers use `as`/`Array.isArray` | no DB-level union guard |
+| union-typed DB columns | SQL | the 3 genuinely-closed unions — `chat_messages.role`, `viewer_events.action`/`source`, `intent_log.source` — are bare `VARCHAR` at the DB but **Zod-enum-COERCED** in the row mappers via `coerceEnum(schema, value, fallback)` (§4c, 2026-05-31): a corrupt value coerces to a safe in-union default, not blind-cast. `last_frame`/`entity_key`/`intent_kind` are FREE strings (open discriminators), correctly NOT coerced | row-mapper coercion is the union guard (no DB CHECK) |
 | bbox rectangle | shared `NormalizedBbox` | ✅ 2026-05-29 — all ~10 inline `{x,y,w,h}` app-side annotations (7 files) replaced with the shared `@groundx/shared` `NormalizedBbox`; mw `citationGeometry` re-exports it | single named type |
 | Services | functions | `chatRouter (1637 lines — overloaded), chatHandler, conversationCompressor, contextBundler, fieldExtractor, attribution, citationGeometry, toolCatalog, structuredHandler, zodToJsonSchema` | middleware |
 

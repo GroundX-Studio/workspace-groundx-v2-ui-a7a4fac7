@@ -93,6 +93,7 @@ added here and asserted by the owning widget's test.
 | jump_to_page | PdfViewer | read | all roles | viewing is open |
 | open_template | _template | read | all roles | viewing a template is open |
 | **edit_template** | _template | mutate | **`["member"]`** | editing a *saved* template requires a signed-in member — the only role-restricted tool |
+| show_template_surface | _template | read | all roles | the `ScopedViewerTemplate` scaffold's canvas-dispatch stub (the copy-me exemplar for a ScopedViewerWidget's `show_*` tool); not a mounted widget, lives in `_template` only |
 | show_extraction | Extract | read | all roles | navigating to the extraction workbench is open (the canvas-dispatch `show_` verb); Save / export are gated at the Save boundary, not the tool |
 | show_integrate | Integrate | read | all roles | navigating to the Integrate connectors surface is open (the canvas-dispatch `show_` verb); the connector DOWNLOAD is disabled-future (UI-02), not gated by this tool |
 | show_smart_report_render | SmartReportRender | read | all roles | navigating to the render surface is open (the canvas-dispatch `show_` verb) |

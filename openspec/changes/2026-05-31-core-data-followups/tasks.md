@@ -380,15 +380,56 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
 independent test file with its own pass/fail. **AUTHOR THESE AFTER the bases they guard exist** (§2,
 §3, §4) — a guard for a missing base would be vacuous.
 
-- [ ] **Update the `components/_template/` scaffold:** add a `ScopedViewerWidget` variant (scope prop +
+- [x] **Update the `components/_template/` scaffold:** add a `ScopedViewerWidget` variant (scope prop +
   `show_*` tool + registry) for viewer widgets; reference `docs/agents/data-model.md` + the shared bases.
-- [ ] **Cross-layer reconciliation matrix** — maintain (in `docs/agents/data-model.md`) a concept ×
+  — DONE: added `components/_template/ScopedViewerTemplate.{tsx,tools.ts,test.tsx}` — the copy-me exemplar
+  for a ScopedViewerWidget. `.tsx` declares the REQUIRED non-`none` `scope: ContentScope` + `role`, drives
+  its demo load from `useScopeAdapter(scope, …)` (the base scope-identity hook). `.tools.ts` exports a
+  canvas-dispatch `show_template_surface` tool + a commented `defineScopedViewerWidget({id,kind,slot,tools})`
+  descriptor template (commented so the un-copied scaffold doesn't need a new `CanvasKind` to compile) and
+  points at `widgets/scopedViewerWidgetRegistryProduction.ts` (the sole mount path). README gained a
+  "two variants ship here" note + a `## ScopedViewerWidget variant` section referencing
+  `docs/agents/data-model.md` "New viewer surface" + `template-scope-results.md` + the shared bases
+  (`@groundx/shared` `ContentScope`/`contentScopeSchema`, `@/widgets/scopedViewerWidget`
+  `defineScopedViewerWidget`/`useScopeAdapter`/`scopeKey`). `_template` is skipped by the widget-contract +
+  tool-quality walkers (`_`-prefix), so it doesn't pollute the catalog; the new `show_template_surface`
+  tool got a matrix row (`widget-access-matrix.md` §3 walks `_template`, as it does for `edit_template`).
+- [x] **Cross-layer reconciliation matrix** — maintain (in `docs/agents/data-model.md`) a concept ×
   layer matrix (app type · wire/middleware type · DB column · persisted JSON) asserting agreement.
-- [ ] **Drift guards** (failing-first against current tree, then fail loudly): (a) a `viewer-widget`
+  — DONE: added the "## Cross-layer reconciliation matrix (concept × layer — assert agreement)" table in
+  `docs/agents/data-model.md` (right under the "before you add" checklist). 10 rows — Citation,
+  ContentScope, Template, GeneratedResult, ViewerStepKind, CanvasIntent, ViewerEvent, ApiError,
+  SuggestedAction, Tool — each naming the app type · wire/middleware type · DB column(s) · persisted JSON ·
+  the reconciler (the shared Zod schema / sanitizer / drift guard). `—` marks a layer the concept doesn't
+  reach. Also refreshed the stale rows the §2/§4 work invalidated: the ApiError rows (now "extends shared
+  ApiError"), the `chat_messages` cols row (dead cols dropped §4e), the union-typed DB columns row (Zod
+  coerce §4c), `WidgetTool`/`ServerTool` rows (`rendersWidget?`).
+- [x] **Drift guards** (failing-first against current tree, then fail loudly): (a) a `viewer-widget`
   that doesn't build on `ScopedViewerWidget` / lacks a `show_*` tool; (b) a duplicate exported type name
   across files; (c) a `Record<string,unknown>` placeholder in a context's typed state; (d) a `*Error`
   not extending the base `ApiError`; (e) a persisted DB column with no in-memory type field.
-- [ ] **Chat-widget reachability guard (migrated from `core-data-model-hardening` on its 2026-05-31
+  — DONE: 5 NON-vacuous guards, each PROVEN to fire by a temporary fork (then reverted), green on the
+  current tree. App-side in `app/src/test/recurrence-drift-guards.test.ts`: (a) every `viewer-widgets/<Name>/`
+  calls `defineScopedViewerWidget(...)` + declares ≥1 canvas-dispatch tool (the `show_*` LITERAL is NOT
+  hard-required — the base descriptor deliberately accepts the full allowlisted verb set, so PdfViewer's
+  `open_`/`jump_` register cleanly; verb prefix is policed by `check-tool-quality`, per the
+  `scopedViewerWidget.ts` header — requiring `show_` would FALSE-fail PdfViewer; documented `SignUpWidget`/
+  `BookCallView`/`GateValueProp` overlay exemptions); (b) no exported type/interface name DECLARED in >1
+  file (re-exports excluded — they ARE the unification mechanism; `ReportSectionRenderAs` is a TRACKED §4b
+  inline-wire-twin not yet folded → documented `DUP_TYPE_NAME_EXEMPT` entry, NOT a fake-pass; the guard
+  still fires on any NEW dup, and a sanity test force-deletes the entry once §4b folds it); (c) no
+  `*State` interface FIELD typed `Record<string,unknown>` (the `currentIntent` placeholder B1 collapsed —
+  scoped to `interface *State {…}` bodies only, so the legit serialization escape hatches `detail?:
+  CanvasIntent|Record<…>` + the localStorage-snapshot shapes are NOT flagged); (d) no app `class XError
+  extends Error` (must extend shared `ApiError`). Middleware-side in
+  `middleware/src/db/persistedColumnPolicy.test.ts`: (e) every persisted DATA column on the guarded tables
+  (`viewer_events`, `intent_log`) is read into its `rowTo*` mapper (`row.<col>`) — the §4e write-only/dead
+  `tool_calls_json`/`attachments_json` regression would turn this RED; PK/FK/INDEX clauses skipped, per-table
+  documented `structuralExempt` + a stale-exemption sanity test; (d-middleware) no middleware `*Error
+  extends Error`. Fork proofs: (a) renaming the descriptor call, (b) a PascalCase dup decl in two files,
+  (c) a `Record<…>` field injected into a `*State` body, (d) a probe `XError extends Error`, (e) a write-only
+  DDL column — each flipped the relevant guard RED, green after revert.
+- [x] **Chat-widget reachability guard (migrated from `core-data-model-hardening` on its 2026-05-31
   archive — the canvas `CanvasKind` registry covers VIEWER widgets only; chat widgets mount imperatively
   in `ChatColumn`).** For TOOL-triggered cards (`propose_schema_field`→ProposeSchemaFieldCard,
   `book_call`→BookingStatusCard, `save_to_account`/`suggestedActions`→SuggestedActionChips): add a
@@ -400,8 +441,30 @@ independent test file with its own pass/fail. **AUTHOR THESE AFTER the bases the
   earn the axis first. (`knip --production` backstop was DROPPED on the hardening archive: the mandatory
   sibling-test rule defeats it, and registry-as-sole-mount-path + the ESLint import ban are the real
   orphan catches.)
-- [ ] **Docs/memory:** the "before you add a widget/type/tool/context" checklist lives in
+  — DONE: added an OPTIONAL `rendersWidget?: string` ("<slot>/<Name>") to `WidgetTool` (app
+  `tools/types.ts`) + `ServerTool` (middleware `services/toolCatalog.ts`). Bound the 3 enumerated cards on
+  BOTH sides (REAL mounted widgets — verified each is mounted off-tools: ProposeSchemaFieldCard in
+  `conversation/chatPrimitives.tsx`, BookingStatusCard in OnboardingShell/CanvasOrchestrator,
+  SuggestedActionChips in `chatPrimitives.tsx`): `propose_schema_field`→`chat-widgets/ProposeSchemaFieldCard`,
+  `book_call`→`chat-widgets/BookingStatusCard`, `save_to_account`→`chat-widgets/SuggestedActionChips` (the
+  `openGate` chip surfaces via the suggestedActions renderer). Coverage test RIDES the existing
+  `app/src/tools/catalog-parity.test.ts` (the only place that imports BOTH catalogs — NOT a second list):
+  4 new tests assert (1) each enumerated card declares the binding app-side, (2) the SAME binding server-side
+  (parity), (3) every binding (either catalog) resolves to a real mounted `chat-widgets/<Name>/` dir, (4)
+  every tool that DECLARES a binding is enumerated (direction-2 — no untracked binding). Failing-first
+  (bindings absent → 3 RED), then green; a fork pointing a binding at a non-existent widget flips the
+  dangling-binding test RED (then reverted). Always-on widgets are NOT bound (deliberate exemption); Phase-2
+  data-driven dispatch stays deferred (these 3 are the only real consumers — axis not yet earned).
+- [x] **Docs/memory:** the "before you add a widget/type/tool/context" checklist lives in
   `docs/agents/data-model.md` header + AGENTS.md + memory, so future agents consult it.
+  — DONE: rewrote the `data-model.md` "Before you add a widget / type / tool / context (READ THIS FIRST)"
+  header — the bases are now SHIPPED (not "planned"/"not yet shipped"), and EACH bullet names the
+  recurrence drift guard that turns RED if the debt comes back (§5(a)–(e) + reachability + parity), so the
+  checklist is guard-backed, not aspirational. Added the new bullets the §5 work introduced (chat-card
+  `rendersWidget` binding, persisted-column round-trip). Updated the AGENTS.md data-model.md ToC line to
+  point at the reconciliation matrix + the guard-backing + the same checklist summary. (Memory entry left
+  to the orchestrator/closeout — this step owns the in-repo docs; the MEMORY.md index is a personal store,
+  not a committed repo file.)
 
 ## 6. Deferred DB sweep — drop extraction_schemas (SOAK-GATED — NOT READY)
 **Execution: → SEQUENTIAL (deploy-gated).** This task is **GATED, not ready.** It MUST NOT be started

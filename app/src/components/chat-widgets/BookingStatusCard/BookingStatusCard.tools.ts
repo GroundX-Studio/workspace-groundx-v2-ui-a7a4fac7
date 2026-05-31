@@ -28,6 +28,10 @@ const bookCall: WidgetTool = {
   category: "mutate",
   input: z.object({}),
   handler: () => ({ kind: "openBookCall" }),
+  // §5 reachability — confirming this tool's chip opens the BookingStatusCard
+  // (mounted by the OnboardingShell + CanvasOrchestrator when the book-call
+  // surface activates).
+  rendersWidget: "chat-widgets/BookingStatusCard",
 };
 
 export const tools: WidgetTool[] = [bookCall];
