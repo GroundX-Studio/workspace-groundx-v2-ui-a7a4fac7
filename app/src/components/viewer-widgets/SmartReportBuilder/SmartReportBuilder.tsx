@@ -3,8 +3,10 @@
  *
  * A **ScopedViewerWidget** mirroring the F3a schema-editor chrome
  * (`SchemaView` / `ExtractView`): a pinned-samples row, `Sections` / `Render`
- * sub-tabs, a row list with an inline section editor, proposal cards, the `⋮`
- * menu, and the `export ▾ 🔒 · ↻ render · 💾 Save 🔒` control row.
+ * sub-tabs, a row list with an inline section editor, the `⋮` menu, and the
+ * `export ▾ 🔒 · ↻ render · 💾 Save 🔒` control row. (Proposal cards — the
+ * agent-driven section suggestions — land with their producer in Phase 5;
+ * not rendered here yet.)
  *
  * Reports are **schemas for questions**: the template = an ordered list of
  * sections, each `name + renderAs + question + instructions + variables`. The

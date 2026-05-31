@@ -76,6 +76,7 @@
 - [ ] `*.tools.ts` for every control, **mirrored on middleware `SERVER_TOOL_CATALOG`** (drift guard green): `show_smart_report_render`/`show_smart_report_edit`, `pin_to_report`, `propose_report_section`, and the section-mutation tools — the **same shared family as Extract's field-mutation tools** (allowlisted verbs `propose_`/`accept_`/`reject_`/`edit_`/`delete_`/`run_`). Interim: each calls the same ChatStore action as its UI control (AgentToolBus bridge pending).
 - [ ] Report render + section focus emit `ViewerEvent`s into the chat three-axis context.
 - [ ] Tests: each tool performs the same mutation as its UI control; pin lands a section; proposal-card accept lands a section.
+- [ ] **Follow-up (from step-16 review):** the builder's inline "make variable" affordance currently hardcodes the literal token `"project"` (`SmartReportBuilder.tsx` `handleMakeVariable`) and is only weakly tested (button presence, not the recorded value). Make the token **user-chosen** (name/select), and assert the recorded variable value — alongside the proposal-card work here. (Spec assertions #12 manual-only/no-auto are already met; this is the UX completion.)
 
 ## Phase 6 · Render endpoint
 
