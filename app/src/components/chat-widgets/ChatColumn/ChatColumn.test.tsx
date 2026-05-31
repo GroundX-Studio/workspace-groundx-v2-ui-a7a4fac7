@@ -826,6 +826,98 @@ describe("ChatColumn", () => {
     });
   });
 
+  // 2026-05-30-unified-conversation-flow Phase 3 — REGRESSION GUARD for the
+  // deleted mount-persistence hack.
+  //
+  // The old ChatColumn forked SteadyConversationFlow / F2ConversationFlow and
+  // needed a "keep the flow mounted across F2→F5" routing hack (former
+  // ChatColumnInner :172) so an auto-advance wouldn't unmount the flow and wipe
+  // its local `liveTurns`. Phase 2 collapsed both forks into the SINGLE
+  // always-mounted <ConversationFlow>, so persistence is now STRUCTURAL: across
+  // the onboarding journey ChatColumn returns the same <ConversationFlow> at the
+  // same position, React reconciles it, and `useConversation`'s `liveTurns`
+  // state survives.
+  //
+  // This test would FAIL against a remount-on-frame-change implementation
+  // (e.g. keying ConversationFlow by frame, or branching it onto a different
+  // mount site per frame): the optimistic user turn is held in the engine's
+  // local `liveTurns` state ONLY — `sendChatMessage` is called once and
+  // `listChatMessages` returns [], so a remount would re-mount an empty thread
+  // and the seeded turn would vanish. We seed the turn at f2, let the first
+  // send auto-advance the journey f2→f5, and assert the SAME turn content is
+  // still present after the advance (no remount/wipe).
+  it("Phase 3: liveTurns persist across an onboarding frame advance f2→f5 (no remount/wipe)", async () => {
+    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      userMessageId: "u-persist",
+      assistantMessageId: "a-persist",
+      reply: {
+        mode: "rag",
+        answer: "Totals reconciled.",
+        citations: [],
+        suggestedActions: [],
+        tools: [],
+        intents: [],
+        toolFailures: [],
+        proposedSchemaField: null,
+      },
+      compressionRan: false,
+    });
+
+    // Observe the live frame so the test can confirm the journey actually
+    // advanced (the property is meaningless if the frame never changed).
+    const framesSeen: string[] = [];
+    let lastFrame = "";
+    function FrameProbe() {
+      const { state } = useOnboardingSession();
+      lastFrame = state.currentFrame;
+      if (framesSeen[framesSeen.length - 1] !== state.currentFrame) {
+        framesSeen.push(state.currentFrame);
+      }
+      return null;
+    }
+
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(
+      <>
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
+        <FrameProbe />
+      </>,
+      { initialFrame: "f2", initialScenario: "utility" },
+    );
+
+    // The journey starts on f2.
+    expect(lastFrame).toBe("f2");
+
+    // Seed a real round-trip turn at f2.
+    const input = screen.getByTestId("chat-live-input").querySelector("input")!;
+    await user.type(input, "Reconcile the totals.");
+    await user.click(screen.getByTestId("chat-live-send"));
+    expect(screen.getByTestId("chat-live-user")).toHaveTextContent("Reconcile the totals.");
+    await waitFor(() => {
+      expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent("Totals reconciled.");
+    });
+    // The first send also fires the onboarding Choreography's onFirstUserSend →
+    // advanceFrame("f5"), so the journey auto-advances f2 → f5: a genuine
+    // onboarding frame advance happens as a side-effect of the seeded turn.
+    await waitFor(() => {
+      expect(lastFrame).toBe("f5");
+    });
+    // The frame REALLY changed (guards against a vacuous pass if the journey
+    // never moved): we observed both f2 and f5.
+    expect(framesSeen).toContain("f2");
+    expect(framesSeen).toContain("f5");
+
+    // After that frame advance, the conversation must NOT have remounted: the
+    // optimistic turn — held ONLY in the engine's local liveTurns — survives,
+    // and the server was hit exactly once. Against a remount-on-frame-change
+    // implementation (the deleted :172 forked-flow hack existed precisely
+    // because the fork could unmount on advance), liveTurns would be wiped and
+    // re-hydrated from the empty `listChatMessages` mock → both bubbles gone.
+    expect(screen.getByTestId("chat-live-user")).toHaveTextContent("Reconcile the totals.");
+    expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent("Totals reconciled.");
+    expect(sendChatMessage).toHaveBeenCalledTimes(1);
+  });
+
   // widget-llm-integration Phase 1 — render `suggestedActions[]` as a chip
   // row beneath each assistant bubble, and dispatch chip clicks.
   describe("SuggestedActionChips integration (widget-llm-integration Phase 1)", () => {
