@@ -6,7 +6,7 @@ lifecycle. Phase 7 (live multi-doc Solar render) stays out of scope, blocked on 
 
 ## MODIFIED Requirements
 
-### Requirement: The report render surface (frame f4 / S3) SHALL stream ordered, cited sections from the render endpoint
+### Requirement: The report render surface (frame f4 / S3) SHALL stream ordered, cited sections
 
 The render surface SHALL obtain its rendered report from the render endpoint
 (`POST /api/widgets/smart-report/reports/render`) on its **initial** paint — not from a synchronous
