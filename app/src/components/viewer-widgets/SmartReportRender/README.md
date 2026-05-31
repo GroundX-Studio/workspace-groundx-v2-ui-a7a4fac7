@@ -9,8 +9,13 @@ Renders the Report **render** surface (f4): an ordered list of report sections,
 each a generated body shown by its `renderAs` formatter (¶ PARAGRAPH / • BULLETS
 / ▦ TABLE via the shared `Markdown` primitive) with the shared `CiteChip` in the
 section footer. It is a **ScopedViewerWidget** — it takes a real `ContentScope`
-and adapts on scope change. v1 reads a MOCK_MODE fixture (`getReportFixture`);
-the live render endpoint + multi-doc fan-out are Phases 6-7.
+and adapts on scope change. The **synchronous first paint** reads a MOCK_MODE
+fixture (`getReportFixture`) — kept sync so the shell/view tests that assert the
+surface on the Report-pill click stay sync (routing the *initial* render through
+the endpoint is ticketed). The **↻ re-render** control is the genuine production
+caller of `POST /api/widgets/smart-report/reports/render` (via `renderReport`):
+it closes the client↔server round-trip and swaps in the endpoint response. The
+live multi-doc fan-out is Phase 7.
 
 ## Props
 

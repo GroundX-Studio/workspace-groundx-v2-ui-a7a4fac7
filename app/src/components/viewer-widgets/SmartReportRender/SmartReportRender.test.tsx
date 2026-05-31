@@ -1,9 +1,20 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type FC } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
+
+// FIX #2: the re-render control closes the client↔server round-trip — it must
+// call the render endpoint client (`renderReport`) and display the RESPONSE,
+// not read a bare fixture. Mock the client so the test can assert it is called
+// and that its response renders.
+vi.mock("@/api/smartReport", () => ({
+  renderReport: vi.fn(),
+  SmartReportApiError: class SmartReportApiError extends Error {},
+}));
+import { renderReport } from "@/api/smartReport";
+import type { RenderReportResult } from "@/api/smartReport";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -17,6 +28,7 @@ const UTILITY_SCOPE: ContentScope = {
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.mocked(renderReport).mockReset();
 });
 
 describe("SmartReportRender — 2026-05-29-smart-report-screen Phase 3", () => {
@@ -96,5 +108,62 @@ describe("SmartReportRender — 2026-05-29-smart-report-screen Phase 3", () => {
     expect(
       within(screen.getByTestId("smart-report-render")).getByText(/billing summary/i),
     ).toBeInTheDocument();
+  });
+
+  // ── FIX #2: re-render routes through the render endpoint client ──────
+  it("the ↻ re-render control calls the render endpoint client and displays the RESPONSE", async () => {
+    const user = userEvent.setup();
+    const responseReport: RenderReportResult = {
+      gated: false,
+      report: {
+        reportId: "rr-rt-utility-ic-brief",
+        templateId: "rt-utility-ic-brief",
+        scope: UTILITY_SCOPE,
+        status: "complete",
+        resolvedVariables: {},
+        exportFormats: ["pdf", "md", "link"],
+        previewOnly: true,
+        sections: [
+          {
+            sectionId: "fresh_section",
+            name: "fresh_section",
+            renderAs: "PARAGRAPH",
+            result: {
+              sectionId: "fresh_section",
+              body: "Freshly re-rendered from the endpoint.",
+              citations: [{ documentId: "utility-bill-2026-04", page: 1, tier: "exact" }],
+            },
+          },
+        ],
+      },
+    };
+    vi.mocked(renderReport).mockResolvedValueOnce(responseReport);
+
+    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    // First paint is the synchronous fixture (the four IC-brief sections).
+    expect(screen.getByText(/billing summary/i)).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("smart-report-rerender"));
+    // The endpoint client is the production caller (round-trip closed).
+    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(renderReport).mock.calls[0][0]).toMatchObject({
+      templateId: "rt-utility-ic-brief",
+      scope: UTILITY_SCOPE,
+    });
+    // The surface now shows the ENDPOINT RESPONSE, not the bare fixture.
+    await waitFor(() =>
+      expect(screen.getByText(/freshly re-rendered from the endpoint/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/billing summary/i)).not.toBeInTheDocument();
+  });
+
+  it("surfaces an error state when the re-render endpoint call rejects", async () => {
+    const user = userEvent.setup();
+    vi.mocked(renderReport).mockRejectedValueOnce(new Error("boom"));
+    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    await user.click(screen.getByTestId("smart-report-rerender"));
+    await waitFor(() =>
+      expect(screen.getByTestId("smart-report-rerender-error")).toBeInTheDocument(),
+    );
   });
 });

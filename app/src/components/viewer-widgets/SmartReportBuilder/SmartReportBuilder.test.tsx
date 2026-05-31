@@ -1,8 +1,45 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
+
+// FIX #1: a member Save must PERSIST the report-kind template (not the
+// no-op the closeout review found). Mock the persist client so the test can
+// assert it is called with the report template, distinct from the anon gate.
+vi.mock("@/api/smartReport", () => ({
+  saveReportTemplate: vi.fn(async () => ({
+    id: "rt-utility-ic-brief",
+    name: "Utility IC Brief (report)",
+    updatedAt: "2026-05-31T00:00:00Z",
+  })),
+  // FIX #2: the builder ↻ render control is a real caller of the render
+  // endpoint client too.
+  renderReport: vi.fn(async () => ({
+    gated: false as const,
+    report: {
+      reportId: "rr-rt-utility-ic-brief",
+      templateId: "rt-utility-ic-brief",
+      scope: { type: "bucket" as const, bucketId: 28454, filter: { project: "utility" } },
+      status: "complete" as const,
+      resolvedVariables: {},
+      exportFormats: ["pdf" as const, "md" as const, "link" as const],
+      previewOnly: true,
+      sections: [],
+    },
+  })),
+  SmartReportApiError: class SmartReportApiError extends Error {
+    status: number;
+    detail: unknown;
+    constructor(message: string, status: number, detail: unknown) {
+      super(message);
+      this.name = "SmartReportApiError";
+      this.status = status;
+      this.detail = detail;
+    }
+  },
+}));
+import { renderReport, saveReportTemplate } from "@/api/smartReport";
 
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
@@ -24,6 +61,8 @@ const UTILITY_SCOPE: ContentScope = {
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   window.localStorage.clear();
+  vi.mocked(saveReportTemplate).mockClear();
+  vi.mocked(renderReport).mockClear();
 });
 
 describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => {
@@ -143,8 +182,9 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     expect(save).toHaveTextContent("🔒");
     await user.click(save);
     // Anonymous Save routes through the sign-in gate (commitGate), not a silent
-    // persist — the gate flips to "open".
+    // persist — the gate flips to "open" AND nothing is persisted.
     expect(screen.getByTestId("gate-status")).toHaveTextContent("open");
+    expect(saveReportTemplate).not.toHaveBeenCalled();
   });
 
   it("does not lock Save for a member (no padlock)", () => {
@@ -155,5 +195,47 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     });
     const save = screen.getByTestId("report-builder-save");
     expect(save).not.toHaveTextContent("🔒");
+  });
+
+  it("FIX #2: the ↻ render control calls the render endpoint client", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+      initialScenario: "utility",
+      initialFrame: "f4a",
+      initialAuthState: "signed-in",
+    });
+    await user.click(screen.getByTestId("report-builder-render"));
+    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(renderReport).mock.calls[0][0]).toMatchObject({
+      templateId: "rt-utility-ic-brief",
+      scope: UTILITY_SCOPE,
+    });
+  });
+
+  it("FIX #1: a member Save PERSISTS the report-kind template (not a no-op)", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+      initialScenario: "utility",
+      initialFrame: "f4a",
+      initialAuthState: "signed-in",
+    });
+    await user.click(screen.getByTestId("report-builder-save"));
+    // The member Save lands the report template through the report-kind persist
+    // path — NOT the anon gate, NOT a silent return.
+    await waitFor(() => expect(saveReportTemplate).toHaveBeenCalledTimes(1));
+    const arg = vi.mocked(saveReportTemplate).mock.calls[0][0];
+    // The persisted template carries the builder's effective sections (the four
+    // Utility IC-brief sections seeded from the fixture).
+    expect(arg.sections.map((s) => s.name)).toEqual([
+      "billing_summary",
+      "charge_breakdown",
+      "anomalies",
+      "recommendation",
+    ]);
+    expect(arg.sections[0].renderAs).toBe("PARAGRAPH");
+    // A persisted save reflects a success status the user can see.
+    await waitFor(() =>
+      expect(screen.getByTestId("report-builder-save-status")).toHaveTextContent(/saved/i),
+    );
   });
 });

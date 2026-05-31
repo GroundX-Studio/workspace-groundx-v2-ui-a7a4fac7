@@ -19,9 +19,16 @@
  *
  * `Result = Template + Scope + answers`: the rendered report
  * (`RenderedReport`) carries the scope it was rendered over; the template
- * stays scope-independent. v1 reads a MOCK_MODE fixture keyed by the scope
- * (`getReportFixture`); the live render endpoint + multi-doc fan-out are
- * Phases 6-7.
+ * stays scope-independent. The **synchronous first paint** reads the MOCK_MODE
+ * fixture keyed by the scope (`getReportFixture`) — kept synchronous so the
+ * shell/view tests that assert the render surface on the Report-pill click stay
+ * sync (routing the *initial* render through the endpoint is ticketed —
+ * `openspec/changes/2026-05-29-smart-report-screen` Phase 6 follow-up). The
+ * **↻ re-render** control is the genuine production client caller of
+ * `POST /api/widgets/smart-report/reports/render` (via `renderReport`) — it
+ * closes the client↔server round-trip the closeout review found missing and
+ * replaces the displayed report with the endpoint response. The live multi-doc
+ * fan-out is Phase 7.
  *
  * Per `widget-role-access`: `role: WidgetRole` is the authorization axis.
  * Export / Save are locked-for-anonymous (`widgetRoleCanEdit`); a sample-doc
@@ -31,17 +38,19 @@
 
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
-import { type FC, useState } from "react";
+import { type FC, useCallback, useState } from "react";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 import { widgetRoleCanEdit } from "@groundx/shared";
 
+import { renderReport } from "@/api/smartReport";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { Markdown } from "@/components/primitives/Markdown/Markdown";
 import {
   BODY_TEXT,
   BORDER,
   BORDER_RADIUS_2X,
+  CORAL,
   EYEBROW_ON_LIGHT,
   FONT_SIZE_CAPTION,
   FONT_SIZE_LABEL,
@@ -51,6 +60,7 @@ import {
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
 import { getReportFixture } from "@/widgets/reportFixtures";
 import type { RenderedReport, RenderedReportSection } from "@/types/report";
@@ -101,10 +111,44 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role, onE
   // `POST /reports/render` fetch with no change to the contract.
   const [report, setReport] = useState<RenderedReport | null>(() => getReportFixture(scope));
   useScopeAdapter(scope, (nextScope) => {
+    // First paint / re-scope reads the synchronous fixture (see header note).
     setReport(getReportFixture(nextScope));
+    setRerenderState("idle");
   });
 
+  const { state: chatState } = useChatStore();
+  // Re-render lifecycle (the endpoint round-trip). `idle` after first paint;
+  // `rerendering` while the POST is in flight; `error` on a rejected call.
+  const [rerenderState, setRerenderState] = useState<"idle" | "rerendering" | "error">("idle");
+
   const canEdit = widgetRoleCanEdit(role);
+
+  // ↻ re-render — the genuine production caller of the render endpoint
+  // (`renderReport` → POST /api/widgets/smart-report/reports/render). Replaces
+  // the displayed report with the ENDPOINT RESPONSE (closes the round-trip). A
+  // gate envelope (#10, BYO scope) keeps the current report and stops; an error
+  // surfaces a retryable banner.
+  const handleRerender = useCallback(async () => {
+    if (rerenderState === "rerendering") return;
+    const chatSessionId = chatState.activeSessionId;
+    if (!chatSessionId) return;
+    const templateId = report?.templateId ?? getReportFixture(scope)?.templateId;
+    if (!templateId) return;
+    setRerenderState("rerendering");
+    try {
+      const result = await renderReport({ templateId, scope, chatSessionId });
+      if (result.gated) {
+        // A BYO scope returns the sign-in gate envelope — leave the current
+        // (sample) report in place; the builder Save path owns gate opening.
+        setRerenderState("idle");
+        return;
+      }
+      setReport(result.report);
+      setRerenderState("idle");
+    } catch {
+      setRerenderState("error");
+    }
+  }, [rerenderState, chatState.activeSessionId, report, scope]);
 
   return (
     <Box
@@ -245,6 +289,45 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role, onE
               ) : null}
             </Box>
           ))}
+
+          {/* ↻ re-render — the production client caller of the render
+              endpoint. Re-runs the template over the current scope and swaps in
+              the endpoint response (round-trip closed). */}
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Box
+              component="button"
+              type="button"
+              data-testid="smart-report-rerender"
+              aria-label="Re-render report"
+              aria-busy={rerenderState === "rerendering" || undefined}
+              disabled={rerenderState === "rerendering"}
+              onClick={handleRerender}
+              sx={{
+                border: `1px solid ${BORDER}`,
+                background: "none",
+                cursor: rerenderState === "rerendering" ? "wait" : "pointer",
+                color: NAVY,
+                fontSize: FONT_SIZE_LABEL,
+                fontWeight: FONT_WEIGHT_LABEL,
+                borderRadius: BORDER_RADIUS_2X,
+                px: 1.25,
+                py: 0.5,
+                opacity: rerenderState === "rerendering" ? 0.6 : 1,
+                "&:focus-visible": { outline: `2px solid ${NAVY}` },
+              }}
+            >
+              {rerenderState === "rerendering" ? "↻ rendering…" : "↻ render"}
+            </Box>
+            {rerenderState === "error" ? (
+              <Box
+                component="span"
+                data-testid="smart-report-rerender-error"
+                sx={{ color: CORAL, fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_LABEL }}
+              >
+                Re-render failed — try again.
+              </Box>
+            ) : null}
+          </Stack>
 
           {/* Export / Save are locked-for-anonymous (#9 / role gate). The
               control renders for both roles; the lock is the disabled state +

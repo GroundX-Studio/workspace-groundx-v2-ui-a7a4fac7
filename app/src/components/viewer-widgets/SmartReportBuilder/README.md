@@ -15,7 +15,10 @@ sections, each `name + renderAs + question + instructions + variables`. The
 inline editor exposes exactly those fields. The builder is a
 **ScopedViewerWidget** — it takes a real `ContentScope` (which template's
 sections to seed from) and adapts on scope change; v1 seeds rows from the
-MOCK_MODE fixture (`getReportFixture`), the live template read lands in Phase 6.
+MOCK_MODE fixture (`getReportFixture`); the live template read lands with the
+authored-question template read (ticketed). The `↻ render` control re-runs the
+template over the current scope through the render endpoint (`renderReport`)
+and advances to the render surface (f4).
 
 It is the **real second consumer** of the generalized editing overlay: row
 edits drive `reportOverlay` on the active ChatSession (`addReportSection` /
@@ -60,9 +63,12 @@ sections share the report's single render-time scope.
 
 - **Save** is **sign-in-gated** (`widgetRoleCanEdit(role)`): an `anonymous`
   user's Save opens the sign-in gate (`commitGate` via `openGate("save")`)
-  rather than persisting; a `member`'s Save is enabled (the persist endpoint
-  wires in Phase 6). The control renders for both roles; the lock is the `🔒`
-  affordance, not a hidden control.
+  and never persists; a `member`'s Save PERSISTS the scope-independent
+  report-kind Template via `saveReportTemplate`
+  (`POST /api/widgets/smart-report/reports` → the shared `saveTemplate` repo
+  API, the same persistence Extract uses) and surfaces a `Saving…/Saved.` status.
+  The control renders for both roles; the lock is the `🔒` affordance, not a
+  hidden control.
 - **export ▾** is locked-for-anonymous (the `🔒` affordance).
 - **Variables are manual / literal-only (#12)** — the per-section "make
   variable" affordance records a literal variable the user names; there is NO

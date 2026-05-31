@@ -23,11 +23,13 @@
  * `PendingTemplateOverlay` shell.
  *
  * Per `widget-role-access`: `role: WidgetRole` is the authorization axis. Save
- * is sign-in-gated — a `member` saves directly (Phase 6 wires the persist
- * endpoint); an `anonymous` user's Save opens the sign-in gate (`commitGate`)
- * rather than persisting. `scope: ContentScope` selects which template's
- * sections to seed from the MOCK_MODE fixture (the demos open on
- * `bucket + project filter`).
+ * is sign-in-gated — a `member` saves directly: `handleSave` builds the
+ * scope-independent report-kind Template from the effective rows and persists it
+ * via `saveReportTemplate` (`POST /api/widgets/smart-report/reports` → the shared
+ * `saveTemplate` repo API, the SAME persistence Extract uses). An `anonymous`
+ * user's Save opens the sign-in gate (`commitGate`) and never persists.
+ * `scope: ContentScope` selects which template's sections to seed from the
+ * MOCK_MODE fixture (the demos open on `bucket + project filter`).
  *
  * The widget's `show_smart_report_edit` canvas-dispatch descriptor + the
  * per-control `*.tools.ts` surface are DEFERRED to Phase 5 (step 17) — the
@@ -61,6 +63,8 @@ import {
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
+import { SmartReportApiError, renderReport, saveReportTemplate } from "@/api/smartReport";
+import type { SaveReportTemplateInput } from "@/api/smartReport";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import type { ReportSectionEdit, ReportSectionItem, ReportSectionRenderAs } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
@@ -124,15 +128,36 @@ function baseRowsForScope(scope: ContentScope): BuilderSectionRow[] {
   }));
 }
 
+/**
+ * The template identity (id + display name) the scope's fixture resolves to.
+ * The template is scope-INDEPENDENT — the scope only selects which template to
+ * seed. Defaults are minted for a scope without a fixture so a from-scratch
+ * template still persists.
+ */
+function templateIdentityForScope(scope: ContentScope): { id: string; name: string } {
+  const report = getReportFixture(scope);
+  if (report) {
+    return { id: report.templateId, name: `${humanizeName(report.templateId.replace(/^rt-/, ""))}` };
+  }
+  return { id: `rt-${Date.now()}`, name: "Untitled report" };
+}
+
+/** Builder Save lifecycle (mirrors Extract's SaveStatus). */
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
 export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, selectedSectionId }) => {
   const { addReportSection, editReportSection, removeReportSection, state: chatState } = useChatStore();
-  const { state: session, openGate } = useOnboardingSession();
+  const { state: session, openGate, advanceFrame } = useOnboardingSession();
 
   // ScopedViewerWidget adaptation: re-seed the base rows whenever the scope
   // IDENTITY changes (via `useScopeAdapter` — load-bearing, not a no-op).
   const [baseRows, setBaseRows] = useState<BuilderSectionRow[]>(() => baseRowsForScope(scope));
+  const [templateIdentity, setTemplateIdentity] = useState(() => templateIdentityForScope(scope));
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   useScopeAdapter(scope, (nextScope) => {
     setBaseRows(baseRowsForScope(nextScope));
+    setTemplateIdentity(templateIdentityForScope(nextScope));
+    setSaveStatus("idle");
   });
 
   // Sub-tab: Sections (the editor) vs Render (a preview hand-off, Phase 5/6).
@@ -185,17 +210,65 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
     if (selectedSectionId !== undefined) setOpenRowId(selectedSectionId);
   }, [selectedSectionId]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     // Save is sign-in-gated. An anonymous user's Save opens the gate
-    // (`commitGate`); the actual persist (the `report`-kind Template save
-    // bridge + endpoint) is Phase 6. A member's Save is enabled here and
-    // wires to the endpoint in Phase 6.
+    // (`commitGate`); it never persists.
     if (!canEdit) {
       openGate("save");
       return;
     }
-    // Member persist path lands in Phase 6 (the render + Save endpoints).
-  }, [canEdit, openGate]);
+    if (saveStatus === "saving") return;
+    // Member persist: build the scope-independent report-kind Template from the
+    // builder's effective rows and persist it via the shared `saveTemplate`
+    // repo API (`POST /api/widgets/smart-report/reports`) — the SAME persistence
+    // Extract uses. The template carries questions/sections only; scope is a
+    // render-time input, never stored on the template.
+    const template: SaveReportTemplateInput = {
+      id: templateIdentity.id,
+      name: templateIdentity.name,
+      format: "ic-brief",
+      sections: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        renderAs: r.renderAs,
+        question: r.question,
+        variables: r.variables,
+        ...(r.instructions.length > 0 ? { instructions: r.instructions.join("\n") } : {}),
+      })),
+    };
+    setSaveStatus("saving");
+    try {
+      await saveReportTemplate(template);
+      setSaveStatus("saved");
+    } catch (err) {
+      // A 401 (auth state flipped to anon mid-edit) routes to the sign-in gate;
+      // any other failure surfaces an error the user can retry from.
+      if (err instanceof SmartReportApiError && err.status === 401) {
+        setSaveStatus("idle");
+        openGate("save");
+      } else {
+        setSaveStatus("error");
+      }
+    }
+  }, [canEdit, openGate, saveStatus, templateIdentity, rows]);
+
+  // ↻ render — re-run the template over the current scope through the render
+  // endpoint (`renderReport`), then advance to the render surface (f4) to show
+  // the result. The endpoint is the production caller (round-trip closed); the
+  // render surface re-fetches its own first paint, so advancing is sufficient.
+  const handleRerender = useCallback(async () => {
+    const chatSessionId = chatState.activeSessionId;
+    if (!chatSessionId) {
+      advanceFrame("f4");
+      return;
+    }
+    try {
+      await renderReport({ templateId: templateIdentity.id, scope, chatSessionId });
+    } catch {
+      /* the render surface owns the visible error state; advance regardless */
+    }
+    advanceFrame("f4");
+  }, [chatState.activeSessionId, templateIdentity.id, scope, advanceFrame]);
 
   const handleAddSection = useCallback(() => {
     const id = `sec-${Date.now()}`;
@@ -366,9 +439,21 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
           {canEdit ? "export ▾" : "export ▾ 🔒"}
         </Box>
         <Box
-          component="span"
+          component="button"
+          type="button"
           data-testid="report-builder-render"
-          sx={{ color: NAVY, fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_LABEL }}
+          aria-label="Re-render report"
+          onClick={handleRerender}
+          sx={{
+            border: "none",
+            background: "none",
+            cursor: "pointer",
+            color: NAVY,
+            fontSize: FONT_SIZE_LABEL,
+            fontWeight: FONT_WEIGHT_LABEL,
+            p: 0,
+            "&:focus-visible": { outline: `2px solid ${NAVY}` },
+          }}
         >
           ↻ render
         </Box>
@@ -391,6 +476,21 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
         >
           {canEdit ? "💾 Save" : "💾 Save 🔒"}
         </Box>
+        {saveStatus !== "idle" ? (
+          <Box
+            component="span"
+            data-testid="report-builder-save-status"
+            sx={{
+              color: saveStatus === "error" ? CORAL : MUTED_ON_LIGHT,
+              fontSize: FONT_SIZE_LABEL,
+              fontWeight: FONT_WEIGHT_LABEL,
+            }}
+          >
+            {saveStatus === "saving" && "Saving…"}
+            {saveStatus === "saved" && "Saved."}
+            {saveStatus === "error" && "Save failed — try again."}
+          </Box>
+        ) : null}
       </Box>
     </Box>
   );

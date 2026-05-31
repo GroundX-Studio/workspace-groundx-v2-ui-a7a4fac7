@@ -91,8 +91,27 @@
 
 ## Closeout
 
+- [x] **Client↔server round-trip closed (2026-05-31 closeout, exec-order step 21).** An
+  adversarial review found the Phase-6 render + Save endpoints had ZERO client callers (the
+  client rendered from a local fixture; the builder member-Save was a `// lands in Phase 6` no-op).
+  Both fixed: (FIX #1) `SmartReportBuilder` member-Save now PERSISTS the report-kind Template via
+  the new `app/src/api/smartReport.ts` `saveReportTemplate` (`POST /api/widgets/smart-report/reports`
+  → the shared `saveTemplate` repo API — the SAME path Extract uses; anon still opens the gate, never
+  persists). (FIX #2) the render endpoint gained a genuine production caller: `smartReport.ts`
+  `renderReport` (`POST …/reports/render`); `SmartReportRender`'s **↻ re-render** control fetches
+  through it and renders the RESPONSE (not a bare fixture), and the builder's **↻ render** calls it
+  too. The synchronous fixture stays the f4 FIRST paint (no shell/view test churn) — routing the
+  *initial* render through the endpoint is the ticket below. Stale "lands in Phase 6" comments in
+  `SmartReportBuilder.tsx` + the two READMEs corrected; stale "Phase 2 wires mutations" comments in
+  `ChatStoreContext/types.ts` (~113, ~463) corrected (the schema-overlay mutations ARE wired).
+- [ ] **Ticket (follow-up):** route the `SmartReportRender` *initial* f4 paint through
+  `POST /api/widgets/smart-report/reports/render` (replace the synchronous `getReportFixture` first
+  paint with a fetch). Deferred from the step-21 closeout to avoid large async-path churn across
+  `OnboardingShell` / `ScopedCanvas` / `ExtractView` / `InteractView` / `SteadyShell` tests; the
+  re-render path + member-Save already exercise both endpoints end-to-end, so the round-trip is
+  closed — this is the remaining initial-paint conversion.
 - [ ] `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict --json` passes.
-- [ ] `scaffold/app` + `scaffold/middleware` vitest green; widget-contract + no-hardcoded-styles drift guards pass.
+- [x] `scaffold/app` + `scaffold/middleware` vitest green; widget-contract + no-hardcoded-styles drift guards pass. — DONE (2026-05-31): app 1346 + middleware 598 green; widget-contract / no-hardcoded-styles / widget-access-matrix / check-tool-quality drift guards green; `npm run build` (tsc + vite) clean; `openspec validate 2026-05-29-smart-report-screen --strict` clean.
 - [ ] Live-verify (Chrome DevTools MCP): Utility → Report pill → render → CiteChip jumps viewer → edit §N → builder → pin from chat; Interact→Report carries scope.
 - [ ] Update memory to point at this capability as the report home: `project_build_status.md`, `project_dev_contracts.md` (W8 surface owned by `smart-report`), `project_phased_plan.md` (Phase 5), `project_spec_frames.md` (f4/f4a + Utility report live). Delete any `TODO(report)` seam.
 - [ ] Archive: `npx @fission-ai/openspec@1.3.1 archive 2026-05-29-smart-report-screen --yes`.

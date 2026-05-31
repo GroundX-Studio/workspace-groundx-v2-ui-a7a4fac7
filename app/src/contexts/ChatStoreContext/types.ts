@@ -108,10 +108,12 @@ export type { CanvasIntent };
  * scenario's `extractionSchema`. Lets the user edit the schema in
  * SchemaView without mutating the immutable scenario manifest.
  *
- * Phase 1 ships the type + an empty default + the `addedFields` /
- * `removedFieldIds` slots (read by SchemaView to render).
- * Phase 2 will wire LLM propose-cards to populate `addedFields`,
- * plus persistence to the `extraction_schemas` table.
+ * The type + an empty default + the `addedFields` / `removedFieldIds`
+ * slots are read by SchemaView/Extract to render. The schema-overlay
+ * mutations ARE wired: `addSchemaField` (+ its propose-card / `editSchemaField`
+ * / `removeSchemaField` siblings) have real callers (the chat propose-cards
+ * and the Extract editing surface), and persistence flows through the shared
+ * `saveTemplate` repo API (Template lifecycle).
  *
  * The overlay's semantics are layered over the manifest at render
  * time — see `SchemaView.applyOverlay` for the merge rule.
@@ -459,8 +461,9 @@ export interface ChatSession {
   viewerHistory: ViewerEvent[];
   currentIntent: CanvasIntent | null;
 
-  // Schema-editor overlay (UI-01). Empty by default; Phase 1
-  // ships the slot, Phase 2 wires mutations.
+  // Schema-editor overlay (UI-01). Empty by default; the mutations are
+  // wired — `addSchemaField` (+ edit/remove/propose siblings) have real
+  // callers (chat propose-cards + the Extract editing surface).
   // Phase 4 of `master-viewer-session` will migrate this slot onto
   // `viewer.workspace.schemaOverlay`; for one release cycle a
   // deprecated getter here can proxy to the viewer slot.

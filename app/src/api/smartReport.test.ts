@@ -1,0 +1,201 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/sentry", () => ({
+  captureException: vi.fn(),
+  initSentry: vi.fn(() => false),
+}));
+
+// `renderReport` self-triggers `ensureServerChatSession` (mirroring extractField)
+// so the render endpoint doesn't 404 before the chat-session row exists. Mock it
+// so the tests can count the render fetch alone.
+vi.mock("@/api/chatSessions", () => ({
+  ensureServerChatSession: vi.fn(async () => undefined),
+}));
+
+import type { ContentScope } from "@groundx/shared";
+
+import { SmartReportApiError, renderReport, saveReportTemplate } from "./smartReport";
+
+const originalFetch = global.fetch;
+
+const UTILITY_SCOPE: ContentScope = {
+  type: "bucket",
+  bucketId: 28454,
+  filter: { project: "utility" },
+};
+
+const RENDER_WIRE = {
+  report_id: "rr-rt-utility-ic-brief",
+  template_id: "rt-utility-ic-brief",
+  status: "complete",
+  sections: [
+    {
+      name: "billing_summary",
+      render_as: "PARAGRAPH",
+      body: "The April 2026 statement totals **$18,742.16**.",
+      cites: [{ documentId: "utility-bill-2026-04", page: 1, tier: "exact" }],
+      confidence: 0.96,
+    },
+    {
+      name: "charge_breakdown",
+      render_as: "TABLE",
+      body: "| Category | Amount |\n| --- | --- |\n| Demand | $9,418.00 |",
+      cites: [{ documentId: "utility-bill-2026-04", page: 3, tier: "exact" }],
+    },
+  ],
+  resolved_variables: {},
+  export_formats: ["pdf", "md", "link"],
+  preview_only: true,
+};
+
+beforeEach(() => {
+  global.fetch = vi.fn();
+  if (typeof document !== "undefined") {
+    document.cookie = "csrf_token=test-csrf-token; path=/";
+  }
+});
+
+afterEach(() => {
+  global.fetch = originalFetch;
+  vi.clearAllMocks();
+});
+
+describe("renderReport (smart-report Phase 6 client caller)", () => {
+  it("POSTs the snake_case render request to the render endpoint", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => RENDER_WIRE,
+    });
+    await renderReport({
+      templateId: "rt-utility-ic-brief",
+      scope: UTILITY_SCOPE,
+      chatSessionId: "chat-1",
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [path, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(path).toBe("/api/widgets/smart-report/reports/render");
+    expect((init as RequestInit).method).toBe("POST");
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.template_id).toBe("rt-utility-ic-brief");
+    expect(body.chat_session_id).toBe("chat-1");
+    expect(body.scope).toEqual(UTILITY_SCOPE);
+    expect(body.section_ids).toBeNull();
+  });
+
+  it("maps the snake_case wire response to a RenderedReport (sectionId, renderAs, result)", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => RENDER_WIRE,
+    });
+    const result = await renderReport({
+      templateId: "rt-utility-ic-brief",
+      scope: UTILITY_SCOPE,
+      chatSessionId: "chat-1",
+    });
+    expect(result.gated).toBe(false);
+    if (result.gated) throw new Error("expected a rendered report");
+    const report = result.report;
+    expect(report.reportId).toBe("rr-rt-utility-ic-brief");
+    expect(report.templateId).toBe("rt-utility-ic-brief");
+    expect(report.previewOnly).toBe(true);
+    expect(report.scope).toEqual(UTILITY_SCOPE);
+    expect(report.sections.map((s) => s.sectionId)).toEqual(["billing_summary", "charge_breakdown"]);
+    expect(report.sections[0].renderAs).toBe("PARAGRAPH");
+    expect(report.sections[0].name).toBe("billing_summary");
+    // The shared RenderedSection result carries the markdown body + citations.
+    expect(report.sections[0].result.body).toContain("18,742.16");
+    expect(report.sections[0].result.sectionId).toBe("billing_summary");
+    expect(report.sections[0].result.citations[0].documentId).toBe("utility-bill-2026-04");
+    expect(report.sections[0].result.confidence).toBe(0.96);
+  });
+
+  it("passes a section-id subset for a re-render", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...RENDER_WIRE, sections: [RENDER_WIRE.sections[0]] }),
+    });
+    await renderReport({
+      templateId: "rt-utility-ic-brief",
+      scope: UTILITY_SCOPE,
+      chatSessionId: "chat-1",
+      sectionIds: ["billing_summary"],
+    });
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.section_ids).toEqual(["billing_summary"]);
+  });
+
+  it("surfaces the gate envelope (#10) as a gated result instead of a report", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ gated: true, gate: "byo", reason: "Sign in." }),
+    });
+    const result = await renderReport({
+      templateId: "rt-utility-ic-brief",
+      scope: { type: "bucket", bucketId: 99999 },
+      chatSessionId: "chat-1",
+    });
+    expect(result.gated).toBe(true);
+    if (!result.gated) throw new Error("expected a gate envelope");
+    expect(result.gate).toBe("byo");
+  });
+
+  it("throws SmartReportApiError with status on a non-2xx response", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "not_session_owner" }),
+    });
+    await expect(
+      renderReport({ templateId: "t", scope: UTILITY_SCOPE, chatSessionId: "chat-1" }),
+    ).rejects.toMatchObject({ name: "SmartReportApiError", status: 403 });
+  });
+});
+
+describe("saveReportTemplate (smart-report Phase 6 member persist)", () => {
+  it("POSTs the report template under a `template` envelope to the Save endpoint", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "rt-utility-ic-brief", name: "Utility IC Brief", updatedAt: "2026-05-31T00:00:00Z" }),
+    });
+    const result = await saveReportTemplate({
+      id: "rt-utility-ic-brief",
+      name: "Utility IC Brief",
+      format: "ic-brief",
+      sections: [
+        {
+          id: "billing_summary",
+          name: "billing_summary",
+          renderAs: "PARAGRAPH",
+          question: "Summarize the billing period and total.",
+          variables: [],
+        },
+      ],
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [path, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(path).toBe("/api/widgets/smart-report/reports");
+    expect((init as RequestInit).method).toBe("POST");
+    const body = JSON.parse((init as RequestInit).body as string);
+    // The server's parseReportTemplate reads `{ template: {...} }`.
+    expect(body.template.id).toBe("rt-utility-ic-brief");
+    expect(body.template.sections[0].renderAs).toBe("PARAGRAPH");
+    expect(result.id).toBe("rt-utility-ic-brief");
+  });
+
+  it("throws SmartReportApiError with status 401 for an anonymous caller", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "no_signed_in_user" }),
+    });
+    await expect(
+      saveReportTemplate({ id: "x", name: "X", format: "f", sections: [] }),
+    ).rejects.toMatchObject({ name: "SmartReportApiError", status: 401 });
+  });
+});
