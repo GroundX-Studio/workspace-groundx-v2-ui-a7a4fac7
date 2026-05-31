@@ -15,10 +15,11 @@
  *
  * `isOnboarding` is read from `activeChatSession.isOnboardingSession` (not
  * hardcoded), so the SAME `send` serves both the onboarding journey and a
- * bare authenticated chat. Phase 1 is a pure dedup: both
- * `SteadyConversationFlow` and `F2ConversationFlow` point at this hook and
- * keep their distinct headers/choreography inline. Phase 2 collapses them
- * into one `<ConversationFlow>` + a pluggable `ChatExperience`.
+ * bare authenticated chat. This hook is the single conversation engine
+ * behind `<ConversationFlow>`; the onboarding-vs-steady difference is a
+ * pluggable `ChatExperience` (Intro/Choreography/seedTurns), NOT a forked
+ * flow component (the old `SteadyConversationFlow`/`F2ConversationFlow`
+ * forks were deleted in Phase 2).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";

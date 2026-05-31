@@ -107,9 +107,9 @@ import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/Thinkin
 />
 ```
 
-`ChatColumn`'s `F2ConversationFlow` is the only production caller
-today; steady mode will mount it once a real upload-progress feed
-exists.
+The onboarding `ChatExperience` (its scripted `Intro`, mounted via the
+single `<ConversationFlow>`) is the only production caller today; steady
+mode will mount it once a real upload-progress feed exists.
 
 ## LLM tools
 
