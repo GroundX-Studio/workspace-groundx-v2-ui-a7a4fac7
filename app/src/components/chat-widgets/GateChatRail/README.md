@@ -110,8 +110,8 @@ import { GateChatRail } from "@/components/chat-widgets/GateChatRail/GateChatRai
 ```
 
 The composing animation that precedes the rail appearing lives in
-`views/Onboarding/GateChatPanel.tsx` — it mounts the rail after the
-typing indicator finishes.
+`components/chat-widgets/GateChatPanel/GateChatPanel.tsx` — it mounts the
+rail after the typing indicator finishes.
 
 ## LLM tools
 

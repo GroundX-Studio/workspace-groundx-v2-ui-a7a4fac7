@@ -41,6 +41,7 @@ Roles today: `anonymous` (uncommitted / pre-sign-up) · `member` (signed in).
 | Integrate | ✅ | ✅ | **ScopedViewerWidget** (connectors / agent plugins + API snippets, f7). Available to both roles. The only locked affordance is the connector DOWNLOAD button, which is disabled-future (UI-02 agent-integration download pipeline) — an honest `aria-disabled` + title, not role-driven, not a hidden control, not faked. The SURFACE (the cards) is the real content. The same widget the authenticated experience uses (`feedback_no_onboarding_duplicates`). (2026-05-30-onboarding-shell-shared-view Phase 3b) |
 | PinToReportAction | ✅ | ✅ | chat-widget (`📌 pin to report`) on every assistant turn. Available to both roles; the only lock is DISABLED-mid-stream (queues the click) — not role-driven. Pins the turn's literal text as a report section via `pinToReport` (existing-or-new UX, no auto-create). (2026-05-29-smart-report-screen Phase 5) |
 | SignUpWidget | ✅ | ❌ | **anonymous only** (the sign-up *form*) — a member never sees the form. NUANCE: the widget also renders a committed-state *celebration* (`signup-celebration`) at the anon→member boundary (`gate.status === "committed"`), driven by gate-state not role; that transient is not "a member browsing the form". `commitGate` is gate-state, not role. |
+| GateChatPanel | ✅ | ❌ | **gate context** (anonymous) — the chat-column composite that dispatches gate-status → idle placeholder / typing indicator / GateChatRail; re-sourced from gate-state, not role. Moved into the chat-widget slot by 2026-05-31-dependency-direction-guard (was `views/Onboarding/`). |
 | GateChatRail | ✅ | ❌ | **gate context** (anonymous) — gate variant re-sourced from gate-state, not role |
 | GateValueProp | ✅ | ❌ | **gate context** (anonymous) — shown beside the gate |
 
@@ -64,6 +65,7 @@ ScopedViewerWidgets take a real `ContentScope`; everything else declares `{ type
 | BookCallView | `{ type: "none" }` | — |
 | GateValueProp | `{ type: "none" }` | — |
 | SignUpWidget | `{ type: "none" }` | — |
+| GateChatPanel | `{ type: "none" }` | gate is session-scoped, not document-scoped; forwards `{ type: "none" }` to GateChatRail |
 | GateChatRail | `{ type: "none" }` | — |
 
 > The raw single-id case is `{ type: "documents", documentIds: [id] }`. No widget takes a bare

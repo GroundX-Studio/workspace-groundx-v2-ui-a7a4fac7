@@ -41,7 +41,7 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistryOptional } from "@/contexts/ScenarioRegistryContext";
 
-import { GateChatPanel } from "@/views/Onboarding/GateChatPanel";
+import { GateChatPanel } from "@/components/chat-widgets/GateChatPanel/GateChatPanel";
 
 export interface ChatColumnProps {
   /**
@@ -108,7 +108,11 @@ export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFr
   // typing-indicator + GateView flow.
   const gateActive =
     session?.gate.status === "open" || session?.gate.status === "committed";
-  if (gateActive) return <GateChatPanel />;
+  // The gate is the anonymous, pre-sign-up moment — session-scoped, not
+  // document-scoped. Pass the gate's own role/scope (anonymous /
+  // { type: "none" }), NOT ChatColumn's role, preserving the byte-for-byte
+  // behavior of GateChatPanel's prior hardcoded GateChatRail mount.
+  if (gateActive) return <GateChatPanel role="anonymous" scope={{ type: "none" }} />;
 
   const isF1 = currentFrame === "f1";
 

@@ -15,6 +15,11 @@ import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProvid
 
 import { GateChatPanel } from "./GateChatPanel";
 
+// GateChatPanel is anonymous-only (the gate IS the pre-sign-up moment)
+// and session-scoped, so every mount declares these.
+const GATE_ROLE = "anonymous" as const;
+const GATE_SCOPE = { type: "none" } as const;
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   // The "has the gate finished composing" flag persists in
@@ -44,7 +49,10 @@ function GateOpener({ trigger = "byo" }: { trigger?: "byo" | "save" | "export" |
 
 describe("GateChatPanel", () => {
   it("renders the idle chat placeholder when gate is not active", () => {
-    renderWithOnboardingProviders(<GateChatPanel />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<GateChatPanel role={GATE_ROLE} scope={GATE_SCOPE} />, {
+      initialFrame: "f2",
+      initialScenario: "utility",
+    });
     expect(screen.getByText(/Ask anything about the sample/i)).toBeInTheDocument();
     expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
     expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
@@ -56,7 +64,7 @@ describe("GateChatPanel", () => {
     renderWithOnboardingProviders(
       <>
         <GateOpener trigger="save" />
-        <GateChatPanel />
+        <GateChatPanel role={GATE_ROLE} scope={GATE_SCOPE} />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -90,7 +98,7 @@ describe("GateChatPanel", () => {
     renderWithOnboardingProviders(
       <>
         <GateOpener trigger="byo" />
-        <GateChatPanel />
+        <GateChatPanel role={GATE_ROLE} scope={GATE_SCOPE} />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -142,7 +150,7 @@ describe("GateChatPanel", () => {
     renderWithOnboardingProviders(
       <>
         <GateActions />
-        <GateChatPanel />
+        <GateChatPanel role={GATE_ROLE} scope={GATE_SCOPE} />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -189,7 +197,7 @@ describe("GateChatPanel", () => {
     renderWithOnboardingProviders(
       <>
         <CommittedHarness />
-        <GateChatPanel />
+        <GateChatPanel role={GATE_ROLE} scope={GATE_SCOPE} />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );

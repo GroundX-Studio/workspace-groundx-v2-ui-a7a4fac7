@@ -131,7 +131,8 @@ function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["subst
  *   • F1 (Ingest) — the right-of-nav slot is the full-width picker
  *     (StepStrip on top, IngestView below). No chat column.
  *   • F2–F7 — the right-of-nav slot is the AppShell chat | canvas
- *     split. Chat column hosts GateChatPanel; canvas hosts the
+ *     split. Chat column hosts GateChatPanel (the chat-widget at
+ *     `components/chat-widgets/GateChatPanel/`); canvas hosts the
  *     active frame view (UnderstandView / ExtractView / etc.).
  *   • The F1 ↔ shell transition slides ONLY chat + canvas; the nav
  *     is stable.
@@ -249,8 +250,9 @@ export const OnboardingShell: FC = () => {
     if (path.endsWith("/onboarding/signup")) {
       // `master-viewer-session` Phase 2 — overlay is now the source of
       // truth for the sign-up surface. The legacy `openGate("byo")`
-      // call STAYS for now because the chat-side `GateChatPanel` still
-      // reads `gate.status` (Phase 6 migrates that side too).
+      // call STAYS for now because the chat-side `GateChatPanel`
+      // (`components/chat-widgets/GateChatPanel/`) still reads
+      // `gate.status` (Phase 6 migrates that side too).
       pushOverlayRef.current({ kind: "sign-up", state: "pending" });
       openGateRef.current("byo");
       return;
@@ -657,7 +659,8 @@ export const OnboardingShell: FC = () => {
   );
 
   // The chat + canvas split that lives in the right-of-nav slot for
-  // F2+. The chat column hosts GateChatPanel; the canvas hosts the
+  // F2+. The chat column hosts GateChatPanel (the chat-widget at
+  // `components/chat-widgets/GateChatPanel/`); the canvas hosts the
   // active frame view with the StepStrip on top.
   const chatIdle = (
     <Box

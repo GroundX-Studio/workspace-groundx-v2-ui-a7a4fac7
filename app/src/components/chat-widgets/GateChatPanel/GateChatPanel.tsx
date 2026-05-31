@@ -16,6 +16,15 @@
  * resumes a session post-signin), the typing animation is skipped — the
  * committed view renders immediately. The animation is reserved for
  * the first time the gate becomes open in this session.
+ *
+ * 2026-05-31-dependency-direction-guard Phase 1 — moved here from
+ * `views/Onboarding/GateChatPanel.tsx`. It is a pure chat-side composite
+ * (it already mounts the `GateChatRail` chat-widget and is mounted by
+ * `ChatColumn`), so it belongs in the chat-widget slot. Living in
+ * `views/` made `ChatColumn` (a widget) import a view, then the view
+ * imported `GateChatRail` back out of `chat-widgets/` — a widget → view →
+ * widget inversion the dependency-direction guard now forbids. No
+ * behavior change: only the file home and import direction moved.
  */
 
 import Box from "@mui/material/Box";
@@ -24,6 +33,7 @@ import Typography from "@mui/material/Typography";
 import { motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useState, type FC } from "react";
 
+import type { WidgetRole, WidgetScope } from "@groundx/shared";
 import {
   BODY_TEXT,
   FONT_WEIGHT_LABEL,
@@ -34,6 +44,23 @@ import {
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { GateChatRail } from "@/components/chat-widgets/GateChatRail/GateChatRail";
+
+export interface GateChatPanelProps {
+  /**
+   * 2026-05-30-widget-role-access — widget AUTHORIZATION role. The gate
+   * is an anonymous-only surface (it IS the pre-sign-up moment), so the
+   * only meaningful role is `anonymous`. The prop is required to satisfy
+   * the widget contract; it is forwarded to the GateChatRail it composes.
+   */
+  role: WidgetRole;
+  /**
+   * 2026-05-30-widget-role-access — required widget scope. The gate is
+   * session-scoped, not document-scoped, so GateChatPanel always declares
+   * `{ type: "none" }`. It is not a ScopedViewerWidget.
+   */
+  scope: WidgetScope;
+}
 
 /**
  * Persisted "the gate has already finished composing for this anon
@@ -66,8 +93,6 @@ function useGateComposedPersisted(ownerKey: string): [boolean, () => void] {
   }, [storageKey]);
   return [composed, markComposed];
 }
-
-import { GateChatRail } from "@/components/chat-widgets/GateChatRail/GateChatRail";
 
 /**
  * Composing-delay duration by trigger.
@@ -132,7 +157,7 @@ const TypingIndicator: FC<{ trigger: keyof typeof TYPING_COPY }> = ({ trigger })
   </Box>
 );
 
-export const GateChatPanel: FC = () => {
+export const GateChatPanel: FC<GateChatPanelProps> = ({ role, scope }) => {
   const { state: session } = useOnboardingSession();
   const { state: chatState } = useChatStore();
   const status = session.gate.status;
@@ -187,8 +212,9 @@ export const GateChatPanel: FC = () => {
       transition={{ duration: 0.28, ease: "easeOut" }}
     >
       {/* 2026-05-30-widget-role-access: GateChatRail is anonymous-only
-          (gate context, pre-signup) and not document-scoped. */}
-      <GateChatRail role="anonymous" scope={{ type: "none" }} />
+          (gate context, pre-signup) and not document-scoped. Forward the
+          gate panel's role/scope — they are anonymous / { type: "none" }. */}
+      <GateChatRail role={role} scope={scope} />
     </motion.div>
   );
 };

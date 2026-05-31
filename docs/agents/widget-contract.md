@@ -232,18 +232,40 @@ Already documented above (§ The contract, § Slot-specific rules).
 They live at the top of the dependency tree — they may import from
 any of the three lower tiers.
 
-### Dependency rule
+### Dependency rule (rule 5 — test-backed)
 
 ```
-viewer-widgets/  →  brand/, primitives/, layout/ (rare)
-chat-widgets/    →  brand/, primitives/, layout/ (rare)
+viewer-widgets/  →  brand/, primitives/, layout/ (rare) + sibling viewer-widgets/
+chat-widgets/    →  brand/, primitives/, layout/ (rare) + sibling chat-widgets/
 layout/          →  brand/, primitives/
 brand/           →  primitives/
 primitives/      →  (theme only)
 ```
 
+**Rule 5 — dependency direction.** A widget's production source imports
+ONLY the three lower tiers (`brand/ · primitives/ · layout/`) and, within
+its OWN slot, sibling widgets (e.g. `chat-widgets/ChatColumn` →
+`chat-widgets/GateChatPanel` → `chat-widgets/GateChatRail`). A widget
+SHALL NOT:
+
+- import from `views/` (a higher-level surface — widgets sit ABOVE views), nor
+- import from the OTHER widget slot (`chat-widgets/` ↛ `viewer-widgets/` and
+  vice-versa — lift any shared piece to a lower tier instead).
+
 Cycles fail TypeScript's no-cycle ESLint rule and the project's
-`madge`-based dependency check.
+`madge`-based dependency check — but those catch only *literal* import
+cycles. A widget → view → widget cycle (the original `ChatColumn` →
+`views/Onboarding/GateChatPanel` → `chat-widgets/GateChatRail`) routes
+through a view and slips past them. Rule 5 closes that gap at the
+*direction* level: it is enforced by `app/src/test/widget-contract.test.ts`
+("rule 5 — dependency direction"), which walks every non-test `.ts`/`.tsx`
+under `chat-widgets/` + `viewer-widgets/` and fails on any import resolving
+into `views/` (alias `@/views/` or a relative climb) or into the other
+widget slot. Test files are exempt (they import views/other widgets as
+render targets). A small, sanity-checked allowlist tolerates known
+separately-ticketed inversions (today: `Extract` → `SchemaView`, owned by
+the `onboarding-shell-shared-view` view-retirement step); new code may not
+add to it without an owning ticket.
 
 ## Project folder catalog (added 2026-05-26 in ARCH-14)
 

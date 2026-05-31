@@ -86,6 +86,103 @@ function findMainTsx(widget: WidgetEntry): string | null {
   return null;
 }
 
+// ── Rule 5 — dependency direction ──────────────────────────────────────────
+//
+// Widgets sit at the TOP of the dependency tree (docs/agents/widget-contract.md
+// §235 / rule 5). A widget's source may import only the three lower tiers
+// (brand/ · primitives/ · layout/) and — within its OWN slot — sibling widgets.
+// It SHALL NOT import from `views/` (a higher-level surface) nor from the OTHER
+// widget slot. The latter two are layering inversions: `madge`/ESLint catch only
+// literal import cycles, so a widget → view → widget cycle (the original
+// `ChatColumn` → `views/Onboarding/GateChatPanel` → `chat-widgets/GateChatRail`)
+// slips through. This guard closes that gap at the direction level.
+
+/** Recursively collect every non-test `.ts`/`.tsx` source file under `dir`. */
+function listSourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  if (!existsSync(dir)) return out;
+  for (const entry of readdirSync(dir)) {
+    const abs = join(dir, entry);
+    if (statSync(abs).isDirectory()) {
+      out.push(...listSourceFiles(abs));
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry)) continue;
+    // Tests are not shipped source — they legitimately import views/other
+    // widgets as render targets. Rule 5 governs PRODUCTION dependency
+    // direction only.
+    if (/\.test\.tsx?$/.test(entry)) continue;
+    out.push(abs);
+  }
+  return out;
+}
+
+/** Pull every import/re-export module specifier string out of a source file. */
+function importSpecifiers(src: string): string[] {
+  const out: string[] = [];
+  // `import ... from "X"` / `export ... from "X"` / `import "X"`.
+  const re = /(?:import|export)\b[^;]*?from\s*["']([^"']+)["']|import\s*["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    out.push((m[1] ?? m[2])!);
+  }
+  return out;
+}
+
+/**
+ * Does `specifier` (as written in `fileAbs`) resolve into `views/`?
+ * Catches both the `@/views/...` alias form and a relative path that
+ * climbs into `src/views/`.
+ */
+function resolvesIntoViews(specifier: string, fileAbs: string): boolean {
+  if (/^@\/views\//.test(specifier)) return true;
+  if (specifier.startsWith(".")) {
+    const resolved = resolve(dirname(fileAbs), specifier);
+    const viewsDir = join(SRC, "views") + "/";
+    return (resolved + "/").startsWith(viewsDir);
+  }
+  return false;
+}
+
+/**
+ * If `specifier` resolves into a widget slot, return that slot name; else null.
+ * Handles `@/components/<slot>/...` and relative climbs into `src/components/<slot>/`.
+ */
+function resolvesIntoSlot(specifier: string, fileAbs: string): (typeof SLOTS)[number] | null {
+  for (const slot of SLOTS) {
+    if (new RegExp(`^@/components/${slot}/`).test(specifier)) return slot;
+  }
+  if (specifier.startsWith(".")) {
+    const resolved = resolve(dirname(fileAbs), specifier) + "/";
+    for (const slot of SLOTS) {
+      const slotDir = join(SRC, "components", slot) + "/";
+      if (resolved.startsWith(slotDir)) return slot;
+    }
+  }
+  return null;
+}
+
+/**
+ * KNOWN, separately-ticketed widget → view inversions that rule 5 tolerates
+ * UNTIL their owning change retires the view. Mirrors the `no-hardcoded-styles`
+ * `ASSET_ALLOWLIST` pattern: each entry is `${slotRelPath} -> ${specifier}` and
+ * must reference a real import (a sanity test below fails if it goes stale, so
+ * the entry is force-deleted the moment the underlying import is removed).
+ *
+ * The allowlist is NOT a way to dodge rule 5 for new code — adding a fresh
+ * widget→view import without an owning ticket will fail review. It exists so
+ * this guard can ship GREEN today without pre-empting work owned elsewhere.
+ */
+const KNOWN_VIEW_IMPORT_ALLOWLIST = new Set<string>([
+  // `Extract` widget still imports the `SchemaView` Design surface from
+  // `views/Onboarding/`. Retiring/relocating SchemaView is owned by
+  // `onboarding-shell-shared-view` Phase 3-4 (cross-plan-execution-order
+  // step 20), which sweeps the per-frame views into thin wrappers/deletions.
+  // Tracked there, not here; this change only untangles the ChatColumn → gate
+  // inversion (the one the rule-5 ticket on the unified plan named).
+  "components/viewer-widgets/Extract/Extract.tsx -> @/views/Onboarding/SchemaView",
+]);
+
 describe("widget contract drift guard", () => {
   // Meta-test: prove the walker finds the expected slot directories
   // when they exist. If both slot dirs are absent the rest of the
@@ -108,6 +205,70 @@ describe("widget contract drift guard", () => {
   // applies the moment any widget lands. Don't silently green here.
   it("widget list is enumerable (sanity meta-check)", () => {
     expect(Array.isArray(widgets)).toBe(true);
+  });
+
+  // Rule 5 — dependency direction. Widgets are the top of the tree: their
+  // production source imports only brand/ · primitives/ · layout/ and, within
+  // their OWN slot, sibling widgets — never `views/`, never the other widget
+  // slot. See docs/agents/widget-contract.md §235.
+  describe("rule 5 — dependency direction", () => {
+    // Build the violation list once so the guard fails with ONE actionable
+    // message listing every offender, file + specifier + reference.
+    const violations: string[] = [];
+    const allowlistHits = new Set<string>();
+    for (const slot of SLOTS) {
+      const slotDir = join(SRC, "components", slot);
+      for (const fileAbs of listSourceFiles(slotDir)) {
+        const rel = fileAbs.slice(SRC.length + 1); // src-relative for messages
+        const src = readFileSync(fileAbs, "utf8");
+        for (const spec of importSpecifiers(src)) {
+          // (a) widget → view inversion.
+          if (resolvesIntoViews(spec, fileAbs)) {
+            const key = `${rel} -> ${spec}`;
+            if (KNOWN_VIEW_IMPORT_ALLOWLIST.has(key)) {
+              allowlistHits.add(key);
+              continue;
+            }
+            violations.push(
+              `${rel} imports a VIEW ("${spec}") — widgets sit ABOVE views; ` +
+                `move the shared piece into a widget or hoist the decision to the host. ` +
+                `(widget-contract.md §235 / rule 5)`,
+            );
+            continue;
+          }
+          // (b) widget → OTHER widget slot. Within-slot sibling imports are
+          // allowed (e.g. chat-widgets/ChatColumn → chat-widgets/GateChatPanel).
+          const targetSlot = resolvesIntoSlot(spec, fileAbs);
+          if (targetSlot !== null && targetSlot !== slot) {
+            violations.push(
+              `${rel} (in ${slot}/) imports the OTHER widget slot ("${spec}" → ${targetSlot}/) — ` +
+                `widget slots must not depend on each other; lift the shared piece to a lower tier. ` +
+                `(widget-contract.md §235 / rule 5)`,
+            );
+          }
+        }
+      }
+    }
+
+    it("no widget source imports from views/ or the other widget slot", () => {
+      expect(
+        violations.length === 0,
+        `Widget dependency-direction violations (rule 5):\n  ${violations.join("\n  ")}`,
+      ).toBe(true);
+    });
+
+    // Mirror the no-hardcoded-styles allowlist hygiene: every allowlist entry
+    // must still correspond to a real import. When the owning change removes
+    // the import, this fails and forces the stale entry to be deleted — the
+    // allowlist can never silently outlive the inversion it tolerates.
+    it("every KNOWN_VIEW_IMPORT_ALLOWLIST entry still matches a real import (sanity)", () => {
+      const stale = [...KNOWN_VIEW_IMPORT_ALLOWLIST].filter((k) => !allowlistHits.has(k));
+      expect(
+        stale.length === 0,
+        `KNOWN_VIEW_IMPORT_ALLOWLIST has stale entries (import already gone — delete them): ` +
+          `${stale.join(", ")}`,
+      ).toBe(true);
+    });
   });
 
   for (const widget of widgets) {
