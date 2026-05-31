@@ -1055,6 +1055,118 @@ describe("middleware API route contract", () => {
         completedFramesJson: JSON.stringify(["f1", "f2", "f3"]),
       });
     });
+
+    // 2026-05-31-steady-scope-producer Phase 1 — the producer write path.
+    //
+    // Before this change the PUT route preserved the scope columns as
+    // `existing?.X ?? null` with NO producer, so a freshly-written
+    // `sample:<scenarioId>` row had bucketId/projectIdsJson NULL and
+    // `deriveRagContentScope` fell through to the env-samples fallback.
+    // With the producer wired at the entity-write seam, a sample entity
+    // gets its demo scope (samples bucket + scenarioId project filter)
+    // persisted onto the row.
+    //
+    // `setupAnonSession` runs WITHOUT a samples bucket configured (testEnv
+    // has no GROUNDX_SAMPLES_BUCKET_ID) so the existing "creates a new
+    // entity row" test still sees NULL columns — the producer only fires
+    // when the demo corpus is configured. Here we configure it.
+    function setupSamplesEnv() {
+      const repository = new MemoryAppRepository();
+      const partnerClient = new FakePartnerClient();
+      const groundxClient = new FakeGroundXClient();
+      const llmClient = new FakeLlmClient();
+      const scenarioRegistry = new FakeScenarioRegistry();
+      const app = createApp({
+        env: { ...testEnv, GROUNDX_SAMPLES_BUCKET_ID: 28454 },
+        repository,
+        partnerClient,
+        groundxClient,
+        llmClient,
+        scenarioRegistry,
+      });
+      return { app, repository };
+    }
+
+    async function setupSamplesAnonSession() {
+      const { app, repository } = setupSamplesEnv();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/chat-sessions")
+        .send({ id: "scp-anon", onboardingSessionId: "scp-anon", title: "Onboarding", isOnboarding: true })
+        .expect(200);
+      return { repository, agent };
+    }
+
+    it("producer: a fresh sample:<scenarioId> PUT persists the demo scope columns (bucketId + projectIdsJson)", async () => {
+      const { repository, agent } = await setupSamplesAnonSession();
+      await agent
+        .put("/api/chat-sessions/scp-anon/entities/sample%3Autility")
+        .send(entityBody())
+        .expect(200);
+      const rows = await repository.listChatSessionEntities("scp-anon");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        entityKey: "sample:utility",
+        bucketId: 28454,
+        projectIdsJson: JSON.stringify(["utility"]),
+        // No producer for these — kept as cf19 / single-doc substrate.
+        groupId: null,
+        documentIdsJson: null,
+      });
+    });
+
+    it("producer: a different scenario uses its own project filter value", async () => {
+      const { repository, agent } = await setupSamplesAnonSession();
+      await agent
+        .put("/api/chat-sessions/scp-anon/entities/sample%3Aloan")
+        .send(entityBody())
+        .expect(200);
+      const rows = await repository.listChatSessionEntities("scp-anon");
+      const loan = rows.find((r) => r.entityKey === "sample:loan");
+      expect(loan).toMatchObject({
+        bucketId: 28454,
+        projectIdsJson: JSON.stringify(["loan"]),
+      });
+    });
+
+    it("producer: does NOT overwrite scope columns already produced on a prior write (idempotent)", async () => {
+      const { repository, agent } = await setupSamplesAnonSession();
+      // First write produces the scope.
+      await agent
+        .put("/api/chat-sessions/scp-anon/entities/sample%3Autility")
+        .send(entityBody())
+        .expect(200);
+      // Second write (frame advance) must preserve the produced scope,
+      // not re-run / clobber it.
+      await agent
+        .put("/api/chat-sessions/scp-anon/entities/sample%3Autility")
+        .send(entityBody({ lastFrame: "f4", completedFramesJson: JSON.stringify(["f1", "f2", "f3"]) }))
+        .expect(200);
+      const rows = await repository.listChatSessionEntities("scp-anon");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        lastFrame: "f4",
+        bucketId: 28454,
+        projectIdsJson: JSON.stringify(["utility"]),
+      });
+    });
+
+    it("producer: leaves scope columns NULL when no samples bucket is configured (anon-onboarding fallback, unchanged)", async () => {
+      // setupAnonSession uses testEnv (no GROUNDX_SAMPLES_BUCKET_ID).
+      const { repository, agent } = await setupAnonSession();
+      await agent
+        .put("/api/chat-sessions/rt03-anon/entities/sample%3Autility")
+        .send(entityBody())
+        .expect(200);
+      const rows = await repository.listChatSessionEntities("rt03-anon");
+      expect(rows[0]).toMatchObject({
+        bucketId: null,
+        projectIdsJson: null,
+        groupId: null,
+        documentIdsJson: null,
+      });
+    });
   });
 
   // RT-04 — server side of "current_intent column kept current."

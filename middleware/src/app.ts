@@ -17,6 +17,7 @@ import { CSRF_COOKIE, csrfMiddleware } from "./middleware/csrf.js";
 import { createSessionRecord, clearSessionCookie, requireAuthenticatedUser, requireSession, sessionMiddleware, setSessionCookie } from "./middleware/session.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { ChatHandlerError, deriveRagContentScope, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
+import { produceEntityScope } from "./services/entityScopeProducer.js";
 import { resolveFieldGeometry } from "./services/citationGeometry.js";
 import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
 import {
@@ -836,6 +837,28 @@ export function createApp({
       const existingRows = await repository.listChatSessionEntities(chatSessionId);
       const existing = existingRows.find((e) => e.entityKey === entityKey) ?? null;
       const now = new Date();
+
+      // 2026-05-31-steady-scope-producer — the entity→scope producer.
+      // For a known-target entity (today: the `sample` EntityKind) compute
+      // the demo scope columns (samples bucket + scenarioId project filter)
+      // so `deriveRagContentScope` resolves the real persisted scope rather
+      // than the bare env-samples fallback. The producer is invoked at this
+      // entity-write seam (entity activate/upsert PUTs here). It is
+      // idempotent: once a row carries scope refs we keep them — a later
+      // frame-advance PUT must not re-derive or clobber them. The producer
+      // returns null for any non-sample / unconfigured-corpus case, in which
+      // case the columns stay as preserved/NULL (the anon-onboarding
+      // fallback, unchanged).
+      const alreadyScoped =
+        existing != null &&
+        (existing.bucketId != null ||
+          existing.projectIdsJson != null ||
+          existing.groupId != null ||
+          existing.documentIdsJson != null);
+      const produced = alreadyScoped
+        ? null
+        : produceEntityScope(entityKey, { samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null });
+
       const merged = {
         chatSessionId,
         entityKey,
@@ -853,12 +876,16 @@ export function createApp({
           body.extractedValuesJson !== undefined
             ? (body.extractedValuesJson as string | null)
             : existing?.extractedValuesJson ?? null,
-        // Server-only fields (CF-15 scope refs) — never overwritten
-        // by a client PUT. They flow in via chat-handler processing.
-        bucketId: existing?.bucketId ?? null,
-        projectIdsJson: existing?.projectIdsJson ?? null,
-        groupId: existing?.groupId ?? null,
-        documentIdsJson: existing?.documentIdsJson ?? null,
+        // Server-only fields (CF-15 scope refs) — never set by a client
+        // PUT. They are written by the entity→scope producer above
+        // (`produced`, first write only) and preserved thereafter. The
+        // producer fills bucketId + projectIdsJson for the `sample` kind;
+        // groupId / documentIdsJson have no producer today (kept as cf19
+        // multi-bucket→group and single-doc-viewer substrate).
+        bucketId: produced?.bucketId ?? existing?.bucketId ?? null,
+        projectIdsJson: produced?.projectIdsJson ?? existing?.projectIdsJson ?? null,
+        groupId: produced?.groupId ?? existing?.groupId ?? null,
+        documentIdsJson: produced?.documentIdsJson ?? existing?.documentIdsJson ?? null,
         createdAt: existing?.createdAt ?? now,
         lastVisitedAt: now,
       };

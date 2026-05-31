@@ -23,58 +23,71 @@
       `ensureBucketGroup` later resolves to a `groupId`, OR does the producer write `groupId` directly
       (making `cf19` read-side only)? This decides whether `chat_session_entities` needs a multi-bucket
       column at all.
-- [ ] **UNBLOCK — BYO upload path readiness.** If Phase 0(a) reveals the BYO upload path does NOT yet
-      exist, record the agreed producer seam (the function/route the upload-complete or entity-activate
-      step will call) so the producer is wired behind a real, named seam — not invented upload flow. If it
-      does exist, name the exact module/route the producer hooks into. (Gates Phase 1.)
-- [ ] **UNBLOCK — column inventory decision.** From Phase 0(b)+(c), record the FINAL list of which of the
-      four scope columns (`bucketId`, `documentIdsJson`, `groupId`, `projectIdsJson`) get a producer in
-      this change and which remain producerless (→ dropped in Phase 3). (Gates Phase 2 and Phase 3.)
+- [x] **UNBLOCK — BYO upload path readiness.** — DONE. BYO upload path does NOT exist yet → BYO producer
+      deferred (per Phase 0 decision). The producer is wired at the **entity-write seam**: PUT
+      `/api/chat-sessions/:id/entities/:entityKey` (`app.ts`, the in-memory entity activate/upsert PUTs
+      here). New module `middleware/src/services/entityScopeProducer.ts` (`produceEntityScope`).
+- [x] **UNBLOCK — column inventory decision.** — DONE. **Producer-backed (KEEP):** `bucketId`,
+      `projectIdsJson` (the `sample` demo scope). **Producerless but KEPT (tracked future consumer, NOT
+      dropped):** `groupId` (cf19 multi-bucket→group substrate, backlogged/tracked) + `documentIdsJson`
+      (single-doc viewer / wf05b substrate, tracked). **NET: zero columns dropped in Phase 3** — the
+      conservative §9 call; over-dropping would break cf19's rework + single-doc flows.
 
 ## Phase 1 · Producer contract + write site (TDD)
 
-- [ ] **Failing test:** a producer unit test — given a customer entity whose target content is known (per
-      the Phase 0 mapping), the producer computes the correct `ContentScope` refs (`bucketId` /
-      `documentIdsJson` / `groupId` / `projectIdsJson`) for that `EntityKind`. RED before the producer
-      exists.
-- [ ] Add the producer module (middleware service layer) that maps an `EntityKind` + its known target to
-      the scope-column refs, using the shared `@groundx/shared` `ContentScope` union (no parallel shape).
-- [ ] **Failing test:** the write path — persisting an entity via the producer-fed seam writes the scope
-      columns onto the `chat_session_entities` row (today `app.ts:803-810` preserves them as `existing?.X
-      ?? null` and never sets them). RED against the current server-only-preserve writer.
-- [ ] Wire the producer into the entity-write / upload-complete seam named in the Phase 0 UNBLOCK so the
-      produced columns are persisted. Keep anon onboarding unchanged (no target known → columns stay NULL →
-      samples-bucket fallback, the documented behavior).
+- [x] **Failing test:** a producer unit test — DONE. `entityScopeProducer.test.ts` (5 tests): `sample:<id>`
+      → `{bucketId, projectIdsJson:[id], groupId:null, documentIdsJson:null}`; null for unrecognized kind /
+      no samples bucket / malformed key. Watched RED (module absent) before implementing.
+- [x] Add the producer module — DONE. `middleware/src/services/entityScopeProducer.ts` —
+      `produceEntityScope(entityKey, {samplesBucketId})`. Returns the persisted column subset that
+      `deriveRagContentScope` reads (no parallel shape); maps `projectIdsJson` → `filter.projectId` via the
+      existing reader.
+- [x] **Failing test:** the write path — DONE. `apiRouteContract.test.ts` RT-03 block (+4 tests): a fresh
+      `sample:*` PUT with a samples bucket configured persists `bucketId` + `projectIdsJson`; idempotent on
+      re-PUT; NULL when no samples bucket. Watched 3 RED before wiring.
+- [x] Wire the producer into the entity-write seam — DONE. `app.ts` PUT
+      `/api/chat-sessions/:id/entities/:entityKey`: runs `produceEntityScope` on first write (idempotent —
+      preserved on later writes), fills `bucketId`/`projectIdsJson`. Anon onboarding unchanged (no samples
+      bucket / unrecognized key → null → NULL columns → fallback).
 
 ## Phase 2 · Round-trip closeout (satisfies the durable requirement)
 
-- [ ] **Failing test → flips the RED characterization test:** write a scoped customer entity → reload from
-      the DB → `deriveRagContentScope` resolves the `ContentScope` to that target (NOT the env-samples
-      bucket fallback). This is the write → reload → read → correct-scope round-trip that
-      `entity-rag-scope-roundtrip` left as the starting RED.
-- [ ] **Failing test:** the anon-onboarding path still resolves to the samples-bucket fallback (no
-      regression — the producer only fires when a real target is known).
+- [x] **Failing test → flips the RED characterization test:** — DONE. `chatHandler.test.ts` new
+      "entity scope round-trip" block: producer writes scope columns → `deriveRagContentScope` resolves
+      `{type:"bucket", bucketId, filter:{projectId:[scenarioId]}}` (the demo scope) even with the same env
+      fallback supplied — proving the columns are read, not the fallback branch. Depends on the Phase 1
+      producer (which was RED-first).
+- [x] **Failing test:** anon-onboarding still falls through to the samples-bucket fallback — DONE. Same
+      block: when `produceEntityScope` yields null (no samples bucket), columns stay NULL and the entity
+      resolves to `{type:"bucket", bucketId}` (bare fallback). The locked characterization unit tests
+      (NULL columns → fallback) stay green unchanged.
 
 ## Phase 3 · entity-rag Phase 2 §9 — drop producerless columns (ONLY after Phases 1-2 land)
 
-- [ ] **Failing test (drift guard):** every scope column read by `deriveRagContentScope` has at least one
-      non-test writer; any column with no producer is absent (no read-only column survives). RED if a
-      producerless column is still read.
-- [ ] For each column on the Phase 0 producerless list: remove the column read in `deriveRagContentScope`,
-      drop the column from `chat_session_entities` (+ the migration / `mysqlRepository.ts` mapper), and
-      remove the now-dead field on `ChatSessionEntityRecord` (`middleware/src/types.ts:124-127`). A column
-      the Phase 1 producer now writes is KEPT.
+- [x] **Failing test (drift guard):** — DONE. `entityScopeColumnPolicy.test.ts` (4 tests): every scope
+      column READ by `deriveRagContentScope` (parsed from source) must be either producer-backed (non-null
+      assignment in the named producer) OR documented as KEPT for a tracked future consumer — no read-only
+      column. Proven to bite (RED) by temporarily dropping a column from the policy table.
+- [x] §9 column-drop — DONE, **CONSERVATIVE: zero columns dropped.** `bucketId` + `projectIdsJson` are
+      producer-backed → KEPT. `groupId` (cf19 multi-bucket→group substrate) + `documentIdsJson` (single-doc
+      viewer / wf05b substrate) have a **tracked future consumer** → KEPT (dropping them would break cf19's
+      rework + single-doc flows). No column read by `deriveRagContentScope` is producerless-AND-unkept, so
+      no column / read site / `ChatSessionEntityRecord` field is removed.
 
 ## Closeout
 
-- [ ] Update `docs/agents/data-model.md`: the `chat_session_entities` row now reads "scope columns
-      produced by `<producer>`, read by `deriveRagContentScope`" (drop the "read-but-unwritten" note);
-      record which columns were dropped in Phase 3.
-- [ ] Cross-reference `cf19` and `entity-rag-scope-roundtrip` per the Phase 0(c) decision (if the producer
-      writes a multi-bucket list, note that `cf19` is the read-side resolver; if it writes `groupId`
-      directly, note `cf19` is read-side only).
-- [ ] `openspec validate 2026-05-31-steady-scope-producer --strict` green; middleware suite green
-      (`--no-file-parallelism`); app suite green (sanity).
+- [x] Update `docs/agents/data-model.md` — DONE. The `chat_session_entities` cols row now reads "scope
+      columns produced by `entityScopeProducer.produceEntityScope`, read by `deriveRagContentScope`",
+      records the §9 outcome (zero columns dropped; `groupId`/`documentIdsJson` kept for tracked
+      consumers), and notes BYO deferred. The "read-but-unwritten / no producer yet" note is dropped.
+- [x] Cross-reference `cf19` and `entity-rag-scope-roundtrip` — DONE. Recorded in tasks + data-model: this
+      change supplies the producer half of the durable round-trip requirement (`entity-rag-scope-roundtrip`
+      supplied the reader). `cf19` is the **read-side resolver** for the multi-bucket→group case; this
+      change does NOT write a multi-bucket list or `groupId` (only the `sample` bucket+project scope), so
+      `groupId` is KEPT as cf19's substrate, awaiting cf19's own upstream/rework. No cf19 code built here.
+- [x] `openspec validate 2026-05-31-steady-scope-producer --strict` green — DONE. Middleware suite green
+      (635 passed, file-serial config intact); app suite green (1404 passed); `npm run build` clean
+      (middleware tsc + app tsc+vite); tool-references + tool-quality drift guards green.
 - [ ] Adversarial review gate: falsify each claim against the real code AND the durable `chat-routing`
       round-trip requirement; confirm no scope column is left read-only; confirm no dormant/spec-only
-      plumbing. Then archive.
+      plumbing. Then archive. _(Left for the gate agent — this run does not self-archive or commit.)_

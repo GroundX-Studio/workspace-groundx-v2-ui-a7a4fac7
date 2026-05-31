@@ -10,6 +10,7 @@ import type {
 } from "../types.js";
 
 import { ChatHandlerError, deriveRagContentScope, handleChatMessage } from "./chatHandler.js";
+import { produceEntityScope } from "./entityScopeProducer.js";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -1169,5 +1170,64 @@ describe("deriveRagContentScope — characterization: read-but-unwritten scope c
   it("with no fallback bucket either, a fresh entity resolves to null (no derivable scope)", () => {
     const scope = deriveRagContentScope(makeFreshEntity(), null);
     expect(scope).toBeNull();
+  });
+});
+
+describe("entity scope round-trip: producer writes → deriveRagContentScope reads (2026-05-31-steady-scope-producer Phase 2)", () => {
+  // This is the round-trip the change `entity-rag-scope-roundtrip` left as
+  // its starting RED: the producer (`entityScopeProducer.produceEntityScope`)
+  // now WRITES the scope columns for a `sample` entity, and
+  // `deriveRagContentScope` READS them back to the demo scope — NOT the bare
+  // env-samples-bucket fallback. The characterization block above still locks
+  // the reader-in-isolation behavior for NULL columns; this block proves the
+  // loop is closed once the producer fills them.
+
+  function entityWithProducedScope(entityKey: string, samplesBucketId: number): ChatSessionEntityRecord {
+    // Simulate the entity-write seam: the producer fills the scope columns,
+    // we persist them onto the row exactly as the PUT route does.
+    const produced = produceEntityScope(entityKey, { samplesBucketId });
+    return {
+      chatSessionId: "chat-rt",
+      entityKey,
+      lastFrame: null,
+      completedFramesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: produced?.bucketId ?? null,
+      projectIdsJson: produced?.projectIdsJson ?? null,
+      groupId: produced?.groupId ?? null,
+      documentIdsJson: produced?.documentIdsJson ?? null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    };
+  }
+
+  it("a produced sample entity resolves to the demo scope (bucket + project filter), NOT the bare fallback", () => {
+    const entity = entityWithProducedScope("sample:utility", 28454);
+    // Even with the same env fallback bucket supplied, the produced
+    // project-filtered scope wins — proving the columns were read, not the
+    // fallback branch.
+    const scope = deriveRagContentScope(entity, 28454);
+    expect(scope).toEqual({
+      type: "bucket",
+      bucketId: 28454,
+      filter: { projectId: ["utility"] },
+    });
+  });
+
+  it("a different scenario round-trips to its own project filter", () => {
+    const entity = entityWithProducedScope("sample:loan", 42);
+    expect(deriveRagContentScope(entity, 42)).toEqual({
+      type: "bucket",
+      bucketId: 42,
+      filter: { projectId: ["loan"] },
+    });
+  });
+
+  it("no-regression: when the producer yields nothing (no samples bucket), the entity falls through to the env fallback", () => {
+    // produceEntityScope returns null → columns NULL → fallback drives.
+    const entity = entityWithProducedScope("sample:utility", undefined as unknown as number);
+    const scope = deriveRagContentScope(entity, 28454);
+    expect(scope).toEqual({ type: "bucket", bucketId: 28454 });
   });
 });
