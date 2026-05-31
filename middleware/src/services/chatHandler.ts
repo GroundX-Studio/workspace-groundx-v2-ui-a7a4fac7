@@ -377,6 +377,11 @@ export async function handleChatMessage(
     intent: request.intent ?? null,
     scopeHint: request.scopeHint,
     activeStepKind: request.activeStepKind,
+    // 2026-05-31-tool-system-completion — derive the caller's WidgetRole
+    // SERVER-side from the chat session (an authenticated session has an
+    // `ownerUserId`; an anonymous one does not). NEVER trusted from the client.
+    // The router role-filters the LLM tool catalog on this.
+    callerRole: session.ownerUserId ? "member" : "anonymous",
   };
 
   let reply: ChatRouterResponse;

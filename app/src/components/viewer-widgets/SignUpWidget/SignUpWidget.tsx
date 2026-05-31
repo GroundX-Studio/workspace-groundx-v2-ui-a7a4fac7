@@ -48,11 +48,12 @@ import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
 import MuiStack from "@mui/material/Stack";
-import { useCallback, useState, type FC, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FC, type FormEvent } from "react";
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import { register } from "@/api/entities/customerEntity";
 import { claimAnonymousChat } from "@/api/claimAnonymousChat";
+import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Button } from "@/components/primitives/Button/Button";
 import { Heading } from "@/components/primitives/Heading/Heading";
@@ -104,22 +105,30 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
+  // The REAL submit sequence, parameterized by explicit field values. Both the
+  // on-screen form submit and the `submit_signup` LLM tool (via the registered
+  // adapter below) drive this SAME action — there is no separate code path.
+  const submitForm = useCallback(
+    async (values: {
+      first: string;
+      last: string;
+      email: string;
+      password: string;
+      confirmPassword: string;
+    }) => {
       if (submitting) return;
       setError(null);
 
-      const trimmedEmail = email.trim();
-      if (!first.trim() || !last.trim() || !trimmedEmail || !password) {
+      const trimmedEmail = values.email.trim();
+      if (!values.first.trim() || !values.last.trim() || !trimmedEmail || !values.password) {
         setError("Please fill in every field.");
         return;
       }
-      if (password !== confirmPassword) {
+      if (values.password !== values.confirmPassword) {
         setError("Passwords don't match — please re-enter the confirmation.");
         return;
       }
-      if (password.length < 8) {
+      if (values.password.length < 8) {
         setError("Password must be at least 8 characters.");
         return;
       }
@@ -127,11 +136,11 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
       setSubmitting(true);
       try {
         await register({
-          first: first.trim(),
-          last: last.trim(),
+          first: values.first.trim(),
+          last: values.last.trim(),
           email: trimmedEmail,
-          password,
-          confirmPassword,
+          password: values.password,
+          confirmPassword: values.confirmPassword,
           endUserLicenseAgreement: true,
         });
         // Best-effort: re-key anon chat rows to the new user. If this
@@ -156,8 +165,37 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
         setSubmitting(false);
       }
     },
-    [first, last, email, password, confirmPassword, submitting, gateAwaitingCommit, commitGate, promoteToSignedIn],
+    [submitting, gateAwaitingCommit, commitGate, promoteToSignedIn],
   );
+
+  const handleSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      void submitForm({ first, last, email, password, confirmPassword });
+    },
+    [submitForm, first, last, email, password, confirmPassword],
+  );
+
+  // 2026-05-31-tool-system-completion (wf04 §1) — register the orchestrator
+  // adapter for the `submitSignup` CanvasIntent so the `submit_signup` LLM
+  // tool routes to the SAME submit sequence as the form's submit Button. The
+  // tool carries the field values as arguments (the 5 inputs are `noTool`).
+  // No-op when no CanvasOrchestratorProvider is mounted (standalone tests).
+  const orchestrator = useCanvasOrchestratorOptional();
+  useEffect(() => {
+    if (!orchestrator) return;
+    return orchestrator.registerAdapter({
+      kind: "submitSignup",
+      apply: (intent) =>
+        submitForm({
+          first: intent.first,
+          last: intent.last,
+          email: intent.email,
+          password: intent.password,
+          confirmPassword: intent.confirmPassword,
+        }),
+    });
+  }, [orchestrator, submitForm]);
 
   // Committed-state celebration. The chat-side `GateChatRail` shows
   // the canonical "Continue to Integrate" CTA; the canvas mirrors the
@@ -228,7 +266,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
           <Box component="form" onSubmit={handleSubmit} aria-label="Sign-up form">
             <MuiStack spacing={1}>
               <MuiStack direction="row" spacing={1}>
-                <TextField noTool="legacy — Phase 7 backfills tool"
+                <TextField noTool="value collected by submit_signup"
                   dense
                   fullWidth
                   size="small"
@@ -238,7 +276,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
                   onChange={(event) => setFirst(event.target.value)}
                   inputProps={{ "data-testid": "signup-first-input" }}
                 />
-                <TextField noTool="legacy — Phase 7 backfills tool"
+                <TextField noTool="value collected by submit_signup"
                   dense
                   fullWidth
                   size="small"
@@ -249,7 +287,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
                   inputProps={{ "data-testid": "signup-last-input" }}
                 />
               </MuiStack>
-              <TextField noTool="legacy — Phase 7 backfills tool"
+              <TextField noTool="value collected by submit_signup"
                 dense
                 fullWidth
                 size="small"
@@ -263,7 +301,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
                   startAdornment: <EmailOutlinedIcon sx={{ mr: 1, color: NAVY }} fontSize="small" />,
                 }}
               />
-              <TextField noTool="legacy — Phase 7 backfills tool"
+              <TextField noTool="value collected by submit_signup"
                 dense
                 fullWidth
                 size="small"
@@ -275,7 +313,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
                 inputProps={{ "data-testid": "signup-password-input" }}
                 helperText="At least 8 characters."
               />
-              <TextField noTool="legacy — Phase 7 backfills tool"
+              <TextField noTool="value collected by submit_signup"
                 dense
                 fullWidth
                 size="small"
@@ -291,7 +329,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
                   {error}
                 </Alert>
               ) : null}
-              <Button noTool="legacy — Phase 7 backfills tool"
+              <Button tool="submit_signup"
                 type="submit"
                 variant="primary"
                 submitting={submitting}

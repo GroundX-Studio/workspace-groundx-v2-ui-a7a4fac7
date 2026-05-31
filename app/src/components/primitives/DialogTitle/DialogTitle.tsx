@@ -8,11 +8,12 @@
  */
 
 import { DialogTitle as MuiDialogTitle, Typography } from "@mui/material";
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 
 import { FONT_SIZE_H5, FONT_WEIGHT_LABEL, NAVY } from "@/constants";
 
 import { IconButton } from "@/components/primitives/IconButton/IconButton";
+import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 
 interface DialogTitleProps {
   children: ReactNode;
@@ -20,6 +21,18 @@ interface DialogTitleProps {
 }
 
 export function DialogTitle({ children, onClose }: DialogTitleProps) {
+  // 2026-05-31-tool-system-completion (wf04 §4) — register an orchestrator
+  // adapter so the `close_dialog` LLM tool routes to the SAME `onClose` the
+  // close IconButton invokes. Only registered when this title owns a close
+  // control (`onClose` present). No-op when no CanvasOrchestratorProvider is
+  // mounted (standalone tests). Last-registration-wins matches the typical
+  // single-open-dialog case.
+  const orchestrator = useCanvasOrchestratorOptional();
+  useEffect(() => {
+    if (!orchestrator || !onClose) return;
+    return orchestrator.registerAdapter({ kind: "closeDialog", apply: () => onClose() });
+  }, [orchestrator, onClose]);
+
   return (
     <MuiDialogTitle
       component="div"
@@ -40,7 +53,7 @@ export function DialogTitle({ children, onClose }: DialogTitleProps) {
       >
         {children}
       </Typography>
-      {onClose && <IconButton noTool="legacy — Phase 7 backfills tool" onClick={onClose} />}
+      {onClose && <IconButton tool="close_dialog" onClick={onClose} />}
     </MuiDialogTitle>
   );
 }

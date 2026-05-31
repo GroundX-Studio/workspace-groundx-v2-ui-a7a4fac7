@@ -50,34 +50,64 @@ function* walk(dir) {
  * file text rather than importing the module so the check can run
  * without booting the React runtime.
  */
-function collectKnownToolNames() {
-  const known = new Set();
-  const slots = ["chat-widgets", "viewer-widgets"];
-  for (const slot of slots) {
-    const slotDir = join(SRC, "components", slot);
-    let entries;
+/**
+ * Tool-discovery homes — the SAME shape as `TOOL_GLOB_PATTERNS` in
+ * `src/tools/registry.ts` and `collectToolFiles` in `check-tool-quality.mjs`.
+ * The two widget slots PLUS the view-hosted (`views/**`) and primitive-hosted
+ * (`components/primitives/**`) homes added by 2026-05-31-tool-system-completion
+ * (BROAD glob-home). Restated here (a `.mjs` can't import the TS const) and
+ * kept identical so the three walkers cannot drift.
+ */
+const TOOL_HOMES = [
+  resolve(SRC, "components", "chat-widgets"),
+  resolve(SRC, "components", "viewer-widgets"),
+  resolve(SRC, "views"),
+  resolve(SRC, "components", "primitives"),
+];
+
+/** Recursively yield every `*.tools.ts` under `dir`, skipping `_`-prefixed dirs. */
+function* walkToolFiles(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.startsWith("_")) continue;
+    const abs = join(dir, entry);
+    let stat;
     try {
-      entries = readdirSync(slotDir);
+      stat = statSync(abs);
     } catch {
       continue;
     }
-    for (const entry of entries) {
-      if (entry.startsWith("_")) continue;
-      const widgetDir = join(slotDir, entry);
-      let widgetEntries;
-      try {
-        widgetEntries = readdirSync(widgetDir);
-      } catch {
-        continue;
-      }
-      for (const file of widgetEntries) {
-        if (!file.endsWith(".tools.ts")) continue;
-        const src = readFileSync(join(widgetDir, file), "utf8");
-        // Lift the tool name literal from each `name: "<...>"` declaration.
-        for (const m of src.matchAll(/\bname:\s*["']([a-z][a-z0-9_]*)["']/g)) {
-          known.add(m[1]);
-        }
-      }
+    if (stat.isDirectory()) {
+      yield* walkToolFiles(abs);
+    } else if (stat.isFile() && entry.endsWith(".tools.ts")) {
+      yield abs;
+    }
+  }
+}
+
+function* collectToolFiles() {
+  const seen = new Set();
+  for (const home of TOOL_HOMES) {
+    for (const file of walkToolFiles(home)) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      yield file;
+    }
+  }
+}
+
+function collectKnownToolNames() {
+  const known = new Set();
+  for (const file of collectToolFiles()) {
+    const src = readFileSync(file, "utf8");
+    // Lift the tool name literal from each `name: "<...>"` declaration.
+    for (const m of src.matchAll(/\bname:\s*["']([a-z][a-z0-9_]*)["']/g)) {
+      known.add(m[1]);
     }
   }
   return known;

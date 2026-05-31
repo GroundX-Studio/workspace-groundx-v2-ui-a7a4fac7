@@ -102,6 +102,12 @@ added here and asserted by the owning widget's test.
 | reject_report_section | SmartReportBuilder | mutate | all roles | shared family with `reject_proposal` |
 | edit_report_section | SmartReportBuilder | mutate | all roles | edits the in-memory draft section; *persisting* is gated at Save, not the tool |
 | delete_report_section | SmartReportBuilder | mutate | all roles | removes a draft section; *persisting* is gated at Save, not the tool |
+| submit_signup | SignUpWidget | mutate | all roles | the sign-up form is anonymous-facing; the user confirms via the chip before the account is created. Availability (a member never sees the form) is enforced at the mount site, not the tool. (2026-05-31-tool-system-completion wf04 §1) |
+| wizard_next | OnboardingWizard | read | all roles | onboarding-walkthrough navigation; gated by `APP_CONFIG.onboarding.enabled` + the mount site, not role |
+| wizard_back | OnboardingWizard | read | all roles | "" |
+| wizard_finish | OnboardingWizard | read | all roles | "" |
+| dismiss_wizard | OnboardingWizard | read | all roles | "" |
+| close_dialog | DialogTitle | mutate | all roles | closing the active dialog is open to anyone who can see it (2026-05-31-tool-system-completion wf04 §4) |
 
 > `category` (`read`/`mutate`) drives the confirmation model (auto-run vs. confirm-chip), NOT
 > visibility. Visibility is `availableIn` only (absent = all roles). Whether a mutation is *persisted*

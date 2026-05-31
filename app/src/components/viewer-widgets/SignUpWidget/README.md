@@ -113,6 +113,16 @@ The chat-side `GateChatRail` is mounted in parallel by the same shell.
 
 ## LLM tools
 
-See [`no-llm.md`](./no-llm.md). Identity actions are user-driven by
-definition; an LLM "signing up" the user is an authentication-fraud
-vector.
+See [`SignUpWidget.tools.ts`](./SignUpWidget.tools.ts). One mutate-category
+tool: `submit_signup`. It does NOT auto-run — mutate tools surface a
+confirmable chip, so the user still confirms before the account is created
+(the historical authentication-fraud concern that previously made this widget
+opt out). The handler dispatches a `submitSignup` CanvasIntent carrying the
+collected fields; the widget registers a matching orchestrator adapter that
+runs the SAME register → claim → promote → commitGate sequence the submit
+Button invokes. The five form inputs stay `noTool` with the reason
+"value collected by submit_signup" (their values are arguments of the tool,
+not separately LLM-drivable controls).
+
+(Added 2026-05-31-tool-system-completion wf04 §1; replaced the prior
+`no-llm.md` opt-out.)

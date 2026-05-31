@@ -308,3 +308,13 @@ export const useCanvasOrchestrator = (): CanvasOrchestratorApi => {
   if (!value) throw new Error("useCanvasOrchestrator must be used inside CanvasOrchestratorProvider");
   return value;
 };
+
+/**
+ * Soft-optional orchestrator access — mirrors `useChatStoreOptional` /
+ * `useOnboardingSessionOptional`. Returns `null` when no
+ * `CanvasOrchestratorProvider` is mounted (standalone widget tests, embedded
+ * canvases) so a widget can register an LLM-tool adapter without forcing a
+ * provider into every render path. Adapter registration becomes a no-op there.
+ */
+export const useCanvasOrchestratorOptional = (): CanvasOrchestratorApi | null =>
+  useContext(CanvasOrchestratorContext);

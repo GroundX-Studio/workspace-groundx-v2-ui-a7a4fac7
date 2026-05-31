@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import type { GroundXClient, LlmClient } from "../types.js";
+import type { WidgetRole } from "@groundx/shared";
 
+import { SERVER_TOOL_CATALOG } from "./toolCatalog.js";
 import { __clearXrayCache } from "./xrayCache.js";
 import {
   classifyChatMode,
@@ -991,6 +994,72 @@ describe("CF-06 token-budget guard in callGroundedLlm", () => {
   });
 });
 
+// ── 2026-05-31-tool-system-completion: server-side role gating ──
+//
+// The chat router exposes a tool to the LLM IFF the caller's role permits it.
+// The caller's role rides on `ChatRouterRequest.callerRole`, derived SERVER-
+// side in chatHandler (never trusted from the client). This block proves the
+// filter is applied at the router boundary (the surface the LLM actually
+// sees), using a member-only tool spliced into the live catalog.
+describe("2026-05-31-tool-system-completion — server-side role filter on the LLM catalog", () => {
+  function jsonOk(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  const memberOnlyTool = {
+    name: "edit_member_only_probe",
+    description:
+      "Member-only probe tool. Use when the role-filter end-to-end test splices it into the catalog.",
+    category: "mutate" as const,
+    inputSchema: z.object({ id: z.string().describe("id") }),
+    availableIn: ["member"] as WidgetRole[],
+    intentBuilder: () => ({ kind: "noop" }),
+  };
+
+  beforeEach(() => {
+    SERVER_TOOL_CATALOG.push(memberOnlyTool);
+  });
+  afterEach(() => {
+    const i = SERVER_TOOL_CATALOG.indexOf(memberOnlyTool);
+    if (i >= 0) SERVER_TOOL_CATALOG.splice(i, 1);
+  });
+
+  async function toolsSentFor(callerRole: WidgetRole | undefined): Promise<string[]> {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+    };
+    const llmForward = vi.fn(async () => jsonOk({ choices: [{ message: { content: "ok" } }] }));
+    const llmClient: LlmClient = { forward: llmForward };
+    await routeChat(makeRequest({ newUserMessage: "Q", callerRole }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body) as {
+      tools?: { function?: { name?: string } }[];
+    };
+    return (body.tools ?? []).map((t) => t.function?.name ?? "").filter(Boolean);
+  }
+
+  it("hides a member-only tool from an anonymous caller", async () => {
+    const names = await toolsSentFor("anonymous");
+    expect(names).not.toContain("edit_member_only_probe");
+    // sanity: an all-roles tool is still present for anonymous.
+    expect(names).toContain("propose_schema_field");
+  });
+
+  it("exposes a member-only tool to a member caller", async () => {
+    const names = await toolsSentFor("member");
+    expect(names).toContain("edit_member_only_probe");
+  });
+});
+
 describe("CF-06 refusal calibration in callGroundedLlm", () => {
   function jsonOk(payload: unknown): Response {
     return new Response(JSON.stringify(payload), {
@@ -1669,9 +1738,12 @@ describe("Phase 5 — function-calling tool round-trip", () => {
     expect(toolNames).toEqual([
       "accept_report_section",
       "book_call",
+      // 2026-05-31-tool-system-completion — universal wf04 tools (no step filter).
+      "close_dialog",
       "commit_gate",
       "delete_report_section",
       "dismiss_gate",
+      "dismiss_wizard",
       "edit_report_section",
       "pin_to_report",
       "propose_report_section",
@@ -1682,7 +1754,11 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       "show_integrate",
       "show_smart_report_edit",
       "show_smart_report_render",
+      "submit_signup",
       "suggest_intent",
+      "wizard_back",
+      "wizard_finish",
+      "wizard_next",
     ]);
   });
 });

@@ -6,11 +6,14 @@
  * mirroring it here turns the suite red (and vice versa).
  */
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   getServerTool,
+  roleExposes,
   SERVER_TOOL_CATALOG,
   toolsForStep,
+  type ServerTool,
 } from "./toolCatalog.js";
 
 const EXPECTED_NAMES = [
@@ -36,6 +39,13 @@ const EXPECTED_NAMES = [
   "reject_report_section",
   "edit_report_section",
   "delete_report_section",
+  // 2026-05-31-tool-system-completion — wf04 §1/§2/§4 deferred tools.
+  "submit_signup",
+  "wizard_next",
+  "wizard_back",
+  "wizard_finish",
+  "dismiss_wizard",
+  "close_dialog",
 ].sort();
 
 describe("server tool catalog", () => {
@@ -86,8 +96,12 @@ describe("server tool catalog", () => {
       [
         "accept_proposal",
         "book_call",
+        // tool-system-completion — DialogTitle close is universal (no step filter).
+        "close_dialog",
         "commit_gate",
+        // tool-system-completion — wizard nav is universal (no step filter).
         "dismiss_gate",
+        "dismiss_wizard",
         "jump_to_page",
         "open_document",
         // smart-report Phase 5 — pin + render are reachable from the doc-viewer.
@@ -101,7 +115,12 @@ describe("server tool catalog", () => {
         // from the doc-viewer (the user can ask to ship/integrate).
         "show_integrate",
         "show_smart_report_render",
+        // tool-system-completion — sign-up submit is universal (no step filter).
+        "submit_signup",
         "suggest_intent",
+        "wizard_back",
+        "wizard_finish",
+        "wizard_next",
       ],
     );
     // `report` step now exposes the smart-report tool surface (Phase 5) +
@@ -109,9 +128,12 @@ describe("server tool catalog", () => {
     expect(toolsForStep("report").map((t) => t.name).sort()).toEqual([
       "accept_report_section",
       "book_call",
+      // tool-system-completion — universal tools (no availableSteps).
+      "close_dialog",
       "commit_gate",
       "delete_report_section",
       "dismiss_gate",
+      "dismiss_wizard",
       "edit_report_section",
       "pin_to_report",
       "propose_report_section",
@@ -122,12 +144,71 @@ describe("server tool catalog", () => {
       "show_integrate",
       "show_smart_report_edit",
       "show_smart_report_render",
+      "submit_signup",
       "suggest_intent",
+      "wizard_back",
+      "wizard_finish",
+      "wizard_next",
     ]);
   });
 
   it("toolsForStep with undefined returns the full catalog", () => {
     expect(toolsForStep(undefined).length).toBe(SERVER_TOOL_CATALOG.length);
+  });
+
+  // ── 2026-05-31-tool-system-completion: server role axis + filter ──
+  //
+  // The behavioral gate: `toolsForStep(step, role)` exposes a tool to the LLM
+  // IFF (`availableIn` undefined/empty → all roles) OR role ∈ `availableIn`.
+  // `category` (read/mutate) does NOT gate visibility. Role is derived
+  // SERVER-side (chatHandler) from the session, never trusted from the client.
+  describe("role-scoped catalog (availableIn: WidgetRole[])", () => {
+    it("every shipped tool with no availableIn is exposed to BOTH roles", () => {
+      // No shipped tool is role-restricted today (edit_template is the
+      // _template stub, not shipped). So the anonymous + member catalogs are
+      // identical and equal to the full per-step catalog.
+      const stepAnon = toolsForStep(undefined, "anonymous").map((t) => t.name).sort();
+      const stepMember = toolsForStep(undefined, "member").map((t) => t.name).sort();
+      const stepAll = SERVER_TOOL_CATALOG.map((t) => t.name).sort();
+      expect(stepAnon).toEqual(stepAll);
+      expect(stepMember).toEqual(stepAll);
+    });
+
+    it("category (mutate) does NOT gate visibility — a mutate tool is exposed to anonymous", () => {
+      // propose_schema_field is mutate + all-roles → anonymous still sees it.
+      const anon = toolsForStep("extract-workbench", "anonymous").map((t) => t.name);
+      expect(anon).toContain("propose_schema_field");
+      expect(getServerTool("propose_schema_field")!.category).toBe("mutate");
+    });
+
+    it("a role NOT in a tool's availableIn hides the tool; a role IN it exposes it", () => {
+      // Exercise the filter directly against a constructed member-only tool so
+      // the rule is pinned even though no shipped tool is member-only today.
+      const memberOnly: ServerTool = {
+        name: "edit_fixture_template",
+        description:
+          "Fixture member-only tool. Use when the role-filter rule is under test (not shipped).",
+        category: "mutate",
+        inputSchema: z.object({ id: z.string().describe("id") }),
+        availableIn: ["member"],
+        intentBuilder: () => ({ kind: "noop" }),
+      };
+      expect(roleExposes(memberOnly, "member")).toBe(true);
+      expect(roleExposes(memberOnly, "anonymous")).toBe(false);
+      // Absent availableIn → all roles.
+      const allRoles: ServerTool = { ...memberOnly, availableIn: undefined };
+      expect(roleExposes(allRoles, "anonymous")).toBe(true);
+      expect(roleExposes(allRoles, "member")).toBe(true);
+      // Empty availableIn → all roles.
+      const emptyRoles: ServerTool = { ...memberOnly, availableIn: [] };
+      expect(roleExposes(emptyRoles, "anonymous")).toBe(true);
+    });
+
+    it("toolsForStep with no role argument is unchanged (back-compat — full per-step catalog)", () => {
+      expect(toolsForStep("report").map((t) => t.name).sort()).toEqual(
+        toolsForStep("report", undefined).map((t) => t.name).sort(),
+      );
+    });
   });
 
   describe("open_document intentBuilder", () => {

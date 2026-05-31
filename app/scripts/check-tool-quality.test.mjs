@@ -185,6 +185,91 @@ export const tools = [t];
   assert(r.code === 0, `expected show_ prefix to pass, got code=${r.code} stderr=${r.stderr}`);
 });
 
+// Test 9 — tool-system-completion: the deferred view/primitive tool
+// verbs (`submit_`, `wizard_`, `close_`) are allowlisted so the
+// SignUpWidget submit / OnboardingWizard nav / DialogTitle close tools
+// pass the verb-prefix rule.
+for (const [verb, name] of [
+  ["submit_", "submit_quality_fixture"],
+  ["wizard_", "wizard_quality_fixture"],
+  ["close_", "close_quality_fixture"],
+]) {
+  withFixture(`Verb_${verb}`, `
+import { z } from "zod";
+import type { WidgetTool } from "@/tools/types";
+const t: WidgetTool = {
+  name: "${name}",
+  description: "Exercises the ${verb} verb prefix. Use when the test asserts the new verb taxonomy passes.",
+  category: "read",
+  input: z.object({ id: z.string().describe("identifier") }),
+  handler: () => null,
+};
+export const tools = [t];
+`, () => {
+    const r = runScript();
+    assert(r.code === 0, `expected ${verb} prefix to pass, got code=${r.code} stderr=${r.stderr}`);
+  });
+}
+
+// Test 10 — 2026-05-31-tool-system-completion glob-home (BROAD): the
+// quality scanner walks view-hosted (views/**) and primitive-hosted
+// (components/primitives/**) `*.tools.ts`, so tools placed there are
+// subject to the SAME rules as widget tools. We drop a tool with a
+// non-allowlisted verb in each home and assert the scanner FIRES on it
+// (proving collectToolFiles learned the home — a no-op walker would
+// silently pass).
+function withHomeFixture(absDir, fileName, body, fn) {
+  mkdirSync(absDir, { recursive: true });
+  const toolsFile = join(absDir, fileName);
+  writeFileSync(toolsFile, body);
+  try {
+    return fn();
+  } finally {
+    rmSync(absDir, { recursive: true, force: true });
+  }
+}
+
+const BAD_VERB_TOOL = `
+import { z } from "zod";
+import type { WidgetTool } from "@/tools/types";
+const t: WidgetTool = {
+  name: "frobnicate_glob_home",
+  description: "Frobnicate the glob-home fixture. Use when the scanner checks a non-widget home.",
+  category: "read",
+  input: z.object({ id: z.string().describe("identifier") }),
+  handler: () => null,
+};
+export const tools = [t];
+`;
+
+withHomeFixture(
+  resolve(APP_ROOT, "src/views/QualityHomeFixtureView"),
+  "QualityHomeFixtureView.tools.ts",
+  BAD_VERB_TOOL,
+  () => {
+    const r = runScript();
+    assert(r.code === 1, "expected a view-hosted bad-verb tool to be scanned + fail");
+    assert(
+      r.stderr.includes("name verb prefix"),
+      `expected the scanner to evaluate the view-hosted tool, got: ${r.stderr}`,
+    );
+  },
+);
+
+withHomeFixture(
+  resolve(APP_ROOT, "src/components/primitives/QualityHomeFixturePrimitive"),
+  "QualityHomeFixturePrimitive.tools.ts",
+  BAD_VERB_TOOL,
+  () => {
+    const r = runScript();
+    assert(r.code === 1, "expected a primitive-hosted bad-verb tool to be scanned + fail");
+    assert(
+      r.stderr.includes("name verb prefix"),
+      `expected the scanner to evaluate the primitive-hosted tool, got: ${r.stderr}`,
+    );
+  },
+);
+
 if (failures.length === 0) {
   console.log("check-tool-quality.test.mjs: all assertions passed");
   process.exit(0);

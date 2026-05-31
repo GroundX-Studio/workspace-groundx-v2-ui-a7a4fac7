@@ -111,6 +111,18 @@ export interface ChatRouterRequest {
    * the full catalog is sent.
    */
   activeStepKind?: string | null;
+  /**
+   * 2026-05-31-tool-system-completion — the caller's AUTHORIZATION role,
+   * derived SERVER-side in `chatHandler.ts` from the chat session
+   * (`session.ownerUserId` present → "member", else "anonymous"). NEVER taken
+   * from the client. The tool catalog sent to the LLM is role-filtered:
+   * `toolsForStep(activeStepKind, callerRole)` exposes a tool IFF its
+   * `availableIn` admits this role (absent/empty → all roles). When omitted
+   * (legacy callers / non-RAG paths), the role filter is a no-op and the full
+   * per-step catalog is sent — but the production path (chatHandler) always
+   * supplies it.
+   */
+  callerRole?: WidgetRole;
 }
 
 // Canonical Citation now lives in the shared wire contract (`@groundx/shared`,
@@ -118,7 +130,7 @@ export interface ChatRouterRequest {
 // middleware imports (`Citation` from "./chatRouter.js") keep resolving. The
 // shared shape is identical: documentId, page, snippet?, bbox? (NormalizedBbox),
 // tier? (CitationTier), confidence?, answerSpan?.
-import { compileScopeFilter, type Citation, type ContentScope, type ScopeFilter } from "@groundx/shared";
+import { compileScopeFilter, type Citation, type ContentScope, type ScopeFilter, type WidgetRole } from "@groundx/shared";
 export type { Citation };
 
 export interface SuggestedAction {
@@ -572,7 +584,16 @@ async function runRagPipeline(
   // filter and returns the safe unrestricted-only set — so the naive validation
   // WIDENS the tool surface for bogus input. A proper fix needs `toolsForStep` to
   // express "unknown step → safe minimum" first. Tracked separately.
-  const catalog = toolsForStep(request.activeStepKind as ViewerStepKind | undefined);
+  // 2026-05-31-tool-system-completion — compose the step filter with the
+  // SERVER-derived caller role. `request.callerRole` comes from chatHandler
+  // (session.ownerUserId → member/anonymous); it is NEVER client-trusted. A
+  // member-only tool (`availableIn: ["member"]`) is absent from the catalog an
+  // anonymous caller's LLM sees. When `callerRole` is omitted the role filter
+  // is a no-op (legacy/non-RAG callers) — the production path always supplies it.
+  const catalog = toolsForStep(
+    request.activeStepKind as ViewerStepKind | undefined,
+    request.callerRole,
+  );
   const openAiTools: OpenAiFunctionTool[] = toOpenAiTools(catalog);
 
   const llmResponse = await callGroundedLlm(

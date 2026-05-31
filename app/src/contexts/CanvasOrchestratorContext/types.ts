@@ -146,7 +146,44 @@ export type CanvasIntent =
    * of the builder's `⋮ → Remove section`). The orchestrator routes to
    * `ChatStore.removeReportSection`.
    */
-  | { kind: "deleteReportSection"; sectionId: string };
+  | { kind: "deleteReportSection"; sectionId: string }
+  /**
+   * 2026-05-31-tool-system-completion (wf04 §1) — submit the F6 sign-up
+   * form with the collected identity fields. Produced by the
+   * `submit_signup` LLM tool and the SignUpWidget's submit Button (both
+   * route to the SAME registered adapter, which runs the widget's own
+   * `register` → `claimAnonymousChat` → `promoteToSignedIn` → `commitGate`
+   * sequence). Mutate-category: the LLM driving sign-up is a confirmable
+   * action, not an auto-run. No-op when no SignUpWidget adapter is mounted.
+   */
+  | {
+      kind: "submitSignup";
+      first: string;
+      last: string;
+      email: string;
+      password: string;
+      confirmPassword: string;
+    }
+  /**
+   * 2026-05-31-tool-system-completion (wf04 §2) — OnboardingWizard
+   * navigation. Produced by the `wizard_next` / `wizard_back` /
+   * `wizard_finish` / `dismiss_wizard` LLM tools and the wizard's own nav
+   * Buttons (both route to the SAME registered adapter, which calls the
+   * OnboardingContext `next` / `back` / `finish` / `closeWithoutCompleting`).
+   * Read-style nav → auto-dispatch. No-op when no wizard adapter is mounted.
+   */
+  | { kind: "wizardNext" }
+  | { kind: "wizardBack" }
+  | { kind: "wizardFinish" }
+  | { kind: "dismissWizard" }
+  /**
+   * 2026-05-31-tool-system-completion (wf04 §4) — dismiss the active dialog.
+   * Produced by the `close_dialog` LLM tool and the `DialogTitle` primitive's
+   * close IconButton (both route to the SAME registered adapter, which calls
+   * the DialogTitle's `onClose`). Mutate-category. No-op when no DialogTitle
+   * adapter is mounted.
+   */
+  | { kind: "closeDialog" };
 
 export type IntentSource = "user" | "agent" | "tour";
 

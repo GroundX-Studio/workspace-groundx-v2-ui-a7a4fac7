@@ -88,19 +88,39 @@ export function createRegistry(
 }
 
 /**
+ * The tool-discovery glob homes. The two widget slots (`chat-widgets/`,
+ * `viewer-widgets/`) PLUS — added by 2026-05-31-tool-system-completion (BROAD
+ * glob-home decision) — view-hosted (`views/**`) and primitive-hosted
+ * (`components/primitives/**`) `*.tools.ts` files, so the `OnboardingWizard`
+ * view and the `DialogTitle` primitive can own their tools in place.
+ *
+ * Exported as the single source of truth for the discovery shape: the two
+ * companion walkers — `check-tool-quality`'s `collectToolFiles` and
+ * `check-tool-references`'s `collectKnownToolNames` — restate the SAME homes,
+ * and `registry.test.ts` asserts this list so the three walkers cannot drift.
+ *
+ * NOTE: `import.meta.glob` requires its pattern argument to be a literal array
+ * (Vite static-analyzes it at build time), so the `eagerModules` call below
+ * INLINES the identical list rather than spreading this const.
+ */
+export const TOOL_GLOB_PATTERNS = [
+  "../components/chat-widgets/*/*.tools.ts",
+  "../components/viewer-widgets/*/*.tools.ts",
+  "../views/**/*.tools.ts",
+  "../components/primitives/**/*.tools.ts",
+] as const;
+
+/**
  * Production singleton. Vite resolves the glob at build time; the
  * `eager: true` flag inlines every match's module so we don't pay
  * a dynamic-import roundtrip at first catalog read.
- *
- * The pattern intentionally only walks `chat-widgets/` and
- * `viewer-widgets/` — Phase 6's drift guard restates that placement
- * convention; the central tool registry only sees what the widget
- * contract recognizes.
  */
 const eagerModules = import.meta.glob(
   [
     "../components/chat-widgets/*/*.tools.ts",
     "../components/viewer-widgets/*/*.tools.ts",
+    "../views/**/*.tools.ts",
+    "../components/primitives/**/*.tools.ts",
   ],
   { eager: true },
 );

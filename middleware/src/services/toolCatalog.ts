@@ -19,9 +19,9 @@
  */
 import { z } from "zod";
 
-import { viewerStepKindSchema, type ViewerStepKind } from "@groundx/shared";
+import { viewerStepKindSchema, type ViewerStepKind, type WidgetRole } from "@groundx/shared";
 
-export type { ViewerStepKind };
+export type { ViewerStepKind, WidgetRole };
 
 /**
  * Server-side tool descriptor. The `intentBuilder` produces the
@@ -39,8 +39,37 @@ export interface ServerTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
    * undefined → exposed in every step.
    */
   availableSteps?: ViewerStepKind[];
+  /**
+   * 2026-05-31-tool-system-completion — the AUTHORIZATION roles this tool is
+   * exposed to in the LLM-facing catalog. `WidgetRole` (`@groundx/shared`) is
+   * the ONE role enum (`anonymous` | `member`). Rule (composed with
+   * `availableSteps`): a tool is exposed IFF (`availableIn` undefined/empty →
+   * ALL roles) OR the caller's role ∈ `availableIn`. `category`
+   * (read/mutate) drives the confirmation model, NOT visibility. The caller's
+   * role is derived SERVER-side from the chat session (never client-trusted) —
+   * see `chatHandler.ts` → `ChatRouterRequest.callerRole`.
+   *
+   * The SERVER catalog is the SOLE role-bearing surface (the app-side
+   * `WidgetTool.availableIn` orphan is not migrated — gate-answered decision
+   * (b)). Today no SHIPPED tool is role-restricted; the matrix's lone
+   * `edit_template = ["member"]` is the `_template` stub, not shipped. Set this
+   * deliberately per `docs/agents/widget-access-matrix.md` §3 when a real
+   * role-restricted tool ships.
+   */
+  availableIn?: WidgetRole[];
   /** Builds the CanvasIntent shape from validated input. */
   intentBuilder: (input: z.infer<TSchema>) => Record<string, unknown>;
+}
+
+/**
+ * True iff the tool is exposed to `role`. `availableIn` undefined/empty → all
+ * roles; otherwise role must be listed. The single role-visibility predicate
+ * — `toolsForStep` composes it with the step filter, and the parity guard
+ * uses the same rule. `category` does NOT participate.
+ */
+export function roleExposes(tool: ServerTool, role: WidgetRole): boolean {
+  if (!tool.availableIn || tool.availableIn.length === 0) return true;
+  return tool.availableIn.includes(role);
 }
 
 // `ViewerStepKind` is now the ONE shared definition (`@groundx/shared`,
@@ -524,6 +553,98 @@ const deleteReportSection: ServerTool = {
   intentBuilder: (input) => ({ kind: "deleteReportSection", sectionId: input.section_id }),
 };
 
+// ── 2026-05-31-tool-system-completion — wf04 §1/§2/§4 deferred tools ──
+//
+// Hand-mirror of the app-side SignUpWidget / OnboardingWizard / DialogTitle
+// tool files. All are all-roles (no `availableIn`) per the access matrix §3.
+// Each routes to a REAL app action via the widget/view/primitive's registered
+// CanvasOrchestrator adapter (no dormant plumbing): the app `handler` and this
+// `intentBuilder` produce the SAME CanvasIntent the on-screen control dispatches.
+
+/** Mirror of `SignUpWidget.tools.ts` → `submit_signup` (mutate). */
+const submitSignup: ServerTool = {
+  name: "submit_signup",
+  description:
+    "Submit the sign-up form to create the account and save the sample work. " +
+    "Use when the user has supplied their name, email, and password and explicitly " +
+    "asked to sign up, create an account, or save their work. The user confirms via " +
+    "the chip before the account is created — it is not submitted automatically.",
+  category: "mutate",
+  inputSchema: z.object({
+    first: z.string().min(1).describe("The first name."),
+    last: z.string().min(1).describe("The last name."),
+    email: z.string().min(1).email().describe("The user's email address (the account login)."),
+    password: z.string().min(8).describe("The chosen password — at least 8 characters."),
+    confirmPassword: z
+      .string()
+      .min(1)
+      .describe("Password confirmation — must match `password` (the widget re-checks)."),
+  }),
+  intentBuilder: (input) => ({
+    kind: "submitSignup",
+    first: input.first,
+    last: input.last,
+    email: input.email,
+    password: input.password,
+    confirmPassword: input.confirmPassword,
+  }),
+};
+
+/** Mirror of `OnboardingWizard.tools.ts` → `wizard_next` (read nav). */
+const wizardNext: ServerTool = {
+  name: "wizard_next",
+  description:
+    "Advance the onboarding wizard to the next step. Use when the active surface is the " +
+    "onboarding wizard and the user asks to continue, go on, or move to the next step.",
+  category: "read",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "wizardNext" }),
+};
+
+/** Mirror of `OnboardingWizard.tools.ts` → `wizard_back` (read nav). */
+const wizardBack: ServerTool = {
+  name: "wizard_back",
+  description:
+    "Move the onboarding wizard back to the previous step. Use when the user asks to go " +
+    "back or review the previous onboarding step.",
+  category: "read",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "wizardBack" }),
+};
+
+/** Mirror of `OnboardingWizard.tools.ts` → `wizard_finish` (read nav). */
+const wizardFinish: ServerTool = {
+  name: "wizard_finish",
+  description:
+    "Finish the onboarding wizard, recording completion. Use when the user is on the last " +
+    "onboarding step and asks to finish, complete, or close the walkthrough as done.",
+  category: "read",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "wizardFinish" }),
+};
+
+/** Mirror of `OnboardingWizard.tools.ts` → `dismiss_wizard` (read nav). */
+const dismissWizard: ServerTool = {
+  name: "dismiss_wizard",
+  description:
+    "Dismiss the onboarding wizard without completing it. Use when the user asks to skip, " +
+    "close, or come back later to the onboarding walkthrough.",
+  category: "read",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "dismissWizard" }),
+};
+
+/** Mirror of `DialogTitle.tools.ts` → `close_dialog` (mutate). */
+const closeDialog: ServerTool = {
+  name: "close_dialog",
+  description:
+    "Close the currently-open dialog via its title-bar close control. Use when the user " +
+    "asks to close, dismiss, or cancel the open modal / dialog.",
+  category: "mutate",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "closeDialog" }),
+};
+
 /**
  * The authoritative server catalog. Phase 7 backfill extends this
  * array as widgets are mirrored. The order here is stable (matches
@@ -555,18 +676,35 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   rejectReportSection,
   editReportSection,
   deleteReportSection,
+  // 2026-05-31-tool-system-completion — wf04 §1/§2/§4 deferred tools
+  // (mirror of SignUpWidget / OnboardingWizard / DialogTitle). All all-roles.
+  submitSignup,
+  wizardNext,
+  wizardBack,
+  wizardFinish,
+  dismissWizard,
+  closeDialog,
 ];
 
 /**
- * Tools exposed for the given ViewerStep. Mirrors the app-side
- * `toolRegistry.forStep`. Tools with no `availableSteps` are
- * exposed in every step.
+ * Tools exposed for the given ViewerStep + caller role. Mirrors the app-side
+ * `toolRegistry.forStep`. The two filters COMPOSE: a tool is exposed IFF its
+ * `availableSteps` admits `stepKind` (absent/empty → every step) AND
+ * `roleExposes(tool, role)` (absent/empty `availableIn` → every role). When
+ * `role` is omitted the role filter is a no-op (back-compat — full per-step
+ * catalog). The caller's role is derived SERVER-side (`chatHandler.ts`), never
+ * trusted from the client.
  */
-export function toolsForStep(stepKind: ViewerStepKind | undefined): ServerTool[] {
-  if (!stepKind) return SERVER_TOOL_CATALOG;
-  return SERVER_TOOL_CATALOG.filter(
-    (t) => !t.availableSteps || t.availableSteps.length === 0 || t.availableSteps.includes(stepKind),
-  );
+export function toolsForStep(
+  stepKind: ViewerStepKind | undefined,
+  role?: WidgetRole,
+): ServerTool[] {
+  return SERVER_TOOL_CATALOG.filter((t) => {
+    const stepOk =
+      !stepKind || !t.availableSteps || t.availableSteps.length === 0 || t.availableSteps.includes(stepKind);
+    const roleOk = role === undefined || roleExposes(t, role);
+    return stepOk && roleOk;
+  });
 }
 
 /** Lookup by name. Returns undefined for unknown names. */

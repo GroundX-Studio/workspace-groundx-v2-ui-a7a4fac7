@@ -80,6 +80,75 @@ try {
   rmSync(fixtureFile2, { force: true });
 }
 
+// Test 4 — 2026-05-31-tool-system-completion glob-home (BROAD): a
+// `*.tools.ts` co-located with a VIEW (views/**) and a PRIMITIVE
+// (components/primitives/**) is discovered by `collectKnownToolNames`,
+// so a `tool="..."` reference to a view/primitive-hosted tool resolves
+// instead of failing as "unknown". Proves the reference walker learned
+// the same homes as the registry + quality scanner (no drift).
+{
+  // View-hosted tool home.
+  const viewToolDir = resolve(APP_ROOT, "src/views/__GlobHomeFixtureView__");
+  const viewToolFile = join(viewToolDir, "GlobHomeFixtureView.tools.ts");
+  const viewRefFile = join(viewToolDir, "GlobHomeFixtureView.tsx");
+  // Primitive-hosted tool home.
+  const primToolDir = resolve(APP_ROOT, "src/components/primitives/GlobHomeFixturePrimitive");
+  const primToolFile = join(primToolDir, "GlobHomeFixturePrimitive.tools.ts");
+  const primRefFile = join(primToolDir, "GlobHomeFixturePrimitive.tsx");
+  mkdirSync(viewToolDir, { recursive: true });
+  mkdirSync(primToolDir, { recursive: true });
+  writeFileSync(
+    viewToolFile,
+    `import { z } from "zod";
+import type { WidgetTool } from "@/tools/types";
+const t: WidgetTool = {
+  name: "wizard_glob_home_fixture",
+  description: "Glob-home fixture view tool. Use when the reference walker checks view homes.",
+  category: "read",
+  input: z.object({ id: z.string().describe("identifier") }),
+  handler: () => null,
+};
+export const tools = [t];
+`,
+  );
+  writeFileSync(
+    viewRefFile,
+    `import { Button } from "@/components/primitives/Button/Button";
+export const ViewProbe = () => <Button tool="wizard_glob_home_fixture">probe</Button>;
+`,
+  );
+  writeFileSync(
+    primToolFile,
+    `import { z } from "zod";
+import type { WidgetTool } from "@/tools/types";
+const t: WidgetTool = {
+  name: "close_glob_home_fixture",
+  description: "Glob-home fixture primitive tool. Use when the reference walker checks primitive homes.",
+  category: "read",
+  input: z.object({ id: z.string().describe("identifier") }),
+  handler: () => null,
+};
+export const tools = [t];
+`,
+  );
+  writeFileSync(
+    primRefFile,
+    `import { Button } from "@/components/primitives/Button/Button";
+export const PrimProbe = () => <Button tool="close_glob_home_fixture">probe</Button>;
+`,
+  );
+  try {
+    const r = runScript();
+    assert(
+      r.code === 0,
+      `expected view/primitive-hosted tool references to resolve, got code=${r.code}, stderr=${r.stderr}`,
+    );
+  } finally {
+    rmSync(viewToolDir, { recursive: true, force: true });
+    rmSync(primToolDir, { recursive: true, force: true });
+  }
+}
+
 if (failures.length === 0) {
   console.log("check-tool-references.test.mjs: all assertions passed");
   process.exit(0);

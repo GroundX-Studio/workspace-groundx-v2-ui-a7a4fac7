@@ -17,7 +17,7 @@ import { z } from "zod";
 import type { Catalog } from "@groundx/shared";
 
 import type { WidgetTool, WidgetToolModule } from "./types";
-import { createRegistry } from "./registry";
+import { createRegistry, TOOL_GLOB_PATTERNS } from "./registry";
 
 const openDocument: WidgetTool = {
   name: "open_document",
@@ -157,6 +157,21 @@ describe("toolRegistry — createRegistry", () => {
     expect(reg.byId("open_document")).toBe(reg.byName("open_document"));
     expect(reg.byId("propose_field")).toBe(reg.byName("propose_field"));
     expect(reg.byId("missing")).toBe(reg.byName("missing"));
+  });
+
+  // ── 2026-05-31-tool-system-completion: glob-home (BROAD) ──
+  // The production singleton walks the two widget slots PLUS view-hosted
+  // (views/**) and primitive-hosted (components/primitives/**) tool files
+  // so OnboardingWizard + DialogTitle tools are discoverable in place. The
+  // SAME pattern shape is mirrored by `check-tool-quality`'s collectToolFiles
+  // and `check-tool-references`'s collectKnownToolNames so the three walkers
+  // cannot drift. We assert the exported pattern list to lock that shape.
+  it("the production glob walks the widget slots + the view/primitive homes", () => {
+    expect(TOOL_GLOB_PATTERNS).toContain("../components/chat-widgets/*/*.tools.ts");
+    expect(TOOL_GLOB_PATTERNS).toContain("../components/viewer-widgets/*/*.tools.ts");
+    // BROAD view + primitive homes (tool-system-completion).
+    expect(TOOL_GLOB_PATTERNS).toContain("../views/**/*.tools.ts");
+    expect(TOOL_GLOB_PATTERNS).toContain("../components/primitives/**/*.tools.ts");
   });
 
   it("duplicate throw (via shared assertUniqueIds) names the colliding modules", () => {

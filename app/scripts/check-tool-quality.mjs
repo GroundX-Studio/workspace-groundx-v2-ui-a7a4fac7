@@ -57,32 +57,67 @@ const ALLOWED_VERBS = [
   "reject_",
   "cancel_",
   "delete_",
+  // 2026-05-31-tool-system-completion — the deferred view/primitive tools.
+  // `submit_` (SignUpWidget submit), `wizard_` (OnboardingWizard nav), and
+  // `close_` (DialogTitle close) per the agent-tools spec "The verb allowlist
+  // SHALL admit submit_, wizard_, and close_".
+  "submit_",
+  "wizard_",
+  "close_",
 ];
 
-function* collectToolFiles() {
-  const slots = ["chat-widgets", "viewer-widgets"];
-  for (const slot of slots) {
-    const slotDir = join(SRC, "components", slot);
-    let entries;
+/**
+ * Tool-discovery homes — the SAME shape as `TOOL_GLOB_PATTERNS` in
+ * `src/tools/registry.ts` and `collectKnownToolNames` in
+ * `check-tool-references.mjs`. The two widget slots PLUS the view-hosted
+ * (`views/**`) and primitive-hosted (`components/primitives/**`) homes added by
+ * 2026-05-31-tool-system-completion (BROAD glob-home), so OnboardingWizard +
+ * DialogTitle tools are scanned in place. `registry.test.ts` asserts the
+ * registry's list; this list is restated here (a `.mjs` script can't import the
+ * TS const) and kept identical — the three walkers cannot drift.
+ */
+const TOOL_HOMES = [
+  resolve(SRC, "components", "chat-widgets"),
+  resolve(SRC, "components", "viewer-widgets"),
+  resolve(SRC, "views"),
+  resolve(SRC, "components", "primitives"),
+];
+
+/** Recursively yield every `*.tools.ts` under `dir`, skipping `_`-prefixed dirs. */
+function* walkToolFiles(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.startsWith("_")) continue;
+    const abs = join(dir, entry);
+    let stat;
     try {
-      entries = readdirSync(slotDir);
+      stat = statSync(abs);
     } catch {
       continue;
     }
-    for (const entry of entries) {
-      if (entry.startsWith("_")) continue;
-      const widgetDir = join(slotDir, entry);
-      let widgetEntries;
-      try {
-        widgetEntries = readdirSync(widgetDir);
-      } catch {
-        continue;
-      }
-      for (const file of widgetEntries) {
-        if (file.endsWith(".tools.ts")) {
-          yield join(widgetDir, file);
-        }
-      }
+    if (stat.isDirectory()) {
+      yield* walkToolFiles(abs);
+    } else if (stat.isFile() && entry.endsWith(".tools.ts")) {
+      yield abs;
+    }
+  }
+}
+
+function* collectToolFiles() {
+  const seen = new Set();
+  for (const home of TOOL_HOMES) {
+    for (const file of walkToolFiles(home)) {
+      // `components/primitives` is nested under `components`, but the widget
+      // slots are siblings — no path is reachable from two homes. Dedupe
+      // defensively anyway so a future overlapping home can't double-count.
+      if (seen.has(file)) continue;
+      seen.add(file);
+      yield file;
     }
   }
 }
