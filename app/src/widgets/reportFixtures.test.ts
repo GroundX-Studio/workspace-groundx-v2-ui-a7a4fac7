@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ContentScope } from "@groundx/shared";
 
-import { getReportFixture } from "./reportFixtures";
+import { getReportFixture, reportTemplateIdForScope } from "./reportFixtures";
 
 describe("report MOCK_MODE fixtures — 2026-05-29-smart-report-screen Phase 2", () => {
   const utilityScope: ContentScope = {
@@ -57,5 +57,35 @@ describe("report MOCK_MODE fixtures — 2026-05-29-smart-report-screen Phase 2",
   it("an unknown scope returns null (no fixture)", () => {
     const unknown: ContentScope = { type: "documents", documentIds: ["nope"] };
     expect(getReportFixture(unknown)).toBeNull();
+  });
+});
+
+describe("reportTemplateIdForScope — scope→template routing (2026-05-31-smart-report-followups)", () => {
+  it("routes a Utility bucket+project scope to the IC-brief template id", () => {
+    const utilityScope: ContentScope = {
+      type: "bucket",
+      bucketId: 28454,
+      filter: { project: "utility" },
+    };
+    // The template id (NOT a rendered report) — the surface fetches the report
+    // from the endpoint using this id; the helper only decides WHICH template.
+    expect(reportTemplateIdForScope(utilityScope)).toBe("rt-utility-ic-brief");
+    expect(reportTemplateIdForScope(utilityScope)).toBe(getReportFixture(utilityScope)!.templateId);
+  });
+
+  it("routes a Solar group scope to the portfolio template id", () => {
+    const solarScope: ContentScope = { type: "group", groupId: 9001 };
+    expect(reportTemplateIdForScope(solarScope)).toBe("rt-solar-portfolio");
+  });
+
+  it("returns null for a scope with no template (surface shows empty, no network call)", () => {
+    const noTemplate: ContentScope = { type: "documents", documentIds: ["nope"] };
+    expect(reportTemplateIdForScope(noTemplate)).toBeNull();
+    const loanScope: ContentScope = {
+      type: "bucket",
+      bucketId: 28454,
+      filter: { project: "loan" },
+    };
+    expect(reportTemplateIdForScope(loanScope)).toBeNull();
   });
 });

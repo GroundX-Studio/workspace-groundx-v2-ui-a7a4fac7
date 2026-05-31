@@ -5,16 +5,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 
-// FIX #2: the re-render control closes the client↔server round-trip — it must
-// call the render endpoint client (`renderReport`) and display the RESPONSE,
-// not read a bare fixture. Mock the client so the test can assert it is called
-// and that its response renders.
+// 2026-05-31-smart-report-followups: the INITIAL f4 paint (not just the ↻
+// re-render) now routes through the render endpoint client (`renderReport`).
+// Mock the client so the test can assert it is the first-paint data source and
+// that its RESPONSE is what the surface renders — no synchronous fixture read
+// survives as the first-paint source.
 vi.mock("@/api/smartReport", () => ({
   renderReport: vi.fn(),
   SmartReportApiError: class SmartReportApiError extends Error {},
 }));
 import { renderReport } from "@/api/smartReport";
 import type { RenderReportResult } from "@/api/smartReport";
+import type { RenderedReport } from "@/types/report";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -26,41 +28,128 @@ const UTILITY_SCOPE: ContentScope = {
   filter: { project: "utility" },
 };
 
+/**
+ * The Utility IC-brief report the endpoint returns in MOCK_MODE — the four
+ * sections + the leading CiteChip into the bill. The tests drive the surface
+ * through this mocked endpoint response (NOT a synchronous fixture read).
+ */
+const UTILITY_REPORT: RenderedReport = {
+  reportId: "rr-utility-ic-brief",
+  templateId: "rt-utility-ic-brief",
+  scope: UTILITY_SCOPE,
+  status: "complete",
+  resolvedVariables: {},
+  exportFormats: ["pdf", "md", "link"],
+  previewOnly: true,
+  sections: [
+    {
+      sectionId: "billing_summary",
+      name: "billing_summary",
+      renderAs: "PARAGRAPH",
+      result: {
+        sectionId: "billing_summary",
+        body: "The April 2026 statement totals **$18,742.16**.",
+        citations: [
+          { documentId: "utility-bill-2026-04", page: 1, snippet: "Total Amount Due", tier: "exact" },
+        ],
+      },
+    },
+    {
+      sectionId: "charge_breakdown",
+      name: "charge_breakdown",
+      renderAs: "TABLE",
+      result: {
+        sectionId: "charge_breakdown",
+        body: "| Category | Amount |\n| --- | --- |\n| Demand | $9,418 |",
+        citations: [{ documentId: "utility-bill-2026-04", page: 3, tier: "exact" }],
+      },
+    },
+    {
+      sectionId: "anomalies",
+      name: "anomalies",
+      renderAs: "BULLETS",
+      result: {
+        sectionId: "anomalies",
+        body: "- Demand charges are 36% higher than the trailing average.",
+        citations: [{ documentId: "utility-bill-2026-04", page: 2, tier: "paraphrase" }],
+      },
+    },
+    {
+      sectionId: "recommendation",
+      name: "recommendation",
+      renderAs: "PARAGRAPH",
+      result: {
+        sectionId: "recommendation",
+        body: "Review the demand-charge spike before approving payment.",
+        citations: [{ documentId: "utility-bill-2026-04", page: 3, tier: "ambient" }],
+      },
+    },
+  ],
+};
+
+const utilityResult: RenderReportResult = { gated: false, report: UTILITY_REPORT };
+
+/** A controllable deferred so a test can hold the call in flight (loading). */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.mocked(renderReport).mockReset();
+  // Default: the endpoint returns the Utility IC-brief report. Individual
+  // tests override (empty, error, in-flight) as needed.
+  vi.mocked(renderReport).mockResolvedValue(utilityResult);
 });
 
-describe("SmartReportRender — 2026-05-29-smart-report-screen Phase 3", () => {
+describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-followups)", () => {
   // ── role + scope contract (widget-contract sibling test) ──────────
   it.each<WidgetRole>(["anonymous", "member"])(
     "mounts for role %s and reflects it on data-role",
-    (role) => {
+    async (role) => {
       renderWithOnboardingProviders(<SmartReportRender role={role} scope={UTILITY_SCOPE} />);
       const root = screen.getByTestId("smart-report-render");
       expect(root).toBeInTheDocument();
       expect(root).toHaveAttribute("data-role", role);
+      // Let the first-paint fetch settle so no act() warning leaks.
+      await waitFor(() => expect(renderReport).toHaveBeenCalled());
     },
   );
 
-  it("renders the Utility fixture's four IC-brief sections over a bucket+project scope", () => {
+  it("FIRST paint calls the render endpoint client (not a synchronous fixture read)", async () => {
     renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
-    const surface = within(screen.getByTestId("smart-report-render"));
-    expect(surface.getByText(/billing summary/i)).toBeInTheDocument();
-    expect(surface.getByText(/charge breakdown/i)).toBeInTheDocument();
-    expect(surface.getByText(/anomalies/i)).toBeInTheDocument();
-    expect(surface.getByText(/recommendation/i)).toBeInTheDocument();
+    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(renderReport).mock.calls[0][0]).toMatchObject({
+      templateId: "rt-utility-ic-brief",
+      scope: UTILITY_SCOPE,
+    });
   });
 
-  it("renders a CiteChip in a section footer (reuses the shipped clickable-citation path)", () => {
+  it("renders the endpoint response's four IC-brief sections over a bucket+project scope", async () => {
     renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
-    const chip = screen.getByTestId("cite-chip-1");
+    const surface = within(await screen.findByTestId("report-section-billing_summary"));
+    expect(surface.getByText(/billing summary/i)).toBeInTheDocument();
+    const root = within(screen.getByTestId("smart-report-render"));
+    expect(root.getByText(/charge breakdown/i)).toBeInTheDocument();
+    expect(root.getByText(/anomalies/i)).toBeInTheDocument();
+    expect(root.getByText(/recommendation/i)).toBeInTheDocument();
+  });
+
+  it("renders a CiteChip in a section footer (reuses the shipped clickable-citation path)", async () => {
+    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    const chip = await screen.findByTestId("cite-chip-1");
     expect(chip).toHaveAttribute("data-citation-doc", "utility-bill-2026-04");
   });
 
-  it("locks export/Save for an anonymous viewer (preview-only sample)", () => {
+  it("locks export/Save for an anonymous viewer (preview-only sample)", async () => {
     renderWithOnboardingProviders(<SmartReportRender role="anonymous" scope={UTILITY_SCOPE} />);
-    expect(screen.getByTestId("smart-report-preview-badge")).toBeInTheDocument();
+    expect(await screen.findByTestId("smart-report-preview-badge")).toBeInTheDocument();
     const exportControl = screen.getByTestId("smart-report-export");
     expect(exportControl).toHaveAttribute("aria-disabled", "true");
     expect(exportControl).toHaveTextContent("🔒");
@@ -72,21 +161,22 @@ describe("SmartReportRender — 2026-05-29-smart-report-screen Phase 3", () => {
     renderWithOnboardingProviders(
       <SmartReportRender role="member" scope={UTILITY_SCOPE} onEditSection={onEditSection} />,
     );
-    await user.click(screen.getByTestId("report-section-edit-billing_summary"));
+    await user.click(await screen.findByTestId("report-section-edit-billing_summary"));
     expect(onEditSection).toHaveBeenCalledWith("billing_summary");
-  });
-
-  it("shows the empty state when the scope has no fixture", () => {
-    const noFixture: ContentScope = { type: "documents", documentIds: ["nope"] };
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={noFixture} />);
-    expect(screen.getByTestId("smart-report-empty")).toBeInTheDocument();
   });
 
   it("re-resolves the report when the scope IDENTITY changes (useScopeAdapter is load-bearing)", async () => {
     const user = userEvent.setup();
     const noFixture: ContentScope = { type: "documents", documentIds: ["nope"] };
-    // A controllable harness that flips the scope prop WITHOUT remounting the
-    // providers (rerender from the helper would tear down CanvasOrchestrator).
+    // The endpoint returns empty (no sections) for the no-fixture scope, then
+    // the Utility report after the scope flips.
+    vi.mocked(renderReport).mockImplementation(async (input) => {
+      const isUtility =
+        input.scope.type === "bucket" && input.scope.filter?.project === "utility";
+      return isUtility
+        ? utilityResult
+        : { gated: false, report: { ...UTILITY_REPORT, sections: [] } };
+    });
     const Harness: FC = () => {
       const [scope, setScope] = useState<ContentScope>(noFixture);
       return (
@@ -99,18 +189,66 @@ describe("SmartReportRender — 2026-05-29-smart-report-screen Phase 3", () => {
       );
     };
     renderWithOnboardingProviders(<Harness />);
-    expect(screen.getByTestId("smart-report-empty")).toBeInTheDocument();
+    // First paint resolves to the empty state for the no-fixture scope.
+    expect(await screen.findByTestId("smart-report-empty")).toBeInTheDocument();
 
-    // Re-scope to the Utility bucket+project — the adapter must re-resolve to
-    // the Utility fixture (not stay on the initial empty state).
+    // Re-scope to the Utility bucket+project — the adapter must re-render
+    // (a NEW endpoint call) and show the Utility sections.
     await user.click(screen.getByTestId("flip-scope"));
-    expect(screen.queryByTestId("smart-report-empty")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByTestId("smart-report-empty")).not.toBeInTheDocument(),
+    );
     expect(
       within(screen.getByTestId("smart-report-render")).getByText(/billing summary/i),
     ).toBeInTheDocument();
+    // The adapter drove the re-scope through the endpoint (not a fixture read):
+    // the no-template scope short-circuits to empty without a call, and the
+    // Utility scope re-runs the endpoint with the NEW scope.
+    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(renderReport).mock.calls[0][0]).toMatchObject({ scope: UTILITY_SCOPE });
   });
 
-  // ── FIX #2: re-render routes through the render endpoint client ──────
+  // ── first-paint lifecycle: loading / empty / error ──────────────────
+  it("shows a loading affordance while the FIRST render call is in flight", async () => {
+    const d = deferred<RenderReportResult>();
+    vi.mocked(renderReport).mockReturnValueOnce(d.promise);
+    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    // Before the call resolves the surface shows a loading state, not a blank
+    // surface and not the (now-gone) synchronous fixture.
+    expect(await screen.findByTestId("smart-report-loading")).toBeInTheDocument();
+    expect(screen.queryByText(/billing summary/i)).not.toBeInTheDocument();
+    // Resolving the call clears the loading state and paints the report.
+    d.resolve(utilityResult);
+    expect(await screen.findByText(/billing summary/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-loading")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state when the endpoint returns no sections for the scope", async () => {
+    vi.mocked(renderReport).mockResolvedValueOnce({
+      gated: false,
+      report: { ...UTILITY_REPORT, sections: [] },
+    });
+    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    expect(await screen.findByTestId("smart-report-empty")).toBeInTheDocument();
+  });
+
+  it("shows a retryable error banner when the FIRST render call rejects", async () => {
+    const user = userEvent.setup();
+    vi.mocked(renderReport).mockRejectedValueOnce(new Error("boom"));
+    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    // First paint failed → a retryable error affordance, not a blank surface
+    // and not a thrown render.
+    expect(await screen.findByTestId("smart-report-error")).toBeInTheDocument();
+    expect(screen.getByTestId("smart-report-retry")).toBeInTheDocument();
+
+    // Retry re-issues the call; the next response paints the report.
+    vi.mocked(renderReport).mockResolvedValueOnce(utilityResult);
+    await user.click(screen.getByTestId("smart-report-retry"));
+    expect(await screen.findByText(/billing summary/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-error")).not.toBeInTheDocument();
+  });
+
+  // ── ↻ re-render shares the same fetch path (round-trip preserved) ───
   it("the ↻ re-render control calls the render endpoint client and displays the RESPONSE", async () => {
     const user = userEvent.setup();
     const responseReport: RenderReportResult = {
@@ -137,20 +275,24 @@ describe("SmartReportRender — 2026-05-29-smart-report-screen Phase 3", () => {
         ],
       },
     };
-    vi.mocked(renderReport).mockResolvedValueOnce(responseReport);
+    // First paint → Utility report; the ↻ re-render → the fresh response.
+    vi.mocked(renderReport)
+      .mockResolvedValueOnce(utilityResult)
+      .mockResolvedValueOnce(responseReport);
 
     renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
-    // First paint is the synchronous fixture (the four IC-brief sections).
-    expect(screen.getByText(/billing summary/i)).toBeInTheDocument();
+    // First paint is the endpoint response (the four IC-brief sections).
+    expect(await screen.findByText(/billing summary/i)).toBeInTheDocument();
+    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
 
     await user.click(screen.getByTestId("smart-report-rerender"));
-    // The endpoint client is the production caller (round-trip closed).
-    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(renderReport).mock.calls[0][0]).toMatchObject({
+    // Re-render shares the same fetch path: a second call to the SAME client.
+    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(renderReport).mock.calls[1][0]).toMatchObject({
       templateId: "rt-utility-ic-brief",
       scope: UTILITY_SCOPE,
     });
-    // The surface now shows the ENDPOINT RESPONSE, not the bare fixture.
+    // The surface now shows the ENDPOINT RESPONSE, not the first-paint report.
     await waitFor(() =>
       expect(screen.getByText(/freshly re-rendered from the endpoint/i)).toBeInTheDocument(),
     );
@@ -159,8 +301,11 @@ describe("SmartReportRender — 2026-05-29-smart-report-screen Phase 3", () => {
 
   it("surfaces an error state when the re-render endpoint call rejects", async () => {
     const user = userEvent.setup();
-    vi.mocked(renderReport).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(renderReport)
+      .mockResolvedValueOnce(utilityResult)
+      .mockRejectedValueOnce(new Error("boom"));
     renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    await screen.findByText(/billing summary/i);
     await user.click(screen.getByTestId("smart-report-rerender"));
     await waitFor(() =>
       expect(screen.getByTestId("smart-report-rerender-error")).toBeInTheDocument(),

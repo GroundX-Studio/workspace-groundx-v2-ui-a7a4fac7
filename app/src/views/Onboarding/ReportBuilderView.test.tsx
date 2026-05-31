@@ -5,6 +5,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
+// 2026-05-31-smart-report-followups: SmartReportRender's FIRST paint now routes
+// through the render endpoint client (`renderReport`); the render→builder
+// `✎ edit §N` hand-off test mounts that surface, so we drive it through this
+// mock (MOCK_MODE returns the same fixtures server-side).
+vi.mock("@/api/smartReport", async () => {
+  const { getReportFixture } = await import("@/widgets/reportFixtures");
+  return {
+    renderReport: vi.fn(async (input: { scope: import("@groundx/shared").ContentScope }) => ({
+      gated: false as const,
+      report: getReportFixture(input.scope) ?? {
+        reportId: "rr-empty",
+        templateId: "rt-empty",
+        scope: input.scope,
+        status: "complete" as const,
+        resolvedVariables: {},
+        exportFormats: [],
+        previewOnly: false,
+        sections: [],
+      },
+    })),
+    SmartReportApiError: class SmartReportApiError extends Error {},
+  };
+});
+
 import { ReportBuilderView } from "./ReportBuilderView";
 import { ReportRenderView } from "./ReportRenderView";
 
@@ -61,8 +85,10 @@ describe("ReportBuilderView — f4a thin wrapper (2026-05-29-smart-report-screen
       initialFrame: "f4",
       initialAuthState: "signed-in",
     });
-    // Start on the render surface (f4). Click `✎ edit §N` for charge_breakdown.
-    await user.click(screen.getByTestId("report-section-edit-charge_breakdown"));
+    // Start on the render surface (f4). The sections paint from the render
+    // endpoint (async first paint), so await the edit affordance before clicking
+    // `✎ edit §N` for charge_breakdown.
+    await user.click(await screen.findByTestId("report-section-edit-charge_breakdown"));
     // We land on the builder (f4a) with that section's editor already open —
     // the hand-off carried the id end-to-end (NOT a generic open-with-nothing).
     expect(screen.getByTestId("smart-report-builder")).toBeInTheDocument();

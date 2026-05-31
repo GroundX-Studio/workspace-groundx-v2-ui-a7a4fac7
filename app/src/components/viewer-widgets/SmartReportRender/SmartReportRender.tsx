@@ -19,16 +19,23 @@
  *
  * `Result = Template + Scope + answers`: the rendered report
  * (`RenderedReport`) carries the scope it was rendered over; the template
- * stays scope-independent. The **synchronous first paint** reads the MOCK_MODE
- * fixture keyed by the scope (`getReportFixture`) — kept synchronous so the
- * shell/view tests that assert the render surface on the Report-pill click stay
- * sync (routing the *initial* render through the endpoint is ticketed —
- * `openspec/changes/2026-05-29-smart-report-screen` Phase 6 follow-up). The
- * **↻ re-render** control is the genuine production client caller of
- * `POST /api/widgets/smart-report/reports/render` (via `renderReport`) — it
- * closes the client↔server round-trip the closeout review found missing and
- * replaces the displayed report with the endpoint response. The live multi-doc
- * fan-out is Phase 7.
+ * stays scope-independent. The **initial paint** routes through the render
+ * endpoint (`POST /api/widgets/smart-report/reports/render` via `renderReport`)
+ * exactly like the **↻ re-render** control — both converge on ONE fetch path
+ * (`runRender`), so the surface the user first sees on the Report pill is the
+ * endpoint response, not a synchronous client-side fixture read
+ * (2026-05-31-smart-report-followups closes that round-trip; MOCK_MODE backs
+ * the server response, so the displayed sections are unchanged). The first
+ * paint has an explicit lifecycle — `loading` (fetch in flight) → `ready`
+ * (endpoint response shown) / `empty` (endpoint returned no sections) /
+ * `error` (the call rejected, with a retry). `useScopeAdapter` re-runs the
+ * SAME fetch on a scope-identity change. The live multi-doc fan-out is Phase 7
+ * (BLOCKED on WF-10) — the same endpoint serves it with no surface rework.
+ *
+ * The template id the first paint renders is resolved from the scope via
+ * `reportTemplateIdForScope` (MOCK_MODE: the Utility scope → the IC-brief
+ * template). When the scope has no template, the surface shows the empty state
+ * without a network round-trip.
  *
  * Per `widget-role-access`: `role: WidgetRole` is the authorization axis.
  * Export / Save are locked-for-anonymous (`widgetRoleCanEdit`); a sample-doc
@@ -62,7 +69,7 @@ import {
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
-import { getReportFixture } from "@/widgets/reportFixtures";
+import { reportTemplateIdForScope } from "@/widgets/reportFixtures";
 import type { RenderedReport, RenderedReportSection } from "@/types/report";
 
 export interface SmartReportRenderProps {
@@ -103,52 +110,102 @@ function humanizeName(name: string): string {
 }
 
 export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role, onEditSection }) => {
-  // ScopedViewerWidget adaptation: re-resolve the report whenever the scope
-  // IDENTITY changes (via `useScopeAdapter` — not on every render). The
-  // resolved report is held in state, so the adapter is the load-bearing
-  // data-load path (NOT a no-op alongside a direct read). v1 resolves the
-  // MOCK_MODE fixture synchronously; Phase 6 swaps this body for the live
-  // `POST /reports/render` fetch with no change to the contract.
-  const [report, setReport] = useState<RenderedReport | null>(() => getReportFixture(scope));
-  useScopeAdapter(scope, (nextScope) => {
-    // First paint / re-scope reads the synchronous fixture (see header note).
-    setReport(getReportFixture(nextScope));
-    setRerenderState("idle");
-  });
-
   const { state: chatState } = useChatStore();
-  // Re-render lifecycle (the endpoint round-trip). `idle` after first paint;
+
+  // The displayed report, once the endpoint has answered. `null` until then
+  // (or when the scope has no template / no sections → the empty state).
+  const [report, setReport] = useState<RenderedReport | null>(null);
+  // First-paint lifecycle: `loading` while the initial render call is in
+  // flight, `ready` once a report (with sections) is shown, `empty` when the
+  // endpoint returns no renderable report for the scope, `error` when the
+  // initial call rejected (retryable). The `↻ re-render` lifecycle is the
+  // separate `rerenderState` below — both drive the SAME `runRender` fetch.
+  const [firstPaintState, setFirstPaintState] = useState<
+    "loading" | "ready" | "empty" | "error"
+  >("loading");
+  // Re-render lifecycle (a later ↻ click). `idle` after first paint;
   // `rerendering` while the POST is in flight; `error` on a rejected call.
   const [rerenderState, setRerenderState] = useState<"idle" | "rerendering" | "error">("idle");
 
   const canEdit = widgetRoleCanEdit(role);
 
-  // ↻ re-render — the genuine production caller of the render endpoint
-  // (`renderReport` → POST /api/widgets/smart-report/reports/render). Replaces
-  // the displayed report with the ENDPOINT RESPONSE (closes the round-trip). A
-  // gate envelope (#10, BYO scope) keeps the current report and stops; an error
-  // surfaces a retryable banner.
-  const handleRerender = useCallback(async () => {
-    if (rerenderState === "rerendering") return;
-    const chatSessionId = chatState.activeSessionId;
-    if (!chatSessionId) return;
-    const templateId = report?.templateId ?? getReportFixture(scope)?.templateId;
-    if (!templateId) return;
-    setRerenderState("rerendering");
-    try {
-      const result = await renderReport({ templateId, scope, chatSessionId });
-      if (result.gated) {
-        // A BYO scope returns the sign-in gate envelope — leave the current
-        // (sample) report in place; the builder Save path owns gate opening.
-        setRerenderState("idle");
+  // ── The one fetch path ──────────────────────────────────────────────
+  // Initial paint AND ↻ re-render both call this — the surface has a single
+  // source of truth for "what the report is" (the render endpoint), MOCK_MODE-
+  // backed server-side. `phase` selects which lifecycle state machine to drive
+  // (the first paint vs. a later re-render) so the loading/error affordances
+  // stay distinct, but the network call + response handling are identical.
+  const runRender = useCallback(
+    async (renderScope: ContentScope, phase: "first-paint" | "rerender") => {
+      const chatSessionId = chatState.activeSessionId;
+      const templateId = reportTemplateIdForScope(renderScope);
+      if (phase === "first-paint") {
+        // No template for this scope (or no session yet) → empty state, no
+        // network round-trip.
+        if (!templateId || !chatSessionId) {
+          setReport(null);
+          setFirstPaintState("empty");
+          return;
+        }
+        setFirstPaintState("loading");
+      } else {
+        if (rerenderState === "rerendering") return;
+        const rerenderTemplateId = report?.templateId ?? templateId;
+        if (!chatSessionId || !rerenderTemplateId) return;
+        setRerenderState("rerendering");
+        try {
+          const result = await renderReport({ templateId: rerenderTemplateId, scope: renderScope, chatSessionId });
+          if (result.gated) {
+            // A BYO scope returns the sign-in gate envelope — leave the current
+            // (sample) report in place; the builder Save path owns gate opening.
+            setRerenderState("idle");
+            return;
+          }
+          setReport(result.report);
+          setRerenderState("idle");
+        } catch {
+          setRerenderState("error");
+        }
         return;
       }
-      setReport(result.report);
-      setRerenderState("idle");
-    } catch {
-      setRerenderState("error");
-    }
-  }, [rerenderState, chatState.activeSessionId, report, scope]);
+
+      try {
+        const result = await renderReport({ templateId, scope: renderScope, chatSessionId });
+        if (result.gated) {
+          // A BYO scope returns the sign-in gate — there is no sample report to
+          // fall back to on first paint, so show the empty state.
+          setReport(null);
+          setFirstPaintState("empty");
+          return;
+        }
+        if (result.report.sections.length === 0) {
+          setReport(null);
+          setFirstPaintState("empty");
+          return;
+        }
+        setReport(result.report);
+        setFirstPaintState("ready");
+        setRerenderState("idle");
+      } catch {
+        setFirstPaintState("error");
+      }
+    },
+    [chatState.activeSessionId, rerenderState, report],
+  );
+
+  // ScopedViewerWidget adaptation: route the FIRST paint — and any re-scope —
+  // through the render endpoint (`runRender`), not a synchronous fixture read.
+  // `useScopeAdapter` re-runs only on a scope-identity change (not every
+  // render), so this is the load-bearing initial-data path.
+  useScopeAdapter(scope, (nextScope) => {
+    void runRender(nextScope, "first-paint");
+  });
+
+  // ↻ re-render — re-runs the template over the current scope and swaps in the
+  // endpoint response (round-trip closed). Shares `runRender` with first paint.
+  const handleRerender = useCallback(() => {
+    void runRender(scope, "rerender");
+  }, [runRender, scope]);
 
   return (
     <Box
@@ -165,7 +222,53 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role, onE
         gap: 2,
       }}
     >
-      {report == null ? (
+      {firstPaintState === "loading" ? (
+        <Box
+          data-testid="smart-report-loading"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, p: 2 }}
+        >
+          Rendering report…
+        </Box>
+      ) : firstPaintState === "error" ? (
+        <Stack
+          data-testid="smart-report-error"
+          direction="row"
+          spacing={1.5}
+          alignItems="center"
+          sx={{ p: 2 }}
+        >
+          <Box
+            component="span"
+            sx={{ color: CORAL, fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_LABEL }}
+          >
+            Couldn’t render the report — try again.
+          </Box>
+          <Box
+            component="button"
+            type="button"
+            data-testid="smart-report-retry"
+            aria-label="Retry rendering report"
+            onClick={() => void runRender(scope, "first-paint")}
+            sx={{
+              border: `1px solid ${BORDER}`,
+              background: "none",
+              cursor: "pointer",
+              color: NAVY,
+              fontSize: FONT_SIZE_LABEL,
+              fontWeight: FONT_WEIGHT_LABEL,
+              borderRadius: BORDER_RADIUS_2X,
+              px: 1.25,
+              py: 0.5,
+              "&:focus-visible": { outline: `2px solid ${NAVY}` },
+            }}
+          >
+            ↻ retry
+          </Box>
+        </Stack>
+      ) : report == null ? (
         <Box
           data-testid="smart-report-empty"
           sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, p: 2 }}

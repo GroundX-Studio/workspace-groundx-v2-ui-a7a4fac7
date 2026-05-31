@@ -5,59 +5,95 @@
 
 ## Decisions (gate the implementation)
 
-- [ ] **INPUT NEEDED:** On the INITIAL f4 paint, while `renderReport` is in flight, should the surface
-      show a dedicated loading skeleton/spinner (`smart-report-loading`), or briefly show the
-      synchronous `getReportFixture` result as an optimistic placeholder and then reconcile with the
-      endpoint response? (Affects whether the fixture read survives at all in the widget, and the
-      first-paint test shape.)
-- [ ] **INPUT NEEDED:** When the endpoint returns a report with zero sections (vs. a transport error),
-      should that render the existing `smart-report-empty` copy, or a distinct "rendered but empty"
-      state? (Determines whether empty and error collapse to one branch.)
+- [x] **DECIDED:** dedicated loading affordance (`smart-report-loading`), NOT an optimistic
+      `getReportFixture` placeholder. Rationale: the proposal's composable invariant requires NO
+      surviving parallel fixture-read code path in the widget — an optimistic placeholder would keep
+      one. So the synchronous fixture read is removed entirely from the widget; the loading state is
+      a visible `smart-report-loading` status while the first-paint `renderReport` is in flight. — DONE
+- [x] **DECIDED:** a zero-section endpoint response renders the existing `smart-report-empty` copy
+      (empty and the no-template scope collapse to ONE empty branch); a transport ERROR is a distinct
+      retryable branch (`smart-report-error` + `smart-report-retry`). Empty ≠ error. — DONE
 
 ## 1 · First-paint lifecycle — async-first-paint test (TDD, failing first)
 
-- [ ] Rewrite the synchronous first-paint assertions in
+- [x] Rewrite the synchronous first-paint assertions in
       `app/src/components/viewer-widgets/SmartReportRender/SmartReportRender.test.tsx` to async against
       a mocked `renderReport`: the four IC-brief sections, the `cite-chip-1` test, the anon
       preview-lock test, `onEditSection`, the empty-state test, and the `useScopeAdapter` re-resolve
       test now assert via `findBy*` / `waitFor` AFTER the mocked endpoint resolves. Add a failing test
       that the FIRST paint calls `renderReport` (not `getReportFixture`) and renders its RESPONSE.
-- [ ] Add failing tests for the new first-paint states: a `loading` affordance while the call is in
+      — DONE: 13-test file rewritten; ran red (9 failing) then green. Coverage NOT weakened — the four
+      sections, the CiteChip doc-id, the anon export-lock + preview badge, `onEditSection`, and the
+      re-scope re-resolve all still assert, now driven through the mocked endpoint.
+- [x] Add failing tests for the new first-paint states: a `loading` affordance while the call is in
       flight (per the INPUT-NEEDED decision), `empty` when the endpoint returns no report/sections, and
       a retryable `error` banner when the first-paint call rejects.
+      — DONE: `smart-report-loading` (deferred promise held in flight), zero-section → `smart-report-empty`,
+      rejected call → `smart-report-error` + `smart-report-retry` (retry re-issues the call and paints).
 
 ## 2 · First-paint lifecycle — implement
 
-- [ ] Replace the synchronous `getReportFixture(scope)` first paint and the synchronous re-scope body
+- [x] Replace the synchronous `getReportFixture(scope)` first paint and the synchronous re-scope body
       in `useScopeAdapter` with a `renderReport` fetch. Introduce a first-paint lifecycle
       (`loading → ready | empty | error`) that converges with the existing re-render path onto ONE
       fetch helper (no surviving parallel fixture-read code path in the widget). Preserve the existing
       `↻ re-render` control, the gate/preview behavior, the CiteChip wiring, and `✎ edit §N`.
-- [ ] Render the loading / empty / error states as user-visible affordances (loading testid per the
+      — DONE: single `runRender(scope, phase)` helper drives both first-paint and re-render through
+      `renderReport`. `useScopeAdapter` now calls `runRender(nextScope, "first-paint")`. Widget has
+      ZERO `getReportFixture` references (verified by grep). Template id resolved via a new
+      `reportTemplateIdForScope(scope)` routing helper (scope→template id, NOT a report read), added to
+      `app/src/widgets/reportFixtures.ts`. Gate envelope, `previewOnly` badge, export lock, CiteChip,
+      and `✎ edit §N` all preserved.
+- [x] Render the loading / empty / error states as user-visible affordances (loading testid per the
       decision, the existing `smart-report-empty`, a retryable error banner reusing the
       `smart-report-rerender-error` pattern). Make first-paint and re-render share the error/retry UI.
+      — DONE: `smart-report-loading` (role=status), `smart-report-empty` (reused), `smart-report-error`
+      + `smart-report-retry` button (retry calls `runRender(scope,"first-paint")`). The re-render path
+      keeps its own `smart-report-rerender-error` banner; both reject paths surface a retryable affordance.
 
 ## 3 · Shell / view test updates for the async first paint
 
-- [ ] Update `app/src/views/Onboarding/OnboardingShell.test.tsx` report assertions (Phase 0 sections,
+- [x] Update `app/src/views/Onboarding/OnboardingShell.test.tsx` report assertions (Phase 0 sections,
       Phase 1 anon preview-lock, Phase 1 Loan empty-state, f4↔f4a round-trip) for the async first
       paint: mock `renderReport` at the shell level so the surface paints the endpoint response, and
       assert rendered sections / preview lock / empty via `findBy*`. The `findByTestId("smart-report-render")`
       mount assertions already tolerate async; confirm they still pass.
-- [ ] Confirm `ReportRenderView` needs no change (it only resolves scope + role and mounts the widget);
+      — DONE: added a shell-level `vi.mock("@/api/smartReport")` that returns the real
+      `getReportFixture(scope)` for the render scope (MOCK_MODE parity). Phase 0 sections + cite-chip,
+      Phase 1 anon preview-lock, and Extract→Report scope assertions moved to `findBy*`; Loan empty-state
+      → `findByTestId`. f4↔f4a + the root-mount assertions already used `findByTestId` and stay green.
+      All 40 OnboardingShell tests pass. Also updated `ReportBuilderView.test.tsx` (the render→builder
+      `✎ edit §N` hand-off test mounts `ReportRenderView`) with the same mock + an awaited edit affordance.
+- [x] Confirm `ReportRenderView` needs no change (it only resolves scope + role and mounts the widget);
       if the shell-level `renderReport` mock must live in a shared test helper, add it there.
+      — DONE: `ReportRenderView.tsx` unchanged (scope+role resolver only). No `ReportRenderView.test.tsx`
+      exists; the wrapper is exercised via OnboardingShell + ReportBuilderView. The `renderReport` mock
+      is inlined per-test-file (two call sites) rather than a shared helper — small + local, no shared
+      helper churn warranted (earn-the-abstraction).
 
 ## 4 · Verify the change end-to-end
 
-- [ ] `scaffold/app` + `scaffold/middleware` vitest green; `npm run build` (tsc + vite) clean;
+- [x] `scaffold/app` + `scaffold/middleware` vitest green; `npm run build` (tsc + vite) clean;
       `widget-contract`, `no-hardcoded-styles`, `widget-access-matrix`, `check-tool-quality` drift
       guards pass.
-- [ ] Adversarial review: confirm NO synchronous fixture-read first-paint path survives in
+      — DONE: app 1371/1371, middleware 598/598, build clean, all four drift guards pass.
+- [x] Adversarial review: confirm NO synchronous fixture-read first-paint path survives in
       `SmartReportRender.tsx`; confirm first paint and re-render share one fetch path; confirm the
       render endpoint contract, gate/preview policy, builder, pin flow, and `show_smart_report_*` tools
       are unchanged; confirm Phase-7 live multi-doc code was NOT added.
+      — DONE: `grep -c getReportFixture SmartReportRender.tsx` = 0 (no fixture read survives). First
+      paint + re-render both go through `runRender → renderReport` (one path). `api/smartReport.ts`,
+      `SmartReportRender.tools.ts`, the builder, and the pin flow are untouched. No `search_groundx`
+      fan-out added (the only "fan-out" token is the Phase-7-deferred doc comment). Gate handling
+      (`result.gated`) + `previewOnly` lock present on both paths.
 
 ## 5 · Manual live-verify (Chrome DevTools MCP)
+
+> REQUIRES A MANUAL CHROME-DEVTOOLS PASS — this cannot be run headlessly by the implementation agent.
+> Left unchecked deliberately; do NOT mark green without an actual live pass in the running app. The
+> automated coverage already proves the first-paint endpoint call fires (SmartReportRender.test:
+> "FIRST paint calls the render endpoint client") and the shell tests prove the sections/CiteChip/
+> preview-lock render from the endpoint response.
 
 - [ ] Live-verify the shipped Utility report path in the real app (Chrome DevTools MCP): Utility →
       Report pill → the FIRST render paints from `POST /api/widgets/smart-report/reports/render` (confirm
@@ -69,7 +105,8 @@
 
 ## 6 · Closeout
 
-- [ ] `OPENSPEC_TELEMETRY=0 openspec validate 2026-05-31-smart-report-followups --strict` passes.
+- [x] `OPENSPEC_TELEMETRY=0 openspec validate 2026-05-31-smart-report-followups --strict` passes.
+      — DONE: "Change '2026-05-31-smart-report-followups' is valid".
 - [ ] Mark the archived `2026-05-29-smart-report-screen` follow-up ticket (initial-paint conversion)
       and its two manual closeout items (live-verify, Interact→Report scope) as discharged by this
       change; update `project_build_status.md` and `project_dev_contracts.md` (W8 first paint now

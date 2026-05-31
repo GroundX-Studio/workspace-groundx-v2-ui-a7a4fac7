@@ -9,13 +9,20 @@ Renders the Report **render** surface (f4): an ordered list of report sections,
 each a generated body shown by its `renderAs` formatter (¶ PARAGRAPH / • BULLETS
 / ▦ TABLE via the shared `Markdown` primitive) with the shared `CiteChip` in the
 section footer. It is a **ScopedViewerWidget** — it takes a real `ContentScope`
-and adapts on scope change. The **synchronous first paint** reads a MOCK_MODE
-fixture (`getReportFixture`) — kept sync so the shell/view tests that assert the
-surface on the Report-pill click stay sync (routing the *initial* render through
-the endpoint is ticketed). The **↻ re-render** control is the genuine production
-caller of `POST /api/widgets/smart-report/reports/render` (via `renderReport`):
-it closes the client↔server round-trip and swaps in the endpoint response. The
-live multi-doc fan-out is Phase 7.
+and adapts on scope change. The **initial paint** routes through the render
+endpoint (`POST /api/widgets/smart-report/reports/render` via `renderReport`) —
+the same path the **↻ re-render** control uses — so the surface the user first
+sees is the endpoint response, not a synchronous client-side fixture read
+(2026-05-31-smart-report-followups closed that round-trip; MOCK_MODE backs the
+server response). First paint has an explicit lifecycle:
+`loading` (`smart-report-loading`) → `ready` / `empty` (`smart-report-empty`,
+endpoint returned no sections) / `error` (`smart-report-error` +
+`smart-report-retry`, retryable). `reportTemplateIdForScope(scope)` resolves
+which template to render (a scope→template routing decision, not a report read);
+a scope with no template shows the empty state without a network call. The
+**↻ re-render** control re-runs the same fetch and swaps in the endpoint
+response. The live multi-doc fan-out is Phase 7 (BLOCKED on WF-10) — the same
+endpoint serves it with no surface rework.
 
 ## Props
 

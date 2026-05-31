@@ -19,6 +19,38 @@ vi.mock("@/api/entities/onboardingSessionEntity", () => ({
   issueOnboardingSession: apiMocks.issueOnboardingSession,
 }));
 
+// 2026-05-31-smart-report-followups: the SmartReportRender FIRST paint now
+// routes through the render endpoint client (`renderReport`), so the shell-
+// level report tests drive the surface through this mock. MOCK_MODE backs the
+// real server with the same fixtures, so the mock here returns the fixture for
+// the render scope — the displayed sections / preview-lock / empty state are
+// the production output, now endpoint-sourced. We resolve the fixture lazily
+// (inside the mock factory) to avoid hoist-order issues.
+vi.mock("@/api/smartReport", async () => {
+  const { getReportFixture } = await import("@/widgets/reportFixtures");
+  return {
+    renderReport: vi.fn(async (input: { scope: import("@groundx/shared").ContentScope }) => {
+      const report = getReportFixture(input.scope);
+      // No fixture for the scope → an endpoint response with no sections, which
+      // the surface renders as the empty state.
+      return {
+        gated: false as const,
+        report: report ?? {
+          reportId: "rr-empty",
+          templateId: "rt-empty",
+          scope: input.scope,
+          status: "complete" as const,
+          resolvedVariables: {},
+          exportFormats: [],
+          previewOnly: false,
+          sections: [],
+        },
+      };
+    }),
+    SmartReportApiError: class SmartReportApiError extends Error {},
+  };
+});
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   apiMocks.issueOnboardingSession.mockReset();
@@ -938,9 +970,10 @@ describe("OnboardingShell", () => {
     // The extract workbench is no longer the canvas content.
     expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
 
-    // The fixture sections render with their headings.
+    // The sections render with their headings — now from the render endpoint
+    // (async first paint), so await the first section before asserting the rest.
+    expect(await screen.findByText(/billing summary/i)).toBeInTheDocument();
     const surface = within(screen.getByTestId("smart-report-render"));
-    expect(surface.getByText(/billing summary/i)).toBeInTheDocument();
     expect(surface.getByText(/charge breakdown/i)).toBeInTheDocument();
     expect(surface.getByText(/anomalies/i)).toBeInTheDocument();
     expect(surface.getByText(/recommendation/i)).toBeInTheDocument();
@@ -971,7 +1004,9 @@ describe("OnboardingShell", () => {
     await user.click(screen.getByText("Report"));
     const surface = await screen.findByTestId("smart-report-render");
     expect(surface).toHaveAttribute("data-role", "anonymous");
-    expect(within(surface).getByTestId("smart-report-export")).toHaveTextContent("🔒");
+    // The export/Save lock + preview badge are part of the rendered report, so
+    // await the endpoint-sourced first paint before asserting the lock.
+    expect(await within(surface).findByTestId("smart-report-export")).toHaveTextContent("🔒");
   });
 
   it("Phase 1: Report pill is reachable on the Loan scenario too (not chapter-gated)", async () => {
@@ -984,7 +1019,7 @@ describe("OnboardingShell", () => {
     // Loan has no fixture → the surface mounts in its empty state (still f4,
     // not the extract workbench).
     const surface = await screen.findByTestId("smart-report-render");
-    expect(within(surface).getByTestId("smart-report-empty")).toBeInTheDocument();
+    expect(await within(surface).findByTestId("smart-report-empty")).toBeInTheDocument();
     expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
   });
 
@@ -1033,7 +1068,8 @@ describe("OnboardingShell", () => {
     // its presence proves the render scope was the source surface's scope, not
     // a re-picked default.
     const surface = await screen.findByTestId("smart-report-render");
-    expect(within(surface).getByText(/billing summary/i)).toBeInTheDocument();
+    // Endpoint-sourced first paint — await the Utility section.
+    expect(await within(surface).findByText(/billing summary/i)).toBeInTheDocument();
   });
 
   // ── 2026-05-30-onboarding-shell-shared-view Phase 3a ──────────────

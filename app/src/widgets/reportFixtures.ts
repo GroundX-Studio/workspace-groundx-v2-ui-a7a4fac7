@@ -164,3 +164,23 @@ export function getReportFixture(scope: ContentScope): RenderedReport | null {
   if (scope.type === "group") return SOLAR_REPORT_STUB;
   return null;
 }
+
+/**
+ * Resolve the report **template id** to render for a `ContentScope`. This is a
+ * scope→template ROUTING decision (which template the surface renders), NOT a
+ * read of the rendered report — `SmartReportRender` obtains the rendered
+ * sections from the render endpoint (`renderReport`). Returns `null` when no
+ * template applies to the scope (the surface then shows its empty state without
+ * a network round-trip). MOCK_MODE: the Utility scope → the IC-brief template,
+ * the Solar `group` scope → the portfolio template.
+ */
+export function reportTemplateIdForScope(scope: ContentScope): string | null {
+  if (scope.type === "bucket") {
+    const project = scope.filter?.project;
+    const projects = Array.isArray(project) ? project : project != null ? [project] : [];
+    if (projects.includes("utility")) return UTILITY_REPORT.templateId;
+    return null;
+  }
+  if (scope.type === "group") return SOLAR_REPORT_STUB.templateId;
+  return null;
+}
