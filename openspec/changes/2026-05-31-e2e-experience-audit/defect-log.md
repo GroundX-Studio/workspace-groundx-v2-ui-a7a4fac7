@@ -71,11 +71,24 @@ Audited the post-`retire-mock-mode` build against REAL GroundX (no MOCK_MODE). O
   (mirror OnboardingShell's step→scope→role wiring + idle state) with a FAILING shell-integration test
   first (assert a cite-chip dispatch mounts `pdf-viewer-widget` in `scoped-shell-canvas-pane`). → ticket.
 
-### DL-2 · global · P3 · OPEN
+### DL-2 · global · P3 · REVERIFIED (fixed in-place, e2e-audit §4)
 - **Measured:** React Router **v7 future-flag warning** logged ~24× to the console
   (`v7_startTransition`). Harmless but noisy; pollutes the console sweep.
 - **Expected:** clean console.
-- **Fix:** set the `v7_startTransition` (+ related) future flags on the Router, or suppress. Trivial. → ticket.
+- **FIX (2026-06-01):** added `export const ROUTER_FUTURE_FLAGS = { v7_startTransition: true }` in
+  `router.tsx` and applied it on `<RouterProvider future={ROUTER_FUTURE_FLAGS}>` in `App.tsx` — the flag
+  lives on RouterProvider, NOT the `createBrowserRouter` `future` arg (that was the initial mis-wire the
+  behavioral test caught). Deliberately did NOT opt into `v7_relativeSplatPath` (it changes relative-link
+  resolution inside our `/:bucketId/:scenarioId/*` splat route — out of scope for a console-noise fix).
+- **Test:** `router.future.test.tsx` — `<RouterProvider future={ROUTER_FUTURE_FLAGS}>` produces ZERO
+  "Future Flag" `console.warn` calls (RED first: failed with no export, then with the flag mis-placed on
+  createMemoryRouter → 1 residual warning; GREEN once moved to RouterProvider). + a guard asserting the
+  flag stays `true`.
+- **Live:** the Vite-served `App.tsx`/`router.tsx` modules confirmed to carry the fix
+  (`future: ROUTER_FUTURE_FLAGS` + `v7_startTransition: true`). NOTE: the Claude_Preview console buffer is
+  cumulative + FIFO-capped, so it still shows pre-fix warnings from this session's earlier reloads — the
+  unit test + served-module grep are the authoritative proof, not the stale buffer.
+- **Gate:** full app suite (1515) + `tsc` + app `npm run build` green; no routing-path behavior change.
 
 ### DL-4 · Report (pin → render reflection) · P3 · OPEN (needs investigation)
 - **Measured:** in onboarding Report (frame f4, no template), clicked `pin-to-report-button` → the
@@ -94,7 +107,16 @@ Audited the post-`retire-mock-mode` build against REAL GroundX (no MOCK_MODE). O
   so this path is not live-drivable in this scenario by design. → investigate reflection/entry-point in a
   focused change; do NOT fix inline.
 
-### DL-3 · responsive (mobile 375px) · P2 · OPEN (needs verification)
+### DL-3 · responsive (mobile 375px) · P2 · CLOSED — NOT A DEFECT (harness artifact)
+- **Verification (2026-06-01, MEASURED):** LOADING the onboarding page at 375×812 (a fresh navigation, NOT
+  `preview_resize` into it) correctly switches to compact: `appshell-compact-topbar` +
+  `appshell-compact-nav-toggle` + `appshell-compact-view-toggle` present, full `onboarding-nav` absent,
+  zero horizontal overflow (scrollWidth 375 = innerWidth 375). The breakpoint/`useMediaQuery` works.
+- **Conclusion:** the original "stayed non-compact" reading was the `preview_resize`-doesn't-re-fire-React-
+  `useMediaQuery` harness artifact (the same class as the winW=1 stuck viewport at session start), not a
+  product bug. No code change. Closed.
+
+### DL-3 (ORIGINAL) · responsive (mobile 375px) · P2 · superseded by the verification above
 - **Measured:** at a 375×812 viewport the onboarding page has **no horizontal overflow** (scrollWidth=375,
   zero over-wide elements) — good — BUT it stayed in the DESKTOP (non-compact) layout: `appshell-compact-topbar`
   absent, nav/view toggles not present. A narrower default width EARLIER in the session DID render compact

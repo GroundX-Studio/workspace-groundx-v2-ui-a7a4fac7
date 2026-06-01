@@ -13,6 +13,21 @@ import { SteadyShell } from "@/views/Steady/SteadyShell";
 import { WorkspacesView, ProjectsView } from "@/views/Scoped/ScopedConversationShell";
 import { ROUTER_PATHS } from "@/router/routerPaths";
 
+/**
+ * DL-2 (e2e-experience-audit): opt into the React Router v7 `startTransition`
+ * future flag so the "Future Flag Warning" console noise (~24×/session) is
+ * silenced and we pre-adopt v7 behavior (state updates wrapped in
+ * `React.startTransition`). This is the ONLY flag the audit observed warning,
+ * and it lives on `<RouterProvider future={...}>` (NOT the data-router
+ * `future` arg). Deliberately NOT opting into `v7_relativeSplatPath` here —
+ * it changes relative-link resolution inside our `/:bucketId/:scenarioId/*`
+ * splat route, a behavior change out of scope for a console-noise fix.
+ * Exported so a guard test can assert it stays set.
+ */
+export const ROUTER_FUTURE_FLAGS = {
+  v7_startTransition: true,
+} as const;
+
 export const router = createBrowserRouter([
   {
     // ARCH-22 (2026-05-26): the scaffold-default `<Dashboard />`

@@ -16,7 +16,7 @@ import { DebugOverlay } from "@/components/layout/DebugOverlay/DebugOverlay";
 import { MotionRoot } from "@/components/primitives/MotionRoot/MotionRoot";
 import { WireframeFilters } from "@/components/brand/WireframeFilters/WireframeFilters";
 import { GxThemeProvider } from "@/ThemeProvider";
-import { router } from "@/router/router";
+import { router, ROUTER_FUTURE_FLAGS } from "@/router/router";
 
 /**
  * AppProviders — the production provider stack, factored out of `App`
@@ -76,7 +76,7 @@ export const AppProviders: FC<{ children: ReactNode }> = ({ children }) => (
 export default function App() {
   return (
     <AppProviders>
-      <RouterProvider router={router} />
+      <RouterProvider router={router} future={ROUTER_FUTURE_FLAGS} />
       {/* DBG-01: app-wide debug overlay, gated on `?debug=true`. Router-
           independent (reads window.location.search), so it mounts once
           here beside the router and covers every route. Renders null in
