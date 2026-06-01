@@ -66,10 +66,66 @@ export interface GroundXCustomer {
   };
 }
 
+/**
+ * A document record inside an ingest-status `progress` bucket. Probe-verified
+ * 2026-06-01 against `GET /v1/ingest/{processId}` (see
+ * `docs/agents/groundx-real-api-shapes.md`): each bucket document is a rich
+ * `GroundXDocument`-shaped record. Modeled as a partial GroundXDocument plus the
+ * extra ingest-status fields the status payload adds (`fileSize`, `fileTokens`,
+ * `processLevel`, `xrayUrl`, `extracted`, `created`, `updated`). Loose `[key]`
+ * inherited from `GroundXDocument` keeps unknown fields readable.
+ */
+export interface IngestProcessDocument extends GroundXDocument {
+  fileSize?: string;
+  fileTokens?: number;
+  processLevel?: "full" | "none" | string;
+  xrayUrl?: string;
+  extracted?: boolean;
+  created?: string;
+  updated?: string;
+}
+
+/** One `progress` bucket of an ingest-status response (e.g. `complete`). */
+export interface IngestProgressBucket {
+  total: number;
+  documents: IngestProcessDocument[];
+}
+
+/**
+ * The ingest `progress` object. Probe-verified 2026-06-01: only the non-empty
+ * buckets are present in a live response, so every bucket is optional. The five
+ * bucket names mirror the status lifecycle (ref `groundx-api` §5).
+ */
+export interface IngestProgress {
+  queued?: IngestProgressBucket;
+  processing?: IngestProgressBucket;
+  complete?: IngestProgressBucket;
+  errors?: IngestProgressBucket;
+  cancelled?: IngestProgressBucket;
+}
+
+/**
+ * The `ingest` object returned by the ingest endpoints. ONE type spanning two
+ * observed states (probe-verified 2026-06-01,
+ * `docs/agents/groundx-real-api-shapes.md`):
+ *
+ * - LIGHT — submit/poll-list (`POST /v1/ingest/*`, each `GET /v1/ingest` list
+ *   item / `IngestStatusLight`): `processId` + `status` (+ `id` / `statusMessage`).
+ * - HEAVY — status (`GET /v1/ingest/{processId}`): adds the `progress` buckets.
+ *
+ * Everything past `processId` / `status` is optional, so the single type covers
+ * submit, poll, list, and cancel responses. (`statusMessage` is the canonical
+ * field name — the prior `message` was an unverified guess; it is gone.)
+ */
 export interface IngestProcess {
   processId: string;
-  status: "queued" | "processing" | "complete" | "error" | "cancelled" | string;
-  message?: string;
+  status: "queued" | "training" | "processing" | "complete" | "error" | "cancelled" | string;
+  /** Integer process row id (present on the list-light + status shapes). */
+  id?: number;
+  /** Human-readable message; populated when `status === "error"`. */
+  statusMessage?: string;
+  /** Per-status-bucket document breakdown (status endpoint only). */
+  progress?: IngestProgress;
 }
 
 export interface DocumentSource {

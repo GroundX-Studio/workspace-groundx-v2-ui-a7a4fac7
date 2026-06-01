@@ -240,28 +240,72 @@ blind-cast.
 > record the verified shape in `docs/agents/groundx-real-api-shapes.md` (the doc
 > exists).
 
-- [ ] **Endpoint probe (record findings):** call the real status + list ingest
+- [x] **Endpoint probe (record findings):** call the real status + list ingest
       endpoints (GroundX MCP `document_getprocessingstatusbyid` /
       `document_getprocesses`, or REST), capture the actual `IngestProcess`
       fields (progress, documents, etc.) and the actual top-level list shape
       (is it `ingests`, `processes`, or both?). Write the verified shapes into
       `docs/agents/groundx-real-api-shapes.md` with the verification date.
-- [ ] **Failing test FIRST (app suite):** assert `IngestProcess` carries the
+      DONE: LIVE probe succeeded 2026-06-01 (partner account, `api.groundx.ai`).
+      `document_getprocesses` → top-level key is **`processes`** (NOT `ingests`);
+      each list item (`IngestStatusLight`) = `{ id:int, processId:uuid, status }`
+      (`statusMessage` absent on complete items → optional).
+      `document_getprocessingstatusbyid` → `{ ingest: { processId, status,
+      progress: { complete: { total, documents:[…] }, … } } }`; only the non-empty
+      bucket was present (each bucket optional); each `documents[]` item is a rich
+      GroundXDocument-shaped record (documentId/bucketId/fileName/fileType/
+      fileSize/fileTokens/processId/processLevel/sourceUrl/xrayUrl/status/extracted/
+      created/updated). Cross-checked against harness `groundx-api`
+      `references/02-documents.md` §5–§7 + `12-python-sdk-objects.md` §10 (which add
+      `ingest.id` + `statusMessage` + the four empty buckets, each Optional). Recorded
+      in `docs/agents/groundx-real-api-shapes.md` (new "ingest processes" section,
+      dated 2026-06-01). NOT live-probe-pending — verified.
+- [x] **Failing test FIRST (app suite):** assert `IngestProcess` carries the
       probe-verified fields (e.g. progress/documents) and that
       `listGroundXProcesses` returns a single reconciled list (no
       mutually-exclusive `ingests?`/`processes?` ambiguity — the reader collapses
       to one). RED first — `sdkTypes.ts:69` is 3 fields and
       `IngestProcessesResponse` (`groundxDocumentsEntity.ts:18-20`) exposes both
       optional keys.
-- [ ] Reconcile `IngestProcess` (`sdkTypes.ts:69`) to the probe-verified shape;
+      DONE: two cases added to `groundxDocumentsEntity.test.ts` — (a) a type-level
+      assertion building the heavy live status shape against `IngestProcess` +
+      reading `IngestProcessDocument`; (b) a runtime collapse test on
+      `listGroundXProcesses` (processes-key / ingests-key / empty → single array).
+      RED first proven BOTH ways: `tsc --noEmit` gave 5 errors (TS2305 no
+      `IngestProcessDocument`; TS2353 `id` not in `IngestProcess`; TS2339
+      `progress`/`statusMessage` missing), and the runtime case failed
+      (`expected { processes:[…] } to deeply equal […]`).
+- [x] Reconcile `IngestProcess` (`sdkTypes.ts:69`) to the probe-verified shape;
       collapse the `ingests?`/`processes?` keys in `listGroundXProcesses`
       (`groundxDocumentsEntity.ts:273`) to a single normalized array at the reader
       boundary. Update consumers (`DocumentsProvider`/`DocumentsContext`) as
       needed. App `tsc --noEmit` GREEN; test GREEN.
-- [ ] **Adversarial review:** confirm the new fields match the recorded probe
+      DONE: `IngestProcess` now `{ processId, status, id?, statusMessage?,
+      progress? }` (the unverified-guess `message` REMOVED, replaced by canonical
+      `statusMessage`; `status` enum gains `training`). Added `IngestProgress` /
+      `IngestProgressBucket` / `IngestProcessDocument` (extends `GroundXDocument`).
+      ONE type covers the light submit/poll-list shape and the heavy status shape
+      (everything past `processId`/`status` optional). The exported
+      `IngestProcessesResponse` is gone — replaced by a file-private
+      `RawIngestProcessesResponse`; `listGroundXProcesses` now returns
+      `Promise<IngestProcess[]>` via `processes ?? ingests ?? []`.
+      `DocumentsProvider.listProcesses` updated to consume the array directly;
+      `sdkContexts.test.tsx` mock updated to the array contract. App `tsc --noEmit`
+      EXIT 0; tests GREEN.
+- [x] **Adversarial review:** confirm the new fields match the recorded probe
       (not invented); confirm the list reader returns one array regardless of
       which key the API used; confirm no consumer still reads `.ingests`/`.processes`
       directly (grep).
+      DONE: every field traces to the live probe + harness ref (no invention; old
+      guessed `message` dropped). Reader collapses to one array — runtime test
+      proves all three branches (processes / ingests / empty). Grep: only
+      surviving `.ingests`/wire-`.processes` read is the single reader collapse
+      line (`groundxDocumentsEntity.ts:265`); the other `.processes` hit is the
+      unrelated DocumentsContext STATE property. No `IngestProcessesResponse`
+      survives anywhere (app + middleware). `IngestProcessDocument extends
+      GroundXDocument` is assignable past its `[key:string]: unknown` index sig
+      (tsc clean). App 184/1512 GREEN; middleware 38/695 GREEN; app build + middleware
+      tsc EXIT 0; `openspec validate --strict` valid.
 
 ## Closeout
 

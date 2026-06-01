@@ -139,8 +139,9 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   const listProcesses = useCallback(
     (options?: RequestOptions) =>
       run(async () => {
-        const response = await api.groundxDocuments.listGroundXProcesses(options);
-        const nextProcesses = response.ingests || response.processes || [];
+        // listGroundXProcesses already collapses the API's processes/ingests
+        // keys into a single normalized array (2026-06-01-data-model-tail item 6).
+        const nextProcesses = await api.groundxDocuments.listGroundXProcesses(options);
         setProcesses(nextProcesses);
         return nextProcesses;
       }),

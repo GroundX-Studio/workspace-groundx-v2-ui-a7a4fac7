@@ -240,6 +240,75 @@ hardcoded `extractionSchema` + `sampleChatScript` + `sampleExtractionValues`** b
 
 Note `"extracted": false` despite the extract endpoint returning real values — possibly a status field that lags or means something else.
 
+## `GET /v1/ingest` (list) + `GET /v1/ingest/{processId}` (status) — ingest processes (added 2026-06-01)
+
+Live-probed 2026-06-01 (partner account, `api.groundx.ai`) via the GroundX MCP
+`document_getprocesses` + `document_getprocessingstatusbyid` tools, cross-checked
+against the harness `groundx-api` reference (`references/02-documents.md` §5–§7,
+`references/12-python-sdk-objects.md` §10). Closes `2026-06-01-data-model-tail`
+item 6 — the prior app-side `IngestProcess` was a 3-field guess
+(`processId`/`status`/`message`) and `IngestProcessesResponse` carried
+mutually-exclusive `ingests?`/`processes?` keys.
+
+### `GET /v1/ingest` — list (each item is `IngestStatusLight`)
+
+Top-level key is **`processes`** (NOT `ingests`). Live response:
+
+```json
+{ "processes": [
+  { "id": 25903, "processId": "567e37f4-…", "status": "complete" },
+  { "id": 25903, "processId": "19aeaffa-…", "status": "complete" }
+] }
+```
+
+- `id` (integer), `processId` (uuid), `status`. `statusMessage` is documented on
+  the light object (ref §7) but was **absent** on these `complete` items → optional.
+- The `ingests` top-level key is **never** the list shape — it was a phantom in
+  the old hand-mirrored `IngestProcessesResponse`. The list reader now collapses
+  to the single `processes` array (with `ingests` still tolerated as a defensive
+  fallback at the reader boundary, never re-exposed).
+
+### `GET /v1/ingest/{processId}` — status (the heavy `ingest` object)
+
+Live response (the empty buckets were OMITTED — only the non-empty `complete`
+bucket was present, confirming each bucket is optional):
+
+```json
+{ "ingest": {
+  "processId": "567e37f4-…",
+  "status": "complete",
+  "progress": {
+    "complete": { "total": 1, "documents": [
+      { "documentId": "5a64053d-…", "bucketId": 25903, "fileName": "table-and-figure-eng.pdf",
+        "fileType": "pdf", "fileSize": "71 KB", "fileTokens": 24280, "processId": "567e37f4-…",
+        "processLevel": "full", "sourceUrl": "https://upload.eyelevel.ai/…",
+        "xrayUrl": "https://upload.eyelevel.ai/…-xray.json", "status": "complete",
+        "extracted": false, "created": "2026-05-21T19:40:35Z", "updated": "2026-05-21T19:42:27Z" }
+    ] }
+  }
+} }
+```
+
+Documented but absent on this live `complete` response → modeled OPTIONAL:
+- `ingest.id` (integer — present on the list-light shape, ref §5 shows it on status too)
+- `ingest.statusMessage` (human-readable; populated when `status === "error"`, ref §5)
+- the other four `progress` buckets `queued` / `processing` / `errors` / `cancelled`
+  (each `{ total: number, documents: [...] }`; ref §5 lists all five, each `Optional`
+  on the typed SDK even at `status === "complete"`).
+
+So the reconciled `IngestProcess` (status object) is:
+`processId` + `status` + optional `id` / `statusMessage` (canonical name; the old
+`message` was the guess) / `progress` (object of optional buckets). Each progress
+bucket document is a rich `GroundXDocument`-shaped record (`documentId`, `bucketId`,
+`fileName`, `fileType`, `fileSize`, `fileTokens`, `processId`, `processLevel`,
+`sourceUrl`, `xrayUrl`, `status`, `extracted`, `created`, `updated`).
+
+**Note — `IngestResponse` (`{ ingest }`) from `ingest_remote` / status / cancel.**
+Right after an ingest submit the `ingest` object is the LIGHT shape (`processId` +
+`status`, ref §2); after polling it is the HEAVY shape above. Both are the same
+`IngestProcess` type with everything past `processId`/`status` optional — so the
+single reconciled type covers submit, poll, and cancel responses.
+
 ## Schema-metadata source — RESOLVED 2026-05-25
 
 The schema metadata comes from `GET /v1/workflow/{workflow_id}`, looked up via the document's `filter.workflow_id`. See the dedicated section above.

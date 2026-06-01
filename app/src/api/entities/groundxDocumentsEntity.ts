@@ -15,9 +15,17 @@ export interface IngestResponse {
   ingest: IngestProcess;
 }
 
-export interface IngestProcessesResponse {
-  ingests?: IngestProcess[];
+/**
+ * Raw `GET /v1/ingest` body. Probe-verified 2026-06-01 (see
+ * `docs/agents/groundx-real-api-shapes.md`): the API returns the top-level
+ * `processes` key. `ingests` is tolerated as a defensive legacy fallback at the
+ * reader boundary only — it is never re-exposed. `listGroundXProcesses` collapses
+ * both into a single normalized `IngestProcess[]`, so callers never see the
+ * mutually-exclusive ambiguity. Internal to the reader; not exported.
+ */
+interface RawIngestProcessesResponse {
   processes?: IngestProcess[];
+  ingests?: IngestProcess[];
 }
 
 export interface DocumentsResponse {
@@ -249,8 +257,11 @@ export const cancelGroundXProcess = async (
   return response.data;
 };
 
-export const listGroundXProcesses = async (options?: RequestOptions): Promise<IngestProcessesResponse> => {
-  const response = await axios.get<IngestProcessesResponse>(groundxUrl("/v1/ingest"), groundxRequestConfig(options));
-  return response.data;
+export const listGroundXProcesses = async (options?: RequestOptions): Promise<IngestProcess[]> => {
+  const response = await axios.get<RawIngestProcessesResponse>(groundxUrl("/v1/ingest"), groundxRequestConfig(options));
+  // Collapse the API's `processes` key (probe-verified 2026-06-01) — tolerating
+  // a legacy `ingests` key — into one normalized array. Callers never branch on
+  // which key the API used.
+  return response.data.processes ?? response.data.ingests ?? [];
 };
 
