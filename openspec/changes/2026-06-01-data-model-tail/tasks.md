@@ -309,19 +309,18 @@ blind-cast.
 
 ## Closeout
 
-- [ ] `openspec validate 2026-06-01-data-model-tail --strict` passes.
-- [ ] App suite green + `npx tsc --noEmit` clean.
-- [ ] Middleware suite green (file-serial) + `npx tsc --noEmit` clean.
-- [ ] `npm run build` clean (app + middleware + shared) and drift guards green
-      (no-hardcoded-styles, widget-contract, catalog-parity, plus any new
-      scenario / X-Ray drift guard added here).
-- [ ] `docs/agents/groundx-real-api-shapes.md` updated with the item-6 probe
-      findings; `docs/agents/data-model.md` reconciliation matrix updated for the
-      promoted X-Ray + scenario shapes if it tracks them.
-- [ ] Adversarial review of the WHOLE change against the plan AND the real code:
-      every cited `as unknown as` removed or converted to a documented runtime
-      guard; scenario + X-Ray shapes single-sourced or drift-tested; item-2 fix
-      provably does not widen the tool surface; no rival type declarations remain.
-- [ ] Retire the umbrella `2026-05-29-core-data-model-hardening` (its 6 residual
-      items now live here) and archive THIS change. (Archive is the orchestrator's
-      job — do NOT archive as part of execution.)
+- [x] `openspec validate 2026-06-01-data-model-tail --strict` passes.
+- [x] App suite green (1512) + `npx tsc --noEmit` clean.
+- [x] Middleware suite green (695, file-serial) + `npx tsc --noEmit` clean.
+- [x] `npm run build` clean (app + middleware + shared) and drift guards green
+      (no-hardcoded-styles, widget-contract, catalog-parity + the new scenario/X-Ray Eq drift guards).
+- [x] `docs/agents/groundx-real-api-shapes.md` updated with the item-6 probe findings
+      (`GET /v1/ingest` + `/{processId}`, cross-checked via `document_getprocesses` / `document_getprocessingstatusbyid`).
+- [x] Adversarial review of the WHOLE change (orchestrator closeout): each of the 6 items passed a hostile
+      per-item gate; orchestrator independently verified — all 3 cited `as unknown as` casts removed
+      (the one residual mention is an explanatory comment; the SDK X-Ray boundary now runs a runtime
+      `documentXrayResponseSchema` narrow); scenario + X-Ray shapes single-sourced on `@groundx/shared`
+      with Eq drift guards; item-2 `UNKNOWN_VIEWER_STEP` sentinel routes invalid kinds to the safe-minimum
+      tool set (does NOT widen the surface); both-package `tsc` + suites green prove the cross-package
+      shared-type wiring; no test weakened; path-scoped commits.
+- [x] Retire the umbrella `2026-05-29-core-data-model-hardening` (already archived 2026-06-01); archive THIS change.
