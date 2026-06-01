@@ -58,6 +58,20 @@ working render path is the fixture.
 - **Gate + idle behavior unchanged.** BYO scope still returns the gate envelope (#10) before any
   render (~464); an empty/unresolvable doc set still returns the idle empty render (~484). Live
   vs mock only differs in *how a non-empty sample scope's sections get their bodies*.
+- **Composable, one source of truth — not a third fork.** The per-section render REUSES the
+  already-shared generation pieces (`searchGroundX`, `buildSnippetBlock`, `parseGroundedAnswer`,
+  and the WF-06b attribution helpers) rather than copying `extractField`'s inline loop. A report
+  SECTION and an extract FIELD are the same concept — a `GeneratedResult` (body + cites + confidence
+  + warnings) over `(question, scope)` — so the live result is built on the shared
+  `RenderedSection` / `GeneratedResult` types (`@groundx/shared`, single-sourced in
+  `2026-06-01-generated-result-shared`), realizing the locked Template + Scope + Results meta-pattern.
+  Per earn-every-axis: report is the caller that earns sharing the orchestration — EITHER extract one
+  `groundedAnswerOverScope(question, scope) → GeneratedResult` helper AND migrate `extractField` to it
+  (≥2 callers), OR compose the existing pieces inline (never a 1-caller abstraction). See tasks.md §2.
+- **No new widgets or tools.** This is a middleware-only change. The report surface
+  (`SmartReportRender` ScopedViewerWidget + `SmartReportBuilder`), its `show_*` canvas-dispatch +
+  template-mutation tools, and `CiteChip` ALL already exist and are unchanged — the wire response
+  shape is identical, so the live path lights up the existing widget with no UI/tool/contract change.
 - **Not in this change:** removing MOCK_MODE. After this lands, `renderReport` works **both**
   with the fixture (MOCK_MODE) and live. Removing the fixture / `mockMode` flag is the dependent
   change `2026-06-01-retire-mock-mode`.

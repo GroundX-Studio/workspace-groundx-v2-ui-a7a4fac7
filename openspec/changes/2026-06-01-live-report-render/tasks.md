@@ -33,18 +33,35 @@
       bodies are the LLM output and whose `cites` are verified citations with a WF-06b `tier`
       (`exact`/`normalized`/`ambient`) and a `confidence` — proving search + generation + verify ran.
 - [ ] Implement the live branch in `renderReport` (replacing the throw at ~478): for each section
-      to render (in template order, honoring the `sectionIds` subset), search the section `question`
-      over the resolved doc set's `ContentScope` via `searchGroundX`, run grounded LLM generation
-      over the snippets (mirror `extractField`'s prompt → `llmClient.forward("/chat/completions")`
-      → parse loop), then verify each citation with `verifyQuote` → `assignTier` → `confidenceFor`
-      (`attribution.ts`), and pass the result through the SAME degradation path `renderSection`
-      uses (variable substitution, unresolved-`{var}` warning, no-source em-dash). Reuse the
-      existing helpers — do not re-implement search, prompting, or verification.
+      to render (in template order, honoring the `sectionIds` subset), produce a grounded cited
+      answer for the section `question` over the resolved doc set's `ContentScope` by **COMPOSING the
+      EXISTING shared pieces** — `searchGroundX` (search), `buildSnippetBlock` (ragPipeline ~636,
+      snippet→prompt block), `llmClient.forward("/chat/completions")` (generation), `parseGroundedAnswer`
+      (ragPipeline ~349, parse the cited answer), then `verifyQuote` → `assignTier` → `confidenceFor`
+      (`attribution.ts`, WF-06b). Then pass the result through the SAME degradation path `renderSection`
+      uses (variable substitution, unresolved-`{var}` warning, no-source em-dash).
+      **COMPOSABLE-OVER-FORKED (this is the crux of the change):** do NOT copy `extractField`'s inline
+      prompt/parse loop into a third place. Reuse `buildSnippetBlock`/`parseGroundedAnswer`/`searchGroundX`/
+      attribution verbatim. **Earn-every-axis decision:** report is now the 3rd caller of
+      "search a question over a scope → grounded, verified, cited answer" (extract + rag are the others).
+      EITHER (preferred if clean) extract ONE shared `groundedAnswerOverScope(question, scope, deps):
+      Promise<GeneratedResult>` orchestration that composes those pieces AND migrate `extractField`'s
+      body to call it too (≥2 real callers → axis earned, single source for the loop) — OR, if migrating
+      `extractField` proves out of scope, compose the existing shared pieces inline here and DO NOT create
+      a new helper (never a 1-caller abstraction). State which path you took + why in the commit.
 - [ ] **Adversarial review:** confirm the live branch genuinely calls the injected `searchGroundX`
       + `llmClient` + `verifyQuote`/`assignTier`/`confidenceFor` per section (not a hardcoded body),
       ordering matches template order + the `sectionIds` subset, and the no-source / unresolved-var
       degradations still fire on the live result. Falsify: a section with no snippet support yields
       the `—` + `⚠ no support in docs` degradation, same as the fixture.
+      **Composable check (mandatory):** grep that NO new private copy of the snippet-block build, the
+      grounding prompt, or the answer-parse exists in `reportRenderer.ts` — it reuses `buildSnippetBlock`
+      / `parseGroundedAnswer` / `searchGroundX` / attribution. If a `groundedAnswerOverScope` helper was
+      extracted, confirm `extractField` ALSO calls it (≥2 callers — not a dormant 1-caller abstraction);
+      if not extracted, confirm nothing new was abstracted. **One-source-of-truth check:** the live
+      section result is built on the shared `RenderedSection` / `GeneratedResult` core
+      (`@groundx/shared` — `body`/`cites`/`confidence`/`warnings`), NOT a new local result shape; the
+      emitted `RenderedSectionWire` derives from it (the anchoring shipped in `generated-result-shared`).
 
 ## 3. `renderReport` async + same response shape (widget unchanged)
 
