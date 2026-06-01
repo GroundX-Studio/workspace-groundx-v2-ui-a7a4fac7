@@ -92,7 +92,7 @@ blind-cast.
 
 ## 3. Scenario shapes — single-source or drift-test (item 3)
 
-- [ ] **Failing test FIRST:** add a drift test asserting `ScenarioConfig` /
+- [x] **Failing test FIRST:** add a drift test asserting `ScenarioConfig` /
       `ScenarioDocument` / `ScenarioManifest` / `SampleDocFilter` agree across
       `app/src/types/scenarios.ts` and `middleware/src/scenarios/types.ts` —
       mirror the `Eq<>` compile-time-equality / widget-contract drift precedent.
@@ -101,18 +101,40 @@ blind-cast.
       prove the test catches drift, then revert. The two file headers
       (`scenarios.ts:1-7`, `middleware/.../types.ts:1-15`) currently only WARN in
       prose with no test.
-- [ ] Choose ONE: (a) single-source the four shapes onto `@groundx/shared` and
+      DONE: chose (a) single-source. Added scenario Zod schemas + `z.infer` types
+      to `@groundx/shared` (`scenarioConfigSchema`/`scenarioManifestSchema`/
+      `scenarioDocumentSchema`/`sampleDocFilterSchema` + constituents). New
+      `app/src/types/scenarios.drift.test.ts` pins each app re-export to the
+      shared type via `Eq<>`; the middleware mirror pin lives in production
+      `middleware/src/scenarios/typesDriftGuard.ts` (middleware tsc excludes test
+      files). RED first proven: before reconcile, `SampleDocFilter` was
+      middleware-only → app drift test failed to compile
+      (`TS2305: Module '@/types/scenarios' has no exported member 'SampleDocFilter'`).
+- [x] Choose ONE: (a) single-source the four shapes onto `@groundx/shared` and
       re-export from both files (preferred — mirrors the `Citation` precedent
       already in these files); OR (b) keep both files but add the `Eq<>` drift
       test as the enforced guard. Update both file headers to name THIS change and
       point at the single source (or the drift test) — drop the
       `core-data-model-hardening` reference and the "degrades silently" warning.
       App + middleware `tsc --noEmit` GREEN; drift test GREEN.
-- [ ] **Adversarial review:** if (a), grep that no rival hand-declared
+      DONE: (a) chosen. Both `scenarios.ts` files now pure `export type {...} from
+      "@groundx/shared"` re-exports; headers rewritten to name THIS change + the
+      new guards and drop the `core-data-model-hardening` reference and the
+      "degrades silently" warning. App + middleware `tsc --noEmit` GREEN; drift
+      test GREEN.
+- [x] **Adversarial review:** if (a), grep that no rival hand-declared
       `ScenarioConfig`/`ScenarioManifest`/`ScenarioDocument`/`SampleDocFilter`
       remains in either file (only re-exports); if (b), confirm the drift test
       genuinely fails on a one-field fork (re-run the fork, confirm RED, revert).
       Confirm no other consumer of these shapes broke (grep importers).
+      DONE: grep confirms no `interface Scenario*`/`interface SampleDocFilter`/
+      `interface Schema*Def`/`interface ChatSeed`/`interface SampleChatTurn`
+      remains in either file (re-exports only). Both guards proven to FIRE on a
+      required-field retype fork (`order: number → string`) then reverted — app
+      `_assertScenarioConfig` and middleware `typesDriftGuard.ts:57` both went
+      `Type 'false' does not satisfy the constraint 'true'`. All importers use the
+      barrels (`@/types/scenarios` / `./types.js`) which keep the same names; app
+      (183 files/1506 tests) + middleware (38/695) suites GREEN, both builds GREEN.
 
 ## 4. App X-Ray types — promote to `@groundx/shared` (item 4)
 

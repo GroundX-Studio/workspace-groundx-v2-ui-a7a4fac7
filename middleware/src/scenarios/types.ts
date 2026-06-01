@@ -1,151 +1,40 @@
 /**
- * Sample scenario types. The contract between the bucket (source of truth)
- * and the frontend (consumer) lives here. Every document in the samples
- * bucket carries a `filter` object whose `kind === "sample-doc"`; on the
- * first doc per scenario the filter also carries a `manifest` blob holding
- * the full ScenarioConfig. Subsequent docs in the same scenarioId carry a
- * slim filter (no manifest).
+ * Sample scenario types — single-sourced on `@groundx/shared`.
  *
- * Keep these shapes in sync with app/src/types/scenarios.ts. Citations use the
- * shared `Citation` (`@groundx/shared`) directly (no `ScenarioCitation` alias);
- * the remaining scenario shapes are still hand-mirrored between the two files —
- * folding them into `@groundx/shared` is a tracked task in the
- * `core-data-model-hardening` change. Until then, if a mirrored shape drifts the
- * runtime degrades silently.
+ * The contract between the bucket (source of truth) and the frontend (consumer)
+ * lives in `@groundx/shared`. Every document in the samples bucket carries a
+ * `filter` object whose `kind === "sample-doc"`; on the first doc per scenario
+ * the filter also carries a `manifest` blob holding the full `ScenarioConfig`.
+ * Subsequent docs in the same scenarioId carry a slim filter (no manifest).
+ *
+ * `ScenarioConfig` / `ScenarioManifest` / `ScenarioDocument` / `SampleDocFilter`
+ * (and their constituents) USED to be hand-mirrored between this file and
+ * `app/src/types/scenarios.ts` with no drift test — and had diverged
+ * (`SampleDocFilter` was middleware-only). They are now single-sourced and
+ * re-exported here.
+ *
+ * Drift guard: this barrel's re-export is pinned to the canonical
+ * `@groundx/shared` shapes by `./typesDriftGuard.ts` (a production-side file —
+ * the middleware `tsconfig.json` EXCLUDES `*.test.ts`, so a test-file assert
+ * would be dormant). The app side carries the mirror runtime + `Eq<>` guard in
+ * `app/src/types/scenarios.drift.test.ts`. Together they make app + middleware
+ * agree by construction; do not re-fork these shapes here — edit the schema in
+ * `@groundx/shared`.
+ *
+ * Citations use the shared `Citation` directly (no `ScenarioCitation` alias);
+ * `ExtractedFieldValue` is the shared generated-result shape (Extract spec).
  */
-
-export interface ScenarioHero {
-  title: string;
-  shortDesc: string;
-  demonstrates: string;
-  badges: Array<"E" | "I" | "R">;
-  chapters: { extract: "live" | "off"; interact: "live" | "off"; report: "live" | "off" };
-  docCount: string;
-}
-
-export interface SchemaFieldDef {
-  id: string;
-  name: string;
-  type: TemplateFieldType;
-  description: string;
-  /** F3a required-toggle; defaults to false for pre-editor fixtures. */
-  required?: boolean;
-  /** F3a "instructions per line" — extra constraints for the focused extractor. */
-  instructions?: string[];
-  /** F3a "format (opt)" — free-text hint for post-extraction shape. */
-  format?: string;
-  /** F3a "identifiers" — short aliases or labels near the field. */
-  identifiers?: string[];
-}
-
-export interface SchemaCategoryDef {
-  id: string;
-  type: "statement" | "charges" | "meters";
-  name: string;
-  fields: SchemaFieldDef[];
-}
-
-export interface ExtractionSchemaDef {
-  id: string;
-  name: string;
-  categories: SchemaCategoryDef[];
-}
-
-export interface ChatSeed {
-  id: string;
-  prompt: string;
-  rationale: string;
-}
-
-// A scenario fixture citation is the shared `Citation` (`@groundx/shared`).
-// (The shared shape adds optional `tier`/`answerSpan` — harmless supersets;
-// fixtures that omit them still conform.) Used directly as `Citation` (no alias).
-// `ExtractedFieldValue` is the shared generated-result shape (Extract
-// specialization): `{fieldId, value, citations}` + the shared
-// `confidence`/`warnings`.
-import type {
+export type {
+  ChatSeed,
   Citation,
-  ExtractedFieldValue as SharedExtractedFieldValue,
-  TemplateFieldType,
+  ExtractedFieldValue,
+  ExtractionSchemaDef,
+  SampleChatTurn,
+  SampleDocFilter,
+  SchemaCategoryDef,
+  SchemaFieldDef,
+  ScenarioConfig,
+  ScenarioDocument,
+  ScenarioHero,
+  ScenarioManifest,
 } from "@groundx/shared";
-
-// The Extract specialization of the shared generated-result core. This module
-// re-exports the shared type so the Extract field-value shape is single-sourced;
-// the compile-time assert below pins the re-export.
-export type ExtractedFieldValue = SharedExtractedFieldValue;
-export type { Citation };
-
-// generated-result drift guard (Extract side) — 2026-05-31-generated-result-shared.
-// Pins this module's exported `ExtractedFieldValue` to the shared type so a future
-// re-fork (replacing the re-export with a free-standing local interface that
-// renames `fieldId`, drops `citations`, widens `confidence`, …) fails the build:
-// the bidirectional `Eq` evaluates `false` and `Assert<false>` is a tsc error.
-// NOTE: it lives in this PRODUCTION file (not a `.test.ts`) because the middleware
-// `tsconfig.json` EXCLUDES `src/**/*.test.ts` from tsc — an assert in a test file
-// would be dormant. The `Eq<>` precedent is `app/src/api/chatSessions.test.ts:58`.
-type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-type Assert<T extends true> = T;
-type _assertExtractGeneratedResult = Assert<Eq<ExtractedFieldValue, SharedExtractedFieldValue>>;
-
-export interface SampleChatTurn {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  citations?: Citation[];
-}
-
-export interface ScenarioManifest {
-  id: string;
-  hero: ScenarioHero;
-  thinkingScript: string[];
-  /** Absent → scenario skips the Extract frame. */
-  extractionSchema?: ExtractionSchemaDef;
-  chatSeeds: ChatSeed[];
-  /** Pre-canned extraction results for the demo flow. */
-  sampleExtractionValues?: ExtractedFieldValue[];
-  /** Pre-canned chat transcript for the demo flow. */
-  sampleChatScript?: SampleChatTurn[];
-  /**
-   * Capability flag — wire carrier for `ScenarioConfig.supportsJsonRender`.
-   * The manifest is the only blob that survives the bucket round-trip, so the
-   * flag is stored here and lifted to the config by the registry. Absent → false.
-   */
-  supportsJsonRender?: boolean;
-}
-
-/** What gets stored in every sample doc's filter. */
-export interface SampleDocFilter {
-  kind: "sample-doc";
-  scenarioId: string;
-  scenarioOrder: number;
-  scenarioRole: "doc";
-  /** Present only on the first doc per scenarioId. */
-  manifest?: ScenarioManifest;
-}
-
-/** ScenarioConfig is what the frontend consumes. */
-export interface ScenarioConfig {
-  id: string;
-  order: number;
-  manifest: ScenarioManifest;
-  documents: ScenarioDocument[];
-  /**
-   * Capability flag: the Extract workbench offers the table→JSON render
-   * handoff for this scenario. Data-driven (replaces the former
-   * `scenarioId === "loan"` literal in the frontend Extract widget). Absent → false.
-   */
-  supportsJsonRender?: boolean;
-}
-
-export interface ScenarioDocument {
-  documentId: string;
-  fileName: string;
-  pageCount?: number;
-  order: number;
-  /**
-   * Optional same-origin URL for the document binary. When present the
-   * frontend F2 PdfViewer loads + renders it via pdfjs-dist. SCEN-06 will
-   * deliver the real Utility/Loan/Solar PDFs and surface URLs here.
-   */
-  previewUrl?: string;
-}

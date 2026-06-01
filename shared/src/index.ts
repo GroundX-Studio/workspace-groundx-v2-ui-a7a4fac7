@@ -931,3 +931,154 @@ export function assertUniqueIds<T>(
     seen.set(id, item);
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Scenario fixture contract — 2026-06-01-data-model-tail item 3. The sample
+// scenario shapes (`ScenarioConfig` / `ScenarioManifest` / `ScenarioDocument` /
+// `SampleDocFilter`, plus their constituents) were HAND-MIRRORED between app
+// `app/src/types/scenarios.ts` and middleware `middleware/src/scenarios/types.ts`
+// with NO drift test — and had already diverged (`SampleDocFilter` was
+// middleware-only; the prose headers only WARNed). They ARE a cross-boundary
+// contract: the middleware seed writes the `manifest` blob into each sample
+// doc's bucket `filter`, and the app reads it back to build the consumer
+// `ScenarioConfig`. So the contract is single-sourced here; both files
+// re-export these types and pin the re-export with a compile-time `Eq<>` assert
+// (the `_assertExtractGeneratedResult` precedent), closing the silent-drift gap.
+//
+// These are the STRICT legacy fixture shapes (e.g. `SchemaCategoryDef.type` is
+// the utility-specific `"statement" | "charges" | "meters"` enum, distinct from
+// the scenario-agnostic free-string `templateCategorySchema.type` above). They
+// are kept distinct from the Template family on purpose — the scenario fixtures
+// pre-date the Template contract and round-trip through the bucket filter as-is.
+// ──────────────────────────────────────────────────────────────────────
+
+/** A scenario's card/hero metadata (F1 sample picker). */
+export const scenarioHeroSchema = z.object({
+  title: z.string(),
+  shortDesc: z.string(),
+  demonstrates: z.string(),
+  badges: z.array(z.enum(["E", "I", "R"])),
+  chapters: z.object({
+    extract: z.enum(["live", "off"]),
+    interact: z.enum(["live", "off"]),
+    report: z.enum(["live", "off"]),
+  }),
+  docCount: z.string(),
+});
+export type ScenarioHero = z.infer<typeof scenarioHeroSchema>;
+
+/**
+ * One scenario-fixture schema field. The strict legacy shape (the inline-editor
+ * F3a field). Field-level `description` is the extraction prompt; the optional
+ * props are the F3a editor extras (required toggle, instructions, format hint,
+ * identifiers). Distinct from the scenario-agnostic shared `templateFieldSchema`.
+ */
+export const schemaFieldDefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: templateFieldTypeSchema,
+  description: z.string(),
+  required: z.boolean().optional(),
+  instructions: z.array(z.string()).optional(),
+  format: z.string().optional(),
+  identifiers: z.array(z.string()).optional(),
+});
+export type SchemaFieldDef = z.infer<typeof schemaFieldDefSchema>;
+
+/**
+ * A scenario-fixture schema category. `type` is the utility-specific enum the
+ * legacy fixtures carry (NOT the free string the shared `templateCategorySchema`
+ * uses) — this is the strict demo-fixture shape both sides must agree on.
+ */
+export const schemaCategoryDefSchema = z.object({
+  id: z.string(),
+  type: z.enum(["statement", "charges", "meters"]),
+  name: z.string(),
+  fields: z.array(schemaFieldDefSchema),
+});
+export type SchemaCategoryDef = z.infer<typeof schemaCategoryDefSchema>;
+
+/** A scenario-fixture extraction schema (categories of fields). */
+export const extractionSchemaDefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  categories: z.array(schemaCategoryDefSchema),
+});
+export type ExtractionSchemaDef = z.infer<typeof extractionSchemaDefSchema>;
+
+/** A pre-canned chat seed prompt offered in the demo flow. */
+export const chatSeedSchema = z.object({
+  id: z.string(),
+  prompt: z.string(),
+  rationale: z.string(),
+});
+export type ChatSeed = z.infer<typeof chatSeedSchema>;
+
+/** A pre-canned chat transcript turn for the demo flow. Citations are the
+ * shared `Citation`. */
+export const sampleChatTurnSchema = z.object({
+  id: z.string(),
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  citations: z.array(citationSchema).optional(),
+});
+export type SampleChatTurn = z.infer<typeof sampleChatTurnSchema>;
+
+/**
+ * The full scenario manifest blob. This is the ONLY blob that survives the
+ * bucket round-trip (it's stored in the first sample doc's `filter.manifest`),
+ * so capability flags like `supportsJsonRender` live here and are lifted to the
+ * `ScenarioConfig` by the registry.
+ */
+export const scenarioManifestSchema = z.object({
+  id: z.string(),
+  hero: scenarioHeroSchema,
+  thinkingScript: z.array(z.string()),
+  /** Absent → scenario skips the Extract frame (e.g. Solar is Interact+Report only). */
+  extractionSchema: extractionSchemaDefSchema.optional(),
+  chatSeeds: z.array(chatSeedSchema),
+  /** Pre-canned extraction results for the demo flow. */
+  sampleExtractionValues: z.array(extractedFieldValueSchema).optional(),
+  /** Pre-canned chat transcript for the demo flow. */
+  sampleChatScript: z.array(sampleChatTurnSchema).optional(),
+  /** Capability flag — wire carrier for `ScenarioConfig.supportsJsonRender`. */
+  supportsJsonRender: z.boolean().optional(),
+});
+export type ScenarioManifest = z.infer<typeof scenarioManifestSchema>;
+
+/**
+ * What gets stored in every sample doc's bucket `filter`. The first doc per
+ * scenarioId also carries the full `manifest`; subsequent docs carry the slim
+ * filter (no manifest). This is the middleware seed → app read contract.
+ */
+export const sampleDocFilterSchema = z.object({
+  kind: z.literal("sample-doc"),
+  scenarioId: z.string(),
+  scenarioOrder: z.number(),
+  scenarioRole: z.literal("doc"),
+  /** Present only on the first doc per scenarioId. */
+  manifest: scenarioManifestSchema.optional(),
+});
+export type SampleDocFilter = z.infer<typeof sampleDocFilterSchema>;
+
+/** A document within a scenario (PDF preview source for the F2 viewer). */
+export const scenarioDocumentSchema = z.object({
+  documentId: z.string(),
+  fileName: z.string(),
+  pageCount: z.number().optional(),
+  order: z.number(),
+  /** Optional same-origin URL for the document binary (pdfjs render source). */
+  previewUrl: z.string().optional(),
+});
+export type ScenarioDocument = z.infer<typeof scenarioDocumentSchema>;
+
+/** The frontend-consumed scenario config (manifest + its documents + lifted flags). */
+export const scenarioConfigSchema = z.object({
+  id: z.string(),
+  order: z.number(),
+  manifest: scenarioManifestSchema,
+  documents: z.array(scenarioDocumentSchema),
+  /** Capability flag lifted from the manifest: Extract offers table→JSON render. */
+  supportsJsonRender: z.boolean().optional(),
+});
+export type ScenarioConfig = z.infer<typeof scenarioConfigSchema>;
