@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
 
+import type { Workflow } from "@/api/entities/sdkTypes";
+
 import { extractToValues, humanizeFieldId, mapFieldType, workflowToSchema } from "./extractLiveData";
+import type { GroundXWorkflowDefinition } from "./extractLiveData";
+
+/**
+ * Item-1 typed-boundary guard (2026-06-01-data-model-tail).
+ *
+ * `workflowToSchema` must take a NAMED GroundX-workflow shape, not
+ * `Record<string, unknown>` — and the GroundX SDK `Workflow` (what
+ * `getGroundXWorkflow(...).workflow` actually is) must be assignable to that
+ * parameter WITHOUT the old `as unknown as Record<string, unknown>` double-cast
+ * at `Extract.tsx`. These compile-time asserts are the real RED→GREEN guard
+ * under `tsc --noEmit` / `npm run build`; the runtime block below documents the
+ * defensive branches still fire for a typed-but-malformed workflow.
+ */
+type Assert<T extends true> = T;
+// `Workflow` (SDK) must flow into the parameter type with no cast.
+type _assertSdkWorkflowAssignable = Assert<
+  Workflow extends GroundXWorkflowDefinition ? true : false
+>;
+// The named type must NOT be a `Record<string, unknown>` alias in disguise:
+// a bare empty object is NOT a valid `Record<string, unknown>` index? — instead
+// prove the type carries the named optional `extract` field the transform reads.
+type _assertNamedShape = Assert<
+  GroundXWorkflowDefinition extends { extract?: unknown } ? true : false
+>;
 
 // Shapes mirror the REAL live workflow (9910308e) + getDocumentExtract
 // responses for c3bfff49 (verified 2026-05-29 — MCP == middleware): field
@@ -54,6 +80,31 @@ describe("workflowToSchema (WF-12)", () => {
   it("returns null when there is no extract block", () => {
     expect(workflowToSchema({ workflowId: "x" })).toBeNull();
     expect(workflowToSchema(null)).toBeNull();
+  });
+
+  it("accepts a typed GroundX SDK Workflow with no cast and returns its schema", () => {
+    // `wf.workflow` from `getGroundXWorkflow` is typed as the SDK `Workflow`.
+    // Passing it directly (no `as unknown as`) must type-check AND behave.
+    const sdkWorkflow: Workflow = {
+      workflowId: "wf-typed",
+      name: "Typed Utility",
+      extract: {
+        statement: { fields: { addressee: { prompt: { description: "name", type: "str" } } } },
+      },
+    };
+    const schema = workflowToSchema(sdkWorkflow)!;
+    expect(schema.id).toBe("wf-typed");
+    expect(schema.categories.map((c) => c.type)).toEqual(["statement"]);
+  });
+
+  it("handles a typed-but-malformed workflow (extract present, no usable groups) → null", () => {
+    // `extract` is the loose `Metadata` leaf at runtime — a garbage group must
+    // still fall through the defensive guards to `null`, not throw.
+    const malformed: GroundXWorkflowDefinition = {
+      workflowId: "wf-bad",
+      extract: { statement: 42, meters: "nope", charges: null } as unknown as Record<string, unknown>,
+    };
+    expect(workflowToSchema(malformed)).toBeNull();
   });
 });
 

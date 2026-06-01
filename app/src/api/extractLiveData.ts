@@ -18,6 +18,23 @@ import type { ExtractionSchemaDef, SchemaCategoryDef, SchemaFieldDef } from "@/t
 
 type Loose = Record<string, unknown>;
 
+/**
+ * The minimal, NAMED GroundX-workflow shape `workflowToSchema` reads — the
+ * typed boundary that replaces the old `wf.workflow as unknown as
+ * Record<string, unknown>` double-cast at the Extract widget's call site.
+ *
+ * The GroundX SDK `Workflow` (`api/entities/sdkTypes.ts`) is assignable to this
+ * (a compile-time guard in `extractLiveData.test.ts` pins that), so
+ * `getGroundXWorkflow(...).workflow` flows in with no cast. The `extract` group
+ * map stays the loose `Metadata` leaf the API actually returns, so the runtime
+ * `typeof` / `Array.isArray` defensive branches below are still load-bearing.
+ */
+export interface GroundXWorkflowDefinition {
+  workflowId?: string;
+  name?: string;
+  extract?: Record<string, unknown>;
+}
+
 const CATEGORY_ORDER: SchemaCategoryDef["type"][] = ["statement", "meters", "charges"];
 
 /** snake_case field id → sentence-case label ("amount_due" → "Amount due"). */
@@ -63,7 +80,9 @@ function fieldFromPrompt(id: string, prompt: Loose): SchemaFieldDef {
  * Transform a live workflow's `extract` into the UI `ExtractionSchemaDef`.
  * Defensive: tolerates missing groups/fields (the API type is loose `Metadata`).
  */
-export function workflowToSchema(workflow: Loose | null | undefined): ExtractionSchemaDef | null {
+export function workflowToSchema(
+  workflow: GroundXWorkflowDefinition | null | undefined,
+): ExtractionSchemaDef | null {
   if (!workflow || typeof workflow !== "object") return null;
   const extract = (workflow.extract ?? null) as Loose | null;
   if (!extract || typeof extract !== "object") return null;

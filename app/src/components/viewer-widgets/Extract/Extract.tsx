@@ -230,7 +230,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
         const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
         if (typeof workflowId !== "string") return;
         const wf = await getGroundXWorkflow(workflowId);
-        const live = workflowToSchema(wf.workflow as unknown as Record<string, unknown>);
+        const live = workflowToSchema(wf.workflow);
         if (isStale() || !live) return;
         setLiveSchema(live);
         const ex = await getDocumentExtract(docId);

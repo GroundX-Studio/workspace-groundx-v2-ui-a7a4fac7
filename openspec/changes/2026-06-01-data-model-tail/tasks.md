@@ -18,14 +18,14 @@ blind-cast.
 
 ## 1. Extract workflow cast — typed workflow→schema input (item 1)
 
-- [ ] **Failing test FIRST (app suite):** in `extractLiveData.test.ts` (or a new
+- [x] **Failing test FIRST (app suite):** in `extractLiveData.test.ts` (or a new
       sibling), assert `workflowToSchema` accepts a typed
       `GroundXWorkflowDefinition`-shaped input (NOT `Record<string, unknown>`)
       and returns the expected `ExtractionSchemaDef`; add a `tsc`-level guard
       (or a type-only test) proving the call site no longer needs a double-cast.
       RED first — the named workflow type does not yet exist and `workflowToSchema`
       still takes `Loose`.
-- [ ] Introduce a named GroundX-workflow → schema input type (the minimal
+- [x] Introduce a named GroundX-workflow → schema input type (the minimal
       `{ extract?: {...} }` shape `workflowToSchema` actually reads,
       `app/src/api/extractLiveData.ts:66`). Update `workflowToSchema`'s parameter
       to that named type (keep the defensive `typeof`/`Array.isArray` guards — the
@@ -33,7 +33,7 @@ blind-cast.
       `wf.workflow as unknown as Record<string, unknown>` double-cast at
       `Extract.tsx:233`; pass the narrowed workflow through. App `tsc --noEmit`
       GREEN; test GREEN.
-- [ ] **Adversarial review:** confirm the `as unknown as` at `Extract.tsx:233`
+- [x] **Adversarial review:** confirm the `as unknown as` at `Extract.tsx:233`
       is GONE (grep), not relocated; confirm the new type is not a `Record<string,
       unknown>` alias in disguise; confirm `workflowToSchema`'s runtime defensive
       branches still fire for a malformed workflow (the test covers a missing

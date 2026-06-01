@@ -40,7 +40,7 @@ export async function fetchLiveSchema(
   const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
   if (typeof workflowId !== "string") return null;
   const wf = await getGroundXWorkflow(workflowId);
-  return workflowToSchema((wf as { workflow?: unknown }).workflow as Record<string, unknown>);
+  return workflowToSchema(wf.workflow);
 }
 
 export function useLiveExtractionSchema(documentId: string | undefined): ExtractionSchemaDef | null {

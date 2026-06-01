@@ -51,7 +51,7 @@ export async function fetchLiveExtract(
   const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
   if (typeof workflowId !== "string") return EMPTY;
   const wf = await getGroundXWorkflow(workflowId);
-  const schema = workflowToSchema((wf as { workflow?: unknown }).workflow as Record<string, unknown>);
+  const schema = workflowToSchema(wf.workflow);
   if (!schema) return EMPTY;
   const ex = await getDocumentExtract(documentId);
   if (!ex.response) return { schema, values: [] };
