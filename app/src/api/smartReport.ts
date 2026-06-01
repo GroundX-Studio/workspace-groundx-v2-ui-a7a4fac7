@@ -27,7 +27,7 @@ import { ensureServerChatSession } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
 import { ApiError } from "@groundx/shared";
-import type { Citation, ContentScope, RenderedSection } from "@groundx/shared";
+import type { ContentScope, RenderedSection } from "@groundx/shared";
 import type { RenderedReport, ReportSectionRenderAs } from "@/types/report";
 
 const RENDER_ROUTE = "/api/widgets/smart-report/reports/render";
@@ -52,15 +52,24 @@ export interface RenderReportInput {
   sectionIds?: string[] | null;
 }
 
-/** One rendered section in the snake_case wire response. */
-interface RenderedSectionWire {
+/**
+ * One rendered section in the snake_case wire response.
+ *
+ * single-source — 2026-05-31-generated-result-shared. The generated-result core
+ * (`body` + citations + `confidence?` + `warnings?`) is DERIVED from the shared
+ * `RenderedSection` (the Report specialization of the shared generated-result
+ * shape) rather than re-declared, so the report body/citation/confidence/warning
+ * contract cannot drift from Extract's. Only the display layer (`name`,
+ * `render_as`) and the snake_case wire alias `cites` (= the shared `citations`)
+ * are layered on top. `wireSectionToRendered` maps this wire onto a full
+ * `RenderedSection` (`cites`→`citations`, `name`→`sectionId`) unchanged.
+ */
+export type RenderedSectionWire = Pick<RenderedSection, "body" | "confidence" | "warnings"> & {
   name: string;
   render_as: ReportSectionRenderAs;
-  body: string;
-  cites: Citation[];
-  confidence?: number;
-  warnings?: string[];
-}
+  /** snake_case wire alias for the shared `RenderedSection.citations`. */
+  cites: RenderedSection["citations"];
+};
 
 /** The render endpoint's success wire response. */
 interface RenderReportResponseWire {

@@ -31,7 +31,7 @@
  * the bodies come from the fixture, not a live search.
  */
 
-import type { Citation, ContentScope, TemplateSaveInput } from "@groundx/shared";
+import type { Citation, ContentScope, RenderedSection, TemplateSaveInput } from "@groundx/shared";
 
 // ──────────────────────────────────────────────────────────────────────
 // App-owned report template shapes (the durable, scope-independent artifact).
@@ -192,15 +192,38 @@ export interface RenderReportRequest {
   parentMessageId: string | null;
 }
 
-/** One rendered section in the wire response (snake_case, per the spec). */
-export interface RenderedSectionWire {
+/**
+ * One rendered section in the wire response (snake_case, per the spec).
+ *
+ * single-source — 2026-05-31-generated-result-shared. The generated-result core
+ * (`body` + citations + `confidence?` + `warnings?`) is DERIVED from the shared
+ * `RenderedSection` (the Report specialization of the shared generated-result
+ * shape) rather than re-declared, so the report body/citation/confidence/warning
+ * contract cannot drift from Extract's. Only the display layer (`name`,
+ * `render_as`) and the snake_case wire alias `cites` (= the shared `citations`)
+ * are layered on top. The `_assertRenderedSectionWire` below pins it under tsc.
+ */
+export type RenderedSectionWire = Pick<RenderedSection, "body" | "confidence" | "warnings"> & {
   name: string;
   render_as: ReportSectionRenderAs;
-  body: string;
-  cites: Citation[];
-  confidence?: number;
-  warnings?: string[];
-}
+  /** snake_case wire alias for the shared `RenderedSection.citations`. */
+  cites: RenderedSection["citations"];
+};
+
+// generated-result drift guard (Report side) — confirms the wire's
+// generated-result core matches the shared `RenderedSection` core. If the shared
+// `RenderedSection` body/citations/confidence/warnings contract drifts (or this
+// wire is re-forked back to a free-standing interface that diverges), the
+// bidirectional `Eq` evaluates `false` and `Assert<false>` fails tsc. Lives in
+// this PRODUCTION file (middleware `tsconfig.json` excludes `*.test.ts`). The
+// `Eq<>` precedent is `app/src/api/chatSessions.test.ts:58`.
+type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+type WireGeneratedCore = Pick<RenderedSectionWire, "body" | "confidence" | "warnings"> & {
+  citations: RenderedSectionWire["cites"];
+};
+type SharedGeneratedCore = Pick<RenderedSection, "body" | "citations" | "confidence" | "warnings">;
+type _assertRenderedSectionWire = Assert<Eq<WireGeneratedCore, SharedGeneratedCore>>;
 
 /** The render endpoint's success wire response. */
 export interface RenderReportResponse {

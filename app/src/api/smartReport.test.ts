@@ -12,10 +12,32 @@ vi.mock("@/api/chatSessions", () => ({
   ensureServerChatSession: vi.fn(async () => undefined),
 }));
 
-import type { ContentScope } from "@groundx/shared";
+import type { ContentScope, RenderedSection } from "@groundx/shared";
 import { ApiError } from "@groundx/shared";
 
-import { SmartReportApiError, renderReport, saveReportTemplate } from "./smartReport";
+import { SmartReportApiError, renderReport, saveReportTemplate, type RenderedSectionWire } from "./smartReport";
+
+/**
+ * generated-result drift guard (Report side, app) —
+ * 2026-05-31-generated-result-shared.
+ *
+ * The app's `RenderedSectionWire` derives its generated-result core (`body` +
+ * citations + `confidence?` + `warnings?`) from the shared `RenderedSection`
+ * (the Report specialization of the shared generated-result shape); only the
+ * snake_case display layer (`name`, `render_as`) + the `cites` alias for
+ * `citations` are layered on top. This compile-time assert is load-bearing under
+ * `npm run build` (tsc — the app tsconfig includes the src tree): if the wire is
+ * re-forked to a free-standing interface that diverges from the shared core, the
+ * bidirectional `Eq` evaluates `false` and `Assert<false>` fails the build. The
+ * `Eq<>` precedent is `app/src/api/chatSessions.test.ts:58`.
+ */
+type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+type WireGeneratedCore = Pick<RenderedSectionWire, "body" | "confidence" | "warnings"> & {
+  citations: RenderedSectionWire["cites"];
+};
+type SharedGeneratedCore = Pick<RenderedSection, "body" | "citations" | "confidence" | "warnings">;
+type _assertRenderedSectionWire = Assert<Eq<WireGeneratedCore, SharedGeneratedCore>>;
 
 const originalFetch = global.fetch;
 

@@ -63,9 +63,29 @@ export interface ChatSeed {
 // `ExtractedFieldValue` is the shared generated-result shape (Extract
 // specialization): `{fieldId, value, citations}` + the shared
 // `confidence`/`warnings`.
-import type { Citation, ExtractedFieldValue, TemplateFieldType } from "@groundx/shared";
+import type {
+  Citation,
+  ExtractedFieldValue as SharedExtractedFieldValue,
+  TemplateFieldType,
+} from "@groundx/shared";
 
-export type { Citation, ExtractedFieldValue };
+// The Extract specialization of the shared generated-result core. This module
+// re-exports the shared type so the Extract field-value shape is single-sourced;
+// the compile-time assert below pins the re-export.
+export type ExtractedFieldValue = SharedExtractedFieldValue;
+export type { Citation };
+
+// generated-result drift guard (Extract side) — 2026-05-31-generated-result-shared.
+// Pins this module's exported `ExtractedFieldValue` to the shared type so a future
+// re-fork (replacing the re-export with a free-standing local interface that
+// renames `fieldId`, drops `citations`, widens `confidence`, …) fails the build:
+// the bidirectional `Eq` evaluates `false` and `Assert<false>` is a tsc error.
+// NOTE: it lives in this PRODUCTION file (not a `.test.ts`) because the middleware
+// `tsconfig.json` EXCLUDES `src/**/*.test.ts` from tsc — an assert in a test file
+// would be dormant. The `Eq<>` precedent is `app/src/api/chatSessions.test.ts:58`.
+type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+type _assertExtractGeneratedResult = Assert<Eq<ExtractedFieldValue, SharedExtractedFieldValue>>;
 
 export interface SampleChatTurn {
   id: string;
