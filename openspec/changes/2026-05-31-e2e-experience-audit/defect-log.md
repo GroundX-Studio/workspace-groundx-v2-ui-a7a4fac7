@@ -32,7 +32,18 @@ Audited the post-`retire-mock-mode` build against REAL GroundX (no MOCK_MODE). O
 - **Expected:** clean console.
 - **Fix:** set the `v7_startTransition` (+ related) future flags on the Router, or suppress. Trivial. → ticket.
 
+### DL-3 · responsive (mobile 375px) · P2 · OPEN (needs verification)
+- **Measured:** at a 375×812 viewport the onboarding page has **no horizontal overflow** (scrollWidth=375,
+  zero over-wide elements) — good — BUT it stayed in the DESKTOP (non-compact) layout: `appshell-compact-topbar`
+  absent, nav/view toggles not present. A narrower default width EARLIER in the session DID render compact
+  mode, so the mechanism exists.
+- **Expected:** at mobile width the shell switches to compact (single-pane + nav/view toggles).
+- **Caveat:** may be a `preview_resize`-doesn't-fire-React-`useMediaQuery` artifact rather than a real
+  breakpoint bug — **verify by loading at a mobile width (not resizing into it)** before fixing. → e2e-audit-followup / ticket.
+
 ## Passes (live, measured — no defect)
+- **2.11 Auth — password show/hide:** the password input flips `type="password"` → `type="text"` on the
+  visibility toggle (validates the `PasswordField` primitive).
 - **F1 Ingest:** sample + BYO tiles render; parsed-doc fetch 200 real data; pick → `/onboarding/28454/utility`.
 - **F2 Understand/PDF:** page renders **958×1240** (24px-collapse cleared), 3 page thumbnails, no error.
 - **F3 Extract:** workbench renders 3 category tabs (Statement·14 / Meters·16 / Charges·6) with real field
