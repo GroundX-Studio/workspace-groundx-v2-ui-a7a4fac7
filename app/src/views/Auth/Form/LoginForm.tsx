@@ -1,15 +1,12 @@
 import { FC, ReactNode, useState } from "react";
 import { FormikHelpers, useFormik } from "formik";
 import { object as yupObject, ObjectSchema, string as yupString } from "yup";
-import IconButton from "@mui/material/IconButton";
-import InputAdornment from "@mui/material/InputAdornment";
 import TextField from "@mui/material/TextField";
-import Visibility from "@mui/icons-material/Visibility";
-import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 
 import { LoginI } from "@/api/entities/customerEntity";
-import { DARK_GREY, GRAY, WHITE } from "@/constants";
+import { WHITE } from "@/constants";
 import { Button } from "@/components/primitives/Button/Button";
+import { PasswordField } from "@/components/primitives/PasswordField/PasswordField";
 import { makeAnimationStartHandler } from "@/shared/utils/makeAnimationStartHandler";
 
 interface LoginFormProps {
@@ -31,7 +28,6 @@ const initValues = (values: LoginI): LoginI => ({
 export const LOGIN_SUBMIT_LABEL = "Continue";
 
 export const LoginForm: FC<LoginFormProps> = ({ values, forgotPassword, onSubmit }) => {
-  const [showPassword, setShowPassword] = useState(false);
   const [emailHasValue, setEmailHasValue] = useState(false);
   const [passwordHasValue, setPasswordHasValue] = useState(false);
 
@@ -67,12 +63,12 @@ export const LoginForm: FC<LoginFormProps> = ({ values, forgotPassword, onSubmit
         sx={{ mt: 3, input: { background: WHITE } }}
       />
 
-      <TextField
+      <PasswordField
         fullWidth
         id="password"
         name="password"
         label="Password"
-        type={showPassword ? "text" : "password"}
+        noTool="pre-app auth (not agent-driven)"
         value={formik.values.password}
         onChange={(event) => {
           setPasswordHasValue(true);
@@ -84,22 +80,6 @@ export const LoginForm: FC<LoginFormProps> = ({ values, forgotPassword, onSubmit
         InputLabelProps={{ shrink: passwordHasValue }}
         InputProps={{
           onAnimationStart: makeAnimationStartHandler(setPasswordHasValue),
-          endAdornment: (
-            <InputAdornment position="end">
-              <IconButton
-                sx={{ backgroundColor: "inherit", "&:hover": { backgroundColor: GRAY } }}
-                aria-label="toggle password visibility"
-                disableRipple
-                onClick={() => setShowPassword((prev) => !prev)}
-              >
-                {showPassword ? (
-                  <Visibility sx={{ color: DARK_GREY }} fontSize="small" />
-                ) : (
-                  <VisibilityOffIcon sx={{ color: DARK_GREY }} fontSize="small" />
-                )}
-              </IconButton>
-            </InputAdornment>
-          ),
         }}
         sx={{ mt: 2, input: { background: WHITE } }}
       />

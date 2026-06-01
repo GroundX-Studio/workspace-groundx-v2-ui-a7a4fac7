@@ -1,22 +1,19 @@
-import { ChangeEvent, FC, useState } from "react";
+import { ChangeEvent, FC } from "react";
 import { FormikHelpers, useFormik } from "formik";
 import { boolean as yupBoolean, object as yupObject, ObjectSchema, ref as yupRef, string as yupString } from "yup";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import FormGroup from "@mui/material/FormGroup";
 import FormHelperText from "@mui/material/FormHelperText";
-import IconButton from "@mui/material/IconButton";
-import InputAdornment from "@mui/material/InputAdornment";
 import Link from "@mui/material/Link";
 import TextField from "@mui/material/TextField";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
-import Visibility from "@mui/icons-material/Visibility";
-import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 
 import { RegisterI } from "@/api/entities/customerEntity";
 import { APP_CONFIG } from "@/appConfig";
-import { BODY_TEXT, DARK_GREY, GRAY, NAVY, WHITE } from "@/constants";
+import { BODY_TEXT, NAVY, WHITE } from "@/constants";
 import { Button } from "@/components/primitives/Button/Button";
+import { PasswordField } from "@/components/primitives/PasswordField/PasswordField";
 
 interface RegisterFormProps {
   values: RegisterI;
@@ -57,32 +54,12 @@ const initValues = (values: RegisterI): RegisterI => ({
 });
 
 export const RegisterForm: FC<RegisterFormProps> = ({ values, onSubmit }) => {
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
   const formik = useFormik({
     initialValues: initValues(values),
     enableReinitialize: true,
     validationSchema: schema,
     onSubmit,
   });
-
-  const passwordAdornment = (isVisible: boolean, onClick: () => void) => (
-    <InputAdornment position="end">
-      <IconButton
-        sx={{ backgroundColor: "inherit", "&:hover": { backgroundColor: GRAY } }}
-        aria-label="toggle password visibility"
-        disableRipple
-        onClick={onClick}
-      >
-        {isVisible ? (
-          <Visibility fontSize="small" sx={{ color: DARK_GREY }} />
-        ) : (
-          <VisibilityOffIcon fontSize="small" sx={{ color: DARK_GREY }} />
-        )}
-      </IconButton>
-    </InputAdornment>
-  );
 
   return (
     <form
@@ -95,8 +72,8 @@ export const RegisterForm: FC<RegisterFormProps> = ({ values, onSubmit }) => {
       <TextField fullWidth id="first" name="first" label="First Name *" value={formik.values.first} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.first && Boolean(formik.errors.first)} helperText={formik.touched.first && formik.errors.first} sx={{ mt: 2, input: { background: WHITE } }} />
       <TextField fullWidth id="last" name="last" label="Last Name *" value={formik.values.last} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.last && Boolean(formik.errors.last)} helperText={formik.touched.last && formik.errors.last} sx={{ mt: 2, input: { background: WHITE } }} />
       <TextField fullWidth id="email" name="email" label="Email *" value={formik.values.email} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.email && Boolean(formik.errors.email)} helperText={formik.touched.email && formik.errors.email} sx={{ mt: 2, input: { background: WHITE } }} />
-      <TextField fullWidth id="password" name="password" label="Password *" type={showPassword ? "text" : "password"} value={formik.values.password} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.password && Boolean(formik.errors.password)} helperText={formik.touched.password && formik.errors.password} InputProps={{ endAdornment: passwordAdornment(showPassword, () => setShowPassword((prev) => !prev)) }} sx={{ mt: 2, input: { background: WHITE } }} />
-      <TextField fullWidth id="confirmPassword" name="confirmPassword" label="Confirm Password *" type={showConfirmPassword ? "text" : "password"} value={formik.values.confirmPassword} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.confirmPassword && Boolean(formik.errors.confirmPassword)} helperText={formik.touched.confirmPassword && formik.errors.confirmPassword} InputProps={{ endAdornment: passwordAdornment(showConfirmPassword, () => setShowConfirmPassword((prev) => !prev)) }} sx={{ mt: 2, input: { background: WHITE } }} />
+      <PasswordField fullWidth id="password" name="password" label="Password *" noTool="pre-app auth (not agent-driven)" value={formik.values.password} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.password && Boolean(formik.errors.password)} helperText={formik.touched.password && formik.errors.password} sx={{ mt: 2, input: { background: WHITE } }} />
+      <PasswordField fullWidth id="confirmPassword" name="confirmPassword" label="Confirm Password *" noTool="pre-app auth (not agent-driven)" value={formik.values.confirmPassword} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.confirmPassword && Boolean(formik.errors.confirmPassword)} helperText={formik.touched.confirmPassword && formik.errors.confirmPassword} sx={{ mt: 2, input: { background: WHITE } }} />
       <TextField fullWidth id="companyName" name="companyName" label="Company Name" value={formik.values.companyName} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.companyName && Boolean(formik.errors.companyName)} helperText={formik.touched.companyName && formik.errors.companyName} sx={{ mt: 2, input: { background: WHITE } }} />
 
       <FormGroup sx={{ mt: 2 }}>

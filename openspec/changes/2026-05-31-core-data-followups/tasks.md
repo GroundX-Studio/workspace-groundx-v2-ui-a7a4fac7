@@ -369,10 +369,40 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   a wide change that risks the behavior-preserving guarantee; left honestly open rather than rushed.
 
 ### 4f. LOW UI cleanups (⟲ WORKFLOW-OK, independent)
-- [ ] **LOW — scenario capability flag:** `ExtractView.tsx` `supportsJsonRender = scenarioId === "loan"`
+- [x] **LOW — scenario capability flag:** `ExtractView.tsx` `supportsJsonRender = scenarioId === "loan"`
   → read a `ScenarioConfig` capability flag (data, not a hardcoded-id branch).
-- [ ] **LOW — `PasswordField` primitive:** extract the show/hide toggle duplicated across `LoginForm`/
+  — DONE: the hardcode lives in the `Extract` widget (`components/viewer-widgets/Extract/Extract.tsx:432`,
+  not `ExtractView`), where `supportsJsonRender = scenarioId === "loan"` is now
+  `scenario?.supportsJsonRender ?? false` — reading the `ScenarioConfig` it already resolves via
+  `byId(scenarioId)`. Added `supportsJsonRender?: boolean` to `ScenarioConfig` (app `types/scenarios.ts`
+  + middleware `scenarios/types.ts`) and, as the bucket-round-trip WIRE CARRIER, to `ScenarioManifest`
+  on both sides — the registry (`scenarios/registry.ts`) LIFTS `group.manifest.supportsJsonRender ?? false`
+  onto the config so the live path is non-dormant (loan/solar aren't seeded yet; the lift is the path a
+  future loan seed flows through). Test fixture `loanTestScenario` sets the flag `true`; utility/solar omit
+  it (→ falsy → EXACT current behavior, only loan ever got the toggle). EARN-EVERY-AXIS: one boolean,
+  replaces the one real hardcode — no speculative flags. Failing-first: new Extract.test case "gates the
+  table→JSON render toggle on the scenario's supportsJsonRender capability flag, not the id" — proves
+  data-driven by (1) id="loan" + flag false → NO toggle, (2) id="utility" + flag true → toggle (red while
+  the id-branch stood, green after). Existing ExtractView loan handoff test (uses `loanTestScenario`)
+  unchanged + green. App build (tsc+vite) + middleware tsc clean.
+- [x] **LOW — `PasswordField` primitive:** extract the show/hide toggle duplicated across `LoginForm`/
   `RegisterForm`/`ConfirmChangePasswordForm` into `components/primitives/PasswordField`.
+  — DONE: new `components/primitives/PasswordField/{PasswordField.tsx,README.md,PasswordField.test.tsx}`.
+  Wraps the RAW MUI `TextField` (NOT the brand `TextField` primitive — the auth forms render the raw field
+  with their own white-bg `sx`; wrapping the brand primitive would change border-radius/focus-ring =
+  behavior change), owns `showPassword` state + the `aria-label="toggle password visibility"`
+  endAdornment, MERGES caller `InputProps` (so LoginForm's `onAnimationStart` label-shrink handler
+  survives), forwards all other `TextFieldProps`, and follows the Phase-5b interactive-primitive
+  tool-binding contract (`Omit<MuiTextFieldProps,"type"> & ToolBindingProps`; sites pass
+  `noTool="pre-app auth (not agent-driven)"`). Icon colors use the `DARK_GREY`/`GRAY` tokens
+  (no-hardcoded-styles green). Replaced ALL THREE call sites (RegisterForm uses it twice → 4 fields, 3
+  consumers — axis earned); removed the now-dead `showPassword`/`setShowPassword` state, the
+  `passwordAdornment` helper, and the unused `IconButton`/`InputAdornment`/`Visibility`/`VisibilityOff`
+  imports. Behavior-preserving: masking, toggle, validation, and field props verified identical — the 3
+  existing form test suites (LoginForm/RegisterForm/ConfirmChangePasswordForm, 9 tests) stay UNCHANGED +
+  green. Failing-first `PasswordField.test.tsx` (4 cases: default-mask, reveal/hide toggle, prop
+  forwarding, InputProps merge + tool-binding) red (module absent) → green. widget-contract (164) +
+  no-hardcoded-styles (74) guards green.
 
 ## 5. Recurrence drift-guards + reconciliation matrix
 **Execution: ◑ MIXED.** The `_template/` scaffold update + reconciliation-matrix doc + checklist are

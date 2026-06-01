@@ -5,12 +5,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import { loanTestScenario, utilityTestScenario } from "@/test/scenarioFixtures";
+import type { ScenarioConfig } from "@/types/scenarios";
 
 import { Extract } from "./Extract";
 
 const UTILITY_DOC_SCOPE: ContentScope = {
   type: "documents",
   documentIds: ["utility-bill-2026-04"],
+};
+const LOAN_DOC_SCOPE: ContentScope = {
+  type: "documents",
+  documentIds: ["loan-doc-1"],
 };
 const EMPTY_SCOPE: ContentScope = { type: "documents", documentIds: [] };
 
@@ -41,6 +47,34 @@ describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () =>
     expect(screen.getByTestId("extract-topbar-title")).toHaveTextContent(/utility/);
     expect(document.querySelector('[aria-label="Statement"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="Meters"]')).not.toBeNull();
+  });
+
+  it("gates the table→JSON render toggle on the scenario's supportsJsonRender capability flag, not the id", () => {
+    // §4f: the JSON-render affordance must read a ScenarioConfig capability
+    // flag (data), NOT a `scenarioId === "loan"` literal. Prove it data-driven:
+    // (1) a scenario whose id IS "loan" but with the flag false → NO toggle;
+    // (2) a scenario whose id is NOT "loan" but with the flag true → toggle.
+    const loanIdNoFlag: ScenarioConfig = {
+      ...loanTestScenario,
+      supportsJsonRender: false,
+    };
+    const { unmount } = renderWithOnboardingProviders(
+      <Extract role="member" scope={LOAN_DOC_SCOPE} />,
+      { initialFrame: "f3", initialScenario: "loan", initialScenarios: [loanIdNoFlag] },
+    );
+    expect(screen.queryByTestId("render-mode-json")).not.toBeInTheDocument();
+    unmount();
+
+    const utilityIdWithFlag: ScenarioConfig = {
+      ...utilityTestScenario,
+      supportsJsonRender: true,
+    };
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      initialScenarios: [utilityIdWithFlag],
+    });
+    expect(screen.getByTestId("render-mode-json")).toBeInTheDocument();
   });
 
   it("shows the anon unlock banner for an anonymous role, not a member", () => {

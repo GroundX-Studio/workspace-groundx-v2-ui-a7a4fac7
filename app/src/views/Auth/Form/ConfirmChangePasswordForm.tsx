@@ -1,14 +1,11 @@
-import { FC, useState } from "react";
+import { FC } from "react";
 import { FormikHelpers, useFormik } from "formik";
 import { object as yupObject, ObjectSchema, string as yupString } from "yup";
-import IconButton from "@mui/material/IconButton";
-import InputAdornment from "@mui/material/InputAdornment";
 import TextField from "@mui/material/TextField";
-import Visibility from "@mui/icons-material/Visibility";
-import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 
-import { DARK_GREY, GRAY, WHITE } from "@/constants";
+import { WHITE } from "@/constants";
 import { Button } from "@/components/primitives/Button/Button";
+import { PasswordField } from "@/components/primitives/PasswordField/PasswordField";
 
 export interface ConfirmChangePasswordI {
   code: string;
@@ -32,7 +29,6 @@ const schema: ObjectSchema<ConfirmChangePasswordI> = yupObject().shape({
 });
 
 export const ConfirmChangePasswordForm: FC<ConfirmChangePasswordFormProps> = ({ values, onSubmit }) => {
-  const [showPassword, setShowPassword] = useState(false);
   const formik = useFormik({
     initialValues: { code: values.code || "", password: values.password || "" },
     validationSchema: schema,
@@ -42,26 +38,17 @@ export const ConfirmChangePasswordForm: FC<ConfirmChangePasswordFormProps> = ({ 
   return (
     <form id="change-password-form" onSubmit={(event) => { event.preventDefault(); formik.handleSubmit(); }}>
       <TextField fullWidth id="code" name="code" label="Code" value={formik.values.code} onChange={formik.handleChange} onBlur={formik.handleBlur} error={formik.touched.code && Boolean(formik.errors.code)} helperText={formik.touched.code && formik.errors.code} sx={{ mt: 2, input: { background: WHITE } }} />
-      <TextField
+      <PasswordField
         fullWidth
         id="password"
         name="password"
         label="Enter your new password"
-        type={showPassword ? "text" : "password"}
+        noTool="pre-app auth (not agent-driven)"
         value={formik.values.password}
         onChange={formik.handleChange}
         onBlur={formik.handleBlur}
         error={formik.touched.password && Boolean(formik.errors.password)}
         helperText={formik.touched.password && formik.errors.password}
-        InputProps={{
-          endAdornment: (
-            <InputAdornment position="end">
-              <IconButton sx={{ backgroundColor: "inherit", "&:hover": { backgroundColor: GRAY } }} aria-label="toggle password visibility" disableRipple onClick={() => setShowPassword((prev) => !prev)}>
-                {showPassword ? <Visibility fontSize="small" sx={{ color: DARK_GREY }} /> : <VisibilityOffIcon fontSize="small" sx={{ color: DARK_GREY }} />}
-              </IconButton>
-            </InputAdornment>
-          ),
-        }}
         sx={{ mt: 2, input: { background: WHITE } }}
       />
       <Button noTool="pre-app auth (not agent-driven)" variant="primary" type="submit" id="change-password-submit" submitting={formik.isSubmitting} sx={{ m: 0, mt: 4, height: 48 }} fullWidth>

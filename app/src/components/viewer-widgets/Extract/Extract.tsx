@@ -429,7 +429,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
   const selectedField = selectedFieldId ? allFields.find((f) => f.id === selectedFieldId) ?? null : null;
   const selectedValue = selectedField ? valuesByFieldId.get(selectedField.id) : undefined;
 
-  const supportsJsonRender = scenarioId === "loan";
+  const supportsJsonRender = scenario?.supportsJsonRender ?? false;
 
   const jsonOutput = JSON.stringify(
     {

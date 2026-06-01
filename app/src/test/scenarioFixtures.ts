@@ -90,6 +90,9 @@ export const utilityTestScenario: ScenarioConfig = {
 export const loanTestScenario: ScenarioConfig = {
   id: "loan",
   order: 2,
+  // Loan is the docs→structured-JSON sample — the only scenario that offers
+  // the table→JSON render handoff in the Extract workbench.
+  supportsJsonRender: true,
   documents: [
     { documentId: "loan-doc-1", fileName: "Loan Application Packet.pdf", order: 1 },
   ],

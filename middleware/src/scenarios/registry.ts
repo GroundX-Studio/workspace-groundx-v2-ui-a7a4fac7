@@ -137,6 +137,10 @@ export class ScenarioRegistry {
         order: group.order,
         manifest: group.manifest,
         documents: group.documents.sort((a, b) => a.order - b.order),
+        // Lift the capability flag off the stored manifest blob (the only
+        // thing that survives the bucket round-trip) to the config the
+        // frontend consumes.
+        supportsJsonRender: group.manifest.supportsJsonRender ?? false,
       });
     }
     scenarios.sort((a, b) => a.order - b.order);

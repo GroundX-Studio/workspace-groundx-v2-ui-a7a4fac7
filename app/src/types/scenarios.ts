@@ -97,6 +97,12 @@ export interface ScenarioManifest {
   sampleExtractionValues?: ExtractedFieldValue[];
   /** Pre-canned chat transcript for the demo flow. */
   sampleChatScript?: SampleChatTurn[];
+  /**
+   * Capability flag — wire carrier for `ScenarioConfig.supportsJsonRender`.
+   * The manifest is the only blob that survives the bucket round-trip, so the
+   * flag is stored here and lifted to the config by the registry. Absent → false.
+   */
+  supportsJsonRender?: boolean;
 }
 
 export interface ScenarioDocument {
@@ -118,4 +124,10 @@ export interface ScenarioConfig {
   order: number;
   manifest: ScenarioManifest;
   documents: ScenarioDocument[];
+  /**
+   * Capability flag: the Extract workbench offers the table→JSON render
+   * handoff for this scenario. Data-driven (replaces the former
+   * `scenarioId === "loan"` literal in Extract.tsx). Absent → false.
+   */
+  supportsJsonRender?: boolean;
 }
