@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,18 +58,25 @@ describe("PasswordField (primitive)", () => {
         id="pw"
         name="pw"
         label="Password"
-        InputProps={{ onAnimationStart }}
+        // A passthrough sentinel (lands on the DOM <input>) + the label-shrink
+        // animation handler LoginForm relies on — both must survive the merge.
+        InputProps={{ onAnimationStart, inputProps: { "data-sentinel": "x" } }}
         noTool="test"
       />,
     );
-    // Toggle adornment present...
+    // The toggle adornment is present...
     expect(screen.getByRole("button", { name: "toggle password visibility" })).toBeInTheDocument();
-    // ...without clobbering the caller's InputProps: the input animates the
-    // label-shrink handler the LoginForm relies on.
+    // ...AND the caller's InputProps survive the `{...InputProps}` spread:
+    // (1) the passthrough sentinel reaches the rendered <input> (proves the
+    //     spread is load-bearing — deleting it drops `inputProps`).
     const input = document.querySelector("#pw") as HTMLInputElement;
-    // jsdom won't fire CSS animations, but the handler must be wired (no throw,
-    // and the adornment coexists with the field).
-    expect(input).toBeInTheDocument();
+    expect(input).toHaveAttribute("data-sentinel", "x");
+    // (2) the caller's onAnimationStart handler is wired — fire it directly
+    //     (jsdom won't trigger CSS animations) and assert the spy ran. MUI
+    //     spreads InputProps onto the InputBase root, so dispatch there.
+    const inputRoot = input.closest(".MuiInputBase-root") as HTMLElement;
+    fireEvent.animationStart(inputRoot);
+    expect(onAnimationStart).toHaveBeenCalled();
   });
 
   it("lands the tool-binding on the rendered field (data-no-tool)", () => {

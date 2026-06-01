@@ -208,5 +208,27 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
       const enumerated = Object.keys(CARD_TOOL_BINDINGS).sort();
       expect(declared).toEqual(enumerated);
     });
+
+    // Direction-2, SERVER side: a SERVER-ONLY tool (no app mirror — e.g.
+    // `suggest_intent`) that declares a rendersWidget binding would slip past
+    // the app-only walk above, leaving an unenumerated/unmirrored chat card.
+    // Require every server tool with a binding to also be enumerated in
+    // CARD_TOOL_BINDINGS. The mirrored app+server cards already pass via the
+    // app walk; this closes the server-only gap. Today this filtered set is
+    // empty (no server-only tool renders a widget), so the assertion holds —
+    // it fires the moment a server-only binding is ever added.
+    it("every SERVER-only tool that declares a rendersWidget binding is enumerated above", () => {
+      const appSet = new Set(appNames);
+      const serverOnlyBound = SERVER_TOOL_CATALOG.filter(
+        (t) => t.rendersWidget && !appSet.has(t.name),
+      )
+        .map((t) => t.name)
+        .sort();
+      const unenumerated = serverOnlyBound.filter((n) => !(n in CARD_TOOL_BINDINGS));
+      expect(
+        unenumerated,
+        `server-only tool(s) declare a rendersWidget binding but are not enumerated in CARD_TOOL_BINDINGS: ${unenumerated.join(", ")}`,
+      ).toEqual([]);
+    });
   });
 });

@@ -45,4 +45,17 @@ describe("selectActiveStep (§4 #16)", () => {
     });
     expect(selectActiveStep(session)).toBe(ingestStep);
   });
+
+  // Exercises the `?? null` out-of-bounds defence (selectors.ts:25): a
+  // stepIndex >= history.length (e.g. a stale index after history was
+  // truncated) reads `undefined` from the array; the selector must coerce
+  // that to `null`, never hand a consumer `undefined`.
+  it("returns null when stepIndex is past the end of history (out of bounds)", () => {
+    const session = withViewer({
+      ...EMPTY_VIEWER_SESSION,
+      history: [ingestStep],
+      currentStep: { stepIndex: 2 },
+    });
+    expect(selectActiveStep(session)).toBeNull();
+  });
 });

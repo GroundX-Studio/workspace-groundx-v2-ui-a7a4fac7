@@ -292,7 +292,10 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   green after) covers null/undefined session, empty viewer (stepIndex -1 → null), and index 0/1
   resolution. Behavior-preserving: the selector's `history[idx] ?? null` is falsy-equivalent to the old
   `history[idx]` at every consumer (each guards `step && step.kind === …`); app build (tsc+vite) clean,
-  confirming no type regression. ZERO inline `currentStep.stepIndex >= 0` idioms remain (grep).
+  confirming no type regression. ZERO inline `currentStep.stepIndex >= 0` idioms remain in PRODUCTION
+  source (grep) — the only surviving occurrences are the selector's own canonical implementation
+  (`selectors.ts:25`) and a legitimate Probe in `SchemaView.test.tsx:644` (a test, not duplicated
+  production logic).
 - [ ] **#20 illegal-states.** Session auth → `{kind:"anon"} | {kind:"authed";groundxUsername;
   groundxApiKey}`, collapse the ~12 empty-string `groundxUsername` checks; `LoginReqCallback` +
   `SchemaFieldExtractionResult` flat-record→discriminated union; add a `parseChatStoreSnapshot(unknown)`
@@ -304,8 +307,13 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   groundxApiKey?}`) — the anon arm carries NO `groundxUsername` field, so the empty-string sentinel is
   UNREPRESENTABLE. `sessionMiddleware` is the ONE conversion boundary (DB `SessionRecord` string column →
   union; `""` → anon). The persistence `SessionRecord` (DB row shape) intentionally keeps the string column
-  (a DB-schema change is out of scope). Added accessors `isAuthedSession`/`sessionUsername`/`sessionApiKey`
-  (each ≥2 real consumers — axis earned) and migrated ALL ~16 readers: `requireAuthenticatedUser`
+  (a DB-schema change is out of scope). Added accessors `isAuthedSession`/`sessionUsername`/`sessionApiKey`.
+  CORRECTION to an earlier loose "each ≥2 real consumers" claim: `isAuthedSession` has ONE production
+  call-site (`app.ts:448` `hasApiKey` derivation) — it is the union's canonical type-guard (its real value
+  is narrowing `req.session` to `AuthedSession` so `.groundxApiKey` is reachable, not call-count), while
+  `sessionUsername` (7 sites) and `sessionApiKey` (4 sites) are well-earned. The two ownership/auth guards
+  read the discriminant directly (`kind !== "authed"` / `kind === "authed"`) rather than the guard, which
+  is why `isAuthedSession`'s call-count is low. Migrated ALL ~16 readers: `requireAuthenticatedUser`
   (`kind !== "authed"`), `assertChatSessionOwnership` (`kind === "authed"`), `app.ts` auth/me · me/metadata ·
   onboarding/session `anonymous` flag · chat-sessions create (`ownerUserId`/`ownerAnonId`) · claim ·
   list-sessions · POST templates · POST report-render · the 3 `groundxApiKey ?? env` fallbacks · the
@@ -453,12 +461,16 @@ independent test file with its own pass/fail. **AUTHOR THESE AFTER the bases the
   CanvasIntent|Record<…>` + the localStorage-snapshot shapes are NOT flagged); (d) no app `class XError
   extends Error` (must extend shared `ApiError`). Middleware-side in
   `middleware/src/db/persistedColumnPolicy.test.ts`: (e) every persisted DATA column on the guarded tables
-  (`viewer_events`, `intent_log`) is read into its `rowTo*` mapper (`row.<col>`) — the §4e write-only/dead
-  `tool_calls_json`/`attachments_json` regression would turn this RED; PK/FK/INDEX clauses skipped, per-table
-  documented `structuralExempt` + a stale-exemption sanity test; (d-middleware) no middleware `*Error
-  extends Error`. Fork proofs: (a) renaming the descriptor call, (b) a PascalCase dup decl in two files,
-  (c) a `Record<…>` field injected into a `*State` body, (d) a probe `XError extends Error`, (e) a write-only
-  DDL column — each flipped the relevant guard RED, green after revert.
+  (`viewer_events`, `intent_log`) is read into its `rowTo*` mapper (`row.<col>`) — the STRUCTURAL complement
+  that fires if a write-only/dead column is added to either of those two tables; PK/FK/INDEX clauses
+  skipped, per-table documented `structuralExempt` + a stale-exemption sanity test. (The §4e `chat_messages`
+  `tool_calls_json`/`attachments_json` regression specifically is caught by the name-grep guard in
+  `mysqlRepository.test.ts` — `expect(joined).not.toContain("tool_calls_json"/"attachments_json")` — NOT by
+  guard (e), whose guarded-table list does not include `chat_messages`; the two are complementary guards.)
+  (d-middleware) no middleware `*Error extends Error`. Fork proofs: (a) renaming the descriptor call,
+  (b) a PascalCase dup decl in two files, (c) a `Record<…>` field injected into a `*State` body, (d) a probe
+  `XError extends Error`, (e) a write-only DDL column on a guarded table — each flipped the relevant guard
+  RED, green after revert.
 - [x] **Chat-widget reachability guard (migrated from `core-data-model-hardening` on its 2026-05-31
   archive — the canvas `CanvasKind` registry covers VIEWER widgets only; chat widgets mount imperatively
   in `ChatColumn`).** For TOOL-triggered cards (`propose_schema_field`→ProposeSchemaFieldCard,
