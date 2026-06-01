@@ -1,8 +1,17 @@
 # Tasks — full end-to-end experience audit + remediation (2026-05-31)
 
+> TDD: failing test first, then implement, then adversarial review before marking done.
+> **Adversarial review gate after EVERY task (Discipline §10)** — a task is not `[x]` until
+> an adversarial review of its output against the plan AND the real code passes, run before
+> marking done and before the next task. Tailored for this AUDIT change: each per-surface
+> audit pass (§2) gets a review that the pass actually exercised every control with MEASURED
+> evidence (a pass that only screenshotted is NOT done), and each per-defect fix (§4) gets a
+> review that the regression test genuinely fails without the fix and the fix broke no sibling
+> interaction.
+
 Exploratory audit-then-fix. Order: **(1) inventory → (2) per-surface audit passes → (3)
 defect log → (4) fix loop → (5) sign-off.** Honor the WIP cap (≤3 in flight). Each confirmed
-defect SHOULD get a regression test before its fix. Adversarial review gate after every task.
+defect SHOULD get a regression test before its fix.
 
 **Tooling (every audit pass below):** start servers with `Claude_Preview preview_start`
 (reads `.claude/launch.json`); screenshots via `preview_screenshot`; drive + inspect with the
@@ -24,6 +33,11 @@ screenshot glance.
       exercised before sign-off.
 - [ ] Confirm the inventory covers each surface in §2; cross-check against the wireframe spec
       so no path (e.g. a back-out / dismissal route) is missed.
+- [ ] **Adversarial review:** re-walk `views/` + `components/` against the inventory and try to
+      find ONE interactive control or nav path the inventory omits (hover/long-press, disabled
+      states, keyboard-only paths, back-out/dismissal routes). If found, the inventory is not
+      done — add the row. Confirm every row names a *measurable* `what-to-measure` (not "looks
+      right").
 
 ## 2 — Per-surface audit passes (drive controls + capture measured evidence)
 
@@ -72,6 +86,13 @@ auditable. Attach a `preview_screenshot` as corroboration.
       degrade to crossfade / instant and no animation blocks interaction.
 - [ ] **2.16 Console + network sweep.** Across every pass, capture console errors and failing
       network responses; any uncaught error or non-2xx on a happy path is a defect row.
+- [ ] **Adversarial review (run PER PASS, 2.1–2.16, before that pass is `[x]`):** for the pass
+      just finished, falsify the verdict against the inventory rows for that surface AND the
+      real component code — confirm EVERY control on the surface was actually driven and that
+      each verdict cites a measured value (rendered px / visibility / attribute / scroll /
+      network body / console / a11y node), not a screenshot glance. A pass that only
+      screenshotted, or skipped a control (incl. disabled/back-out/error states), is NOT done →
+      reopen it. No control silently dropped because it was "obviously fine."
 
 ## 3 — Defect log
 
@@ -81,6 +102,10 @@ auditable. Attach a `preview_screenshot` as corroboration.
       `open → test-written → fixed → reverified` or `triaged-ticketed`.
 - [ ] Every audit pass in §2 feeds this log; a pass is not "done" until its controls are all
       either `pass` (with measured value) or a logged defect row.
+- [ ] **Adversarial review:** reconcile the defect log against every §2 pass's measured output —
+      confirm no measured-wrong observation was quietly dropped, every row's `measured actual`
+      is a real captured value (not paraphrase), and severity is defensible (a path-blocking or
+      data-wrong finding is not filed P3). Confirm the log accounts for EVERY inventory row.
 
 ## 4 — Fix loop (per defect)
 
@@ -91,7 +116,14 @@ auditable. Attach a `preview_screenshot` as corroboration.
       contract, and the composable-over-forked principle.
 - [ ] Re-verify live with a fresh measured pass on the actual surface (not just the unit test);
       flip the defect-log row to `reverified` with the new measured value.
-- [ ] Adversarial review the fix against the plan AND the real code before marking done.
+- [ ] **Adversarial review (per defect, before marking the row done):** review the fix against
+      the plan AND the real code. Concretely: (a) revert the fix and confirm the regression test
+      genuinely FAILS without it (a test that passes on the unfixed code proves nothing — it is
+      not a regression test); (b) confirm the fix did not break a sibling interaction on the
+      same surface — re-drive the adjacent controls and the nearest shared widget consumer (e.g.
+      the steady-mode mount of the same widget) and confirm they still measure correct; (c)
+      confirm the fix honors the drift guards / widget contract / composable-over-forked rule
+      and adds no dormant or spec-only plumbing.
 - [ ] Any defect out of scope to fix here → triage: open an OpenSpec change ticket or
       `spawn_task`, set the row to `triaged-ticketed` with the ticket reference. No stale /
       dormant code left behind.
@@ -104,4 +136,8 @@ auditable. Attach a `preview_screenshot` as corroboration.
       viewports with measured-correct controls; corroborating screenshots attached.
 - [ ] `npm test` (app + middleware suites) green; drift guards green; `npm run build` green.
 - [ ] `openspec validate 2026-05-31-e2e-experience-audit --strict` passes.
+- [ ] **Adversarial review (final gate, before archive):** confirm every §2 pass and every §4
+      fix carries its own passed review (no pass marked done on screenshots alone, no fix marked
+      done without the revert-the-fix red check). Re-confirm the defect log has zero `open` rows
+      and every `triaged-ticketed` row names a real ticket / spawned task. Only then archive.
 - [ ] Archive the change.

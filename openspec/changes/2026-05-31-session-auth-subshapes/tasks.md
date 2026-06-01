@@ -4,7 +4,9 @@
 > step 2-7g) — do NOT re-touch `middleware/src/middleware/session.ts`. This change closes the three
 > remaining flat-record sub-shapes. TDD: failing test first (constructing the illegal/old flat shape
 > the new union/validator rejects), then implement, then adversarial review before marking done.
-> WIP cap = 3. Behavior-preserving for every valid input.
+> **Adversarial review gate after EVERY task (Discipline §10)** — a task is not `[x]` until an
+> adversarial review of its output against the plan AND the real code passes, run before marking done
+> and before the next task. WIP cap = 3. Behavior-preserving for every valid input.
 
 ## 1. `LoginReqCallback` → discriminated union
 

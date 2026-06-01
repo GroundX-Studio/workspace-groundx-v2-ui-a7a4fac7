@@ -9,6 +9,11 @@
 > (`core-data-followups` step 2-7g): a compile-time
 > `Eq<Local, Shared>` that fails `npm run build` if a side re-forks.
 >
+> **TDD: failing test first, then implement, then adversarial review before
+> marking done. Adversarial review gate after EVERY task (Discipline §10)** — a
+> task is not `[x]` until an adversarial review of its output against the plan
+> AND the real code passes, run before marking done and before the next task.
+>
 > **Cross-plan dependency (DO NOT double-fix here):** the X-Ray response-shape
 > twin (`documentPages[].number`/`.page`/`pageNumber`) AND the WF-03 `PageDim`
 > shape both live in `citationGeometry.ts`, which `2026-05-29-wf05b-word-level-geometry`
@@ -39,6 +44,14 @@
 - [ ] Runtime validate at the parse boundary: the `/api/chat/messages` route
       handler (or `sendChatMessage` client) validates the reply against
       `chatReplySchema` before returning/consuming. App + middleware suites green.
+- [ ] **Adversarial review:** grep app + middleware for any surviving local
+      re-declaration of `ChatReply` / `ChatRouterResponse` / `DispatchedIntent` /
+      `ToolFailure` (only re-export aliases may remain); confirm BOTH the app-side
+      and middleware-side `Eq<>` guards actually fire by forking one app field to a
+      mismatch and observing `tsc`/`npm run build` fail, then revert; confirm the
+      runtime `chatReplySchema` accepts the real reply fixture byte-for-byte
+      (`tools[]`/`intents[]`/`toolFailures[]`/`proposedSchemaField`/`_debug?`) and
+      no field was dropped/renamed — behaviour unchanged, no runtime shape change.
 
 ## B. Debug payload + debug-scope twin (ChatReplyDebug ↔ ChatRouterDebug)
 
@@ -54,6 +67,13 @@
 - [ ] Confirm the dev-console logger in `sendChatMessage` (`result.reply._debug.scope`)
       and the middleware writer both compile against the `ContentScope`-typed
       scope. Suites green.
+- [ ] **Adversarial review:** confirm the LOW debug-scope twin is actually closed —
+      grep both sides for the re-declared `{type,bucketId,groupId,documentIds,filter}`
+      scope literal and verify it is GONE (scope now resolves to the shared
+      `ContentScope`); confirm the `Eq<ChatReplyDebug, SharedChatReplyDebug>` guard
+      fires by forking the `scope`/`mode`/`groundx`/`llm` shape to a mismatch →
+      `tsc` fails → revert; exercise `chatReplyDebugSchema` against a fixture whose
+      `scope` is a real `ContentScope` variant; behaviour unchanged.
 
 ## C. Create-session result + scopeHint
 
@@ -65,6 +85,13 @@
       `ChatRouterRequest.scopeHint` field) with the shared type.
 - [ ] Runtime validate `CreateChatSessionResult` at the `POST /api/chat-sessions`
       response boundary. Suites green.
+- [ ] **Adversarial review:** grep for any surviving local `CreateChatSessionResult`
+      or inline `scopeHint` shape on app or middleware (incl. the middleware
+      `ChatRouterRequest.scopeHint` field — confirm it now references the shared
+      `chatScopeHintSchema` type, not a re-fork); confirm the `Eq<>` guards for BOTH
+      `CreateChatSessionResult` and `scopeHint` fire by forking each to a mismatch →
+      `tsc` fails → revert; exercise both runtime validates against real fixtures;
+      behaviour unchanged.
 
 ## D. Shared Source union (7× event-source enum + IntentSource)
 
@@ -83,6 +110,14 @@
       single-source `CanvasOrchestratorContext.IntentSource` off
       `Exclude<Source,"system">`. Add `Eq<>` guards on both app + middleware
       sides. Suites green.
+- [ ] **Adversarial review:** count the source-enum declarations BEFORE and AFTER —
+      all 7 event-source enum sites + the `IntentSource` site must now derive from
+      the one `sourceSchema` (grep for surviving `["user","agent","tour","system"]`
+      / `viewerEventSourceSchema` / `intentLogSourceSchema` / `*_FALLBACK` re-forks
+      and confirm they delegate, not redefine); confirm the `Source.options`
+      deep-equals test fires by adding a bogus enum member → test fails → revert;
+      confirm `IntentSource` actually excludes `"system"` (a literal `"system"` in an
+      intent-source position must fail `tsc`); behaviour unchanged.
 
 ## E. AppUserMetadata + customer-auth client modules
 
@@ -97,12 +132,27 @@
 - [ ] Add `appUserMetadataSchema` to `@groundx/shared` (all session-metadata
       fields optional except `groundxUsername`); replace the app + middleware
       `AppUserMetadata` declarations with re-exports.
+- [ ] **Adversarial review:** confirm the subset/superset claim holds — every
+      app-narrowed field is genuinely OPTIONAL in the shared schema and the app
+      still compiles consuming only `groundxUsername?`/`onboardingState?` while
+      middleware sees all 7; grep both sides for a surviving local `AppUserMetadata`
+      interface (only re-exports may remain); fire the app + middleware `Eq<>` guards
+      by forking a field's optionality → `tsc` fails → revert; exercise
+      `appUserMetadataSchema` over a real session-metadata fixture; behaviour unchanged.
 - [ ] Single-source the two customer-auth client modules
       (`api/entities/customerEntity.ts`, `api/entities/partnerCustomerEntity.ts`):
       move their shared request/response wire shapes (login/register/auth
       response + partner credentials/profile) onto `@groundx/shared` schemas
       where a middleware mirror exists; add `Eq<>` guards. Runtime validate at
       the auth response parse boundary. Suites green.
+- [ ] **Adversarial review:** verify the axis is EARNED per shape — only fold a
+      request/response shape that has a real middleware mirror (no dormant shared
+      schema with a single consumer); confirm NO secret-bearing field leaks into the
+      shared schema or a committed fixture (Partner API `*username` values stay out —
+      see the never-commit-secrets lock); fire each new `Eq<>` guard by forking →
+      `tsc` fails → revert; exercise the auth-response runtime validate against a
+      sanitized fixture; grep for a surviving local copy of any folded wire shape;
+      behaviour unchanged.
 
 ## F. SchemaFieldExtractionResult
 
@@ -113,6 +163,12 @@
       app `SchemaFieldExtractionResult` declaration (`ChatStoreContext/types.ts`)
       with a re-export so `ChatStoreContext.tsx` + `SchemaView.tsx` consume the
       shared type. Suites green.
+- [ ] **Adversarial review:** confirm BOTH real consumers (`ChatStoreContext.tsx`
+      AND `SchemaView.tsx`) now resolve `SchemaFieldExtractionResult` to the shared
+      type and that no local declaration survives (grep); fire the `Eq<>` guard by
+      forking a field → `tsc` fails → revert; exercise
+      `schemaFieldExtractionResultSchema` against a real extraction-result fixture;
+      behaviour unchanged.
 
 ## Closeout
 

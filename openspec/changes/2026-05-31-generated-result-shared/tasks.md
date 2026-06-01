@@ -1,5 +1,10 @@
 # Tasks — generated-result shared type: drift guard + Report-wire single-source
 
+> TDD: failing test first, then implement, then adversarial review before marking done.
+> **Adversarial review gate after EVERY task (Discipline §10)** — a task is not `[x]`
+> until an adversarial review of its output against the plan AND the real code passes,
+> run before marking done and before the next task.
+
 Scope is the REMAINING gap only. The shared `GeneratedResult` + `ExtractedFieldValue` +
 `RenderedSection` + `parseGeneratedResult` + the 11-test runtime parse suite already exist and are
 green (`shared/src/index.ts:347-429`, `middleware/src/services/generatedResult.test.ts`). Do NOT
@@ -20,6 +25,17 @@ then refactor. The `Eq<>` precedent is `app/src/api/chatSessions.test.ts:40-43`.
       collapse it onto the shared type.
 - [ ] **Behavior-preserving (Extract):** Run the existing Extract suites (`generatedResult.test`,
       `ExtractView`/`Extract`, `SchemaView`) — all green, no rendered-value change.
+- [ ] **Adversarial review (Eq<> drift guard):** Prove the guard is load-bearing, not dormant.
+      For EACH consumer type pinned by an `Eq<>` assert (app + middleware `ExtractedFieldValue`,
+      and any `GeneratedResult`/`RenderedSection` re-export covered), temporarily fork it to a
+      single-field mismatch (e.g. rename `fieldId`→`field_id`, drop `citations`, or widen
+      `confidence` to `string`) and confirm `npx tsc --noEmit` / `npm run build` FAILS with the
+      `Assert<Eq<...>>` line — capture the failing tsc output — then REVERT and confirm green
+      again. Falsify the "re-export is the only source" claim: grep app + middleware for any
+      remaining free-standing `ExtractedFieldValue`/`GeneratedResult` interface or `type` literal
+      that rivals the `@groundx/shared` re-export (no second declaration survives). Confirm the
+      `Eq<>`/`Assert<>` helpers were not weakened to `[A] extends [B]` (one-directional) and the
+      test file was not retargeted to a trivial pass. Failed gate → back to in-progress.
 
 ## Single-source the Report wire section `[D]`
 - [ ] **RED (middleware):** Add an `Eq<>`/structural assert in a colocated test that
@@ -41,6 +57,20 @@ then refactor. The `Eq<>` precedent is `app/src/api/chatSessions.test.ts:40-43`.
 - [ ] **Behavior-preserving (Report):** Run `app/src/api/smartReport.test.ts` + the SmartReport
       render/widget suites + middleware report-render tests — all green; the rendered Report sections
       (markdown body, CiteChips, confidence/warnings, em-dash low-confidence degrade) are unchanged.
+- [ ] **Adversarial review (RenderedSectionWire single-source):** Prove the fork is gone, not
+      shadowed. Grep BOTH `app/src/api/smartReport.ts` (was `:56`) and
+      `middleware/src/services/reportRenderer.ts` (was `:196`) and confirm each `RenderedSectionWire`
+      declaration now DERIVES from the shared `RenderedSection` core (`@groundx/shared`) — no
+      free-standing interface listing `body`/`cites`/`confidence`/`warnings` survives on either
+      side; the only locally-declared members are the snake_case display layer (`name`, `render_as`)
+      and the `cites` wire alias. Falsify the "byte-identical" claim against the REAL renderer: run
+      the middleware report-render path and diff the emitted wire JSON (keys AND values, snake_case
+      `cites`/`render_as` display layer intact) against a pre-change fixture — must be byte-identical;
+      confirm `wireSectionToRendered` (`smartReport.ts:89`) still maps `cites`→`citations`/`body`→`body`
+      unchanged. Confirm the `Eq<>` assert is RED if the shared core drifts (re-run the fork test on
+      a `RenderedSection` field) and that neither colocated test was retargeted to a tautology.
+      Cross-plan collision check: confirm no other in-flight change re-forks `RenderedSection`/
+      `RenderedSectionWire` on the same files. Failed gate → back to in-progress.
 
 ## Closeout
 - [ ] `export PATH="$HOME/.nvm/versions/node/v20.20.2/bin:$PATH" && openspec validate
