@@ -288,7 +288,7 @@ export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope
           <Label sx={{ color: EYEBROW_ON_LIGHT }}>{eyebrow}</Label>
           <BodyText>{body}</BodyText>
           {onGateFrame ? (
-            <Button noTool="legacy — Phase 7 backfills tool"
+            <Button noTool="onboarding-flow nav chrome (not agent-driven)"
               type="button"
               variant="primary"
               fullWidth

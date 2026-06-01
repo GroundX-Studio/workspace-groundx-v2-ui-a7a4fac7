@@ -43,17 +43,21 @@ can reach it.
 - **WHEN** `check-tool-references` runs
 - **THEN** the guard reports the unbound control and fails.
 
-### Requirement: The sanctioned tool-less widgets SHALL be explicitly named
+### Requirement: A tool-less widget SHALL carry a documented no-llm.md rationale
 
-The widget contract SHALL name exactly three widgets as sanctioned tool-less
-exceptions: `ThinkingStream` (decorative), `SuggestedActionChips` (it is itself the
-dispatch UI for tools the router already returned), and `ChatColumn` (the chat surface
-itself). Each SHALL keep a `no-llm.md` carrying a specific rationale, and no other
-widget may opt out without a documented, reviewed reason.
+A widget SHALL be tool-less ONLY if it carries a `no-llm.md` with a specific, reviewed
+`## Why` (never boilerplate) — that documented rationale, enforced by
+`widget-contract.test.ts`, is the sole sanction for opting out of an LLM tool. The widget contract SHALL name the inert/dispatch
+trio — `ThinkingStream` (decorative), `SuggestedActionChips` (it is itself the dispatch UI for
+tools the router already returned), and `ChatColumn` (the chat surface itself) — as the canonical
+exceptions, and SHALL acknowledge any other current documented opt-outs rather than claim an
+exhaustive count the tree contradicts.
 
-#### Scenario: The inert trio is documented, others are not silently exempt
+#### Scenario: Every tool-less widget is documented, none is silently exempt
 
-- **GIVEN** the widget contract docs
-- **WHEN** the sanctioned-exceptions list is read
-- **THEN** it names exactly ThinkingStream, SuggestedActionChips, ChatColumn
-- **AND** each of those widgets' `no-llm.md` states why no tool applies.
+- **GIVEN** the widget contract docs and the `widget-contract.test.ts` guard
+- **WHEN** the sanctioned tool-less widgets are read
+- **THEN** the inert/dispatch trio (ThinkingStream, SuggestedActionChips, ChatColumn) are named as
+  the canonical exceptions
+- **AND** every widget with a `no-llm.md` (the trio plus any other current opt-out) carries a
+  specific `## Why`, which the guard requires — so no widget is silently tool-less.

@@ -696,6 +696,29 @@ piece (README, sibling test, mode prop, or `<Name>.tools.ts` /
 `no-llm.md`). Fix and re-run; no other gate is needed for the
 widget to land.
 
+## Sanctioned tool-less widgets — the inert trio
+
+The `no-llm.md` fork is NOT a general escape hatch. A widget may be tool-less
+ONLY if it ships a `no-llm.md` carrying a specific, reviewed `## Why` (never
+boilerplate) — that documented rationale, enforced by `widget-contract.test.ts`,
+IS the sanction. The **inert/dispatch trio** below are the canonical exceptions:
+
+| Widget | Why no tool |
+| --- | --- |
+| `ThinkingStream` | Decorative. A timer-driven reveal of pre-supplied thinking notes — the LLM picks neither the notes nor the timing, so there is no expressive surface to drive. |
+| `SuggestedActionChips` | It IS the dispatch UI for tools the router already returned (`reply.suggestedActions[]`). The LLM drives it by emitting actions; a tool to "click its own chip" adds no expressivity. |
+| `ChatColumn` | The chat surface itself, not an affordance. Its tools live on the widgets it composes. The LLM already drives the column by being the other side of the conversation; a `send_message` tool would loop. |
+
+Other widgets also currently carry a documented `no-llm.md` opt-out — `BookCallView`,
+`GateValueProp`, and `GateChatPanel` (gate/booking chrome that is presentational or whose
+actions live on composed widgets). These are NOT silent exemptions: each ships its own
+`## Why`, which the guard requires. (Whether any of them should instead expose a real tool
+is a separate review — tracked, not assumed-fine.)
+
+Adding a new `no-llm.md` opt-out is a contract decision: it must carry a reviewed `## Why`,
+not just be dropped in. This mirrors the `app-architecture` spec requirement
+"A tool-less widget SHALL carry a documented no-llm.md rationale."
+
 ## How to mount a widget into the AppShell
 
 ```tsx

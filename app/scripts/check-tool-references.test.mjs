@@ -149,6 +149,112 @@ export const PrimProbe = () => <Button tool="close_glob_home_fixture">probe</But
   }
 }
 
+// Test 5 — 2026-05-28-wf04-tool-coverage-completion §6: the binding guard
+// covers every interactive surface, not just Button/IconButton/TextField. A
+// `GxPill` with an `onClick` and no `tool`/`noTool` MUST fail; a `DropdownMenu`
+// (its items are inherently interactive) with no `tool`/`noTool` MUST fail; a
+// `GxSectionHeader` with an `onClick` and no binding MUST fail. The same
+// surfaces WITH a binding (real tool or honest noTool) MUST pass.
+{
+  const unboundFile = resolve(APP_ROOT, "src/views/Onboarding/__check_unbound_fixture__.tsx");
+
+  // 5a — GxPill with onClick, no binding → fail, named.
+  writeFileSync(
+    unboundFile,
+    `import { GxPill } from "@/components/brand/GxPill/GxPill";
+export const Probe = () => <GxPill onClick={() => {}}>x</GxPill>;
+`,
+  );
+  try {
+    const r = runScript();
+    assert(r.code === 1, `expected unbound GxPill(onClick) to fail, got code=${r.code}`);
+    assert(
+      r.stderr.includes("GxPill"),
+      `expected stderr to name the unbound GxPill, got: ${r.stderr}`,
+    );
+  } finally {
+    rmSync(unboundFile, { force: true });
+  }
+
+  // 5b — GxPill WITHOUT onClick (decorative) → passes, even with no binding.
+  writeFileSync(
+    unboundFile,
+    `import { GxPill } from "@/components/brand/GxPill/GxPill";
+export const Probe = () => <GxPill variant="success">done</GxPill>;
+`,
+  );
+  try {
+    const r = runScript();
+    assert(r.code === 0, `expected decorative GxPill (no onClick) to pass, got code=${r.code}, stderr=${r.stderr}`);
+  } finally {
+    rmSync(unboundFile, { force: true });
+  }
+
+  // 5c — GxPill with onClick AND an honest noTool → passes.
+  writeFileSync(
+    unboundFile,
+    `import { GxPill } from "@/components/brand/GxPill/GxPill";
+export const Probe = () => <GxPill onClick={() => {}} noTool="decorative status toggle">x</GxPill>;
+`,
+  );
+  try {
+    const r = runScript();
+    assert(r.code === 0, `expected bound GxPill(onClick) to pass, got code=${r.code}, stderr=${r.stderr}`);
+  } finally {
+    rmSync(unboundFile, { force: true });
+  }
+
+  // 5d — DropdownMenu with no binding → fail (its items are inherently interactive).
+  writeFileSync(
+    unboundFile,
+    `import { DropdownMenu } from "@/components/primitives/DropdownMenu/DropdownMenu";
+export const Probe = () => <DropdownMenu trigger={() => null} items={[]} />;
+`,
+  );
+  try {
+    const r = runScript();
+    assert(r.code === 1, `expected unbound DropdownMenu to fail, got code=${r.code}`);
+    assert(
+      r.stderr.includes("DropdownMenu"),
+      `expected stderr to name the unbound DropdownMenu, got: ${r.stderr}`,
+    );
+  } finally {
+    rmSync(unboundFile, { force: true });
+  }
+
+  // 5e — DropdownMenu WITH an honest noTool → passes.
+  writeFileSync(
+    unboundFile,
+    `import { DropdownMenu } from "@/components/primitives/DropdownMenu/DropdownMenu";
+export const Probe = () => <DropdownMenu noTool="row-local actions, dispatched by host" trigger={() => null} items={[]} />;
+`,
+  );
+  try {
+    const r = runScript();
+    assert(r.code === 0, `expected bound DropdownMenu to pass, got code=${r.code}, stderr=${r.stderr}`);
+  } finally {
+    rmSync(unboundFile, { force: true });
+  }
+
+  // 5f — GxSectionHeader with onClick, no binding → fail.
+  writeFileSync(
+    unboundFile,
+    `import { GxSectionHeader } from "@/components/brand/GxSectionHeader/GxSectionHeader";
+export const Probe = () => <GxSectionHeader label="X" onClick={() => {}} />;
+`,
+  );
+  try {
+    const r = runScript();
+    assert(r.code === 1, `expected unbound GxSectionHeader(onClick) to fail, got code=${r.code}`);
+    assert(
+      r.stderr.includes("GxSectionHeader"),
+      `expected stderr to name the unbound GxSectionHeader, got: ${r.stderr}`,
+    );
+  } finally {
+    rmSync(unboundFile, { force: true });
+  }
+}
+
 if (failures.length === 0) {
   console.log("check-tool-references.test.mjs: all assertions passed");
   process.exit(0);

@@ -149,6 +149,86 @@ function extractToolRefs(src) {
   return refs;
 }
 
+/**
+ * 2026-05-28-wf04-tool-coverage-completion §6 — binding coverage for the
+ * interactive surfaces that aren't typed primitives.
+ *
+ * Button / IconButton / TextField / PasswordField require `tool | noTool` at the
+ * TYPE level (the discriminated union in `components/primitives/_tool-binding.ts`),
+ * so a bare invocation is a tsc error and never reaches this script. But three
+ * surfaces are NOT in that union and a clickable one could ship unbound:
+ *
+ *   • `DropdownMenu` — its `items[]` each carry an `onClick`; the element is
+ *     inherently interactive, so it ALWAYS needs a binding.
+ *   • `GxPill` — interactive ONLY when `onClick` is supplied (else decorative).
+ *   • `GxSectionHeader` — interactive ONLY when `onClick` is supplied.
+ *
+ * For these we parse the OPENING TAG and require a `tool=` or `noTool=` attribute
+ * (conditioned on `onClick` for the two GUARDED-INTERACTIVE surfaces). The check
+ * is intentionally tag-local: it does not chase the attribute across components.
+ */
+const ALWAYS_INTERACTIVE = new Set(["DropdownMenu"]);
+const ONCLICK_INTERACTIVE = new Set(["GxPill", "GxSectionHeader"]);
+
+/** All opening tags `<Name ...>` for `Name` in `names`, with their attribute slice. */
+function* openingTags(src, names) {
+  // Strip comments so a commented-out `<GxPill onClick=…>` isn't flagged.
+  const stripped = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  for (const name of names) {
+    const open = new RegExp(`<${name}(\\s|>|/)`, "g");
+    let m;
+    while ((m = open.exec(stripped)) !== null) {
+      const tagStart = m.index;
+      // Find the end of the opening tag, respecting nested `{...}` (JSX
+      // expression containers) and quoted strings so a `>` inside an
+      // `onClick={() => x > y}` doesn't terminate the tag early.
+      let i = open.lastIndex - 1;
+      let depth = 0;
+      let quote = null;
+      let end = -1;
+      for (; i < stripped.length; i += 1) {
+        const ch = stripped[i];
+        if (quote) {
+          if (ch === quote) quote = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === "`") {
+          quote = ch;
+          continue;
+        }
+        if (ch === "{") depth += 1;
+        else if (ch === "}") depth -= 1;
+        else if (ch === ">" && depth === 0) {
+          end = i;
+          break;
+        }
+      }
+      if (end < 0) continue;
+      const attrs = stripped.slice(open.lastIndex - 1, end);
+      const line = stripped.slice(0, tagStart).split("\n").length;
+      yield { name, attrs, line };
+    }
+  }
+}
+
+function checkBindingCoverage(src, fileRel, failures) {
+  const all = new Set([...ALWAYS_INTERACTIVE, ...ONCLICK_INTERACTIVE]);
+  for (const tag of openingTags(src, all)) {
+    const hasOnClick = /\bonClick\s*=/.test(tag.attrs);
+    const interactive = ALWAYS_INTERACTIVE.has(tag.name) || (ONCLICK_INTERACTIVE.has(tag.name) && hasOnClick);
+    if (!interactive) continue;
+    const hasBinding = /\btool\s*=/.test(tag.attrs) || /\bnoTool\s*=/.test(tag.attrs);
+    if (hasBinding) continue;
+    failures.push({
+      file: fileRel,
+      line: tag.line,
+      col: 1,
+      name: tag.name,
+      binding: true,
+    });
+  }
+}
+
 /** Levenshtein distance, capped at 3 for early-exit. */
 function levenshtein(a, b) {
   if (a === b) return 0;
@@ -192,32 +272,41 @@ function main() {
     if (file.endsWith(".test.tsx") || file.endsWith(".test-d.tsx")) continue;
     if (file.includes(`${"_template"}`)) continue;
     const src = readFileSync(file, "utf8");
+    const fileRel = relative(APP_ROOT, file);
     const refs = extractToolRefs(src);
     for (const ref of refs) {
       if (known.has(ref.name)) continue;
       failures.push({
-        file: relative(APP_ROOT, file),
+        file: fileRel,
         line: ref.line,
         col: ref.col,
         name: ref.name,
         suggestion: nearest(ref.name, known),
       });
     }
+    checkBindingCoverage(src, fileRel, failures);
   }
   if (failures.length === 0) {
     return 0;
   }
   console.error(
-    `check-tool-references: ${failures.length} unresolved tool reference(s).`,
+    `check-tool-references: ${failures.length} problem(s).`,
   );
   for (const f of failures) {
+    if (f.binding) {
+      console.error(
+        `  ${f.file}:${f.line}  <${f.name}> is interactive but declares neither tool= nor noTool=`,
+      );
+      continue;
+    }
     const hint = f.suggestion ? ` — did you mean "${f.suggestion}"?` : "";
     console.error(
       `  ${f.file}:${f.line}:${f.col}  tool="${f.name}"${hint}`,
     );
   }
   console.error(
-    `\nAdd the tool declaration in the owning widget's <Name>.tools.ts, or change the reference to a known tool name. The authoritative list comes from src/components/{chat-widgets,viewer-widgets}/*/*.tools.ts.`,
+    `\nUnresolved tool="..." → add the tool declaration in the owning widget's <Name>.tools.ts, or change the reference to a known tool name (authoritative list: src/components/{chat-widgets,viewer-widgets}/*/*.tools.ts + views/** + components/primitives/**).` +
+      `\nUnbound interactive surface (DropdownMenu, or GxPill/GxSectionHeader with onClick) → add tool="<name>" or noTool="<honest reason>" to the opening tag.`,
   );
   return 1;
 }
