@@ -1,5 +1,11 @@
 # Core data-model hardening — turn the data structures into real, shared classes/objects
 
+> **DISPOSITION (2026-06-01): RECONCILED + RETIRING — umbrella fully decomposed.**
+> A hostile reconcile verified 31 items delivered-elsewhere (ticked with pointers); the 6 residual
+> loose-typing/SDK-shape items relocated to `2026-06-01-data-model-tail`; the soak-gated DB drop to
+> `2026-05-31-extraction-schemas-table-drop`. Nothing left uncovered — this umbrella is archived.
+> (Original note retained below for history.)
+>
 > **DISPOSITION (2026-05-31): umbrella inventory — being decomposed, not executed as one change.**
 > This was the pass-1 inventory of structural debts. Its live work was largely delivered via the
 > archived `2026-05-31-core-data-followups` (§1–§5 + security), and the remaining wide folds were
