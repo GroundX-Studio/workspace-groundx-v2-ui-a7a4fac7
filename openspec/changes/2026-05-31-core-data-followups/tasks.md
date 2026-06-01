@@ -333,19 +333,40 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   "not_session_owner"` code. The helper keys ownership off the session's auth state — authed →
   `ownerUserId === groundxUsername`, anon → `ownerAnonId === session.id` (the dominant 6-site semantics;
   the two arms are mutually exclusive so a stale anon owner can't grant an authed session access). Wired
-  into ALL SEVEN guards in `app.ts`: the 6 that already returned `not_session_owner` (PATCH session,
-  PATCH session-entity, POST viewer-events, POST intent, POST report-render ×2) + the messages-hydrate GET
-  whose `chat_session_forbidden` is now reconciled onto `not_session_owner`. Failing-first
-  `sessionOwnership.test.ts` (7 cases: red — module absent; green after) covers authed-owns/not,
-  authed-vs-anon-row, anon-owns/not, anon-vs-user-row, and the canonical error code. Behavior-preserving
-  for the 6 (verbatim same predicate) + the existing 200-path test on the messages route (anon session on
-  an anon row still owns) + the `not_session_owner` 403 test on `/api/intent` (unchanged + green). The
-  messages route's reconciliation is a security-tightening of one untested edge (authed read of an
-  unclaimed-anon row) onto the more-correct model — no test regressed. The app-side fixture mock in
-  `chatSessions.test.ts:453` was updated `chat_session_forbidden → not_session_owner` to reflect the
-  unified contract (it is a stubbed body, NOT an assertion — the test asserts only `status: 403`). ZERO
-  `ownedByUser`/`ownedByAnon`/`ownsVia*`/`chat_session_forbidden`/inline-`"not_session_owner"` remain in
-  `app.ts` (grep); middleware suite 665 green.
+  into the SEVEN guards swept here in `app.ts`: the 6 that already returned `not_session_owner` (PATCH
+  session, PATCH session-entity, POST viewer-events, POST intent, POST report-render ×2) + the
+  messages-hydrate GET whose `chat_session_forbidden` is now reconciled onto `not_session_owner`.
+  Failing-first `sessionOwnership.test.ts` (7 cases: red — module absent; green after) covers
+  authed-owns/not, authed-vs-anon-row, anon-owns/not, anon-vs-user-row, and the canonical error code.
+  Behavior-preserving for the 6 (verbatim same predicate) + the `not_session_owner` 403 test on
+  `/api/intent` (unchanged + green). The messages-hydrate route's reconciliation is a security-tightening
+  of one untested edge (authed read of an unclaimed-anon row) onto the more-correct model — no test
+  regressed. The app-side fixture mock in `chatSessions.test.ts:453` was updated `chat_session_forbidden →
+  not_session_owner` to reflect the unified contract (it is a stubbed body, NOT an assertion — the test
+  asserts only `status: 403`). ZERO `ownedByUser`/`ownedByAnon`/`ownsVia*`/`chat_session_forbidden`/
+  inline-`"not_session_owner"` remain in `app.ts` (grep); middleware suite 665 green.
+  **CORRECTION (step 2-7k — closes a pre-existing IDOR this #19 sweep MISSED, found by a fresh hostile
+  adversarial review):** the original #19 wired the helper into only the SEVEN routes above and justified
+  behavior-preservation via "the existing 200-path test on the messages route (anon session on an anon row
+  still owns)" — that justification was **FACTUALLY WRONG**: the `POST /api/chat/messages` round-trip test
+  seeded `ownerAnonId:"anon-1"` while the posting agent minted a DIFFERENT cookie id, so it passed only
+  BECAUSE `POST /api/chat/messages` had NO ownership check at all (a MAJOR IDOR — any visitor could POST a
+  victim's chatSessionId and read the assistant reply from / write into another user's thread; `callerRole`
+  is even derived from the loaded victim row at chatHandler.ts:382). Step 2-7k closes it: `POST
+  /api/chat/messages` now loads the row and 403s `not_session_owner` on a non-owner (an UNKNOWN session
+  still 404s via the existing handler path). The round-trip test was fixed to seed `ownerAnonId === the
+  agent's real session id` so the legitimate owner→own-thread 200 path passes because the agent OWNS the
+  row (NOT because the guard is absent — verified by re-fork: removing the guard makes only the new IDOR
+  test go RED, the round-trip stays green). **Finding 6 (also closed in 2-7k):** `POST /api/chat-sessions`
+  upsert was likewise gated only by requireSession; a repeat POST with a foreign id grafted the caller's
+  cookie via `ON DUPLICATE KEY UPDATE` — now 403s if an existing row isn't owned (a true create + the legit
+  owner re-upserting their own row both still pass; the full auth/claim/sign-up suite stayed green, so it
+  landed safely). With both, the helper now guards 9 routes (the 7 above + these 2), not 7. Finding 2:
+  added a route-level 403 test for the messages-hydrate GET (locking the reconciled `not_session_owner`
+  contract, previously untested). Finding 1/4: rewrote the stale "we accept EITHER match" comment above the
+  messages-hydrate GET to state the actual auth-state-keyed semantics (claim re-keys the row; no
+  either-match). Middleware suite 682 green; app `npm run build` (tsc+vite) clean; `openspec validate
+  --strict` clean. — DONE (step 2-7k).
 
 ### 4e. Round-trip / dead-plumbing closeout (→ SEQUENTIAL/TDD)
 - [ ] **#17 §9 closeout.** Each persist chain gets a reader+writer or is DROPPED (the `attachments_json`

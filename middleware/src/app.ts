@@ -481,6 +481,17 @@ export function createApp({
       }
       const now = new Date();
       const existing = await repository.getChatSession(input.id);
+      // §4 #19 follow-up (Finding 6) — close the sibling IDOR. The upsert is
+      // gated only by requireSession; a repeat POST with a foreign id would
+      // overwrite owner_anon_id via ON DUPLICATE KEY UPDATE, grafting the
+      // caller's cookie onto a foreign row. Guard: an EXISTING row the caller
+      // does not own → 403. A true create (no row yet) still proceeds; the
+      // legitimate owner re-upserting their own row (client retry / rehydrate)
+      // still owns it and passes.
+      if (existing && !assertChatSessionOwnership(existing, session)) {
+        res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
+        return;
+      }
       const record: ChatSessionRecord = {
         id: input.id,
         onboardingSessionId: input.onboardingSessionId ?? input.id,
@@ -518,11 +529,15 @@ export function createApp({
   // the visible thread lives only in component state and vanishes
   // when the user reloads, even though the DB rows are intact.
   //
-  // Ownership: the chat_sessions row carries ownerAnonId (cookie
-  // session id for anon visitors) and ownerUserId (Partner customer
-  // id once authed). The same chat session can flip from anon to
-  // authed mid-flow via /api/chat-sessions/claim, so we accept EITHER
-  // match — the visitor still owns the same cookie pre/post-sign-up.
+  // Ownership: `assertChatSessionOwnership` keys off the caller's auth
+  // state, NOT an either-match. An authed caller is matched ONLY against
+  // ownerUserId (=== groundxUsername); an anon caller ONLY against
+  // ownerAnonId (=== cookie session id). The two arms are mutually
+  // exclusive, so a stale anon owner can't grant an authed session access.
+  // The anon→authed flip is handled by /api/chat-sessions/claim, which
+  // re-keys the row (nulls owner_anon_id, sets owner_user_id) — so after
+  // sign-up the now-authed caller matches via ownerUserId, not the old
+  // cookie. (§4 #19 reconciled the error code to not_session_owner.)
   app.get<{ id: string }>("/api/chat-sessions/:id/messages", apiLimiter, requireSession, async (req, res, next) => {
     try {
       const session = req.session!;
@@ -1345,6 +1360,20 @@ export function createApp({
       const payload = parseChatMessageRequest(req.body);
       if (!payload) {
         res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      // §4 #19 follow-up (Finding 3) — close the IDOR. requireSession only
+      // proves a cookie exists; without an ownership check any visitor could
+      // POST a victim's chatSessionId and write into / read the assistant
+      // reply from another user's thread (callerRole is even derived from the
+      // loaded victim row in chatHandler). Mirror the 6 sibling mutating
+      // routes: load the row, 403 on a non-owner. An UNKNOWN session falls
+      // through to handleChatMessage, which preserves the existing 404
+      // (chat_session_not_found) behavior — so the guard fires only when the
+      // row exists AND the caller doesn't own it.
+      const row = await repository.getChatSession(payload.chatSessionId);
+      if (row && !assertChatSessionOwnership(row, session)) {
+        res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
         return;
       }
       // Anonymous onboarding sessions don't have a customer-scoped

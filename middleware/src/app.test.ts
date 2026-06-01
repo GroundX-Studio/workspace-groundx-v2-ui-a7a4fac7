@@ -458,7 +458,12 @@ describe("middleware scaffold", () => {
     const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
 
     const agent = request.agent(app);
-    await agent.post("/api/onboarding/session").expect(200);
+    const created = await agent.post("/api/onboarding/session").expect(200);
+    // The posting agent must ACTUALLY OWN the row for the legitimate
+    // owner→own-thread 200 path to pass once the ownership guard lands
+    // (§4 #19 follow-up, Finding 3). ownerAnonId === the agent's real
+    // cookie session id, not an unrelated planted id.
+    const sid: string = created.body.sessionId;
 
     // Seed a chat session so the handler can find it.
     const now = new Date();
@@ -466,7 +471,7 @@ describe("middleware scaffold", () => {
       id: "chat-1",
       onboardingSessionId: "onb-1",
       ownerUserId: null,
-      ownerAnonId: "anon-1",
+      ownerAnonId: sid,
       title: "Onboarding",
       isOnboarding: true,
       activeEntityKey: null,
@@ -494,6 +499,66 @@ describe("middleware scaffold", () => {
     expect(groundxClient.calls).toHaveLength(0);
   });
 
+  // Finding 3 (§4 #19 follow-up) — MAJOR IDOR. The route was gated only by
+  // requireSession (cookie-exists), with NO ownership check, so any visitor
+  // could POST a victim's chatSessionId and write into / read the assistant
+  // reply from another user's thread. Mirror the 6 sibling mutating routes:
+  // load the row, 403 not_session_owner on a non-owner.
+  it("POST /api/chat/messages returns 403 when the caller doesn't own the chat session", async () => {
+    const { app, repository } = setup();
+    // Plant a chat_session owned by a DIFFERENT anon id (the victim).
+    const now = new Date();
+    await repository.upsertChatSession({
+      id: "chat-victim",
+      onboardingSessionId: "chat-victim",
+      ownerUserId: null,
+      ownerAnonId: "anon-VICTIM",
+      title: "Victim's thread",
+      isOnboarding: true,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+    // The attacker bootstraps a fresh anon session — a different cookie id.
+    const attacker = request.agent(app);
+    await attacker.post("/api/onboarding/session").expect(200);
+    await attacker
+      .post("/api/chat/messages")
+      .send({ chatSessionId: "chat-victim", newUserMessage: "leak the thread" })
+      .expect(403, { error: "not_session_owner" });
+    // The guard runs BEFORE handleChatMessage — the victim thread is untouched.
+    const messages = await repository.listChatMessages("chat-victim");
+    expect(messages).toHaveLength(0);
+  });
+
+  // Finding 2 (§4 #19 follow-up) — the messages-hydrate GET 403 path (its
+  // error code was reconciled chat_session_forbidden→not_session_owner in
+  // #19) had NO route-level 403 test. Lock the reconciled contract.
+  it("GET /api/chat-sessions/:id/messages returns 403 when the caller doesn't own the session", async () => {
+    const { app, repository } = setup();
+    const now = new Date();
+    await repository.upsertChatSession({
+      id: "cs-foreign",
+      onboardingSessionId: "cs-foreign",
+      ownerUserId: null,
+      ownerAnonId: "anon-OWNER",
+      title: "Someone else's",
+      isOnboarding: true,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+    const intruder = request.agent(app);
+    await intruder.post("/api/onboarding/session").expect(200); // a different session id
+    await intruder
+      .get("/api/chat-sessions/cs-foreign/messages")
+      .expect(403, { error: "not_session_owner" });
+  });
+
   it("returns safe upstream status context for direct Partner auth failures", async () => {
     class LoginErrorPartnerClient extends FakePartnerClient implements GroundXPartnerClient {
       async loginCustomer(): Promise<never> {
@@ -519,6 +584,56 @@ describe("middleware scaffold", () => {
   });
 
   // UI-10b — intent_log POST route.
+  // Finding 6 (§4 #19 follow-up) — pre-existing sibling IDOR. The upsert was
+  // gated only by requireSession; a repeat POST with a foreign id overwrote
+  // owner_anon_id via ON DUPLICATE KEY UPDATE, letting an anon caller graft
+  // their cookie onto a foreign row. Guard: an existing row the caller does
+  // not own → 403; a true create (no row yet) still succeeds; the legitimate
+  // owner re-upserting their OWN row still succeeds (idempotent retry/rehydrate).
+  describe("POST /api/chat-sessions ownership (Finding 6)", () => {
+    it("returns 403 when re-upserting a row owned by someone else", async () => {
+      const { app, repository } = setup();
+      const now = new Date();
+      await repository.upsertChatSession({
+        id: "chat-owned",
+        onboardingSessionId: "chat-owned",
+        ownerUserId: null,
+        ownerAnonId: "anon-OWNER",
+        title: "Owner's",
+        isOnboarding: true,
+        activeEntityKey: null,
+        currentIntent: null,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+      });
+      const attacker = request.agent(app);
+      await attacker.post("/api/onboarding/session").expect(200);
+      await attacker
+        .post("/api/chat-sessions")
+        .send({ id: "chat-owned", title: "hijacked", isOnboarding: true })
+        .expect(403, { error: "not_session_owner" });
+      // The row's owner is unchanged — no graft.
+      const row = await repository.getChatSession("chat-owned");
+      expect(row?.ownerAnonId).toBe("anon-OWNER");
+    });
+
+    it("still allows the legitimate owner to re-upsert their own row (idempotent)", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/chat-sessions")
+        .send({ id: "chat-mine", title: "Mine", isOnboarding: true })
+        .expect(200);
+      // Repeat POST (client retry / rehydrate) — same owner, still 200.
+      await agent
+        .post("/api/chat-sessions")
+        .send({ id: "chat-mine", title: "Mine v2", isOnboarding: true })
+        .expect(200);
+    });
+  });
+
   describe("POST /api/intent (UI-10b)", () => {
     async function setupOwnedSession() {
       const { app, repository } = setup();
