@@ -8,18 +8,19 @@
 > Integrate (correctly gated in onboarding) ✓ · Sign-up gate (3 doors + value-prop canvas + magic-link
 > commit) ✓ · Auth password toggle ✓ · Debug reset (all session state cleared) ✓ · Reduced-motion
 > (code+unit verified; OS media-feature not settable in harness) · Console sweep (clean except DL-2).
-> **Defects ticketed (fix LATER, NOT inline):**
-> • **DL-5 (P1, code-confirmed)** steady shell canvas is a STUB — no viewer widget ever mounts in the authed
->   experience → `2026-06-01-steady-canvas-mount`. Blocks live 2.4/2.10-chat/2.12-canvas.
-> • **DL-1 (P1)** doc-scope chat RAG returns 0 snippets (works at BUCKET scope — localized to the
->   document-scoped filter) → `2026-06-01-rag-retrieval-correctness`.
-> • **DL-4 (P3)** pin→draft not reflected in render (open design Q) · **DL-3 (P2)** mobile compact (largely a
->   `preview_resize` artifact; desktop verified) · **DL-2 (P3)** React Router v7 console warnings.
-> **Remaining live-blocked-by-ticket:** 2.4 chat citation→source mount (DL-1 onboarding / DL-5 steady) ·
-> 2.5 builder f4a + section accept/reject (no template by design → unit/orchestrator coverage) ·
-> 2.12 steady widget canvas (DL-5). Light/LLM-driven items not separately driven: 2.8 propose-schema-field /
-> booking-status cards · 2.9 gate dismiss + export/metered triggers (open+commit verified; dismiss
-> unit-tested, LC5).
+> **Defect fix loop (2026-06-01) — 4 of 5 FIXED, published to dev (commit 7b65bfe):**
+> • **DL-5 (P1)** ✅ FIXED + live-verified — steady shell mounts viewer widgets via shared ScopedCanvas
+>   (`2026-06-01-steady-canvas-mount`). Unblocks 2.4/2.10-chat/2.12 live re-verify.
+> • **DL-4 (P3)** ✅ FIXED — render empty state surfaces a reachable "open builder" entry for a pinned draft.
+> • **DL-2 (P3)** ✅ FIXED — RR `v7_startTransition` flag on RouterProvider; console noise gone.
+> • **DL-3 (P2)** ✅ CLOSED — not a defect (loading at 375px IS compact; was a `preview_resize` artifact).
+> • **DL-1 (P1)** ⏳ REMAINING — doc-scope chat RAG returns 0 snippets (works at BUCKET scope → localized to
+>   the document-scoped filter). Deferred to a FOCUSED continuation (middleware deep-dive + ground-truth
+>   regression suite) → `2026-06-01-rag-retrieval-correctness`.
+> **DO NOT ARCHIVE** until DL-1 lands AND the blocked surfaces re-verify live: 2.4 chat citation→source
+> (DL-1 onboarding), 2.10 chat-path round-trip, 2.12 steady widget parity (now mountable post-DL-5; full
+> drive pending). Light/LLM-driven not separately driven: 2.8 propose-schema-field / booking-status cards ·
+> 2.9 gate dismiss + export/metered (open+commit verified; dismiss unit-tested, LC5).
 
 > TDD: failing test first, then implement, then adversarial review before marking done.
 > **Adversarial review gate after EVERY task (Discipline §10)** — a task is not `[x]` until
