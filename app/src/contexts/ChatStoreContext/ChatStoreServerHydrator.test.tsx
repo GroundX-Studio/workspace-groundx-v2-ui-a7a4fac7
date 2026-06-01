@@ -253,6 +253,38 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
     });
   });
 
+  it("coerces a STRUCTURALLY-corrupt server currentIntent (real `kind`, missing required field) to null", async () => {
+    // `2026-05-31-canvas-intent-schema-shared` §3 — the OLD structural guard
+    // accepts this (non-empty string `kind`) and blind-casts it; the shared
+    // `parseCanvasIntent` schema rejects it (`openDocument` requires
+    // `documentId`) so a corrupt/legacy row coerces to `null` instead of
+    // masquerading as a typed intent flowing into the orchestrator.
+    vi.mocked(listChatSessions).mockResolvedValue([
+      makeRemoteSession({
+        id: "ci-3",
+        title: "Looks-real-but-corrupt intent",
+        currentIntent: { kind: "openDocument" },
+      }),
+    ]);
+    let observed: unknown = "unset";
+    const Inspector: FC = () => {
+      const s = useChatStore().state.sessions.get("ci-3");
+      observed = s ? s.currentIntent : "missing";
+      return null;
+    };
+    render(
+      <StubAuthProvider auth={{ isLoggedIn: true }}>
+        <ChatStoreProvider ephemeral>
+          <ChatStoreServerHydrator />
+          <Inspector />
+        </ChatStoreProvider>
+      </StubAuthProvider>,
+    );
+    await waitFor(() => {
+      expect(observed).toBeNull();
+    });
+  });
+
   // ── master-viewer-session Phase 1 — viewer slot hydrate round-trip ──
   it("hydrates ViewerSession.history + overlays + workspace from the server payload", async () => {
     const remoteHistory = [

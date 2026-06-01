@@ -1186,24 +1186,40 @@ describe("middleware API route contract", () => {
 
     it("updates currentIntent (JSON payload) on an existing session", async () => {
       const { repository, agent } = await setupAnonSession();
+      // 2026-05-31-canvas-intent-schema-shared — a real `CanvasIntent`
+      // (validated through the shared `canvasIntentSchema` at the write
+      // boundary, round-trips through the validated read boundary).
+      const intent = { kind: "openDocument", documentId: "d-1", page: 2 };
       await agent
         .patch("/api/chat-sessions/rt04-anon")
-        .send({ currentIntent: { kind: "extract", documentId: "d-1" } })
+        .send({ currentIntent: intent })
         .expect(200);
       const row = await repository.getChatSession("rt04-anon");
       expect(row).not.toBeNull();
-      expect(row!.currentIntent).toEqual({ kind: "extract", documentId: "d-1" });
+      expect(row!.currentIntent).toEqual(intent);
     });
 
     it("supports setting currentIntent to null (canvas closed)", async () => {
       const { repository, agent } = await setupAnonSession();
       await agent
         .patch("/api/chat-sessions/rt04-anon")
-        .send({ currentIntent: { kind: "understand" } })
+        .send({ currentIntent: { kind: "wizardNext" } })
         .expect(200);
       await agent.patch("/api/chat-sessions/rt04-anon").send({ currentIntent: null }).expect(200);
       const row = await repository.getChatSession("rt04-anon");
       expect(row!.currentIntent).toBeNull();
+    });
+
+    it("returns 400 when currentIntent is a structurally-present but invalid intent (real `kind`, missing required field)", async () => {
+      // 2026-05-31-canvas-intent-schema-shared — the write boundary validates
+      // through the shared schema, so a bogus/legacy intent (`openDocument`
+      // with no `documentId`) is rejected rather than persisted (and thus
+      // never has to be coerced away on the read path).
+      const { agent } = await setupAnonSession();
+      await agent
+        .patch("/api/chat-sessions/rt04-anon")
+        .send({ currentIntent: { kind: "openDocument" } })
+        .expect(400);
     });
 
     it("updates activeEntityKey on an existing session", async () => {
@@ -1220,7 +1236,7 @@ describe("middleware API route contract", () => {
       const { repository, agent } = await setupAnonSession();
       await agent
         .patch("/api/chat-sessions/rt04-anon")
-        .send({ currentIntent: { kind: "interact" } })
+        .send({ currentIntent: { kind: "openBookCall" } })
         .expect(200);
       const row = await repository.getChatSession("rt04-anon");
       expect(row!.title).toBe("Onboarding");
@@ -1258,7 +1274,7 @@ describe("middleware API route contract", () => {
       await agent.post("/api/onboarding/session").expect(200);
       await agent
         .patch("/api/chat-sessions/never-created")
-        .send({ currentIntent: { kind: "extract" } })
+        .send({ currentIntent: { kind: "wizardNext" } })
         .expect(404);
     });
 
@@ -1274,7 +1290,7 @@ describe("middleware API route contract", () => {
       await agentB.post("/api/onboarding/session").expect(200);
       await agentB
         .patch("/api/chat-sessions/rt04-owned")
-        .send({ currentIntent: { kind: "extract" } })
+        .send({ currentIntent: { kind: "wizardNext" } })
         .expect(403);
     });
 
@@ -1282,7 +1298,7 @@ describe("middleware API route contract", () => {
       const { app } = setup();
       await request(app)
         .patch("/api/chat-sessions/whatever")
-        .send({ currentIntent: { kind: "extract" } })
+        .send({ currentIntent: { kind: "wizardNext" } })
         .expect(401);
     });
 
@@ -1295,20 +1311,21 @@ describe("middleware API route contract", () => {
     // the updated value.
     it("round-trip: PATCH currentIntent → getChatSession reflects the new value (same call chatHandler uses)", async () => {
       const { repository, agent } = await setupAnonSession();
+      const first = { kind: "openDocument", documentId: "doc-99", page: 4 };
       await agent
         .patch("/api/chat-sessions/rt04-anon")
-        .send({ currentIntent: { kind: "extract", documentId: "doc-99" } })
+        .send({ currentIntent: first })
         .expect(200);
       // Same call signature chatHandler invokes during context bundling.
       const row = await repository.getChatSession("rt04-anon");
-      expect(row!.currentIntent).toEqual({ kind: "extract", documentId: "doc-99" });
+      expect(row!.currentIntent).toEqual(first);
       // Now flip it and re-assert — the value really does flow.
       await agent
         .patch("/api/chat-sessions/rt04-anon")
-        .send({ currentIntent: { kind: "understand" } })
+        .send({ currentIntent: { kind: "wizardFinish" } })
         .expect(200);
       const row2 = await repository.getChatSession("rt04-anon");
-      expect(row2!.currentIntent).toEqual({ kind: "understand" });
+      expect(row2!.currentIntent).toEqual({ kind: "wizardFinish" });
     });
 
     // ── master-viewer-session Phase 1 — ViewerSession slot persistence ──

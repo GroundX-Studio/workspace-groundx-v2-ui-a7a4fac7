@@ -6,7 +6,7 @@ import { patchChatSession } from "@/api/chatSessionPatch";
 import { recordViewerEvent } from "@/api/viewerEvents";
 import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntitySessionStoreContext";
 import type { FFrame } from "@/types/onboarding";
-import { compileScopeFilter, type ContentScope, type NormalizedBbox } from "@groundx/shared";
+import { compileScopeFilter, parseCanvasIntent, type ContentScope, type NormalizedBbox } from "@groundx/shared";
 
 import { resolvePinTarget, type PinResolution, type PinTargetTemplate } from "./resolvePinTarget";
 import {
@@ -31,20 +31,17 @@ const ChatStoreContext = createContext<ChatStoreApi | null>(null);
  * Coerce an untrusted `currentIntent` value read back from the server
  * (`chat_sessions.current_intent_json` — arbitrary JSON) into a `CanvasIntent`.
  *
- * This is a STRUCTURAL guard only: it accepts a plain object carrying a
- * non-empty string `kind` and rejects everything else (null, primitives,
- * arrays, `{}`) → `null`. It does NOT verify `kind` is a real discriminant or
- * that the variant's fields are present — full validation needs a shared Zod
- * `CanvasIntent` schema (none exists yet; tracked in the core-data-model
- * change). It exists so the strict `currentIntent: CanvasIntent | null` state
- * type isn't populated straight from an unchecked cast: a corrupt/legacy row
- * degrades to `null` instead of masquerading as a typed intent.
+ * Full structural + variant validation via the shared `parseCanvasIntent`
+ * (`2026-05-31-canvas-intent-schema-shared`): a value that is not a real
+ * `CanvasIntent` — a bogus `kind`, a variant missing a required field, a
+ * primitive/array/`{}` — coerces to `null` rather than masquerading as a typed
+ * intent flowing into the orchestrator. The strict `currentIntent: CanvasIntent
+ * | null` state type is therefore never populated from an unchecked cast. This
+ * is the same `canvasIntentSchema` the middleware row mapper validates against
+ * (one source of truth across both `current_intent_json` read boundaries).
  */
 function coerceHydratedIntent(raw: unknown): CanvasIntent | null {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-  const kind = (raw as { kind?: unknown }).kind;
-  if (typeof kind !== "string" || kind.length === 0) return null;
-  return raw as CanvasIntent;
+  return parseCanvasIntent(raw);
 }
 
 /**

@@ -742,6 +742,127 @@ export const canvasKindSchema = z.enum([
 export type CanvasKind = z.infer<typeof canvasKindSchema>;
 
 // ──────────────────────────────────────────────────────────────────────
+// CanvasIntent — 2026-05-31-canvas-intent-schema-shared. The ONE shared,
+// runtime-validated discriminated union of every command the canvas can
+// receive, discriminated on `kind`. It is the single source of truth that
+//   • the app `CanvasIntent` TYPE derives from (`contexts/Canvas-
+//     OrchestratorContext/types.ts` re-exports `z.infer<typeof
+//     canvasIntentSchema>` instead of hand-declaring the union), and whose
+//     `kind` discriminator the orchestrator `dispatch()` switch +
+//     `assertNeverIntent` drive exhaustiveness off of, and
+//   • BOTH `current_intent_json` read boundaries validate against — the app
+//     hydration `coerceHydratedIntent` and the middleware `rowToChatSession`
+//     mapper — so a corrupt/legacy persisted intent coerces to `null` rather
+//     than masquerading as a typed intent.
+//
+// This is DISTINCT from `canvasKindSchema` (the canvas SURFACE kind enum
+// above): that discriminates which widget mounts; this discriminates which
+// command the orchestrator applies. They share no values and BOTH remain.
+//
+// `frame` / `scenario` are the app `FFrame` / `Scenario` string-literal
+// unions inlined here as the wire contract (they are the persisted intent
+// payload). Shared field shapes reuse the existing schemas
+// (`normalizedBboxSchema`, `citationTierSchema`, `contentScopeSchema`,
+// `templateFieldTypeSchema`).
+//
+// Default (strip) key handling on each variant: an unknown prop does NOT
+// fail validation (it is dropped), mirroring `templateFieldSchema` — a valid
+// intent with a future field added by one end still parses at the other end;
+// a missing required field or a non-discriminant `kind` IS rejected.
+// ──────────────────────────────────────────────────────────────────────
+
+/** The frame the canvas/shell can switch to (== app `FFrame`). */
+const canvasFrameSchema = z.enum(["f1", "f2", "f3", "f3a", "f4", "f4a", "f5", "f6", "f7"]);
+/** The demo scenario (== app `Scenario`). */
+const canvasScenarioSchema = z.enum(["utility", "loan", "solar"]);
+/** Report-section render mode (shared by propose/edit report-section intents). */
+const reportRenderAsSchema = z.enum(["PARAGRAPH", "BULLETS", "TABLE"]);
+
+export const canvasIntentSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("showSample"), scenario: canvasScenarioSchema }),
+  z.object({ kind: z.literal("openDocument"), documentId: z.string(), page: z.number().optional() }),
+  z.object({
+    kind: z.literal("highlightCitation"),
+    documentId: z.string(),
+    page: z.number(),
+    bbox: normalizedBboxSchema.optional(),
+    tier: citationTierSchema.optional(),
+  }),
+  z.object({ kind: z.literal("jumpToPage"), documentId: z.string(), page: z.number() }),
+  z.object({ kind: z.literal("showExtract"), scope: contentScopeSchema, schemaId: z.string() }),
+  z.object({ kind: z.literal("editSchema"), schemaId: z.string() }),
+  z.object({ kind: z.literal("showIntegrate"), scope: contentScopeSchema }),
+  z.object({ kind: z.literal("showReport"), templateId: z.string(), scope: contentScopeSchema }),
+  z.object({ kind: z.literal("editTemplate"), templateId: z.string(), selectedSectionId: z.string().optional() }),
+  z.object({ kind: z.literal("openGate"), trigger: z.enum(["save", "export", "byo", "threshold"]) }),
+  z.object({ kind: z.literal("switchFrame"), frame: canvasFrameSchema }),
+  z.object({
+    kind: z.literal("proposeSchemaField"),
+    categoryId: z.string(),
+    name: z.string(),
+    type: templateFieldTypeSchema,
+    description: z.string(),
+  }),
+  z.object({ kind: z.literal("acceptSchemaField"), proposalId: z.string() }),
+  z.object({ kind: z.literal("rejectSchemaField"), proposalId: z.string() }),
+  z.object({ kind: z.literal("commitGate"), method: z.enum(["register", "sso", "engineer-call"]) }),
+  z.object({ kind: z.literal("dismissGate") }),
+  z.object({ kind: z.literal("openBookCall") }),
+  z.object({ kind: z.literal("pinToReport"), turnId: z.string(), text: z.string(), templateId: z.string().optional() }),
+  z.object({
+    kind: z.literal("proposeReportSection"),
+    name: z.string(),
+    renderAs: reportRenderAsSchema,
+    question: z.string(),
+  }),
+  z.object({ kind: z.literal("acceptReportSection"), proposalId: z.string() }),
+  z.object({ kind: z.literal("rejectReportSection"), proposalId: z.string() }),
+  z.object({
+    kind: z.literal("editReportSection"),
+    sectionId: z.string(),
+    name: z.string().optional(),
+    renderAs: reportRenderAsSchema.optional(),
+    question: z.string().optional(),
+    instructions: z.array(z.string()).optional(),
+    variables: z.array(z.string()).optional(),
+  }),
+  z.object({ kind: z.literal("deleteReportSection"), sectionId: z.string() }),
+  z.object({
+    kind: z.literal("submitSignup"),
+    first: z.string(),
+    last: z.string(),
+    email: z.string(),
+    password: z.string(),
+    confirmPassword: z.string(),
+  }),
+  z.object({ kind: z.literal("wizardNext") }),
+  z.object({ kind: z.literal("wizardBack") }),
+  z.object({ kind: z.literal("wizardFinish") }),
+  z.object({ kind: z.literal("dismissWizard") }),
+  z.object({ kind: z.literal("closeDialog") }),
+]);
+
+/**
+ * The ONE CanvasIntent type — derived from the schema (single source of
+ * truth). The app re-exports this; `StampedIntent` / `CanvasAdapter` /
+ * `IntentSource` stay app-side (orchestrator-runtime concerns, not wire
+ * contracts).
+ */
+export type CanvasIntent = z.infer<typeof canvasIntentSchema>;
+
+/**
+ * Sanitize an untrusted value (a `current_intent_json` DB-read or wire
+ * payload) into a typed `CanvasIntent`, or `null` if it doesn't validate.
+ * The single boundary sanitizer (parallels `parseCitations` / `parseTemplate`)
+ * — both read boundaries route through it instead of an `as` cast, so a
+ * corrupt/legacy persisted intent degrades to `null`.
+ */
+export function parseCanvasIntent(input: unknown): CanvasIntent | null {
+  const parsed = canvasIntentSchema.safeParse(input);
+  return parsed.success ? parsed.data : null;
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Catalog<T> — the shared READ contract every data catalog satisfies. A
 // catalog looks up a descriptor by id and enumerates the set; it is NEVER a
 // dispatcher (it does not resolve behavior) and NEVER a state store (it is

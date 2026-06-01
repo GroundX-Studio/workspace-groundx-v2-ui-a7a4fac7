@@ -414,6 +414,52 @@ describe("MySqlAppRepository", () => {
       // intent_kind is a free string discriminator (not a closed union) — unchanged.
       expect(log.intentKind).toBe("openDocument");
     });
+
+    // 2026-05-31-canvas-intent-schema-shared §4 — `current_intent_json` was
+    // blind-cast (`parseJsonColumn(...) as ChatSessionRecord["currentIntent"]`),
+    // so a corrupt/legacy persisted intent flowed unchecked into the read.
+    // `rowToChatSession` now validates via the shared `parseCanvasIntent`
+    // (same schema as the app hydration boundary), coercing an invalid intent
+    // to `null` while a valid intent round-trips unchanged.
+    it("getChatSession coerces a malformed current_intent_json to null (other fields intact)", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{
+          id: "s1", onboarding_session_id: "o1", owner_user_id: "u1", owner_anon_id: null,
+          title: "T", is_onboarding: 1, active_entity_key: "e1",
+          // real-looking `kind` but `openDocument` requires `documentId`.
+          current_intent_json: { kind: "openDocument" },
+          viewer_history_json: null, viewer_overlays_json: null, viewer_workspace_json: null,
+          created_at: "2026-05-31T00:00:00.000Z", updated_at: "2026-05-31T00:00:00.000Z",
+          archived_at: null,
+        }],
+        [],
+      ]);
+      const session = await repository.getChatSession("s1");
+      expect(session).not.toBeNull();
+      expect(session!.currentIntent).toBeNull();
+      // Other fields unaffected by the intent coercion.
+      expect(session!.id).toBe("s1");
+      expect(session!.title).toBe("T");
+      expect(session!.activeEntityKey).toBe("e1");
+    });
+
+    it("getChatSession passes a well-formed current_intent_json through (round-trips equal)", async () => {
+      const repository = new MySqlAppRepository(testEnv);
+      mysqlMock.execute.mockResolvedValueOnce([
+        [{
+          id: "s2", onboarding_session_id: "o2", owner_user_id: "u1", owner_anon_id: null,
+          title: "T2", is_onboarding: 0, active_entity_key: null,
+          current_intent_json: { kind: "openDocument", documentId: "util-1", page: 2 },
+          viewer_history_json: null, viewer_overlays_json: null, viewer_workspace_json: null,
+          created_at: "2026-05-31T00:00:00.000Z", updated_at: "2026-05-31T00:00:00.000Z",
+          archived_at: null,
+        }],
+        [],
+      ]);
+      const session = await repository.getChatSession("s2");
+      expect(session!.currentIntent).toEqual({ kind: "openDocument", documentId: "util-1", page: 2 });
+    });
   });
 
   // shared-template-lifecycle Phase 2 — templates repo methods.

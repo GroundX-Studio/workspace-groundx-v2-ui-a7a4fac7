@@ -23,7 +23,7 @@ import {
   VIEWER_EVENT_SOURCE_FALLBACK,
   viewerEventSourceSchema,
 } from "../types.js";
-import { templateKindSchema, type TemplateKind } from "@groundx/shared";
+import { parseCanvasIntent, templateKindSchema, type TemplateKind } from "@groundx/shared";
 import type { z } from "zod";
 
 /**
@@ -801,7 +801,7 @@ function rowToChatSession(row: mysql.RowDataPacket): ChatSessionRecord {
     title: row.title,
     isOnboarding: Boolean(row.is_onboarding),
     activeEntityKey: row.active_entity_key,
-    currentIntent: parseJsonColumn(row.current_intent_json) as ChatSessionRecord["currentIntent"],
+    currentIntent: parseCanvasIntent(parseJsonColumn(row.current_intent_json)),
     viewerHistory: parseJsonColumn(row.viewer_history_json) as ChatSessionRecord["viewerHistory"],
     viewerOverlays: parseJsonColumn(row.viewer_overlays_json) as ChatSessionRecord["viewerOverlays"],
     viewerWorkspace: parseJsonColumn(row.viewer_workspace_json) as ChatSessionRecord["viewerWorkspace"],

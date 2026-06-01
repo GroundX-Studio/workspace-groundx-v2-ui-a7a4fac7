@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
-import { contentScopeSchema, parseCitations, sourceSchema, templateSaveInputSchema, type Source } from "@groundx/shared";
+import { contentScopeSchema, parseCanvasIntent, parseCitations, sourceSchema, templateSaveInputSchema, type CanvasIntent, type Source } from "@groundx/shared";
 
 import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
@@ -684,13 +684,24 @@ export function createApp({
         res.status(400).json({ error: "invalid_payload" });
         return;
       }
-      // currentIntent: object | null when provided.
+      // currentIntent: a valid `CanvasIntent` or null when provided.
+      // `2026-05-31-canvas-intent-schema-shared` — validated through the same
+      // shared `canvasIntentSchema` the read boundaries use (one source of
+      // truth). A structurally-present-but-invalid intent is rejected at the
+      // write boundary (400) rather than persisted, so the column never holds
+      // a value the read path would have to coerce away.
+      let validatedCurrentIntent: CanvasIntent | null = null;
       if (hasCurrentIntent) {
         const v = body.currentIntent;
-        const ok = v === null || (typeof v === "object" && !Array.isArray(v));
-        if (!ok) {
-          res.status(400).json({ error: "invalid_payload" });
-          return;
+        if (v === null) {
+          validatedCurrentIntent = null;
+        } else {
+          const parsed = parseCanvasIntent(v);
+          if (parsed === null) {
+            res.status(400).json({ error: "invalid_payload" });
+            return;
+          }
+          validatedCurrentIntent = parsed;
         }
       }
       // activeEntityKey: string | null when provided.
@@ -748,9 +759,7 @@ export function createApp({
       const now = new Date();
       const merged: ChatSessionRecord = {
         ...existing,
-        currentIntent: hasCurrentIntent
-          ? (body.currentIntent as Record<string, unknown> | null)
-          : existing.currentIntent,
+        currentIntent: hasCurrentIntent ? validatedCurrentIntent : existing.currentIntent,
         activeEntityKey: hasActiveEntityKey
           ? (body.activeEntityKey as string | null)
           : existing.activeEntityKey,

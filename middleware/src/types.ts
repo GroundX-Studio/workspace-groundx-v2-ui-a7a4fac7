@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { sourceSchema, type AppUserMetadata as SharedAppUserMetadata, type Source, type TemplateKind } from "@groundx/shared";
+import { sourceSchema, type AppUserMetadata as SharedAppUserMetadata, type CanvasIntent, type Source, type TemplateKind } from "@groundx/shared";
 
 export interface SessionRecord {
   id: string;
@@ -36,7 +36,14 @@ export interface ChatSessionRecord {
   title: string;
   isOnboarding: boolean;
   activeEntityKey: string | null;
-  currentIntent: Record<string, unknown> | null;
+  /**
+   * `2026-05-31-canvas-intent-schema-shared` — the validated `CanvasIntent`
+   * read off `current_intent_json` via the shared `parseCanvasIntent` (was an
+   * open `Record<string, unknown>` blind-cast). The middleware derives the
+   * type from the ONE `canvasIntentSchema` in `@groundx/shared`, the same
+   * schema the app hydration boundary validates against.
+   */
+  currentIntent: CanvasIntent | null;
   /**
    * `master-viewer-session` Phase 1 — paired ViewerSession state
    * persisted alongside the chat session. Three nullable JSON slots

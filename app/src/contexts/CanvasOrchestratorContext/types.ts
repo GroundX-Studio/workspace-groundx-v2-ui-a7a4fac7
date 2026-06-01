@@ -1,5 +1,4 @@
-import type { ContentScope, Scenario } from "@/types/onboarding";
-import type { IntentSource as SharedIntentSource, NormalizedBbox, TemplateFieldType } from "@groundx/shared";
+import type { CanvasIntent, IntentSource as SharedIntentSource, NormalizedBbox } from "@groundx/shared";
 
 /**
  * CanvasIntent — discriminated union of every command the canvas can receive.
@@ -8,182 +7,17 @@ import type { IntentSource as SharedIntentSource, NormalizedBbox, TemplateFieldT
  * state machine), all stamped with `source` and a monotonic `intentId` so the
  * middleware reducer can establish total order. Server-wins on conflict.
  *
- * Extend this union by adding a new variant + registering a matching
- * `CanvasAdapter` via `registerAdapter`. Zod validation guards the wire format
- * at the middleware boundary; the discriminated union enforces compile-time
- * exhaustiveness inside the app.
+ * Single source of truth: the union itself is `canvasIntentSchema` /
+ * `z.infer<typeof canvasIntentSchema>` in `@groundx/shared` — re-exported here
+ * unchanged so the orchestrator `dispatch()` switch + `assertNeverIntent`
+ * (which drive compile-time exhaustiveness off the `kind` discriminator) and
+ * both `current_intent_json` read boundaries (app hydration + middleware row
+ * mapper) all derive from the ONE schema. Extend the union by adding a variant
+ * to `canvasIntentSchema` THERE + registering a matching `CanvasAdapter` via
+ * `registerAdapter` here; the shared `parseCanvasIntent` then guards the wire
+ * format at every persistence boundary.
  */
-export type CanvasIntent =
-  | { kind: "showSample"; scenario: Scenario }
-  | { kind: "openDocument"; documentId: string; page?: number }
-  | {
-      kind: "highlightCitation";
-      documentId: string;
-      page: number;
-      bbox?: NormalizedBbox;
-      /** WF-06b — attribution tier; threaded to the viewer overlay precision. */
-      tier?: import("@/types/onboarding").CitationTier;
-    }
-  /**
-   * widget-llm-integration Phase 4 — lighter-weight cousin of
-   * `highlightCitation`. Same viewer-step push/swap, but no
-   * `bbox` highlight. Produced by `PdfViewer.jump_to_page` (LLM
-   * tool) and by future page-navigation affordances inside the
-   * viewer pane itself.
-   */
-  | { kind: "jumpToPage"; documentId: string; page: number }
-  | { kind: "showExtract"; scope: ContentScope; schemaId: string }
-  | { kind: "editSchema"; schemaId: string }
-  // 2026-05-30-onboarding-shell-shared-view Phase 3b — the canvas-dispatch
-  // intent for the Integrate connectors surface (frame f7). Mirrors
-  // showExtract / showReport: a navigation intent the orchestrator routes to
-  // `advanceFrame("f7")`.
-  | { kind: "showIntegrate"; scope: ContentScope }
-  | { kind: "showReport"; templateId: string; scope: ContentScope }
-  /**
-   * Open the report builder (f4a) for a template. `selectedSectionId` (when
-   * present) is the section the builder pre-opens its inline editor on — the
-   * render→builder `✎ edit §N` hand-off and the `show_smart_report_edit` LLM
-   * tool both carry it. Omitted → builder opens with no editor expanded.
-   */
-  | { kind: "editTemplate"; templateId: string; selectedSectionId?: string }
-  | { kind: "openGate"; trigger: "save" | "export" | "byo" | "threshold" }
-  | { kind: "switchFrame"; frame: import("@/types/onboarding").FFrame }
-  /**
-   * widget-llm-integration follow-up B.1 — schema-field proposal
-   * (the LLM-proposed addition). Replaces the fenced-JSON
-   * `proposedSchemaField` envelope. The orchestrator handler
-   * routes to `ChatStore.enqueueFieldProposal` so the chat scroll
-   * + canvas-side ProposalCard both surface the proposal.
-   */
-  | {
-      kind: "proposeSchemaField";
-      categoryId: string;
-      name: string;
-      type: TemplateFieldType;
-      description: string;
-    }
-  /**
-   * widget-llm-integration follow-up B.1 — accept a queued
-   * proposal. The orchestrator handler routes to
-   * `ChatStore.acceptFieldProposal(proposalId)`.
-   */
-  | { kind: "acceptSchemaField"; proposalId: string }
-  /**
-   * widget-llm-integration follow-up B.1 — reject a queued
-   * proposal. The orchestrator handler routes to
-   * `ChatStore.dismissFieldProposal(proposalId)`.
-   */
-  | { kind: "rejectSchemaField"; proposalId: string }
-  /**
-   * widget-llm-integration follow-up B.2 — commit the sign-up
-   * gate via a specific method. Orchestrator routes to
-   * `OnboardingSessionContext.commitGate(method)`.
-   */
-  | { kind: "commitGate"; method: "register" | "sso" | "engineer-call" }
-  /**
-   * widget-llm-integration follow-up B.2 — dismiss the sign-up
-   * gate. Orchestrator routes to `OnboardingSessionContext.dismissGate()`.
-   */
-  | { kind: "dismissGate" }
-  /**
-   * widget-llm-integration follow-up B.3 — open the Book Call
-   * surface by setting `?bookCall=1` on the URL. The
-   * OnboardingShell already watches this param to mount
-   * `BookCallView` + `BookingStatusCard`. The orchestrator
-   * handler manipulates `window.location.search` directly.
-   */
-  | { kind: "openBookCall" }
-  /**
-   * 2026-05-29-smart-report-screen Phase 5 — pin an assistant turn
-   * into the report as a section. Produced by the `pin_to_report`
-   * LLM tool and the `📌 pin to report` chat affordance. The
-   * orchestrator routes to `ChatStore.pinToReport` (existing-or-new
-   * UX, NO silent auto-create). `text` is the literal turn text
-   * (#12); `templateId` is the explicit target when the user chose one.
-   */
-  | { kind: "pinToReport"; turnId: string; text: string; templateId?: string }
-  /**
-   * smart-report Phase 5 — an LLM-proposed report section. Produced by
-   * `propose_report_section`. The orchestrator routes to
-   * `ChatStore.enqueueReportProposal` so the builder surfaces a
-   * ProposalCard (the report sibling of `proposeSchemaField`).
-   */
-  | {
-      kind: "proposeReportSection";
-      name: string;
-      renderAs: "PARAGRAPH" | "BULLETS" | "TABLE";
-      question: string;
-    }
-  /**
-   * smart-report Phase 5 — accept a queued report-section proposal.
-   * The orchestrator routes to `ChatStore.acceptReportProposal`.
-   */
-  | { kind: "acceptReportSection"; proposalId: string }
-  /**
-   * smart-report Phase 5 — reject a queued report-section proposal.
-   * The orchestrator routes to `ChatStore.dismissReportProposal`.
-   */
-  | { kind: "rejectReportSection"; proposalId: string }
-  /**
-   * smart-report Phase 5 — edit a report section (the chat-driven twin
-   * of the builder's inline editor). The orchestrator routes to
-   * `ChatStore.editReportSection` (shallow-merge patch). Fields mirror
-   * the inline editor: name / renderAs / question / instructions /
-   * variables (all optional — a partial patch).
-   */
-  | {
-      kind: "editReportSection";
-      sectionId: string;
-      name?: string;
-      renderAs?: "PARAGRAPH" | "BULLETS" | "TABLE";
-      question?: string;
-      instructions?: string[];
-      variables?: string[];
-    }
-  /**
-   * smart-report Phase 5 — delete a report section (the chat-driven twin
-   * of the builder's `⋮ → Remove section`). The orchestrator routes to
-   * `ChatStore.removeReportSection`.
-   */
-  | { kind: "deleteReportSection"; sectionId: string }
-  /**
-   * 2026-05-31-tool-system-completion (wf04 §1) — submit the F6 sign-up
-   * form with the collected identity fields. Produced by the
-   * `submit_signup` LLM tool and the SignUpWidget's submit Button (both
-   * route to the SAME registered adapter, which runs the widget's own
-   * `register` → `claimAnonymousChat` → `promoteToSignedIn` → `commitGate`
-   * sequence). Mutate-category: the LLM driving sign-up is a confirmable
-   * action, not an auto-run. No-op when no SignUpWidget adapter is mounted.
-   */
-  | {
-      kind: "submitSignup";
-      first: string;
-      last: string;
-      email: string;
-      password: string;
-      confirmPassword: string;
-    }
-  /**
-   * 2026-05-31-tool-system-completion (wf04 §2) — OnboardingWizard
-   * navigation. Produced by the `wizard_next` / `wizard_back` /
-   * `wizard_finish` / `dismiss_wizard` LLM tools and the wizard's own nav
-   * Buttons (both route to the SAME registered adapter, which calls the
-   * OnboardingContext `next` / `back` / `finish` / `closeWithoutCompleting`).
-   * Read-style nav → auto-dispatch. No-op when no wizard adapter is mounted.
-   */
-  | { kind: "wizardNext" }
-  | { kind: "wizardBack" }
-  | { kind: "wizardFinish" }
-  | { kind: "dismissWizard" }
-  /**
-   * 2026-05-31-tool-system-completion (wf04 §4) — dismiss the active dialog.
-   * Produced by the `close_dialog` LLM tool and the `DialogTitle` primitive's
-   * close IconButton (both route to the SAME registered adapter, which calls
-   * the DialogTitle's `onClose`). Mutate-category. No-op when no DialogTitle
-   * adapter is mounted.
-   */
-  | { kind: "closeDialog" };
+export type { CanvasIntent };
 
 // 2026-05-31-chat-wire-types-shared — `IntentSource` is the shared `Source`
 // vocabulary MINUS `"system"` (`Exclude<Source,"system">`), single-sourced via
