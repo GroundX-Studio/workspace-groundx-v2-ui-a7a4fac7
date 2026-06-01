@@ -27,11 +27,12 @@ describe("MySqlAppRepository", () => {
     await repository.createSchema();
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
-    // 9 legacy CREATE TABLE statements + 1 information_schema probe + 1 ALTER
-    // (mock reports all three viewer columns missing) = 11; shared-template-
-    // lifecycle Phase 2 adds CREATE TABLE templates + the idempotent copy
-    // INSERT…SELECT from extraction_schemas = 13.
-    expect(statements).toHaveLength(13);
+    // 9 CREATE TABLE statements + shared-template-lifecycle Phase 2's
+    // CREATE TABLE templates + the idempotent copy INSERT…SELECT from
+    // extraction_schemas = 11. The Phase-1 viewer-column information_schema
+    // probe + ALTER were dropped (2026-05-31-viewer-history-column-drop), so
+    // the count drops from 13 to 11.
+    expect(statements).toHaveLength(11);
     const joined = statements.join("\n");
     // Auth + metadata.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS sessions");
@@ -65,10 +66,6 @@ describe("MySqlAppRepository", () => {
     expect(copyStmt).toMatch(
       /SELECT\s+id\s*,\s*'extract'\s*,\s*groundx_username\s*,\s*name\s*,\s*schema_json\s*,\s*created_at\s*,\s*updated_at\s+FROM\s+extraction_schemas/i,
     );
-    // master-viewer-session Phase 1 — idempotent migration probe + ALTER
-    // when the viewer JSON columns are missing.
-    expect(joined).toContain("information_schema.COLUMNS");
-    expect(joined).toContain("ALTER TABLE chat_sessions ADD COLUMN viewer_history_json JSON NULL");
     // App-owned only — no GroundX/Partner duplicates.
     const lower = joined.toLowerCase();
     expect(lower).not.toContain("stripe");
@@ -102,157 +99,120 @@ describe("MySqlAppRepository", () => {
     expect(joined).not.toContain("attachments_json");
   });
 
-  // ── master-viewer-session Phase 1 — chat_sessions viewer-column migration ──
+  // ── 2026-05-31-viewer-history-column-drop — dead viewer-column closeout ──
   //
-  // Regression class: the upstream bug was "chat_sessions table was
-  // created BEFORE the viewer JSON columns were added to the schema;
-  // CREATE TABLE IF NOT EXISTS is a no-op so the columns never landed
-  // on existing deployments; every upsertChatSession then failed with
-  // 'Unknown column'." These tests pin the migration logic so it can't
-  // regress to silently no-op'ing again.
+  // The three `chat_sessions` viewer JSON columns
+  // (`viewer_history_json` / `viewer_overlays_json` / `viewer_workspace_json`)
+  // were WRITE-NULL-ONLY: the full read/write/migration chain existed, but no
+  // app mutator ever wrote a non-null value, so every reload saw NULL. Per the
+  // §9 / §4 #17 closeout rule a persist chain must have BOTH a live reader AND a
+  // live writer OR be dropped; wiring a viewer PATCH would be new product
+  // behavior (out of scope), so the columns were dropped. This guard fails
+  // loudly if any of the three is reintroduced in the ASSEMBLED `chat_sessions`
+  // DDL, the `upsertChatSession` INSERT, OR the `listChatSessions` SELECT — i.e.
+  // if the dead plumbing comes back on any of the three statements.
+  it("does not reintroduce the dropped viewer_* chat_sessions columns (DDL + INSERT + SELECT)", async () => {
+    const repository = new MySqlAppRepository(testEnv);
+
+    // (1) DDL — every statement createSchema() actually issues.
+    await repository.createSchema();
+    const ddl = mysqlMock.execute.mock.calls.map(([s]) => String(s)).join("\n");
+
+    // (2) INSERT — the actually-assembled `upsertChatSession` SQL string.
+    mysqlMock.execute.mockClear();
+    await repository.upsertChatSession({
+      id: "s1",
+      onboardingSessionId: "o1",
+      ownerUserId: "u1",
+      ownerAnonId: null,
+      title: "T",
+      isOnboarding: false,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: new Date("2026-05-31T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-31T00:00:00.000Z"),
+      archivedAt: null,
+    });
+    const insertSql = String(mysqlMock.execute.mock.calls.at(-1)![0]);
+    expect(insertSql).toContain("INSERT INTO chat_sessions");
+
+    // (3) SELECT — the actually-assembled `listChatSessionsForUser` SQL string.
+    mysqlMock.execute.mockClear();
+    mysqlMock.execute.mockResolvedValueOnce([[], []]);
+    await repository.listChatSessionsForUser("u1");
+    const selectSql = String(mysqlMock.execute.mock.calls.at(-1)![0]);
+    expect(selectSql).toMatch(/SELECT[\s\S]+FROM chat_sessions/);
+
+    // The three dead columns must appear in NONE of the three statements.
+    for (const col of ["viewer_history_json", "viewer_overlays_json", "viewer_workspace_json"]) {
+      expect(ddl, `DDL still references dead column ${col}`).not.toContain(col);
+      expect(insertSql, `INSERT still references dead column ${col}`).not.toContain(col);
+      expect(selectSql, `SELECT still references dead column ${col}`).not.toContain(col);
+    }
+  });
+
+  // ── 2026-05-31-viewer-history-column-drop — reduced-schema boot ──
   //
-  // CAVEAT: these tests use a mocked mysql pool. They verify the
-  // migration's DDL strings + branching, NOT that the DDL actually
-  // applies to a real MySQL instance. A real-DB integration test
-  // (testcontainers / disposable schema) is the only complete catch
-  // for "schema migration didn't run end-to-end."
-  describe("ensureChatSessionsViewerColumns migration (Phase 1 regression)", () => {
+  // The Phase-1 viewer columns + their idempotent information_schema-probed
+  // ALTER migration were DROPPED (write-NULL-only dead plumbing). These tests
+  // pin both boot paths against the reduced schema:
+  //   - Fresh boot: the chat_sessions CREATE TABLE carries no viewer_* column,
+  //     and createSchema issues NO information_schema probe and NO ALTER tied
+  //     to the dropped columns.
+  //   - Existing-DB upgrade: an older DB that already has the viewer columns
+  //     boots without error. Because the probe/ALTER are gone, a residual
+  //     column is simply ignored (nothing writes it) — the drop is lossless.
+  //
+  // CAVEAT: these tests use a mocked mysql pool. They verify the boot's DDL
+  // strings + branching, NOT that the DDL actually applies to a real MySQL
+  // instance. A real-DB integration test is the only complete catch for
+  // "schema migration ran end-to-end."
+  describe("reduced-schema boot (viewer columns dropped)", () => {
     function statements(): string[] {
       return mysqlMock.execute.mock.calls.map(([s]) => String(s));
     }
-    function alters(): string[] {
-      return statements().filter((s) => /^ALTER TABLE chat_sessions/i.test(s));
+    function chatSessionsCreate(): string {
+      return statements().find((s) => /CREATE TABLE IF NOT EXISTS chat_sessions/i.test(s))!;
     }
 
-    it("ALTERs in all three viewer columns when none exist (fresh upgrade path)", async () => {
-      // First call → CREATE TABLE statements; the information_schema
-      // probe returns an empty resultset → all three columns missing.
+    it("fresh boot: chat_sessions CREATE TABLE has no viewer_* column", async () => {
       mysqlMock.execute.mockResolvedValue([[], []]);
       const repository = new MySqlAppRepository(testEnv);
 
       await repository.createSchema();
 
-      const alterStatements = alters();
-      expect(alterStatements).toHaveLength(1);
-      const alter = alterStatements[0];
-      expect(alter).toContain("ADD COLUMN viewer_history_json JSON NULL");
-      expect(alter).toContain("ADD COLUMN viewer_overlays_json JSON NULL");
-      expect(alter).toContain("ADD COLUMN viewer_workspace_json JSON NULL");
-      // Single statement holds all three — cheaper than three ALTERs.
-      expect(alter.split(",").length).toBe(3);
+      const create = chatSessionsCreate();
+      expect(create).toBeDefined();
+      expect(create).not.toContain("viewer_history_json");
+      expect(create).not.toContain("viewer_overlays_json");
+      expect(create).not.toContain("viewer_workspace_json");
     });
 
-    it("ALTERs in only the missing columns when some already exist (partial migration)", async () => {
-      // Probe returns one row → viewer_history_json already exists;
-      // the other two are missing.
-      mysqlMock.execute.mockImplementation((sql: string) => {
-        if (typeof sql === "string" && sql.includes("information_schema.COLUMNS")) {
-          return Promise.resolve([[{ COLUMN_NAME: "viewer_history_json" }], []]);
-        }
-        return Promise.resolve([[], []]);
-      });
-      const repository = new MySqlAppRepository(testEnv);
-
-      await repository.createSchema();
-
-      const alterStatements = alters();
-      expect(alterStatements).toHaveLength(1);
-      const alter = alterStatements[0];
-      // Already-present column NOT added (note: `viewer_history_json`
-      // may still appear in an `AFTER viewer_history_json` positional
-      // hint, so we check the ADD COLUMN clause specifically).
-      expect(alter).not.toContain("ADD COLUMN viewer_history_json");
-      // Missing columns ARE added.
-      expect(alter).toContain("ADD COLUMN viewer_overlays_json");
-      expect(alter).toContain("ADD COLUMN viewer_workspace_json");
-    });
-
-    it("issues NO ALTER when all three viewer columns already exist (idempotent)", async () => {
-      // Steady-state boot: all three columns present.
-      mysqlMock.execute.mockImplementation((sql: string) => {
-        if (typeof sql === "string" && sql.includes("information_schema.COLUMNS")) {
-          return Promise.resolve([
-            [
-              { COLUMN_NAME: "viewer_history_json" },
-              { COLUMN_NAME: "viewer_overlays_json" },
-              { COLUMN_NAME: "viewer_workspace_json" },
-            ],
-            [],
-          ]);
-        }
-        return Promise.resolve([[], []]);
-      });
-      const repository = new MySqlAppRepository(testEnv);
-
-      await repository.createSchema();
-
-      expect(alters()).toHaveLength(0);
-    });
-
-    it("probes information_schema before any ALTER (verifies the conditional path runs once)", async () => {
+    it("fresh boot: no information_schema probe and no viewer-column ALTER are issued", async () => {
       mysqlMock.execute.mockResolvedValue([[], []]);
       const repository = new MySqlAppRepository(testEnv);
 
       await repository.createSchema();
 
-      const probeStatements = statements().filter((s) => s.includes("information_schema.COLUMNS"));
-      expect(probeStatements).toHaveLength(1);
-      // The probe scopes to the right table + the right three columns.
-      const probe = probeStatements[0];
-      expect(probe).toContain("'chat_sessions'");
-      expect(probe).toContain("'viewer_history_json'");
-      expect(probe).toContain("'viewer_overlays_json'");
-      expect(probe).toContain("'viewer_workspace_json'");
+      const joined = statements().join("\n");
+      // The dropped migration's probe + ALTER must be gone entirely.
+      expect(joined).not.toContain("information_schema.COLUMNS");
+      expect(joined).not.toMatch(/ALTER TABLE chat_sessions.*viewer_/i);
     });
 
-    // Concurrency regression: multi-replica EKS / rolling update boots two pods
-    // at once. Both probe "column missing" and both issue the ALTER; the loser
-    // hits ER_DUP_FIELDNAME (errno 1060). A plain throw rejects createSchema()
-    // → CrashLoopBackOff until the winner finishes. The ALTER must tolerate
-    // losing the race (same class of fix as the templates copy-migration's
-    // ON DUPLICATE KEY UPDATE).
-    it("swallows a duplicate-column error from the ALTER (concurrent-pod race)", async () => {
-      mysqlMock.execute.mockImplementation((sql: string) => {
-        if (typeof sql === "string" && sql.includes("information_schema.COLUMNS")) {
-          // We saw the columns as missing — so we'll issue the ALTER...
-          return Promise.resolve([[], []]);
-        }
-        if (typeof sql === "string" && /^ALTER TABLE chat_sessions/i.test(sql)) {
-          // ...but a concurrent pod already added them. MySQL: errno 1060.
-          const err = Object.assign(new Error("Duplicate column name 'viewer_history_json'"), {
-            code: "ER_DUP_FIELDNAME",
-            errno: 1060,
-          });
-          return Promise.reject(err);
-        }
-        return Promise.resolve([[], []]);
-      });
+    it("existing-DB upgrade: boots without error against a DB that still has the viewer columns", async () => {
+      // Simulate an older DB: the `CREATE TABLE IF NOT EXISTS` is a no-op
+      // (the table already exists, with the legacy viewer columns). The
+      // boot must complete with no error — and crucially must NOT issue any
+      // probe/ALTER referencing the dropped columns (there is none left).
+      mysqlMock.execute.mockResolvedValue([[], []]);
       const repository = new MySqlAppRepository(testEnv);
 
-      // The race-loser must NOT crash the pod — createSchema resolves.
       await expect(repository.createSchema()).resolves.toBeUndefined();
-      // It DID attempt the ALTER (it isn't silently skipping the migration).
-      expect(alters()).toHaveLength(1);
-    });
 
-    it("re-throws a non-duplicate-column error from the ALTER (real failures still surface)", async () => {
-      mysqlMock.execute.mockImplementation((sql: string) => {
-        if (typeof sql === "string" && sql.includes("information_schema.COLUMNS")) {
-          return Promise.resolve([[], []]);
-        }
-        if (typeof sql === "string" && /^ALTER TABLE chat_sessions/i.test(sql)) {
-          // e.g. table genuinely gone, permissions, syntax — must NOT be eaten.
-          const err = Object.assign(new Error("Table 'chat_sessions' doesn't exist"), {
-            code: "ER_NO_SUCH_TABLE",
-            errno: 1146,
-          });
-          return Promise.reject(err);
-        }
-        return Promise.resolve([[], []]);
-      });
-      const repository = new MySqlAppRepository(testEnv);
-
-      await expect(repository.createSchema()).rejects.toThrow(/doesn't exist/);
+      const joined = statements().join("\n");
+      expect(joined).not.toContain("information_schema.COLUMNS");
+      expect(joined).not.toMatch(/ALTER TABLE chat_sessions.*viewer_/i);
     });
   });
 
@@ -429,7 +389,6 @@ describe("MySqlAppRepository", () => {
           title: "T", is_onboarding: 1, active_entity_key: "e1",
           // real-looking `kind` but `openDocument` requires `documentId`.
           current_intent_json: { kind: "openDocument" },
-          viewer_history_json: null, viewer_overlays_json: null, viewer_workspace_json: null,
           created_at: "2026-05-31T00:00:00.000Z", updated_at: "2026-05-31T00:00:00.000Z",
           archived_at: null,
         }],
@@ -451,7 +410,6 @@ describe("MySqlAppRepository", () => {
           id: "s2", onboarding_session_id: "o2", owner_user_id: "u1", owner_anon_id: null,
           title: "T2", is_onboarding: 0, active_entity_key: null,
           current_intent_json: { kind: "openDocument", documentId: "util-1", page: 2 },
-          viewer_history_json: null, viewer_overlays_json: null, viewer_workspace_json: null,
           created_at: "2026-05-31T00:00:00.000Z", updated_at: "2026-05-31T00:00:00.000Z",
           archived_at: null,
         }],

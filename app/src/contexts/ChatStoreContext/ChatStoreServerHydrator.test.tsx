@@ -285,41 +285,23 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
     });
   });
 
-  // ── master-viewer-session Phase 1 — viewer slot hydrate round-trip ──
-  it("hydrates ViewerSession.history + overlays + workspace from the server payload", async () => {
-    const remoteHistory = [
-      { kind: "ingest-picker" },
-      { kind: "doc-viewer", documentId: "util-1", page: 2 },
-    ];
-    const remoteOverlays = [{ kind: "citation-peek", documentId: "util-1", page: 2 }];
-    const remoteWorkspace = {
-      schemaOverlay: {
-        addedFields: [],
-        removedFieldIds: [],
-        editedFields: [],
-        pendingFieldProposals: [],
-        pinnedSamples: ["util-1"],
-        focusedCategoryId: "meters",
-      },
-    };
+  // ── 2026-05-31-viewer-history-column-drop — viewer state is client-only ──
+  // The Phase-1 viewer_* columns were dropped (write-NULL-only dead plumbing),
+  // so the server carries no viewer slots. A server-only session hydrates to
+  // the EMPTY viewer session — same result the always-null hydrate produced
+  // before the drop. (The former "hydrates ViewerSession.history + overlays +
+  // workspace from the server payload" round-trip test was removed: it asserted
+  // a persistence capability that no longer exists.)
+  it("server-only session hydrates to an empty client-only ViewerSession", async () => {
     vi.mocked(listChatSessions).mockResolvedValue([
-      {
-        ...makeRemoteSession({ id: "vs-1", title: "Viewer-state" }),
-        viewerHistory: remoteHistory,
-        viewerOverlays: remoteOverlays,
-        viewerWorkspace: remoteWorkspace,
-      },
+      makeRemoteSession({ id: "vs-1", title: "Viewer-state" }),
     ]);
-    let observedViewer: { history: unknown[]; overlays: unknown[]; pinnedSamples: unknown[] } | null = null;
+    let observedViewer: { history: unknown[]; overlays: unknown[] } | null = null;
     const ViewerProbe: FC = () => {
       const { state } = useChatStore();
       const s = state.sessions.get("vs-1");
       if (s) {
-        observedViewer = {
-          history: s.viewer.history,
-          overlays: s.viewer.overlays,
-          pinnedSamples: s.viewer.workspace.schemaOverlay.pinnedSamples,
-        };
+        observedViewer = { history: s.viewer.history, overlays: s.viewer.overlays };
       }
       return null;
     };
@@ -333,9 +315,8 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
     );
     await waitFor(() => {
       expect(observedViewer).not.toBeNull();
-      expect(observedViewer!.history).toEqual(remoteHistory);
-      expect(observedViewer!.overlays).toEqual(remoteOverlays);
-      expect(observedViewer!.pinnedSamples).toEqual(["util-1"]);
+      expect(observedViewer!.history).toEqual([]);
+      expect(observedViewer!.overlays).toEqual([]);
     });
   });
 
@@ -377,11 +358,6 @@ function makeRemoteSession(overrides: {
     isOnboarding: false,
     activeEntityKey: null,
     currentIntent: overrides.currentIntent ?? null,
-    // master-viewer-session Phase 1: server returns null for never-touched
-    // viewer slots; the hydrator projects null → EMPTY_VIEWER_SESSION.
-    viewerHistory: null,
-    viewerOverlays: null,
-    viewerWorkspace: null,
     createdAt: "2026-05-27T00:00:00.000Z",
     updatedAt: "2026-05-27T00:00:00.000Z",
     archivedAt: null,

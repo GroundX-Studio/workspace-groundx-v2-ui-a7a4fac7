@@ -501,12 +501,6 @@ export function createApp({
         isOnboarding: input.isOnboarding,
         activeEntityKey: input.activeEntityKey ?? null,
         currentIntent: existing?.currentIntent ?? null,
-        // `master-viewer-session` Phase 1: viewer slot defaults to
-        // null on creation; PATCH /api/chat-sessions/:id populates
-        // them as the user accumulates viewer history / overlays.
-        viewerHistory: existing?.viewerHistory ?? null,
-        viewerOverlays: existing?.viewerOverlays ?? null,
-        viewerWorkspace: existing?.viewerWorkspace ?? null,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
         archivedAt: existing?.archivedAt ?? null,
@@ -658,10 +652,6 @@ export function createApp({
         | {
             currentIntent?: unknown;
             activeEntityKey?: unknown;
-            // `master-viewer-session` Phase 1 — three nullable viewer slots.
-            viewerHistory?: unknown;
-            viewerOverlays?: unknown;
-            viewerWorkspace?: unknown;
           }
         | null;
       if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -670,17 +660,8 @@ export function createApp({
       }
       const hasCurrentIntent = Object.prototype.hasOwnProperty.call(body, "currentIntent");
       const hasActiveEntityKey = Object.prototype.hasOwnProperty.call(body, "activeEntityKey");
-      const hasViewerHistory = Object.prototype.hasOwnProperty.call(body, "viewerHistory");
-      const hasViewerOverlays = Object.prototype.hasOwnProperty.call(body, "viewerOverlays");
-      const hasViewerWorkspace = Object.prototype.hasOwnProperty.call(body, "viewerWorkspace");
       // Body must carry at least one updatable field.
-      if (
-        !hasCurrentIntent &&
-        !hasActiveEntityKey &&
-        !hasViewerHistory &&
-        !hasViewerOverlays &&
-        !hasViewerWorkspace
-      ) {
+      if (!hasCurrentIntent && !hasActiveEntityKey) {
         res.status(400).json({ error: "invalid_payload" });
         return;
       }
@@ -713,35 +694,6 @@ export function createApp({
           return;
         }
       }
-      // viewerHistory: array | null when provided. Each element is an
-      // opaque JSON object (a ViewerStep) — the server doesn't
-      // validate per-step shape so the contract can evolve client-side.
-      if (hasViewerHistory) {
-        const v = body.viewerHistory;
-        const ok = v === null || Array.isArray(v);
-        if (!ok) {
-          res.status(400).json({ error: "invalid_payload" });
-          return;
-        }
-      }
-      // viewerOverlays: array | null when provided.
-      if (hasViewerOverlays) {
-        const v = body.viewerOverlays;
-        const ok = v === null || Array.isArray(v);
-        if (!ok) {
-          res.status(400).json({ error: "invalid_payload" });
-          return;
-        }
-      }
-      // viewerWorkspace: object | null when provided.
-      if (hasViewerWorkspace) {
-        const v = body.viewerWorkspace;
-        const ok = v === null || (typeof v === "object" && !Array.isArray(v));
-        if (!ok) {
-          res.status(400).json({ error: "invalid_payload" });
-          return;
-        }
-      }
 
       // FK + ownership — same pattern as the other RT routes.
       const existing = await repository.getChatSession(chatSessionId);
@@ -763,17 +715,6 @@ export function createApp({
         activeEntityKey: hasActiveEntityKey
           ? (body.activeEntityKey as string | null)
           : existing.activeEntityKey,
-        // `master-viewer-session` Phase 1 — three viewer slots merge with
-        // the same null-preserving semantics as the legacy fields.
-        viewerHistory: hasViewerHistory
-          ? (body.viewerHistory as unknown[] | null)
-          : existing.viewerHistory,
-        viewerOverlays: hasViewerOverlays
-          ? (body.viewerOverlays as unknown[] | null)
-          : existing.viewerOverlays,
-        viewerWorkspace: hasViewerWorkspace
-          ? (body.viewerWorkspace as Record<string, unknown> | null)
-          : existing.viewerWorkspace,
         updatedAt: now,
       };
       await repository.upsertChatSession(merged);

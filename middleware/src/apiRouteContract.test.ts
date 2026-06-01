@@ -1328,60 +1328,6 @@ describe("middleware API route contract", () => {
       expect(row2!.currentIntent).toEqual({ kind: "wizardFinish" });
     });
 
-    // ── master-viewer-session Phase 1 — ViewerSession slot persistence ──
-    //
-    // Closure gate for the foundation phase: viewer history, overlays,
-    // and workspace state must round-trip through the same PATCH
-    // endpoint that currentIntent / activeEntityKey use, so the client
-    // can persist viewer state with the same RT-04 semantics.
-    it("round-trip: PATCH viewerHistory + viewerOverlays + viewerWorkspace → getChatSession reflects all three", async () => {
-      const { repository, agent } = await setupAnonSession();
-      const history = [
-        { kind: "ingest-picker" },
-        { kind: "doc-viewer", documentId: "utility-bill-2026-04", page: 1 },
-        { kind: "extract-workbench", scenarioId: "utility", focusedCategoryId: "meters" },
-      ];
-      const overlays = [
-        { kind: "sign-up", state: "pending", cause: "save-schema" },
-      ];
-      const workspace = {
-        schemaOverlay: {
-          addedFields: [],
-          removedFieldIds: [],
-          editedFields: [],
-          pendingFieldProposals: [],
-          pinnedSamples: ["utility-bill-2026-04"],
-          focusedCategoryId: "meters",
-        },
-      };
-      await agent
-        .patch("/api/chat-sessions/rt04-anon")
-        .send({ viewerHistory: history, viewerOverlays: overlays, viewerWorkspace: workspace })
-        .expect(200);
-      const row = await repository.getChatSession("rt04-anon");
-      expect(row).not.toBeNull();
-      expect(row!.viewerHistory).toEqual(history);
-      expect(row!.viewerOverlays).toEqual(overlays);
-      expect(row!.viewerWorkspace).toEqual(workspace);
-    });
-
-    it("viewer slot fields default to null on session create + survive a partial PATCH", async () => {
-      const { repository, agent } = await setupAnonSession();
-      // Initial — never touched, three fields are null.
-      const initial = await repository.getChatSession("rt04-anon");
-      expect(initial!.viewerHistory).toBeNull();
-      expect(initial!.viewerOverlays).toBeNull();
-      expect(initial!.viewerWorkspace).toBeNull();
-      // PATCH only viewerOverlays — other two stay null.
-      await agent
-        .patch("/api/chat-sessions/rt04-anon")
-        .send({ viewerOverlays: [{ kind: "citation-peek", documentId: "d-1", page: 3 }] })
-        .expect(200);
-      const row = await repository.getChatSession("rt04-anon");
-      expect(row!.viewerHistory).toBeNull();
-      expect(row!.viewerOverlays).toEqual([{ kind: "citation-peek", documentId: "d-1", page: 3 }]);
-      expect(row!.viewerWorkspace).toBeNull();
-    });
   });
 
   // RT-05 — server side of "steady-mode session list hydrates from
@@ -1599,7 +1545,7 @@ describe("middleware API route contract", () => {
     ) {
       const now = new Date();
       // Create the row via the public route so ownership matches the
-      // agent's cookie. Then PATCH every viewer-state field.
+      // agent's cookie. Then PATCH the current intent.
       await agent
         .post("/api/chat-sessions")
         .send({
@@ -1614,13 +1560,6 @@ describe("middleware API route contract", () => {
         .patch(`/api/chat-sessions/${chatSessionId}`)
         .send({
           currentIntent: { kind: "showSample", scenario: "utility" },
-          viewerHistory: [
-            { kind: "ingest-picker" },
-            { kind: "doc-viewer", documentId: "doc-A", page: 1 },
-            { kind: "extract-workbench", scenarioId: "utility" },
-          ],
-          viewerOverlays: [{ kind: "citation-peek", documentId: "doc-A", page: 7 }],
-          viewerWorkspace: { schemaOverlay: { addedFields: [], pendingFieldProposals: [], dismissedFieldProposalKeys: [] } },
         })
         .expect(200);
       // Seed an active entity directly via the repo (the case the

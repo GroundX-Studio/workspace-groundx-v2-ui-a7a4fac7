@@ -44,21 +44,6 @@ export interface ChatSessionRecord {
    * schema the app hydration boundary validates against.
    */
   currentIntent: CanvasIntent | null;
-  /**
-   * `master-viewer-session` Phase 1 — paired ViewerSession state
-   * persisted alongside the chat session. Three nullable JSON slots
-   * keep the row simple while staying readable:
-   *   - `viewerHistory`   — ordered ViewerStep[] the user has traversed.
-   *   - `viewerOverlays`  — z-stacked transient surfaces (sign-up,
-   *                          citation-peek, book-call).
-   *   - `viewerWorkspace` — workspace state (schema overlay, etc.)
-   *                          that's neither step nor overlay.
-   * Null = never written (default at row creation). The client treats
-   * null as empty for its hydration purposes.
-   */
-  viewerHistory: unknown[] | null;
-  viewerOverlays: unknown[] | null;
-  viewerWorkspace: Record<string, unknown> | null;
   createdAt: Date;
   updatedAt: Date;
   archivedAt: Date | null;

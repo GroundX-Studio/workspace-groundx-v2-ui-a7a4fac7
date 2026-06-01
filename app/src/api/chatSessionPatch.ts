@@ -34,16 +34,6 @@ export interface PatchChatSessionInput {
    * (F1 picker, no active entity). Omit to leave unchanged.
    */
   activeEntityKey?: string | null;
-  /**
-   * `master-viewer-session` Phase 1 — paired viewer-state slots.
-   * Each is omitted by default; pass an array or object to write,
-   * `null` to explicitly clear. The server stores each as JSON on
-   * the chat_sessions row with the same merge semantics as
-   * `currentIntent`.
-   */
-  viewerHistory?: unknown[] | null;
-  viewerOverlays?: unknown[] | null;
-  viewerWorkspace?: Record<string, unknown> | null;
 }
 
 export async function patchChatSession(input: PatchChatSessionInput): Promise<void> {
@@ -53,15 +43,6 @@ export async function patchChatSession(input: PatchChatSessionInput): Promise<vo
   }
   if (Object.prototype.hasOwnProperty.call(input, "activeEntityKey")) {
     body.activeEntityKey = input.activeEntityKey ?? null;
-  }
-  if (Object.prototype.hasOwnProperty.call(input, "viewerHistory")) {
-    body.viewerHistory = input.viewerHistory ?? null;
-  }
-  if (Object.prototype.hasOwnProperty.call(input, "viewerOverlays")) {
-    body.viewerOverlays = input.viewerOverlays ?? null;
-  }
-  if (Object.prototype.hasOwnProperty.call(input, "viewerWorkspace")) {
-    body.viewerWorkspace = input.viewerWorkspace ?? null;
   }
   // No-op when the caller didn't ask to change anything — saves a
   // round trip and a server 400.

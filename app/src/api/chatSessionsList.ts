@@ -31,15 +31,6 @@ export interface PersistedChatSessionSummary {
   isOnboarding: boolean;
   activeEntityKey: string | null;
   currentIntent: Record<string, unknown> | null;
-  /**
-   * `master-viewer-session` Phase 1 — paired viewer slots. All three
-   * are null when the row has never been touched (a fresh chat
-   * session that hasn't accumulated viewer state). The hydrator
-   * projects them into `ChatSession.viewer.{history,overlays,workspace}`.
-   */
-  viewerHistory: unknown[] | null;
-  viewerOverlays: unknown[] | null;
-  viewerWorkspace: Record<string, unknown> | null;
   /** ISO timestamps (Date serialized through JSON.stringify). */
   createdAt: string;
   updatedAt: string;

@@ -893,62 +893,23 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         isOnboarding: boolean;
         activeEntityKey: string | null;
         currentIntent: Record<string, unknown> | null;
-        // `master-viewer-session` Phase 1 — viewer slots come back
-        // null when never touched; null hydrates to EMPTY_VIEWER_SESSION
-        // so render-time consumers don't need to undefined-check.
-        viewerHistory?: unknown[] | null;
-        viewerOverlays?: unknown[] | null;
-        viewerWorkspace?: Record<string, unknown> | null;
         createdAt: string;
         updatedAt: string;
       }>,
     ) => {
       if (serverSessions.length === 0) return;
-      // Build a ViewerSession from the three nullable JSON slots. Null
-      // = empty for hydration. Workspace round-trips via a structural
-      // copy; ViewerStep / ViewerOverlay shapes are opaque to the
-      // server so we trust the payload (validation lives client-side
-      // in the consumers that act on the entries).
-      const hydrateViewer = (
-        history?: unknown[] | null,
-        overlays?: unknown[] | null,
-        workspace?: Record<string, unknown> | null,
-      ): import("./types").ViewerSession => {
-        if (!history && !overlays && !workspace) return EMPTY_VIEWER_SESSION;
-        const baseWorkspace = workspace as
-          | { schemaOverlay?: unknown }
-          | null
-          | undefined;
-        return {
-          history: (history as import("./types").ViewerStep[] | null | undefined) ?? [],
-          currentStep: { stepIndex: (history?.length ?? 0) - 1 },
-          overlays: (overlays as import("./types").ViewerOverlay[] | null | undefined) ?? [],
-          workspace: {
-            schemaOverlay: (baseWorkspace?.schemaOverlay as
-              | import("./types").PendingSchemaOverlay
-              | undefined) ?? EMPTY_PENDING_SCHEMA_OVERLAY,
-          },
-        };
-      };
-      // `master-viewer-session` Phase 4 — the legacy `pendingSchemaOverlay`
-      // slot must mirror `viewer.workspace.schemaOverlay` on the
-      // hydrated session so the Phase-4 projection (pending → workspace)
-      // doesn't clobber the server-authoritative value. Pick the
-      // server's workspace.schemaOverlay if present, else fall through
-      // to the legacy default.
-      const pickSchemaOverlay = (
-        viewer: import("./types").ViewerSession,
-      ): import("./types").PendingSchemaOverlay => viewer.workspace.schemaOverlay;
+      // Viewer state is client-only — it is NOT persisted on the
+      // chat_sessions row (the Phase-1 viewer_* columns were dropped in
+      // `2026-05-31-viewer-history-column-drop` as write-NULL-only dead
+      // plumbing). The server therefore carries no viewer slots to
+      // hydrate; a server-only session starts with the empty viewer
+      // session + empty schema overlay, exactly as the always-null
+      // hydrate did before the drop. A session already present locally
+      // keeps its own client-only state via the spread below.
       setState((prev) => {
         const nextSessions = new Map(prev.sessions);
         for (const remote of serverSessions) {
           const local = nextSessions.get(remote.id);
-          const hydratedViewer = hydrateViewer(
-            remote.viewerHistory,
-            remote.viewerOverlays,
-            remote.viewerWorkspace,
-          );
-          const hydratedOverlay = pickSchemaOverlay(hydratedViewer);
           const merged: ChatSession = local
             ? {
                 ...local,
@@ -956,9 +917,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
                 title: remote.title,
                 activeEntityKey: (remote.activeEntityKey as EntityKey | null) ?? null,
                 currentIntent: coerceHydratedIntent(remote.currentIntent),
-                viewer: hydratedViewer,
-                // Phase 4 sync: pendingSchemaOverlay mirrors workspace.
-                pendingSchemaOverlay: hydratedOverlay,
+                viewer: EMPTY_VIEWER_SESSION,
+                pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
                 createdAt: new Date(remote.createdAt).getTime(),
                 updatedAt: new Date(remote.updatedAt).getTime(),
               }
@@ -973,11 +933,11 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
                 activeEntityKey: (remote.activeEntityKey as EntityKey | null) ?? null,
                 viewerHistory: [],
                 currentIntent: coerceHydratedIntent(remote.currentIntent),
-                pendingSchemaOverlay: hydratedOverlay,
+                pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
                 // Report overlay is client-only (not DB-hydrated, like
                 // messages/entities); a server-only session starts empty.
                 reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
-                viewer: hydratedViewer,
+                viewer: EMPTY_VIEWER_SESSION,
                 gate: { status: "idle" },
                 signupOpen: false,
                 isOnboardingSession: remote.isOnboarding,

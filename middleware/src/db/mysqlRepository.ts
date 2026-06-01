@@ -43,19 +43,6 @@ function coerceEnum<T extends string>(
   return parsed.success ? parsed.data : fallback;
 }
 
-/**
- * True for MySQL/MariaDB's "Duplicate column name" error (ER_DUP_FIELDNAME,
- * errno 1060) — raised when an `ADD COLUMN` targets a column a concurrent
- * connection already added. Used to make the idempotent viewer-column ALTER
- * race-safe across multi-replica pod boots. Matches on `errno` (stable across
- * drivers) with a `code` fallback.
- */
-function isDuplicateColumnError(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { errno?: number; code?: string };
-  return e.errno === 1060 || e.code === "ER_DUP_FIELDNAME";
-}
-
 export class MySqlAppRepository implements AppRepository {
   private pool: mysql.Pool;
 
@@ -119,12 +106,6 @@ export class MySqlAppRepository implements AppRepository {
         is_onboarding BOOLEAN NOT NULL DEFAULT FALSE,
         active_entity_key VARCHAR(64) NULL,
         current_intent_json JSON NULL,
-        -- master-viewer-session Phase 1: paired ViewerSession slots.
-        -- All three default to NULL; PATCH /api/chat-sessions/:id
-        -- populates them as the user accumulates viewer state.
-        viewer_history_json JSON NULL,
-        viewer_overlays_json JSON NULL,
-        viewer_workspace_json JSON NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         archived_at DATETIME NULL,
@@ -279,57 +260,6 @@ export class MySqlAppRepository implements AppRepository {
       FROM extraction_schemas
       ON DUPLICATE KEY UPDATE id = id
     `);
-
-    // master-viewer-session Phase 1 — idempotent column-add migration.
-    // The chat_sessions CREATE TABLE IF NOT EXISTS above includes the
-    // viewer_* columns by definition, but existing databases that
-    // pre-date Phase 1 already have the table created without those
-    // columns. `IF NOT EXISTS` short-circuits, so the new columns
-    // never land. This per-column ALTER TABLE catches that gap.
-    //
-    // We don't use `ADD COLUMN IF NOT EXISTS` (MySQL 8.0.29+) because
-    // the deploy may target older MySQL/MariaDB. The information_schema
-    // probe + conditional ALTER works on every supported version.
-    await this.ensureChatSessionsViewerColumns();
-  }
-
-  /**
-   * Idempotent: add the three Phase-1 viewer JSON columns to
-   * `chat_sessions` if they don't already exist. Skipped silently if
-   * the columns are already present.
-   */
-  private async ensureChatSessionsViewerColumns(): Promise<void> {
-    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
-      `SELECT COLUMN_NAME
-       FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'chat_sessions'
-         AND COLUMN_NAME IN ('viewer_history_json', 'viewer_overlays_json', 'viewer_workspace_json')`,
-    );
-    const present = new Set(rows.map((r) => String(r.COLUMN_NAME)));
-    const wanted: Array<{ name: string; ddl: string }> = [
-      { name: "viewer_history_json", ddl: "ADD COLUMN viewer_history_json JSON NULL AFTER current_intent_json" },
-      { name: "viewer_overlays_json", ddl: "ADD COLUMN viewer_overlays_json JSON NULL AFTER viewer_history_json" },
-      { name: "viewer_workspace_json", ddl: "ADD COLUMN viewer_workspace_json JSON NULL AFTER viewer_overlays_json" },
-    ];
-    const missing = wanted.filter((w) => !present.has(w.name));
-    if (missing.length === 0) return;
-    // One ALTER statement adds all missing columns in a single rewrite —
-    // cheaper than three separate ALTERs for large tables.
-    const clauses = missing.map((m) => m.ddl).join(", ");
-    try {
-      await this.pool.execute(`ALTER TABLE chat_sessions ${clauses}`);
-    } catch (err) {
-      // Concurrent-pod race (multi-replica EKS / rolling update): two pods both
-      // read the columns as missing and both issue this ALTER. The loser hits
-      // ER_DUP_FIELDNAME (errno 1060) — which is harmless here, the winner
-      // already added the columns. Swallow ONLY that; a plain rethrow would
-      // reject createSchema() → CrashLoopBackOff. Same race-safety intent as
-      // the templates copy-migration's ON DUPLICATE KEY UPDATE. We don't use
-      // `ADD COLUMN IF NOT EXISTS` (MySQL 8.0.29+) because the deploy may
-      // target older MySQL/MariaDB.
-      if (!isDuplicateColumnError(err)) throw err;
-    }
   }
 
   async createSession(session: SessionRecord): Promise<void> {
@@ -421,9 +351,8 @@ export class MySqlAppRepository implements AppRepository {
       `INSERT INTO chat_sessions (
         id, onboarding_session_id, owner_user_id, owner_anon_id, title,
         is_onboarding, active_entity_key, current_intent_json,
-        viewer_history_json, viewer_overlays_json, viewer_workspace_json,
         created_at, updated_at, archived_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         owner_user_id = VALUES(owner_user_id),
         owner_anon_id = VALUES(owner_anon_id),
@@ -431,9 +360,6 @@ export class MySqlAppRepository implements AppRepository {
         is_onboarding = VALUES(is_onboarding),
         active_entity_key = VALUES(active_entity_key),
         current_intent_json = VALUES(current_intent_json),
-        viewer_history_json = VALUES(viewer_history_json),
-        viewer_overlays_json = VALUES(viewer_overlays_json),
-        viewer_workspace_json = VALUES(viewer_workspace_json),
         updated_at = VALUES(updated_at),
         archived_at = VALUES(archived_at)`,
       [
@@ -445,9 +371,6 @@ export class MySqlAppRepository implements AppRepository {
         record.isOnboarding ? 1 : 0,
         record.activeEntityKey,
         record.currentIntent != null ? JSON.stringify(record.currentIntent) : null,
-        record.viewerHistory != null ? JSON.stringify(record.viewerHistory) : null,
-        record.viewerOverlays != null ? JSON.stringify(record.viewerOverlays) : null,
-        record.viewerWorkspace != null ? JSON.stringify(record.viewerWorkspace) : null,
         record.createdAt,
         record.updatedAt,
         record.archivedAt,
@@ -459,7 +382,6 @@ export class MySqlAppRepository implements AppRepository {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
       `SELECT id, onboarding_session_id, owner_user_id, owner_anon_id, title,
         is_onboarding, active_entity_key, current_intent_json,
-        viewer_history_json, viewer_overlays_json, viewer_workspace_json,
         created_at, updated_at, archived_at
        FROM chat_sessions WHERE id = ? LIMIT 1`,
       [id],
@@ -472,7 +394,6 @@ export class MySqlAppRepository implements AppRepository {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
       `SELECT id, onboarding_session_id, owner_user_id, owner_anon_id, title,
         is_onboarding, active_entity_key, current_intent_json,
-        viewer_history_json, viewer_overlays_json, viewer_workspace_json,
         created_at, updated_at, archived_at
        FROM chat_sessions
        WHERE owner_user_id = ?
@@ -802,9 +723,6 @@ function rowToChatSession(row: mysql.RowDataPacket): ChatSessionRecord {
     isOnboarding: Boolean(row.is_onboarding),
     activeEntityKey: row.active_entity_key,
     currentIntent: parseCanvasIntent(parseJsonColumn(row.current_intent_json)),
-    viewerHistory: parseJsonColumn(row.viewer_history_json) as ChatSessionRecord["viewerHistory"],
-    viewerOverlays: parseJsonColumn(row.viewer_overlays_json) as ChatSessionRecord["viewerOverlays"],
-    viewerWorkspace: parseJsonColumn(row.viewer_workspace_json) as ChatSessionRecord["viewerWorkspace"],
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     archivedAt: row.archived_at ? new Date(row.archived_at) : null,
