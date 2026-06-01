@@ -403,6 +403,30 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   middleware suite 686 green (+2 logging +2 authed-arm), app suite 1464 green, app `npm run build`
   (tsc+vite) clean, middleware tsc clean, ESLint clean on all touched files (the 5 unused-disable warnings
   GONE, no new warnings), `openspec validate --strict` clean. — DONE (step 2-7l).
+  **CORRECTION (step 2-7m — closes the IDENTICAL-CLASS SIBLING of the 2-7l query leak in the SAME file):**
+  the 2-7l fix removed the user QUERY from the dispatch/retry logs but a SECOND leak of the same class
+  survived in `middleware/src/services/groundxSearch.ts`: the result-summary `logger.info`
+  (`{ groundxSearchResult: { …, topSnippets: [{ …, textPreview }] } }`) emitted ~240 chars of retrieved
+  GroundX DOCUMENT TEXT per snippet (top-3) at the prod default `LOG_LEVEL=info` — violating the SAME
+  module invariant ("Free-form fields (chat content, document text) MUST NOT be logged anywhere",
+  lib/logger.ts). A comment FALSELY claimed truncation made it safe; truncated document text is still
+  free-form content that can carry PII. FIX: REMOVED the snippet/document-text carriers (`topSnippets` +
+  `textPreview`) from the result-summary payload entirely — KEPT the non-sensitive telemetry (count,
+  topScore, filenames) and replaced the snippet array with `topResults` carrying IDENTIFIERS only
+  (documentId/fileName/page/score, NO text); corrected the false comment to state document text is
+  deliberately NOT logged. `logger.ts` was NOT touched (payload-removal is the correct fix, not a redact
+  path — even redacted-in-prod still leaks in non-prod/debug deploys). EXPLICIT NON-GOAL LEFT UNCHANGED:
+  the dev-only `options.debug.groundx` accumulator (~:256-272) still carries query + snippet `text` — it is
+  GATED on a caller debug flag documented "Never set in production" and is browser-surfaced diagnostics
+  (not a server log), consistent with existing design; deliberately untouched. Provenance: carried VERBATIM
+  from the pre-split `chatRouter.ts` (the §1 split moved it unchanged) — pre-existing, not introduced here —
+  fixed now because it is the identical-class sibling of the 2-7l leak in the same reviewed file. Regression
+  guard (failing-first): EXTENDED `middleware/src/services/groundxSearch.logging.test.ts` with a case that
+  feeds a PII-shaped document snippet through the result path and asserts the emitted result-summary payload
+  contains NO snippet/document text (`textPreview`/`topSnippets`/the secret string gone) — RED before the
+  removal (textPreview + doc text present), GREEN after; locks the invariant against re-add. Gates: middleware
+  suite 687 green (+1 logging case), app suite 1464 green, app `npm run build` (tsc+vite) clean, middleware
+  tsc clean, ESLint clean on the two touched files, `openspec validate --strict` clean. — DONE (step 2-7m).
 
 ### 4e. Round-trip / dead-plumbing closeout (→ SEQUENTIAL/TDD)
 - [ ] **#17 §9 closeout.** Each persist chain gets a reader+writer or is DROPPED (the `attachments_json`

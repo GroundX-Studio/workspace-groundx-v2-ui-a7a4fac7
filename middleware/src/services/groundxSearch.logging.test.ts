@@ -90,4 +90,40 @@ describe("searchGroundX logging (PII guard)", () => {
       expect(flatten(p)).not.toContain("123-45-6789");
     }
   });
+
+  // Sibling of the query leak: the result-summary log MUST NOT emit retrieved
+  // GroundX document text (the `topSnippets[].textPreview` field). Document
+  // text is free-form content that can carry PII (the same invariant in
+  // lib/logger.ts forbids it). The fix removes the snippet/doc-text field from
+  // the result-summary payload entirely, keeping only non-sensitive telemetry
+  // (count/score/filenames). This test fails if it is ever re-added.
+  it("does NOT emit retrieved document text in the result-summary log payload", async () => {
+    const payloads = captureLoggerInfo();
+    // A PII-shaped document snippet returned by GroundX search.
+    const SECRET_DOC_TEXT =
+      "Account holder John Q. Public, SSN 987-65-4321, balance overdue $4,200.";
+    const client: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: {
+            results: [{ documentId: "d1", fileName: "statement.pdf", text: SECRET_DOC_TEXT }],
+          },
+        }),
+      ),
+    };
+
+    await searchGroundX("show me the overdue accounts", { type: "bucket", bucketId: 42 }, client, "k");
+
+    // The result-summary log must carry the non-sensitive telemetry
+    // (count/score/filenames) but never the retrieved document text.
+    const resultLog = payloads.find((p) => flatten(p).includes("groundxSearchResult"));
+    expect(resultLog).toBeDefined();
+    for (const p of payloads) {
+      expect(flatten(p)).not.toContain(SECRET_DOC_TEXT);
+      expect(flatten(p)).not.toContain("987-65-4321");
+      // The snippet/doc-text carriers must be gone from the summary entirely.
+      expect(flatten(p)).not.toContain("textPreview");
+      expect(flatten(p)).not.toContain("topSnippets");
+    }
+  });
 });

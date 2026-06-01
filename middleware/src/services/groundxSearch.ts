@@ -227,23 +227,30 @@ export async function searchGroundX(
       if (geo.bbox) r.bbox = geo.bbox;
     }
   }
-  // Result summary for dev visibility (top scores + filenames; we
-  // DON'T log full snippet text because it can contain user content
-  // and would dominate the log).
+  // Result summary for dev visibility. Carries ONLY non-sensitive telemetry
+  // (count + top score + the document ids/filenames/pages that came back).
+  // The retrieved snippet/document TEXT is DELIBERATELY NOT logged: it is
+  // free-form GroundX result content that can carry user PII, and the module
+  // invariant (lib/logger.ts) is that document text MUST NOT be logged
+  // anywhere — not even truncated/redacted, since pino's redact paths don't
+  // match this nested field and any non-prod/debug deploy would emit it in
+  // cleartext. (Sibling of the `query` leak removed from the dispatch logs
+  // above.) The dev-only `options.debug.groundx` accumulator below still
+  // carries snippet text — that is browser-surfaced diagnostics gated on a
+  // caller debug flag ("Never set in production"), not a server log.
   logger.info(
     {
       groundxSearchResult: {
         count: mapped.length,
         topScore: mapped[0]?.score ?? null,
         files: Array.from(new Set(mapped.map((r) => r.fileName).filter(Boolean))).slice(0, 3),
-        // Top-3 snippets with truncated text so the log shows what
-        // actually came back from GroundX without exploding.
-        topSnippets: mapped.slice(0, 3).map((r) => ({
+        // Top-3 result IDENTIFIERS only (no document text) so the log shows
+        // which docs came back without leaking their content.
+        topResults: mapped.slice(0, 3).map((r) => ({
           documentId: r.documentId,
           fileName: r.fileName,
           page: r.pageNumber,
           score: r.score,
-          textPreview: (r.text ?? "").slice(0, 240),
         })),
       },
     },
