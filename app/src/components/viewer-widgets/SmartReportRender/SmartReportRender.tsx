@@ -138,6 +138,16 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
 
   const canEdit = widgetRoleCanEdit(role);
 
+  // DL-4 (e2e-experience-audit): a pinned answer lands in the session's
+  // `reportOverlay` as a draft section (Pin→template = NO auto — it does NOT
+  // create a saved template or auto-open the builder). When the scope has no
+  // rendered report but a draft exists, the empty state surfaces a reachable
+  // "open builder" affordance so the draft isn't orphaned (otherwise it's
+  // reachable only via an LLM `show_smart_report_edit` tool-call).
+  const activeSession =
+    chatState.activeSessionId != null ? chatState.sessions.get(chatState.activeSessionId) : undefined;
+  const draftSectionCount = activeSession?.reportOverlay.addedFields.length ?? 0;
+
   // ── The one fetch path ──────────────────────────────────────────────
   // Initial paint AND ↻ re-render both call this — the surface has a single
   // source of truth for "what the report is" (the render endpoint), served by
@@ -278,12 +288,53 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
           </Box>
         </Stack>
       ) : report == null ? (
-        <Box
+        <Stack
           data-testid="smart-report-empty"
-          sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, p: 2 }}
+          spacing={1.5}
+          sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, p: 2, alignItems: "flex-start" }}
         >
-          No report for this scope yet. Pin an answer or open the builder to start one.
-        </Box>
+          <Box>
+            {draftSectionCount > 0
+              ? `You have a report draft in progress — ${draftSectionCount} pinned ${
+                  draftSectionCount === 1 ? "answer" : "answers"
+                }. Open the builder to shape it into a report.`
+              : "No report for this scope yet. Pin an answer or open the builder to start one."}
+          </Box>
+          {draftSectionCount > 0 && orchestrator ? (
+            <Box
+              component="button"
+              type="button"
+              data-testid="smart-report-open-draft-builder"
+              onClick={() =>
+                orchestrator.dispatch(
+                  {
+                    kind: "editTemplate",
+                    // The handler routes to the builder (f4a), which reads the
+                    // in-memory `reportOverlay` draft; `templateId` is a required
+                    // intent field but unused for an unsaved draft, so route by
+                    // the scope's template id when one applies, else a sentinel.
+                    templateId: reportTemplateIdForScope(scope) ?? "report-draft",
+                  },
+                  "user",
+                )
+              }
+              sx={{
+                border: `1px solid ${NAVY}`,
+                background: "none",
+                cursor: "pointer",
+                color: NAVY,
+                fontSize: FONT_SIZE_LABEL,
+                fontWeight: FONT_WEIGHT_LABEL,
+                borderRadius: BORDER_RADIUS_2X,
+                px: 1.25,
+                py: 0.5,
+                "&:focus-visible": { outline: `2px solid ${NAVY}` },
+              }}
+            >
+              Open builder →
+            </Box>
+          ) : null}
+        </Stack>
       ) : (
         <>
           {report.previewOnly ? (

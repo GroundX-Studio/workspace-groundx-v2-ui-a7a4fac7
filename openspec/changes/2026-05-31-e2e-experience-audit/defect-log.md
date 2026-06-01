@@ -90,7 +90,27 @@ Audited the post-`retire-mock-mode` build against REAL GroundX (no MOCK_MODE). O
   unit test + served-module grep are the authoritative proof, not the stale buffer.
 - **Gate:** full app suite (1515) + `tsc` + app `npm run build` green; no routing-path behavior change.
 
-### DL-4 · Report (pin → render reflection) · P3 · OPEN (needs investigation)
+### DL-4 · Report (pin → render reflection) · P3 · REVERIFIED (fixed in-place, e2e-audit §4)
+- **Decision (user, 2026-06-01):** keep `Pin→template = NO auto`, but the render's empty/no-content state
+  MUST surface a reachable entry to an existing draft so a pinned draft isn't orphaned.
+- **FIX:** `SmartReportRender` now reads the active session's `reportOverlay.addedFields` (the pinned
+  draft sections). When the scope renders empty BUT a draft exists, the `smart-report-empty` state shows
+  "You have a report draft in progress — N pinned answers…" + a reachable `smart-report-open-draft-builder`
+  `<button>` that dispatches the `editTemplate` intent (→ builder f4a) — the SAME hand-off the per-section
+  `✎ edit` affordance and `show_smart_report_edit` tool use (no fork). No auto-open, no saved template
+  created (decision honored).
+- **Test:** `SmartReportRender.test.tsx` — (1) draft present → affordance renders (button, "open builder",
+  "draft in progress" copy); (2) no draft → affordance absent. Revert-check: reverting the component change
+  makes test (1) FAIL (testid not found) while (2) stays green — a real regression test.
+- **Gate:** drift guards (238) + full app suite (1517) + `tsc` + app `npm run build` green; affordance reuses
+  the existing editTemplate dispatch path (proven by the per-section edit test); sx uses theme constants
+  (no-hardcoded-styles guard green).
+- **Live note:** onboarding chat-intro bootstrap was stuck post-`resetExperience` this session (input
+  renders, NO console errors, full suite green → environmental, not a regression), so the onboarding live
+  corroboration was blocked; the affordance renders deterministically from `chatState` and is authoritatively
+  covered by the unit tests above. (Steady chat path is healthy — see DL-5.)
+
+### DL-4 (ORIGINAL) · Report (pin → render reflection) · P3 · superseded by the fix above
 - **Measured:** in onboarding Report (frame f4, no template), clicked `pin-to-report-button` → the
   existing-or-new resolution surfaced as `pin-to-report-resolution-prompt-new-only` reading "Pinned to a
   new report draft." (correct new-only variant — no existing template). BUT re-checking the Report render

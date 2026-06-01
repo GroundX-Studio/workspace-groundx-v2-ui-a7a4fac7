@@ -1,6 +1,6 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState, type FC } from "react";
+import { useEffect, useState, type FC } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
@@ -20,6 +20,7 @@ import type { RenderedReport } from "@/types/report";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 
 import { SmartReportRender } from "./SmartReportRender";
 
@@ -202,6 +203,57 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       expect(snapshot.frame).toBe("f4a");
       expect(snapshot.selectedSectionId).toBe("billing_summary");
     });
+  });
+
+  it("DL-4: empty state surfaces a reachable 'open builder' affordance ONLY when a pinned draft exists", async () => {
+    // A no-fixture scope → reportTemplateIdForScope === null → the empty state
+    // (no endpoint round-trip), the scenario where a pinned draft would
+    // otherwise be orphaned (reachable only via an LLM tool-call).
+    const NO_FIXTURE_SCOPE: ContentScope = { type: "documents", documentIds: ["draft-only-doc"] };
+    let pinOnce = false;
+    // Seed a pinned draft into the active session's reportOverlay — exactly
+    // what the 📌 pin-to-report action does (Pin→template = NO auto: no saved
+    // template, no auto-open of the builder).
+    const DraftSeeder: FC = () => {
+      const { state, resolveSessionForScope, pinToReport } = useChatStore();
+      useEffect(() => {
+        resolveSessionForScope(NO_FIXTURE_SCOPE, { title: "draft test" });
+      }, [resolveSessionForScope]);
+      useEffect(() => {
+        if (state.activeSessionId && !pinOnce) {
+          pinOnce = true;
+          pinToReport({ turnId: "turn-1", text: "What is the total amount due on this bill?" });
+        }
+      }, [state.activeSessionId, pinToReport]);
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <DraftSeeder />
+        <SmartReportRender role="member" scope={NO_FIXTURE_SCOPE} />
+      </>,
+      { initialFrame: "f4", initialScenario: "utility" },
+    );
+    // The empty state surfaces the reachable draft entry point — a real
+    // <button> wired to the editTemplate render→builder hand-off (the SAME
+    // intent the proven per-section ✎ edit affordance and `show_smart_report_edit`
+    // tool emit).
+    const openBuilder = await screen.findByTestId("smart-report-open-draft-builder");
+    expect(screen.getByTestId("smart-report-empty")).toBeInTheDocument();
+    expect(openBuilder.tagName).toBe("BUTTON");
+    expect(openBuilder).toHaveTextContent(/open builder/i);
+    expect(screen.getByTestId("smart-report-empty")).toHaveTextContent(/draft in progress/i);
+  });
+
+  it("DL-4: empty state shows NO draft affordance when there is no pinned draft", async () => {
+    // Same no-fixture empty scope, but no draft seeded → the affordance must
+    // be absent (the conditional is load-bearing, not always-on).
+    renderWithOnboardingProviders(
+      <SmartReportRender role="member" scope={{ type: "documents", documentIds: ["no-draft-doc"] }} />,
+      { initialFrame: "f4", initialScenario: "utility" },
+    );
+    expect(await screen.findByTestId("smart-report-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-open-draft-builder")).not.toBeInTheDocument();
   });
 
   it("re-resolves the report when the scope IDENTITY changes (useScopeAdapter is load-bearing)", async () => {
