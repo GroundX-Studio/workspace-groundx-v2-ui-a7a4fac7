@@ -120,10 +120,20 @@
       room for — they MUST NOT remain a runtime branch). Drop the three
       `mockMode: env.MOCK_MODE` passes in `app.ts` (~1174, ~1243, ~1348) and the
       stale `MOCK_MODE` comments (~1187).
+      Re-ground the report tests so the **fresh-customer real-mode expectation
+      is the live path's graceful no-template state** (`live-report-render`,
+      re-revised, does NOT seed a sample report template): with no template,
+      smart-report renders the **no-template** state (NOT a fixture-rendered
+      report, NOT a broken/empty error); with a real template, the live render
+      runs and returns sections. Any prior test that asserted a
+      fixture-rendered report for a new customer MUST be re-grounded to the
+      no-template state, not retargeted to a fixture.
 - [ ] **Adversarial review:** confirm against code that report render returns
       sections via the live path with NO `mockMode`; the fixture model is either
       gone or test-only (grep proves no runtime importer); `app.ts` report routes
-      pass no `mockMode`.
+      pass no `mockMode`; and that the fresh-customer path renders the
+      no-template state (not an error and not a fixture report) — assert against
+      the live `smart-report` behavior `live-report-render` shipped.
 
 ## 10. App-side widget tests + reportFixtures (TDD)
 
@@ -149,14 +159,29 @@
       `mode === "development"` assertions ~146, ~166 + the summary line ~188) to
       smoke the real-client path (or skip cleanly when creds are absent —
       explicit, not silent). Update `app/playwright.config.ts` webServer (~25) to
-      boot the e2e middleware WITHOUT `MOCK_MODE=true` — deterministic e2e data
-      now comes from real/seeded GroundX or an injected fake harness, NOT a mock
-      env flag.
+      boot the e2e middleware WITHOUT `MOCK_MODE=true`, in **REAL mode against
+      the live GroundX backend** using the Partner API key — NOT a mock/fake
+      harness and NOT `MOCK_MODE`. The deterministic e2e data is the fixed
+      **seeded sample doc `c3bfff49…` in bucket `28454`**, which is stable. The
+      webServer env passes through `GROUNDX_PARTNER_API_KEY` + the GroundX base
+      URL from the environment (sourced from a CI **secret** in CI; from
+      `.env.local` locally). (Removed alternative: there is no injected fake
+      harness for e2e — the decision is real GroundX. UNIT tests still inject
+      fakes at the seam; that is unaffected.)
+- [ ] **CI Partner-key handling (no silent skip).** Ensure CI provides
+      `GROUNDX_PARTNER_API_KEY` (+ GroundX base URL) to the e2e job as a
+      **secret**, and that the e2e job **fails loudly** if the key is absent
+      rather than skipping the Playwright suite. If the repo's CI does not yet
+      run e2e, capture the secret + fail-on-missing requirement so the wiring is
+      explicit (ticket it rather than orphan it). No "quietly green because it
+      didn't run."
 - [ ] **Adversarial review:** no `MOCK_MODE` token remains in any env file,
-      script, or playwright config (grep); the e2e suite still has a deterministic
-      data source (named explicitly — seeded bucket or injected fake), not a
-      silently-broken "real creds required in CI" gap; smoke either passes against
-      real clients or fails honestly with a clear message.
+      script, or playwright config (grep); the e2e suite runs in REAL mode
+      against the seeded bucket `28454` doc `c3bfff49…` (named explicitly), with
+      NO mock/fake harness; prove CI cannot pass e2e green while silently
+      skipping for a missing Partner key (the job fails loudly when the secret is
+      absent); smoke either passes against real clients or fails honestly with a
+      clear message.
 
 ## 12. In-repo docs
 
@@ -177,5 +202,8 @@
       drift guard green; full `vitest` + the re-grounded e2e suite green.
 - [ ] Remove any inline `TODO(2026-06-01-retire-mock-mode)` left during the work.
 - [ ] Capture in the closeout note: which previously-mock-asserted behaviors are
-      now covered by injected fakes (the explicit coverage map), and the e2e
-      deterministic-data decision (seeded bucket vs injected harness).
+      now covered by injected fakes (the explicit coverage map); the e2e
+      deterministic-data decision (**RESOLVED: real GroundX — seeded bucket
+      `28454` doc `c3bfff49…`, no injected harness**) plus the CI Partner-key
+      secret + fail-on-missing requirement; and the fresh-customer report
+      behavior (**no template → live no-template state**, no fixture report).

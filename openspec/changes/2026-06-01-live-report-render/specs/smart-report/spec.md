@@ -2,30 +2,46 @@
 
 ## ADDED Requirements
 
-### Requirement: The sample report template SHALL be persisted server-side as the live path's source of section questions
+### Requirement: Report rendering SHALL treat a missing template as the legitimate new-customer starting state
 
-The sample report template (`rt-utility-ic-brief`, the Utility IC-brief) SHALL be persisted
-server-side as a `report`-kind `Template` whose sections each carry a `question`, so the live render
-path obtains its section questions from the SERVER (the durable Template), not from the client
-request or a client fixture. The persistence SHALL use the same `Template` lifecycle Extract uses
-(the shared `saveTemplate` / `getTemplate` repo API + the `report`-kind `TemplateSaveInput` bridge),
-with server-assigned ownership. The fixture (MOCK_MODE) pre-rendered bodies MAY remain as the
-offline render bodies, but they SHALL NOT be the source of section *questions* for the live path.
-The client request SHALL NOT carry section questions (one source of truth: the persisted Template).
+The render service SHALL treat a missing report template as the legitimate new-customer starting
+state — a brand-new authenticated customer legitimately has ZERO report templates (`Pin→template =
+NO auto`; the existing-or-new UX of the Template + Scope + Results model). The render service SHALL
+load the template by the render request's `template_id` via the shared `getTemplate` repo API; when
+no template exists for that id, `renderReport` SHALL return the graceful **no-template state** (no
+sections, complete, preview-only) — it SHALL NOT return an error and SHALL NOT fabricate or seed a
+render. The no-template state SHALL be DISTINGUISHABLE on the wire from an empty-doc-set render via a
+discriminator (e.g. `reason: "no_template"` vs `"empty_scope"`) so the surface shows the right copy —
+"create or pick a report template" vs "no documents match this scope" — rather than one ambiguous
+empty state (make-illegal-states-unrepresentable; two genuinely different user situations are not
+conflated). No sample report template SHALL be persisted/seeded by this
+change; the ABSENCE of a sample template SHALL never break the render service. The live render
+machinery (per-section search → ground → verify → cite) SHALL run ONLY when a real user-created
+template exists; the section questions then come from that persisted Template, never from the client
+request (one source of truth).
 
-#### Scenario: The sample template is retrievable from the server without a prior Save
+#### Scenario: A new customer with no template renders the no-template state, not an error
 
-- **GIVEN** a fresh deployment (no client has hit the report Save endpoint)
-- **WHEN** the render service resolves the `rt-utility-ic-brief` template by id
-- **THEN** `getTemplate` returns a `report`-kind Template with the four ordered sections (`billing_summary`, `charge_breakdown`, `anomalies`, `recommendation`), each carrying a non-empty `question` and its `renderAs`
-- **AND** the live path fans each section's `question` from that persisted Template, never from the client request.
+- **GIVEN** MOCK_MODE is OFF and no report template exists for the render request's `template_id` (the new-customer norm)
+- **WHEN** a report is rendered
+- **THEN** the render service returns the graceful no-template state (empty render shape: no sections, `status: "complete"`, `preview_only: true`), never an error and never a fabricated/fixture render
+- **AND** no search or LLM call is made, and no sample template is seeded anywhere.
+
+#### Scenario: When a real template exists, its sections drive the live path
+
+- **GIVEN** MOCK_MODE is OFF and a real user-created `report`-kind Template exists for the request's `template_id`
+- **WHEN** the render service resolves the template by id
+- **THEN** `getTemplate` returns that Template and the live path fans each section's `question` from it
+- **AND** the section questions come from the persisted Template, never from the client request.
 
 ### Requirement: Report rendering SHALL have a live multi-doc path, not only a fixture
 
 Report rendering SHALL have a **live** render path that produces real cited sections — not only the
-MOCK_MODE fixture. Outside MOCK_MODE, for each template section (in template order, honoring any
-`section_ids` subset), the render service SHALL search the section's `question` (read from the
-server-persisted Template) over the resolved `ContentScope` doc set, run grounded LLM generation
+MOCK_MODE fixture. Outside MOCK_MODE, when a real user-created Template exists for the request's
+`template_id` (when none exists, the no-template state applies — see the no-template requirement
+above), for each template section (in template order, honoring any `section_ids` subset), the render
+service SHALL search the section's `question` (read from that server-persisted Template) over the
+resolved `ContentScope` doc set, run grounded LLM generation
 over the returned snippets, verify each citation against its source chunk via the WF-06b path
 (verify → tier → confidence), and emit a cited section. The live path SHALL reuse the established
 RAG search → grounded-generation → WF-06b-verification orchestration (the genuine second caller of

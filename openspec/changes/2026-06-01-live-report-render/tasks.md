@@ -12,50 +12,42 @@
 > `2026-06-01-retire-mock-mode`); `npm run build` + drift guards green. Failed gate → back to
 > `in-progress`, never advance. TDD is mandatory: write the failing test first.
 
-## 1. Persist the sample report template server-side (the live path's source of questions)
+## 1. No-template state is the graceful new-customer starting point (NO sample template seeded)
 
-The live path needs the template's section **questions** from a SERVER source — the MOCK_MODE
-fixture only carries pre-rendered bodies, and `rt-utility-ic-brief` is not seeded anywhere
-(`app/src/widgets/reportFixtures.ts:30` + the `REPORT_FIXTURES` mock constant are the only
-definitions). Persist it as a real `report`-kind `TemplateRecord` via the existing
-`reportTemplateToSaveInput` → `saveTemplate` path (the same persistence Extract schemas use).
+There is NO sample report template, and that is the CORRECT new-customer starting state. Per the
+Template + Scope + Results model (`Pin→template = NO auto`; existing-or-new UX), a brand-new
+authenticated customer legitimately has ZERO templates. This change does NOT seed any sample
+template. When the render route's `repository.getTemplate(request.templateId)` returns `null`,
+`renderReport` MUST return the graceful no-template state — never an error, never a fixture, never a
+fabricated render. The no-template state reuses the EXISTING widget empty state (the render surface
+already ships loading/ready/empty/error+retry). A sample template MAY be added later; its ABSENCE
+must never break anything. (No `rt-utility-ic-brief` server constant, no `saveTemplate` seeding, no
+section-question mapping table — the live path's questions come from a REAL user-created template
+when one exists, §5.)
 
-Section → `question` mapping for the `rt-utility-ic-brief` Utility IC-brief template (the question
-that produces each existing `UTILITY_SECTIONS` fixture body — same ids/names/`renderAs`):
-
-| id / name | renderAs | question |
-| --- | --- | --- |
-| `billing_summary` | PARAGRAPH | "Summarize this statement: total amount due, number of meters, number of line-item charges, billing period, and account number." |
-| `charge_breakdown` | TABLE | "Break down the total charges by category (demand charges, energy charges, taxes & fees) as a table of category and amount." |
-| `anomalies` | BULLETS | "List any billing anomalies — charges or usage materially above the trailing baseline, per-meter spikes — with the magnitude of each." |
-| `recommendation` | PARAGRAPH | "Given the charges and any anomalies, recommend what to review before approving payment and the estimated recoverable savings." |
-
-- [ ] Write FAILING test (`reportRenderer.test.ts` or `app.test.ts`): after seeding/boot,
-      `repository.getTemplate("rt-utility-ic-brief")` returns a non-null `report`-kind
-      `TemplateRecord` whose parsed `ReportTemplate` has the four ordered sections above, each with a
-      non-empty `question`, matching `name`, and `renderAs`. (Today it returns `null` unless the
-      Save endpoint was hit — `app.test.ts:1243` only sees it because that test calls Save first.)
-- [ ] Define the `rt-utility-ic-brief` `ReportTemplate` (the four sections WITH the `question`
-      strings above) as a server-side constant and PERSIST it via `reportTemplateToSaveInput(template)`
-      → `saveTemplate(...)` with a SERVER-assigned owner (not from any wire). Seed it where the other
-      sample/boot content is established (check `middleware/scripts/seed-bucket.ts` and the app boot /
-      `createSchema` path; if seeding belongs in the boot sequence, add it there so `memoryRepository`
-      and `mysqlRepository` both have it for a fresh start). Keep the MOCK_MODE `UTILITY_SECTIONS`
-      fixture bodies UNCHANGED — they remain the offline render bodies; this task only adds the
-      persisted *questions* the live path fans.
-- [ ] **Adversarial review:** confirm `getTemplate("rt-utility-ic-brief")` returns the template on a
-      FRESH start (no Save call required) for BOTH repository implementations the test exercises;
-      confirm the persisted sections' `question` strings are present and non-empty (the live path
-      depends on them — a blank question is a no-op fan-out); confirm the template id/name/section
-      ids/`renderAs` match the client fixture (`reportFixtures.ts`) so render results line up; confirm
-      NO section `question` is read from the client request anywhere (one-source-of-truth).
+- [ ] Write FAILING test (`reportRenderer.test.ts`): with `mockMode: false`, INJECTED clients that
+      THROW if called, and a `getTemplate` that returns `null` for `request.templateId`, `renderReport`
+      returns the no-template state (empty render shape: `sections: []`, `status: "complete"`,
+      `preview_only: true`) WITHOUT calling search/LLM — never an error, never a fixture. This is the
+      new-customer norm (`getTemplate` returns `null`), not an error path.
+- [ ] Implement the no-template branch in `renderReport`: when the resolved template is `null`, return
+      the graceful no-template state (the existing empty-render shape) before any live fan-out. Do NOT
+      seed a sample template anywhere (no `seed-bucket.ts` / boot `saveTemplate` for a report template).
+      Keep the MOCK_MODE `UTILITY_SECTIONS` fixture bodies UNCHANGED — the fixture path is unaffected.
+- [ ] **Adversarial review:** confirm NO sample report template is written anywhere (grep
+      `seed-bucket.ts`, the boot / `createSchema` path, and `reportRenderer.ts` — no
+      `saveTemplate(...report...)` seeding); confirm a `null` template degrades to the no-template state
+      (the existing widget empty state), never an error or a fabricated/fixture render; confirm the
+      injected clients are NOT touched when there is no template; confirm NO section `question` is read
+      from the client request anywhere (one-source-of-truth).
 
 ## 2. Load the template in the render route + thread it into deps
 
 - [ ] Write FAILING test (`app.test.ts` render route): the render route loads the template by
       `template_id` from the repository (server source), NOT from the request body; a render request
-      whose `template_id` has no persisted template returns the idle empty render (or a clear
-      `template_not_found`), and the request body NEVER supplies section questions.
+      whose `template_id` has no persisted template (the new-customer norm) returns the graceful
+      no-template state (§1: empty render shape), never an error or crash, and the request body NEVER
+      supplies section questions.
 - [ ] In the render route (~1232), after ownership checks, load the template via
       `repository.getTemplate(templateId)` → `parseTemplate` into a `ReportTemplate`, and pass it (or a
       `getTemplate` callback) into `RenderReportDeps`. Use the request BODY scope
@@ -65,48 +57,39 @@ that produces each existing `UTILITY_SECTIONS` fixture body — same ids/names/`
 - [ ] **Adversarial review:** confirm the route reads the template from the repo (grep the route for
       `getTemplate` / `parseTemplate`), the scope still comes from `body.scope` (no
       `deriveRagContentScope` in the render route), and the live path's section questions trace back to
-      the persisted template — not the request. Confirm a missing template degrades gracefully (idle
-      empty render or explicit not-found), never a crash.
+      the user-created template — not the request. Confirm a missing template degrades gracefully to
+      the no-template state (§1), never a crash and never a fabricated render.
 
-## 3. Earn the shared `groundedAnswerOverScope` seam (or compose inline + ticket the dup)
+## 3. Extract the shared `groundedAnswerOverScope` seam + migrate `runRagPipeline` onto it
 
-This is the composable-over-forked crux. The real ≥2-caller axis is **`runRagPipeline` + the report
-render** (both: prose body + verified `Citation[]` over `(question, scope)`). `extractField` is NOT a
-caller — it returns a scalar value + single citation and never verifies; DO NOT touch it.
+This is the composable-over-forked crux. Pre-launch, no real users yet → take the PREFERRED (most
+extensible) path; there is NO fallback in this plan. The real ≥2-caller axis is **`runRagPipeline` +
+the report render** (both: prose body + verified `Citation[]` over `(question, scope)`).
+`extractField` is NOT a caller — it returns a scalar value + single citation and never verifies; DO
+NOT touch it.
 
-- [ ] Write FAILING test for the chosen path:
-      - **Preferred (extract + migrate rag):** a unit test for `groundedAnswerOverScope(question,
-        scope, deps)` that, with injected fake `groundxClient` + `llmClient` returning canned snippets
-        + a grounded answer with a verbatim quote, returns a shared `GeneratedResult` (`body` +
-        verified `citations[]` each with a WF-06b `tier` + `confidence`). PLUS a `ragPipeline.test.ts`
-        assertion that `runRagPipeline`'s per-answer body now routes through the helper (rag still
-        produces identical citations/tiers for the existing chat fixtures — behavior-parity).
-      - **Fallback (compose inline):** assert `callGroundedLlm` is now exported and callable, and that
-        the report path composes `searchGroundX` + `buildSnippetBlock` + `callGroundedLlm` +
-        `parseGroundedAnswer` + `verifyQuote`/`assignTier`/`confidenceFor` to produce a verified
-        `GeneratedResult` — with the duplication ticketed (see below).
-- [ ] Implement the chosen path:
-      - **Preferred:** extract ONE `groundedAnswerOverScope(question, scope, deps): Promise<GeneratedResult>`
-        helper (new module or in `ragPipeline.ts`) that composes `searchGroundX` (search),
-        `buildSnippetBlock` (`ragPipeline` ~636), an **exported** `callGroundedLlm` (`ragPipeline` ~438 —
-        add `export`), `parseGroundedAnswer` (`ragPipeline` ~349), then the WF-06b verify loop
-        `verifyQuote` → `assignTier` → `confidenceFor` (`attribution.ts`). MIGRATE `runRagPipeline`'s
-        per-answer body (the ~140 inline lines, `ragPipeline.ts` ~235-298) to call the helper, so the
-        inline loop becomes the shared helper and rag is the real second caller. The helper returns the
-        shared `GeneratedResult` core (`body`/`citations`/`confidence?`/`warnings?`).
-      - **Fallback (only if migrating the tangled `runRagPipeline` is out of scope for this change):**
-        add `export` to `callGroundedLlm`, compose the pieces inline in the report path, and FILE a
-        tracked follow-up ticket (OpenSpec `tasks.md` entry or `spawn_task`) to dedupe `runRagPipeline`
-        onto the same helper. Do NOT claim the loop is deduped if it is not.
-      - State which path you took and WHY in the commit message.
+- [ ] Write FAILING test: a unit test for `groundedAnswerOverScope(question, scope, deps)` that, with
+      injected fake `groundxClient` + `llmClient` returning canned snippets + a grounded answer with a
+      verbatim quote, returns a shared `GeneratedResult` (`body` + verified `citations[]` each with a
+      WF-06b `tier` + `confidence`). PLUS a `ragPipeline.test.ts` behavior-parity assertion that
+      `runRagPipeline`'s per-answer body now routes through the helper and STILL produces identical
+      citations/tiers for the existing chat fixtures.
+- [ ] Implement: extract ONE `groundedAnswerOverScope(question, scope, deps): Promise<GeneratedResult>`
+      helper (new module or in `ragPipeline.ts`) that composes `searchGroundX` (search),
+      `buildSnippetBlock` (`ragPipeline` ~636), an **exported** `callGroundedLlm` (`ragPipeline` ~438 —
+      add `export`), `parseGroundedAnswer` (`ragPipeline` ~349), then the WF-06b verify loop
+      `verifyQuote` → `assignTier` → `confidenceFor` (`attribution.ts`). MIGRATE `runRagPipeline`'s
+      per-answer body (the ~140 inline lines, `ragPipeline.ts` ~235-298) to call the helper, so the
+      inline loop becomes the shared helper and rag is the real second caller. The helper returns the
+      shared `GeneratedResult` core (`body`/`citations`/`confidence?`/`warnings?`).
 - [ ] **Adversarial review:** **Composable check (mandatory):** grep that NO new private copy of the
       snippet-block build, the grounding prompt, or the answer-parse exists in the report path — it
       reuses `buildSnippetBlock` / `parseGroundedAnswer` / `callGroundedLlm` / `searchGroundX` /
-      attribution. If `groundedAnswerOverScope` was extracted, confirm `runRagPipeline` ALSO calls it
-      (≥2 real callers — not a dormant 1-caller abstraction) and that `extractField` was NOT migrated
-      onto it. If inline was chosen, confirm `callGroundedLlm` is exported, the duplication is ticketed,
-      and the plan does not pretend it is deduped. **One-source-of-truth check:** the helper's result is
-      the shared `GeneratedResult` (`@groundx/shared`), NOT a new local result shape.
+      attribution. Confirm `runRagPipeline` ALSO calls `groundedAnswerOverScope` (≥2 real callers — not
+      a dormant 1-caller abstraction), the behavior-parity test is real + green (identical
+      citations/tiers for the existing chat fixtures), and `extractField` was NOT migrated onto it.
+      **One-source-of-truth check:** the helper's result is the shared `GeneratedResult`
+      (`@groundx/shared`), NOT a new local result shape.
 
 ## 4. Unify the section degradation path (fixture + live share `renderSection`)
 
@@ -134,23 +117,25 @@ caller — it returns a scalar value + single citation and never verifies; DO NO
 ## 5. Per-section live render wired into `renderReport` (search → ground → verify → cited section)
 
 - [ ] Write FAILING test (`reportRenderer.test.ts`): with `mockMode: false`, INJECTED fake
-      `groundxClient` + `llmClient` (NOT MOCK_MODE), a resolved/persisted template, and a sample
-      scope, `renderReport` returns `sections[]` whose bodies are the LLM output and whose `cites` are
-      verified citations with a WF-06b `tier` (`exact`/`normalized`/`ambient`) and a `confidence` —
-      proving search + generation + verify ran per section, in template order, honoring `sectionIds`.
-      Also assert the OLD `throw new Error("live report render is not yet wired …")` is gone.
-- [ ] Replace the throw (~478) with the live branch: for each section to render (template order,
-      honoring the `sectionIds` subset), call `groundedAnswerOverScope(section.question, scope, deps)`
-      (preferred) OR the inline composition (fallback) to produce a `GeneratedResult`, then pass it
-      through the unified degradation path from §4 to emit a `RenderedSectionWire`. The section
+      `groundxClient` + `llmClient` (NOT MOCK_MODE), a REAL user-created template (resolved via deps),
+      and a sample scope, `renderReport` returns `sections[]` whose bodies are the LLM output and whose
+      `cites` are verified citations with a WF-06b `tier` (`exact`/`normalized`/`ambient`) and a
+      `confidence` — proving search + generation + verify ran per section, in template order, honoring
+      `sectionIds`. Also assert the OLD `throw new Error("live report render is not yet wired …")` is
+      gone. (The `null`-template no-render case is pinned in §1.)
+- [ ] Replace the throw (~478) with the live branch (reached only when a real template exists): for
+      each section to render (template order, honoring the `sectionIds` subset), call
+      `groundedAnswerOverScope(section.question, scope, deps)` (§3) to produce a `GeneratedResult`, then
+      pass it through the unified degradation path from §4 to emit a `RenderedSectionWire`. The section
       `question` comes from the deps template (§2), NEVER the request.
 - [ ] **Adversarial review:** confirm the live branch genuinely calls the injected `searchGroundX` +
-      `llmClient` + `verifyQuote`/`assignTier`/`confidenceFor` per section (not a hardcoded body);
-      ordering matches template order + the `sectionIds` subset; the §4 degradations fire on the live
-      result (a section with no snippet support → `—` + `⚠ no support in docs`). **One-source-of-truth
-      check:** the emitted `RenderedSectionWire` derives from the shared `RenderedSection` /
-      `GeneratedResult` core (`@groundx/shared`), NOT a new local result shape (the `Eq<>` guard at
-      reportRenderer.ts ~219 still holds).
+      `llmClient` + `verifyQuote`/`assignTier`/`confidenceFor` per section via
+      `groundedAnswerOverScope` (not a hardcoded body); ordering matches template order + the
+      `sectionIds` subset; the §4 degradations fire on the live result (a section with no snippet
+      support → `—` + `⚠ no support in docs`). **One-source-of-truth check:** the emitted
+      `RenderedSectionWire` derives from the shared `RenderedSection` / `GeneratedResult` core
+      (`@groundx/shared`), NOT a new local result shape (the `Eq<>` guard at reportRenderer.ts ~219
+      still holds).
 
 ## 6. `renderReport` async + convert EVERY call-site
 
@@ -179,8 +164,9 @@ caller — it returns a scalar value + single citation and never verifies; DO NO
       clients that THROW if called — they must NOT be touched on a BYO scope); and a sample scope that
       resolves to an empty doc set still returns the idle empty render (`sections: []`, `status:
       "complete"`, `preview_only: true`) without calling the LLM.
-- [ ] Confirm the BYO gate (~464) and empty-scope idle render (~484) run before / instead of the live
-      fan-out — no code change expected beyond ordering; the test pins the invariant (#10 gate, idle
+- [ ] Confirm the BYO gate (~464), the no-template state (§1), and the empty-scope idle render (~484)
+      all run before / instead of the live fan-out — no code change expected beyond ordering (gate →
+      no-template → idle → live); the test pins the invariant (#10 gate, no-template state, idle
       render) against the new live path so it can't regress.
 - [ ] **Adversarial review:** prove the injected throwing clients are NOT invoked on the BYO and
       empty-scope paths (the gate/idle branches short-circuit before the live fan-out). Confirm this
@@ -193,8 +179,11 @@ caller — it returns a scalar value + single citation and never verifies; DO NO
       WITHOUT MOCK_MODE and is not retargeted to the fixture.
 - [ ] Delete any inline `TODO(2026-06-01-live-report-render)` and confirm the "not yet wired (Phase 7
       / WF-10)" throw is fully removed from `reportRenderer.ts`.
-- [ ] Confirm the §3 fallback dedupe ticket exists (if the inline path was taken) OR that
-      `runRagPipeline` calls `groundedAnswerOverScope` (if extracted). No orphaned partial-dedup claim.
+- [ ] Confirm `runRagPipeline` calls `groundedAnswerOverScope` (the seam was extracted + migrated, §3)
+      with the behavior-parity test green. No orphaned partial-dedup claim, no dormant 1-caller helper.
+- [ ] Confirm NO sample report template is seeded anywhere (no report-kind `saveTemplate` in
+      `seed-bucket.ts` / boot / `reportRenderer.ts`); a `null` template renders the graceful
+      no-template state (§1), never an error or fabricated render.
 - [ ] Confirm scope boundary: MOCK_MODE is **still present** — `renderReport` works both with the
       fixture and live. Removing MOCK_MODE is the dependent change `2026-06-01-retire-mock-mode`; do
       NOT touch it here.

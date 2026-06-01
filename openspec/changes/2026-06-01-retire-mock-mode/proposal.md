@@ -63,7 +63,14 @@ gate check** that fails closed if that dependency has not shipped. If
   `reportRenderer.renderReport`. The report fixture model
   (`UTILITY_REPORT_DOC_INDEX`, section templates) is **kept only as a test
   fixture** (moved out of the runtime module) or deleted if
-  `live-report-render` already relocated it — never a runtime branch.
+  `live-report-render` already relocated it. After removal, the **real-mode
+  report behavior for a fresh customer is the live path's no-template state**:
+  `2026-06-01-live-report-render` (re-revised) does NOT seed a sample report
+  template; smart-report renders the graceful **no-template** state when no
+  template exists, and runs the live render only when a real template exists.
+  There is no fixture-rendered report to fall back to — "no template →
+  no-template state" is the correct, non-error real-mode outcome, not a
+  broken/empty screen. The fixture model is never a runtime branch.
 - **Make the conditional client-requirement guards unconditional**: the
   `"required outside MOCK_MODE"` guards in `ragPipeline.ts` (~62, 65) and
   `fieldExtractor.ts` (~231, 234) become plain unconditional
@@ -82,8 +89,21 @@ gate check** that fails closed if that dependency has not shipped. If
   `scripts/setup-local-env.mjs`, `scripts/test-setup-local-env.mjs`,
   `scripts/smoke-dev.mjs` (the `MOCK_MODE: "true"` + the `mode === "development"`
   assertions), `app/playwright.config.ts` (the `MOCK_MODE=true` webServer env —
-  the e2e middleware must boot against real/injected clients deterministically),
+  the e2e middleware now boots in **REAL mode against the live GroundX backend**
+  using the Partner API key, NOT a mock/fake harness and NOT `MOCK_MODE`; the
+  deterministic e2e data is the fixed **seeded sample doc `c3bfff49…` in bucket
+  `28454`**, which is stable),
   and `MOCK_MODE: false` in `middleware/src/test/fakes.ts` (`testEnv`).
+  This is distinct from UNIT tests, which keep injected fakes / test-doubles at
+  the dependency seam — that is the legitimate test seam, not "mock mode," and
+  it stays.
+- **CI must supply the Partner API key (and base URL) to e2e as a secret**: the
+  Playwright suite cannot run in REAL mode without the Partner key. CI SHALL
+  provide `GROUNDX_PARTNER_API_KEY` (and the GroundX base URL) as a **secret**,
+  and the e2e job SHALL **fail loudly** if the key is absent rather than
+  silently skipping the suite — no "quietly green because it didn't run." An
+  adversarial-review check enforces that CI does not skip e2e for lack of the
+  key.
 - **Update the in-repo docs** that describe `MOCK_MODE` as a runtime mode
   (`docs/agents/*` LLM-runtime / scenario-fixtures references) to describe the
   injected-fake test seam instead. (The user's memory store is updated
