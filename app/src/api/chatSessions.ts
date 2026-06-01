@@ -32,12 +32,6 @@ interface CreateChatSessionInput {
   activeEntityKey?: string | null;
 }
 
-export interface CreateChatSessionResult {
-  chatSessionId: string;
-  ownerUserId: string | null;
-  ownerAnonId: string | null;
-}
-
 // A chat-reply citation IS the shared `Citation` (`@groundx/shared`) — the
 // middleware end of this same wire already uses it (chatRouter `Citation`).
 // `bbox` (NormalizedBbox) is threaded end-to-end for CiteChip's viewer jump;
@@ -45,12 +39,25 @@ export interface CreateChatSessionResult {
 // (no `ChatCitation` alias).
 import {
   ApiError,
+  chatReplySchema,
+  createChatSessionResultSchema,
+  type ChatReply as SharedChatReply,
+  type ChatReplyDebug as SharedChatReplyDebug,
+  type ChatScopeHint,
   type Citation,
+  type CreateChatSessionResult as SharedCreateChatSessionResult,
+  type DispatchedIntent as SharedDispatchedIntent,
   type ProposalEnvelopeProvenance,
   type ProposedSchemaField,
-  type ScopeFilter,
   type SuggestedAction,
+  type ToolFailure as SharedToolFailure,
 } from "@groundx/shared";
+
+// 2026-05-31-chat-wire-types-shared — the `POST /api/chat-sessions` result was
+// declared on BOTH sides of the wire. It is now single-sourced on
+// `@groundx/shared`; re-export so the local name (`CreateChatSessionResult`)
+// is unchanged for every consumer.
+export type CreateChatSessionResult = SharedCreateChatSessionResult;
 
 // 2026-05-31-core-data-followups §4 #13 — `ChatSuggestedAction` was a
 // byte-identical fork of the shared chip shape; it is now an alias of the ONE
@@ -67,87 +74,18 @@ export type ChatSuggestedAction = SuggestedAction;
 // `id`, which the client mints when pushing into `pendingSchemaOverlay`).
 export type { ProposalEnvelopeProvenance, ProposedSchemaField };
 
-/**
- * Dev-only diagnostic payload mirroring the middleware's `ChatRouterDebug`.
- * Present on `ChatReply` when `NODE_ENV !== "production"`. Lets the
- * browser DevTools console show exactly what the chat router asked
- * GroundX and what came back, without needing terminal access.
- */
-export interface ChatReplyDebug {
-  mode: "rag" | "structured" | "hybrid";
-  // Mirrors the middleware `ChatRouterDebug.scope` wire shape (unified
-  // `ContentScope` — discriminant `type`, composable `filter`). Kept in sync
-  // with `chatRouter.ts`; folding both debug-scope mirrors onto `ContentScope`
-  // is tracked in the `core-data-model-hardening` envelope-unification task.
-  scope: { type: "bucket" | "group" | "documents"; bucketId?: number; groupId?: number; documentIds?: string[]; filter?: ScopeFilter };
-  groundx: {
-    path: string;
-    query: string;
-    n: number;
-    filter: unknown;
-    resultCount: number;
-    topSnippets: Array<{ documentId: string; fileName?: string; score?: number; text?: string }>;
-  } | null;
-  llm: {
-    model: string;
-    snippetBlockChars: number;
-    userContentChars: number;
-    systemChars: number;
-    answerChars: number;
-  } | null;
-}
-
-/**
- * widget-llm-integration Phase 5 — one successful LLM tool call
- * round-trip from the middleware. The frontend dispatches each
- * `intent` through the canvas orchestrator on receipt.
- */
-export interface ChatDispatchedIntent {
-  name: string;
-  arguments: Record<string, unknown>;
-  intent: Record<string, unknown>;
-}
-
-/** widget-llm-integration Phase 5 — one failed LLM tool call. */
-export interface ChatToolFailure {
-  name: string;
-  reason: string;
-}
-
-export interface ChatReply {
-  mode: "rag" | "structured" | "hybrid";
-  answer: string;
-  citations: Citation[];
-  suggestedActions: ChatSuggestedAction[];
-  tools: { name: string; arguments: Record<string, unknown> }[];
-  /**
-   * widget-llm-integration Phase 5 — validated LLM tool calls. The
-   * chat surface dispatches each `intent` through the canvas
-   * orchestrator on receipt. Empty array when the LLM emitted no
-   * tools (or no tools matched the registry).
-   */
-  intents: ChatDispatchedIntent[];
-  /**
-   * widget-llm-integration Phase 5 — tool calls that failed
-   * validation (unknown name, Zod parse failure, etc.). v1 surfaces
-   * these as a one-line note; no auto-retry (design.md §M).
-   */
-  toolFailures: ChatToolFailure[];
-  /**
-   * UI-01 Phase 2a — non-null when the grounded LLM emitted a
-   * well-formed proposed field in its JSON block. The chat surface
-   * surfaces this as a Propose card with Accept/Reject controls; the
-   * Accept handler calls the ChatStore `addSchemaField` action.
-   */
-  proposedSchemaField: ProposedSchemaField | null;
-  /**
-   * Dev-only diagnostic payload. Present iff `NODE_ENV !== production`.
-   * `sendChatMessage` logs it to the browser console so the user can
-   * see the raw GroundX request + result + LLM dispatch char counts
-   * for each chat turn.
-   */
-  _debug?: ChatReplyDebug;
-}
+// 2026-05-31-chat-wire-types-shared — the chat reply envelope (the dev-only
+// `ChatReplyDebug` diagnostic, the per-tool-call `ChatDispatchedIntent` /
+// `ChatToolFailure`, and the `ChatReply` body) was declared as a byte-twin of
+// the middleware `ChatRouterDebug` / `DispatchedIntent` / `ToolFailure` /
+// `ChatRouterResponse`. Both halves now re-export the ONE `@groundx/shared`
+// source under the `Eq<>` guards in `chatSessions.test.ts`; the local names are
+// kept as aliases so no consumer churns. `ChatReplyDebug.scope` is now the
+// shared `ContentScope` (the LOW debug-scope literal twin is closed).
+export type ChatReplyDebug = SharedChatReplyDebug;
+export type ChatDispatchedIntent = SharedDispatchedIntent;
+export type ChatToolFailure = SharedToolFailure;
+export type ChatReply = SharedChatReply;
 
 export interface SendChatMessageResult {
   userMessageId: string;
@@ -180,10 +118,7 @@ export interface SendChatMessageInput {
    * with no fallback to "I can talk about the April utility bill —
    * try asking about charges or due date."
    */
-  scopeHint?: {
-    fileName?: string | null;
-    scenarioTitle?: string | null;
-  };
+  scopeHint?: ChatScopeHint;
   /**
    * widget-llm-integration Phase 5 — the active ViewerStep kind the
    * user is currently on. Sent to the middleware so the LLM tool
@@ -408,7 +343,20 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
  * picked up the expected anon/user mapping.
  */
 export async function createChatSession(input: CreateChatSessionInput): Promise<CreateChatSessionResult> {
-  return postJson<CreateChatSessionResult>("/api/chat-sessions", input);
+  const result = await postJson<CreateChatSessionResult>("/api/chat-sessions", input);
+  // 2026-05-31-chat-wire-types-shared — runtime-validate the create-session
+  // result against the shared `createChatSessionResultSchema` at this parse
+  // boundary. Drop-safe (see `sendChatMessage`): report a contract drift to
+  // Sentry without throwing, so a parse miss never breaks the ensure-create
+  // flow.
+  const parsed = createChatSessionResultSchema.safeParse(result);
+  if (!parsed.success) {
+    captureException(parsed.error, {
+      route: "/api/chat-sessions",
+      validation: "createChatSessionResultSchema",
+    });
+  }
+  return result;
 }
 
 /**
@@ -446,6 +394,19 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
       scopeHint: input.scopeHint,
       activeStepKind: input.activeStepKind ?? null,
     });
+    // 2026-05-31-chat-wire-types-shared — runtime-validate the reply envelope
+    // against the shared `chatReplySchema` at this parse boundary. Drop-safe:
+    // a malformed reply is reported to Sentry but does NOT throw (behaviour-
+    // preserving — the envelope is single-sourced, so a parse miss signals a
+    // genuine server/contract drift to triage, not a flow to break).
+    const replyParse = chatReplySchema.safeParse(result.reply);
+    if (!replyParse.success) {
+      captureException(replyParse.error, {
+        route: "/api/chat/messages",
+        chatSessionId: input.chatSessionId,
+        validation: "chatReplySchema",
+      });
+    }
     // Dev-only: log the raw chat-pipeline diagnostics so the user can
     // see what was actually asked of GroundX + the LLM without
     // context-switching to the middleware terminal. Gated on

@@ -300,15 +300,12 @@ export async function runRagPipeline(
       ? {
           _debug: {
             mode: "rag" as const,
-            scope: (scope === null
-              ? { type: "documents" }
-              : {
-                  type: scope.type,
-                  ...("bucketId" in scope ? { bucketId: scope.bucketId } : {}),
-                  ...("groupId" in scope ? { groupId: scope.groupId } : {}),
-                  ...("documentIds" in scope ? { documentIds: scope.documentIds } : {}),
-                  ...(scope.filter ? { filter: scope.filter } : {}),
-                }) as ChatRouterDebug["scope"],
+            // 2026-05-31-chat-wire-types-shared — `_debug.scope` is now the
+            // shared `ContentScope`. `scope` is already `ContentScope | null`,
+            // so pass it through directly; the null case (no resolved scope)
+            // surfaces as an empty `documents` scope — a valid `ContentScope`
+            // that reads as "no documents in scope" in the dev debug panel.
+            scope: (scope ?? { type: "documents", documentIds: [] }) satisfies ChatRouterDebug["scope"],
             groundx: debugCapture.groundx ?? null,
             llm: debugCapture.llm ?? null,
           },

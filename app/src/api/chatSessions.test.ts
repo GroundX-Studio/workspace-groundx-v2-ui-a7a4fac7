@@ -10,9 +10,21 @@ vi.mock("@/lib/sentry", () => ({
 import { captureException } from "@/lib/sentry";
 
 import {
+  chatReplyDebugSchema,
+  chatReplySchema,
+  chatScopeHintSchema,
+  createChatSessionResultSchema,
+  dispatchedIntentSchema,
   proposedSchemaFieldSchema,
+  toolFailureSchema,
+  type ChatReply as SharedChatReply,
+  type ChatReplyDebug as SharedChatReplyDebug,
+  type ChatScopeHint as SharedChatScopeHint,
+  type CreateChatSessionResult as SharedCreateChatSessionResult,
+  type DispatchedIntent as SharedDispatchedIntent,
   type ProposalEnvelopeProvenance as SharedProvenance,
   type ProposedSchemaField as SharedProposedSchemaField,
+  type ToolFailure as SharedToolFailure,
 } from "@groundx/shared";
 
 import {
@@ -23,8 +35,14 @@ import {
   createChatSession,
   listChatMessages,
   sendChatMessage,
+  type ChatDispatchedIntent,
+  type ChatReply,
+  type ChatReplyDebug,
+  type ChatToolFailure,
+  type CreateChatSessionResult,
   type ProposalEnvelopeProvenance,
   type ProposedSchemaField,
+  type SendChatMessageInput,
 } from "./chatSessions";
 
 /**
@@ -52,6 +70,98 @@ describe("proposal-envelope wire twins (§4 #18)", () => {
       provenance: { version: "v1", verified: true },
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+/**
+ * 2026-05-31-chat-wire-types-shared — the `/api/chat/*` reply envelope was
+ * declared TWICE (app `ChatReply` / `ChatDispatchedIntent` / `ChatToolFailure`
+ * and middleware `ChatRouterResponse` / `DispatchedIntent` / `ToolFailure`) as
+ * hand-mirrored byte-twins. These are now single-sourced on `@groundx/shared`.
+ * The `Eq<>` asserts are load-bearing under `npm run build` (tsc): if either
+ * side re-forks the shape, the `Assert<false>` fails the build — a real wire
+ * drift guard, not a name-set check.
+ */
+type _assertChatReply = Assert<Eq<ChatReply, SharedChatReply>>;
+type _assertDispatchedIntent = Assert<Eq<ChatDispatchedIntent, SharedDispatchedIntent>>;
+type _assertToolFailure = Assert<Eq<ChatToolFailure, SharedToolFailure>>;
+type _assertChatReplyDebug = Assert<Eq<ChatReplyDebug, SharedChatReplyDebug>>;
+type _assertCreateChatSessionResult = Assert<
+  Eq<CreateChatSessionResult, SharedCreateChatSessionResult>
+>;
+// `scopeHint` is the optional field on the input — assert the non-undefined
+// shape single-sources off the shared `ChatScopeHint`.
+type _assertScopeHint = Assert<
+  Eq<NonNullable<SendChatMessageInput["scopeHint"]>, SharedChatScopeHint>
+>;
+
+describe("chat reply envelope wire twins (chat-wire-types-shared)", () => {
+  it("the shared chatReplySchema validates a representative reply fixture byte-for-byte", () => {
+    const parsed = chatReplySchema.safeParse({
+      mode: "rag",
+      answer: "The April utility total is $142.30.",
+      citations: [
+        { documentId: "doc-1", page: 1, snippet: "Total amount due $142.30", tier: "exact" },
+      ],
+      suggestedActions: [{ key: "show-source", label: "Show source", detail: { documentId: "doc-1" } }],
+      tools: [{ name: "show_source", arguments: { documentId: "doc-1" } }],
+      intents: [
+        { name: "show_source", arguments: { documentId: "doc-1" }, intent: { kind: "doc-viewer" } },
+      ],
+      toolFailures: [{ name: "bogus_tool", reason: "unknown tool" }],
+      proposedSchemaField: {
+        categoryId: "c1",
+        name: "Total tax",
+        type: "NUMBER",
+        description: "the total tax amount",
+        provenance: { version: "v1", verified: true },
+      },
+      _debug: {
+        mode: "rag",
+        scope: { type: "bucket", bucketId: 28454, filter: { projectId: "utility" } },
+        groundx: {
+          path: "/v1/search/28454",
+          query: "total amount",
+          n: 6,
+          filter: { projectId: "utility" },
+          resultCount: 1,
+          topSnippets: [{ documentId: "doc-1", fileName: "april.pdf", score: 0.9, text: "..." }],
+        },
+        llm: { model: "gpt-4o", snippetBlockChars: 600, userContentChars: 700, systemChars: 200, answerChars: 40 },
+      },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("dispatchedIntentSchema + toolFailureSchema validate their wire shapes", () => {
+    expect(
+      dispatchedIntentSchema.safeParse({ name: "show_source", arguments: {}, intent: {} }).success,
+    ).toBe(true);
+    expect(toolFailureSchema.safeParse({ name: "x", reason: "y" }).success).toBe(true);
+  });
+
+  it("chatReplyDebugSchema accepts a debug payload whose scope is a real ContentScope variant", () => {
+    expect(
+      chatReplyDebugSchema.safeParse({
+        mode: "hybrid",
+        scope: { type: "documents", documentIds: ["d1", "d2"] },
+        groundx: null,
+        llm: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("createChatSessionResultSchema + chatScopeHintSchema validate their wire shapes", () => {
+    expect(
+      createChatSessionResultSchema.safeParse({
+        chatSessionId: "chat-1",
+        ownerUserId: null,
+        ownerAnonId: "anon-abc",
+      }).success,
+    ).toBe(true);
+    expect(
+      chatScopeHintSchema.safeParse({ fileName: "april.pdf", scenarioTitle: "Utility" }).success,
+    ).toBe(true);
   });
 });
 
@@ -306,7 +416,13 @@ describe("sendChatMessage", () => {
     it("captures exception on 5xx with route + chatSessionId + status extras", async () => {
       const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
       (global.fetch as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) }) // ensure-create
+        // ensure-create — complete result so its parse-boundary validate stays
+        // silent and this asserts ONLY the message-send error capture.
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ chatSessionId: "chat-1", ownerUserId: null, ownerAnonId: "anon-a" }),
+        })
         .mockResolvedValueOnce({
           ok: false,
           status: 502,
@@ -328,7 +444,11 @@ describe("sendChatMessage", () => {
     it("still captures on 404 (after invalidating the cache)", async () => {
       const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
       (global.fetch as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ chatSessionId: "chat-2", ownerUserId: null, ownerAnonId: "anon-b" }),
+        })
         .mockResolvedValueOnce({
           ok: false,
           status: 404,
@@ -406,15 +526,32 @@ describe("sendChatMessage", () => {
 
     it("does NOT capture on a successful send", async () => {
       const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
+      // chat-wire-types-shared — the create-result + reply envelopes are now
+      // runtime-validated against the shared schemas; a malformed payload
+      // routes to Sentry. Use COMPLETE wire shapes here so the "no capture on
+      // success" guard tests the success path, not a fixture-shape drift.
       (global.fetch as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ chatSessionId: "chat-3", ownerUserId: null, ownerAnonId: "anon-z" }),
+        })
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
           json: async () => ({
             userMessageId: "u1",
             assistantMessageId: "a1",
-            reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [] },
+            reply: {
+              mode: "rag",
+              answer: "ok",
+              citations: [],
+              suggestedActions: [],
+              tools: [],
+              intents: [],
+              toolFailures: [],
+              proposedSchemaField: null,
+            },
             compressionRan: false,
           }),
         });

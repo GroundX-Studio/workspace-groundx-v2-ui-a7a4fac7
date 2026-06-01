@@ -4,7 +4,7 @@ import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
 // module (type-only → erased → cycle-free with the orchestrator's runtime
 // dependency on ChatStore). Re-exported below for back-compat consumers.
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
-import type { Citation, ContentScope, NormalizedBbox, TemplateFieldType } from "@groundx/shared";
+import type { Citation, ContentScope, NormalizedBbox, SchemaFieldExtractionResult, Source, TemplateFieldType } from "@groundx/shared";
 
 /**
  * Chat session foundation — see /memory/project_chat_session_model.md.
@@ -81,7 +81,8 @@ export interface ViewerEvent {
     | "scan-completed"
     | "intent-dispatched"
     | "left";
-  source: "user" | "agent" | "tour" | "system";
+  // 2026-05-31-chat-wire-types-shared — single-sourced off the shared `Source`.
+  source: Source;
   /**
    * Event-specific payload. For `intent-dispatched` events this is the
    * structured `CanvasIntent` itself (see `CanvasOrchestratorContext.dispatch`);
@@ -125,19 +126,12 @@ export type { CanvasIntent };
  * can show an "Extracting…" badge instead of a "—" placeholder.
  * Failures land at "error"; happy path lands at "done" with a value.
  */
-export interface SchemaFieldExtractionResult {
-  status: "pending" | "done" | "error";
-  value: string | number | boolean | null;
-  confidence?: number;
-  /**
-   * `expand-inline-editor-fields` — the previous extraction's
-   * confidence when this result is a re-run. Drives the preview
-   * chip's `conf <new> ↑ <old>` rendering. Absent on the first
-   * extraction (no prior run to compare against).
-   */
-  previousConfidence?: number;
-  citation?: { documentId: string; page: number; snippet?: string } | null;
-}
+// 2026-05-31-chat-wire-types-shared — `SchemaFieldExtractionResult` is now a
+// re-export of the ONE `@groundx/shared` schema so a future middleware producer
+// shares the source. The `Eq<>` guard lives in
+// `SchemaFieldExtractionResult.contract.test.ts`. `ChatStoreContext.tsx` +
+// `SchemaView.tsx` consume the re-export unchanged.
+export type { SchemaFieldExtractionResult };
 
 export interface SchemaFieldAddition {
   categoryId: string;

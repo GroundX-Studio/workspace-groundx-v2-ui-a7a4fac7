@@ -1,5 +1,5 @@
 import type { ContentScope, Scenario } from "@/types/onboarding";
-import type { NormalizedBbox, TemplateFieldType } from "@groundx/shared";
+import type { IntentSource as SharedIntentSource, NormalizedBbox, TemplateFieldType } from "@groundx/shared";
 
 /**
  * CanvasIntent — discriminated union of every command the canvas can receive.
@@ -185,7 +185,11 @@ export type CanvasIntent =
    */
   | { kind: "closeDialog" };
 
-export type IntentSource = "user" | "agent" | "tour";
+// 2026-05-31-chat-wire-types-shared — `IntentSource` is the shared `Source`
+// vocabulary MINUS `"system"` (`Exclude<Source,"system">`), single-sourced via
+// the shared `IntentSource` alias rather than re-declared. The
+// `Source.contract.test.ts` `Eq<>` guard pins this to the shared union.
+export type IntentSource = SharedIntentSource;
 
 export interface StampedIntent {
   intentId: number;

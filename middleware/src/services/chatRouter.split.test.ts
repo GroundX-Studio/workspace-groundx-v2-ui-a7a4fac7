@@ -18,11 +18,40 @@
  */
 import { describe, expect, it } from "vitest";
 
+import type {
+  ChatReply as SharedChatReply,
+  ChatReplyDebug as SharedChatReplyDebug,
+  DispatchedIntent as SharedDispatchedIntent,
+  ToolFailure as SharedToolFailure,
+} from "@groundx/shared";
+
 import * as chatRouter from "./chatRouter.js";
 import * as types from "./chatRouterTypes.js";
+import type {
+  ChatRouterDebug,
+  ChatRouterResponse,
+  DispatchedIntent,
+  ToolFailure,
+} from "./chatRouterTypes.js";
 import * as classifier from "./chatClassifier.js";
 import * as search from "./groundxSearch.js";
 import * as ragPipeline from "./ragPipeline.js";
+
+/**
+ * 2026-05-31-chat-wire-types-shared — the middleware-side `Eq<Local, Shared>`
+ * drift guards for the chat wire envelope. The middleware `ChatRouterResponse`
+ * / `ChatRouterDebug` / `DispatchedIntent` / `ToolFailure` are now re-exports
+ * of the ONE `@groundx/shared` source; these asserts are load-bearing under
+ * middleware `tsc` (`npm run build` / `tsc --noEmit`): if the middleware
+ * re-forks any of these shapes, `Eq<…>` evaluates `false` and `Assert<false>`
+ * fails the type-check. Mirrors the app-side guards in `chatSessions.test.ts`.
+ */
+type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+type _assertChatRouterResponse = Assert<Eq<ChatRouterResponse, SharedChatReply>>;
+type _assertChatRouterDebug = Assert<Eq<ChatRouterDebug, SharedChatReplyDebug>>;
+type _assertDispatchedIntent = Assert<Eq<DispatchedIntent, SharedDispatchedIntent>>;
+type _assertToolFailure = Assert<Eq<ToolFailure, SharedToolFailure>>;
 
 describe("chatRouter.ts split — module seams", () => {
   it("extracts the wire types + shared constants + envelope schema + error into chatRouterTypes.ts", () => {

@@ -220,6 +220,58 @@ export function isWidgetReadOnly(role: WidgetRole): boolean {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Source — 2026-05-31-chat-wire-types-shared. The four-value source enum
+// `["user","agent","tour","system"]` was duplicated 7× across the boundary:
+// the middleware `viewerEventSourceSchema` + `intentLogSourceSchema` (+ their
+// `*_FALLBACK` consts) + two `app.ts` allow-sets, and the app
+// `ChatStoreContext` ViewerEvent source / `intentLog` / `viewerEvents`. It is
+// single-sourced here. The canvas-orchestrator `IntentSource`
+// (`"user"|"agent"|"tour"`) is the same vocabulary MINUS `"system"` (an intent
+// is always attributable to a user action, an agent tool call, or the tour
+// state machine — never the implicit system), so it is DERIVED as
+// `Exclude<Source,"system">` rather than re-declared.
+// ──────────────────────────────────────────────────────────────────────
+
+/** The origin of a viewer event / intent-log entry / dispatched intent. */
+export const sourceSchema = z.enum(["user", "agent", "tour", "system"]);
+export type Source = z.infer<typeof sourceSchema>;
+
+/**
+ * The canvas-orchestrator intent sources — `Source` minus the implicit
+ * `"system"`. An intent is always attributable to a concrete actor (a user UI
+ * event, an agent tool call, or the tour state machine). Derived from
+ * `sourceSchema` so the vocabulary cannot drift between the event-source and
+ * intent-source halves.
+ */
+export const intentSourceSchema = sourceSchema.exclude(["system"]);
+export type IntentSource = Exclude<Source, "system">;
+
+// ──────────────────────────────────────────────────────────────────────
+// AppUserMetadata — 2026-05-31-chat-wire-types-shared. The app-owned session
+// metadata persisted by the middleware (`app_user_metadata`) and surfaced to
+// the app on `/api/auth/me` (`appMetadata`) + `PATCH /api/me/metadata`. It was
+// declared TWICE: the middleware persisted-record shape (7 fields,
+// `groundxUsername` required) and the app's documented SUBSET
+// (`groundxUsername?` / `onboardingState?`). Single-sourced here with every
+// session-metadata field OPTIONAL except `groundxUsername`, so the middleware
+// sees the full set and the app narrows to the two fields it reads — from ONE
+// source. `acceptedTermsAt` accepts a `Date` (middleware record) OR an ISO
+// string (the JSON wire form `res.json` serializes it to) so both halves of the
+// boundary satisfy the one type without a runtime change.
+// ──────────────────────────────────────────────────────────────────────
+
+export const appUserMetadataSchema = z.object({
+  groundxUsername: z.string(),
+  onboardingState: z.string().nullish(),
+  uiPreferencesJson: z.string().nullish(),
+  featureFlagsJson: z.string().nullish(),
+  lastActiveProjectId: z.string().nullish(),
+  acceptedTermsAt: z.union([z.date(), z.string()]).nullish(),
+  appRole: z.string().nullish(),
+});
+export type AppUserMetadata = z.infer<typeof appUserMetadataSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
 // WidgetScope — every widget declares a required scope. The four
 // ScopedViewerWidgets (PdfViewer/Extract/SmartReport/Integrate) take a real
 // `ContentScope`; every other widget takes `{ type: "none" }`. The `none`
@@ -461,6 +513,25 @@ export const extractFieldResultSchema = z.object({
 export type ExtractFieldResult = z.infer<typeof extractFieldResultSchema>;
 
 // ──────────────────────────────────────────────────────────────────────
+// SchemaFieldExtractionResult — 2026-05-31-chat-wire-types-shared. UI-01
+// Phase 2c: the per-field extraction result the chat propose-card fires for
+// after `addSchemaField` lands a field addition. Declared only on the app
+// (`ChatStoreContext/types.ts`) and consumed by `ChatStoreContext.tsx` +
+// `SchemaView.tsx`. Single-sourced here so a future middleware producer of the
+// same shape shares ONE source. The `citation` reuses `extractFieldCitationSchema`
+// (the same `{documentId, page, snippet?}` best-match shape).
+// ──────────────────────────────────────────────────────────────────────
+export const schemaFieldExtractionResultSchema = z.object({
+  status: z.enum(["pending", "done", "error"]),
+  value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  confidence: z.number().optional(),
+  /** The previous extraction's confidence when this result is a re-run. */
+  previousConfidence: z.number().optional(),
+  citation: extractFieldCitationSchema.nullish(),
+});
+export type SchemaFieldExtractionResult = z.infer<typeof schemaFieldExtractionResultSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
 // SuggestedAction — 2026-05-31-core-data-followups §4 #13. The clickable chip
 // the grounded LLM proposes (e.g. "Show source", "Open samples"). It was
 // declared byte-identically in THREE places: the `SuggestedActionChips` widget,
@@ -507,6 +578,117 @@ export const proposedSchemaFieldSchema = z.object({
   provenance: proposalEnvelopeProvenanceSchema.optional(),
 });
 export type ProposedSchemaField = z.infer<typeof proposedSchemaFieldSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
+// Chat wire envelope — 2026-05-31-chat-wire-types-shared. The `/api/chat/*`
+// request/response contract was declared TWICE: the app `api/chatSessions.ts`
+// (`ChatReply` / `ChatReplyDebug` / `ChatDispatchedIntent` / `ChatToolFailure`
+// / `CreateChatSessionResult` / `scopeHint`) and the middleware
+// `services/chatRouterTypes.ts` (`ChatRouterResponse` / `ChatRouterDebug` /
+// `DispatchedIntent` / `ToolFailure`). They were hand-mirrored byte-twins that
+// nothing forced to agree. Single-sourced here as Zod schemas (z.infer types);
+// both sides re-export under a compile-time `Eq<Local, Shared>` guard
+// (load-bearing under `npm run build`) plus a runtime `validate` at each parse
+// boundary. Reuses the already-shared `Citation` / `SuggestedAction` /
+// `ProposedSchemaField` / `ContentScope`.
+// ──────────────────────────────────────────────────────────────────────
+
+/** The three chat router modes (deterministic classifier output). */
+export const chatModeSchema = z.enum(["rag", "structured", "hybrid"]);
+export type ChatMode = z.infer<typeof chatModeSchema>;
+
+/**
+ * widget-llm-integration Phase 5 — one successful LLM tool call round-trip
+ * from the middleware. The frontend dispatches each `intent` through the
+ * canvas orchestrator on receipt.
+ */
+export const dispatchedIntentSchema = z.object({
+  name: z.string(),
+  arguments: z.record(z.unknown()),
+  intent: z.record(z.unknown()),
+});
+export type DispatchedIntent = z.infer<typeof dispatchedIntentSchema>;
+
+/** widget-llm-integration Phase 5 — one failed LLM tool call. */
+export const toolFailureSchema = z.object({
+  name: z.string(),
+  reason: z.string(),
+});
+export type ToolFailure = z.infer<typeof toolFailureSchema>;
+
+/**
+ * Dev-only diagnostic payload attached to chat replies in non-prod
+ * environments. Present on `ChatReply` when `NODE_ENV !== "production"`. Lets
+ * the browser DevTools console show exactly what the chat router asked
+ * GroundX and what came back. `scope` is the shared `ContentScope` (NOT a
+ * re-declared `{type,bucketId,groupId,documentIds,filter}` literal — that LOW
+ * debug-scope twin is closed here).
+ */
+export const chatReplyDebugSchema = z.object({
+  mode: chatModeSchema,
+  scope: contentScopeSchema,
+  groundx: z
+    .object({
+      path: z.string(),
+      query: z.string(),
+      n: z.number(),
+      filter: z.unknown(),
+      resultCount: z.number(),
+      topSnippets: z.array(
+        z.object({
+          documentId: z.string(),
+          fileName: z.string().optional(),
+          score: z.number().optional(),
+          text: z.string().optional(),
+        }),
+      ),
+    })
+    .nullable(),
+  llm: z
+    .object({
+      model: z.string(),
+      snippetBlockChars: z.number(),
+      userContentChars: z.number(),
+      systemChars: z.number(),
+      answerChars: z.number(),
+    })
+    .nullable(),
+});
+export type ChatReplyDebug = z.infer<typeof chatReplyDebugSchema>;
+
+/** The `/api/chat/messages` reply envelope — one shape, both sides of the wire. */
+export const chatReplySchema = z.object({
+  mode: chatModeSchema,
+  answer: z.string(),
+  citations: z.array(citationSchema),
+  suggestedActions: z.array(suggestedActionSchema),
+  tools: z.array(z.object({ name: z.string(), arguments: z.record(z.unknown()) })),
+  intents: z.array(dispatchedIntentSchema),
+  toolFailures: z.array(toolFailureSchema),
+  proposedSchemaField: proposedSchemaFieldSchema.nullable(),
+  _debug: chatReplyDebugSchema.optional(),
+});
+export type ChatReply = z.infer<typeof chatReplySchema>;
+
+/** The `POST /api/chat-sessions` result — one shape, both sides of the wire. */
+export const createChatSessionResultSchema = z.object({
+  chatSessionId: z.string(),
+  ownerUserId: z.string().nullable(),
+  ownerAnonId: z.string().nullable(),
+});
+export type CreateChatSessionResult = z.infer<typeof createChatSessionResultSchema>;
+
+/**
+ * Optional friendly hint about what the user is currently looking at, threaded
+ * into the grounded LLM prompt (app `SendChatMessageInput.scopeHint` ↔
+ * middleware `ChatRouterRequest.scopeHint`). Both fields nullable+optional —
+ * the frontend has the scenario manifest in hand; the server does not.
+ */
+export const chatScopeHintSchema = z.object({
+  fileName: z.string().nullish(),
+  scenarioTitle: z.string().nullish(),
+});
+export type ChatScopeHint = z.infer<typeof chatScopeHintSchema>;
 
 // ──────────────────────────────────────────────────────────────────────
 // ViewerStepKind — the discriminant of the app's `ViewerStep` union. Lives

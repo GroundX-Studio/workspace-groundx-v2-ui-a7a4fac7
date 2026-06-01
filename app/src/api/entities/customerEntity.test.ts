@@ -1,6 +1,8 @@
 import rawAxios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { appUserMetadataSchema, type AppUserMetadata as SharedAppUserMetadata } from "@groundx/shared";
+
 import axios from "@/api/axios";
 import {
   confirmUserChangingPassword,
@@ -10,7 +12,22 @@ import {
   register,
   resetUserPassword,
   updateAppMetadata,
+  type AppUserMetadata,
 } from "@/api/entities/customerEntity";
+
+/**
+ * 2026-05-31-chat-wire-types-shared — `AppUserMetadata` was declared on BOTH
+ * sides of the wire: the middleware persisted-record shape (7 fields) and the
+ * app's documented SUBSET (`groundxUsername?` / `onboardingState?`). It is now
+ * single-sourced on `@groundx/shared` with every session-metadata field OPTIONAL
+ * except `groundxUsername`, so each side narrows from one source. This `Eq<>`
+ * assert is load-bearing under `npm run build` (tsc): if the app re-forks the
+ * shape, `Assert<false>` fails the build.
+ */
+type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _assertAppUserMetadata = Assert<Eq<AppUserMetadata, SharedAppUserMetadata>>;
 
 vi.mock("@/api/axios", () => ({
   default: {
@@ -130,6 +147,25 @@ describe("customerEntity", () => {
     await expect(logout()).resolves.toEqual({ success: true });
 
     expect(mockedAxiosPost).toHaveBeenCalledWith("/api/auth/logout");
+  });
+
+  it("validates the app-metadata response against the shared appUserMetadataSchema", () => {
+    // The app narrows to `groundxUsername` + `onboardingState`, but the shared
+    // schema also accepts the middleware's superset fields (all optional).
+    expect(appUserMetadataSchema.safeParse({ groundxUsername: "acct-1", onboardingState: "complete" }).success).toBe(true);
+    expect(
+      appUserMetadataSchema.safeParse({
+        groundxUsername: "acct-1",
+        onboardingState: null,
+        uiPreferencesJson: "{}",
+        featureFlagsJson: null,
+        lastActiveProjectId: "proj-1",
+        acceptedTermsAt: new Date().toISOString(),
+        appRole: "owner",
+      }).success,
+    ).toBe(true);
+    // `groundxUsername` is the one required field.
+    expect(appUserMetadataSchema.safeParse({ onboardingState: "complete" }).success).toBe(false);
   });
 
   it("updates app-owned metadata through the same-origin middleware session", async () => {

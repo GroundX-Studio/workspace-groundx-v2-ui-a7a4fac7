@@ -21,7 +21,21 @@ import type { NormalizedBbox, WordMap } from "./citationGeometry.js";
 // middleware imports (`Citation` from "./chatRouter.js") keep resolving. The
 // shared shape is identical: documentId, page, snippet?, bbox? (NormalizedBbox),
 // tier? (CitationTier), confidence?, answerSpan?.
-import { ApiError, type Citation, type ContentScope, type ProposalEnvelopeProvenance, type ProposedSchemaField, type ScopeFilter, type SuggestedAction, type WidgetRole } from "@groundx/shared";
+import {
+  ApiError,
+  type ChatMode as SharedChatMode,
+  type ChatReply as SharedChatReply,
+  type ChatReplyDebug as SharedChatReplyDebug,
+  type ChatScopeHint,
+  type Citation,
+  type ContentScope,
+  type DispatchedIntent as SharedDispatchedIntent,
+  type ProposalEnvelopeProvenance,
+  type ProposedSchemaField,
+  type SuggestedAction,
+  type ToolFailure as SharedToolFailure,
+  type WidgetRole,
+} from "@groundx/shared";
 
 export type { Citation };
 // 2026-05-31-core-data-followups §4 #13 — the middleware `SuggestedAction` was a
@@ -50,7 +64,11 @@ export const proposalEnvelopeV1Schema = z
   })
   .strict();
 
-export type ChatMode = "rag" | "structured" | "hybrid";
+// 2026-05-31-chat-wire-types-shared — the chat mode + reply envelope wire
+// shapes are single-sourced on `@groundx/shared`; re-export so local importers
+// (`chatRouter`, `ragPipeline`, `chatHandler`) keep their names unchanged. The
+// `Eq<Local, Shared>` guards live in `chatRouter.split.test.ts`.
+export type ChatMode = SharedChatMode;
 
 export interface ChatRouterRequest {
   newUserMessage: string;
@@ -71,10 +89,7 @@ export interface ChatRouterRequest {
    * the model only sees "no snippets" and can't suggest alternative
    * questions tied to the active doc.
    */
-  scopeHint?: {
-    fileName?: string | null;
-    scenarioTitle?: string | null;
-  };
+  scopeHint?: ChatScopeHint;
   /**
    * RT-04 — the persisted canvas-orchestrator intent for THIS chat
    * session (from `chat_sessions.current_intent_json`). Updated via
@@ -126,101 +141,19 @@ export interface ChatRouterRequest {
 // a present provenance, so the unified-optional shape is runtime-identical here.
 export type { ProposalEnvelopeProvenance, ProposedSchemaField };
 
-/**
- * Dev-only diagnostic payload attached to chat replies in non-prod
- * environments. Surfaces what the chat router actually asked GroundX
- * and what came back, so the user can see (in browser DevTools) why
- * the LLM said "no snippets" — without context-switching to the
- * middleware terminal. NEVER set in production.
- */
-export interface ChatRouterDebug {
-  mode: ChatMode;
-  scope: { type: "bucket" | "group" | "documents"; bucketId?: number; groupId?: number; documentIds?: string[]; filter?: ScopeFilter };
-  groundx: {
-    /** Full URL path of the GroundX search call (e.g. /v1/search/...) */
-    path: string;
-    /** The raw query string that was sent — what the model would search for. */
-    query: string;
-    /** Top-N requested. */
-    n: number;
-    /** Filter object passed to GroundX (RBAC + scope). */
-    filter: unknown;
-    /** Number of snippets returned. */
-    resultCount: number;
-    /** Top-3 snippets (truncated) so the user can verify what came back. */
-    topSnippets: Array<{ documentId: string; fileName?: string; score?: number; text?: string }>;
-  } | null;
-  llm: {
-    model: string;
-    /** Snippet block char count actually passed to the model. */
-    snippetBlockChars: number;
-    /** Total user-content chars (snippet block + question + scope hint). */
-    userContentChars: number;
-    /** System prompt char count. */
-    systemChars: number;
-    /** Final answer char count. */
-    answerChars: number;
-  } | null;
-}
-
-/**
- * widget-llm-integration Phase 5 — one successful tool call. The
- * frontend looks up the tool by name in the app-side `toolRegistry`,
- * runs the handler with `arguments`, and dispatches the resulting
- * intent via the canvas orchestrator. We also carry the
- * already-constructed `intent` payload (built by the server tool's
- * `intentBuilder`) so the app can dispatch directly without a second
- * handler invocation when it trusts the server.
- */
-export interface DispatchedIntent {
-  name: string;
-  arguments: Record<string, unknown>;
-  intent: Record<string, unknown>;
-}
-
-/** widget-llm-integration Phase 5 — one failed tool call. */
-export interface ToolFailure {
-  name: string;
-  reason: string;
-}
-
-export interface ChatRouterResponse {
-  mode: ChatMode;
-  answer: string;
-  citations: Citation[];
-  suggestedActions: SuggestedAction[];
-  /** Tool calls the assistant invoked (Phase 7 wire-up). */
-  tools: { name: string; arguments: Record<string, unknown> }[];
-  /**
-   * widget-llm-integration Phase 5 — validated, dispatchable LLM tool
-   * calls. The frontend orchestrator routes each entry to its
-   * registered intent handler. Empty array when the LLM emitted no
-   * tool calls.
-   */
-  intents: DispatchedIntent[];
-  /**
-   * widget-llm-integration Phase 5 — tool calls that failed
-   * validation (unknown tool name, Zod parse failure, etc.). The
-   * frontend can surface these as a "tried to do X but ..." chip;
-   * v1 does not auto-retry (design.md §M).
-   */
-  toolFailures: ToolFailure[];
-  /**
-   * UI-01 Phase 2a — non-null when the LLM emitted a well-formed
-   * `proposedSchemaField` in its fenced JSON block AND the user's
-   * turn looked like a schema-add request. The frontend renders an
-   * Accept/Reject card inline with the assistant turn; Accept calls
-   * the ChatStore `addSchemaField` action.
-   */
-  proposedSchemaField: ProposedSchemaField | null;
-  /**
-   * Dev-only diagnostic payload. Present when `NODE_ENV !== "production"`.
-   * Lets the browser DevTools console + Network tab show exactly what
-   * the chat router asked GroundX and what came back, so users don't
-   * need terminal access to debug "why did the LLM say no snippets."
-   */
-  _debug?: ChatRouterDebug;
-}
+// 2026-05-31-chat-wire-types-shared — the dev-only debug payload, the
+// per-tool-call `DispatchedIntent` / `ToolFailure`, and the chat response body
+// (`ChatRouterResponse`) were byte-twins of the app `ChatReplyDebug` /
+// `ChatDispatchedIntent` / `ChatToolFailure` / `ChatReply`. They now re-export
+// the ONE `@groundx/shared` source under the `Eq<>` guards in
+// `chatRouter.split.test.ts`; the local names are kept as aliases so every
+// `from "./chatRouter.js"` importer (chatHandler, ragPipeline) is unchanged.
+// `ChatRouterDebug.scope` is now the shared `ContentScope` (LOW debug-scope
+// literal twin closed).
+export type ChatRouterDebug = SharedChatReplyDebug;
+export type DispatchedIntent = SharedDispatchedIntent;
+export type ToolFailure = SharedToolFailure;
+export type ChatRouterResponse = SharedChatReply;
 
 export interface ChatRouterDeps {
   llmClient: LlmClient;

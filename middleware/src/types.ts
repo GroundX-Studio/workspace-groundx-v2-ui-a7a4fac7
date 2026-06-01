@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { TemplateKind } from "@groundx/shared";
+import { sourceSchema, type AppUserMetadata as SharedAppUserMetadata, type Source, type TemplateKind } from "@groundx/shared";
 
 export interface SessionRecord {
   id: string;
@@ -9,15 +9,13 @@ export interface SessionRecord {
   expiresAt: Date;
 }
 
-export interface AppUserMetadata {
-  groundxUsername: string;
-  onboardingState?: string | null;
-  uiPreferencesJson?: string | null;
-  featureFlagsJson?: string | null;
-  lastActiveProjectId?: string | null;
-  acceptedTermsAt?: Date | null;
-  appRole?: string | null;
-}
+// 2026-05-31-chat-wire-types-shared — `AppUserMetadata` was a byte-twin of the
+// app's documented subset. It is now a re-export of the ONE `@groundx/shared`
+// schema (every field optional except `groundxUsername`). The middleware reads
+// the full set; `acceptedTermsAt` accepts `Date | string` so the repository
+// row-mapper's `new Date(...)` stays valid. The `Eq<>` guard lives in
+// `middleware/src/appUserMetadata.contract.test.ts`.
+export type AppUserMetadata = SharedAppUserMetadata;
 
 /**
  * Chat-session records (per project_chat_session_model + project_database).
@@ -154,8 +152,13 @@ export type ViewerEventAction = z.infer<typeof viewerEventActionSchema>;
  * baseline action (no UI side effect inferred from it). */
 export const VIEWER_EVENT_ACTION_FALLBACK: ViewerEventAction = "opened";
 
-export const viewerEventSourceSchema = z.enum(["user", "agent", "tour", "system"]);
-export type ViewerEventSource = z.infer<typeof viewerEventSourceSchema>;
+// 2026-05-31-chat-wire-types-shared — the viewer-event source enum was a
+// byte-twin of the shared `["user","agent","tour","system"]` vocabulary; it now
+// IS the shared `sourceSchema` (one source of truth across the boundary). The
+// local name + the `ViewerEventSource` type alias + the coercion fallback are
+// kept so `mysqlRepository.coerceEnum` callers are unchanged.
+export const viewerEventSourceSchema = sourceSchema;
+export type ViewerEventSource = Source;
 /** Safe default for a corrupt `viewer_events.source` — `system` (the
  * non-attributable origin). */
 export const VIEWER_EVENT_SOURCE_FALLBACK: ViewerEventSource = "system";
@@ -183,8 +186,10 @@ export interface ViewerEventRecord {
  * Both tables share `chat_session_id` so the conversation/viewer/intent
  * axes can be cross-joined when building LLM context.
  */
-export const intentLogSourceSchema = z.enum(["user", "agent", "tour", "system"]);
-export type IntentLogSource = z.infer<typeof intentLogSourceSchema>;
+// 2026-05-31-chat-wire-types-shared — same single-source as
+// `viewerEventSourceSchema`: the intent-log source IS the shared `sourceSchema`.
+export const intentLogSourceSchema = sourceSchema;
+export type IntentLogSource = Source;
 /** Safe default for a corrupt `intent_log.source` — `system`. */
 export const INTENT_LOG_SOURCE_FALLBACK: IntentLogSource = "system";
 

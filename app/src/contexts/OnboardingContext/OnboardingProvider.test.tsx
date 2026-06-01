@@ -34,7 +34,9 @@ const renderProvider = ({
     const [auth, setAuth] = useState<Auth>(loggedInAuth);
     const [user, setUser] = useState<AuthContextI["user"]>({
       ...baseUser,
-      appMetadata: onboardingState === undefined ? null : { onboardingState },
+      // chat-wire-types-shared — `AppUserMetadata.groundxUsername` is now the
+      // one required field (the app narrows the rest). Fixture carries it.
+      appMetadata: onboardingState === undefined ? null : { groundxUsername: "acct-1", onboardingState },
     });
 
     const contextValue: AuthContextI = {
@@ -53,6 +55,10 @@ const renderProvider = ({
               ? {
                 ...currentUser,
                 appMetadata: {
+                    // chat-wire-types-shared — `groundxUsername` is required on
+                    // the shared `AppUserMetadata`; carry the existing one (or
+                    // the user's username) so the merged metadata stays typed.
+                    groundxUsername: currentUser.appMetadata?.groundxUsername ?? currentUser.username,
                     ...(currentUser.appMetadata ?? {}),
                     ...metadata,
                   },

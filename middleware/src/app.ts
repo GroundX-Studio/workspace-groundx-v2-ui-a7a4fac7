@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
-import { contentScopeSchema, parseCitations, templateSaveInputSchema } from "@groundx/shared";
+import { contentScopeSchema, parseCitations, sourceSchema, templateSaveInputSchema, type Source } from "@groundx/shared";
 
 import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
@@ -951,7 +951,9 @@ export function createApp({
         "intent-dispatched",
         "left",
       ]);
-      const allowedSources = new Set<string>(["user", "agent", "tour", "system"]);
+      // 2026-05-31-chat-wire-types-shared — the source allow-set derives from
+      // the single shared `sourceSchema.options`, not a re-typed literal.
+      const allowedSources = new Set<string>(sourceSchema.options);
       if (
         !chatSessionId ||
         timestamp == null ||
@@ -1002,7 +1004,7 @@ export function createApp({
           | "scan-completed"
           | "intent-dispatched"
           | "left",
-        source: source as "user" | "agent" | "tour" | "system",
+        source: source as Source,
         detailJson,
       });
       res.status(201).json({ ok: true });
@@ -1036,7 +1038,7 @@ export function createApp({
         body.intent && typeof body.intent === "object" && !Array.isArray(body.intent)
           ? (body.intent as Record<string, unknown>)
           : null;
-      const allowedSources = new Set(["user", "agent", "tour", "system"]);
+      const allowedSources = new Set<string>(sourceSchema.options);
       if (!chatSessionId || !source || !allowedSources.has(source) || !intent) {
         res.status(400).json({ error: "invalid_payload" });
         return;
@@ -1064,7 +1066,7 @@ export function createApp({
         id: randomUUID(),
         chatSessionId,
         timestamp: Date.now(),
-        source: source as "user" | "agent" | "tour" | "system",
+        source: source as Source,
         intentKind,
         intentJson: JSON.stringify(intent),
       });

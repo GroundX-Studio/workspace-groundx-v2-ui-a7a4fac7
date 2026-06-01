@@ -15,6 +15,8 @@
  * chatHandler's `listViewerEvents` always returned [].
  */
 
+import type { Source } from "@groundx/shared";
+
 import { ensureServerChatSession } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
@@ -31,7 +33,8 @@ export interface RecordViewerEventInput {
     | "scan-completed"
     | "intent-dispatched"
     | "left";
-  source: "user" | "agent" | "tour" | "system";
+  // 2026-05-31-chat-wire-types-shared — single-sourced off the shared `Source`.
+  source: Source;
   detail?: Record<string, unknown>;
 }
 

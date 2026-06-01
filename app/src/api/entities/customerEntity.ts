@@ -1,6 +1,8 @@
+import { appUserMetadataSchema, type AppUserMetadata as SharedAppUserMetadata } from "@groundx/shared";
 import rawAxios from "axios";
 
 import axios from "@/api/axios";
+import { captureException } from "@/lib/sentry";
 import {
   appMetadataUrl,
   customerDataUrl,
@@ -68,10 +70,13 @@ export interface UserDataResponse {
   appMetadata?: AppUserMetadata | null;
 }
 
-export interface AppUserMetadata {
-  groundxUsername?: string;
-  onboardingState?: string | null;
-}
+// 2026-05-31-chat-wire-types-shared — `AppUserMetadata` was the app's
+// documented SUBSET of the middleware's persisted-record shape. It is now a
+// re-export of the ONE `@groundx/shared` schema (every session-metadata field
+// optional except `groundxUsername`); the app keeps reading only
+// `groundxUsername` + `onboardingState`, but from one source. The `Eq<>` guard
+// in `customerEntity.test.ts` pins the shape under the build.
+export type AppUserMetadata = SharedAppUserMetadata;
 
 export interface UpdateAppMetadataInput {
   onboardingState?: string | null;
@@ -116,6 +121,15 @@ export const getUserData = async (accountId: string): Promise<UserDataResponse> 
 
 export const updateAppMetadata = async (data: UpdateAppMetadataInput): Promise<AppUserMetadata> => {
   const response = await axios.patch<{ appMetadata: AppUserMetadata }>(appMetadataUrl, data);
+  // 2026-05-31-chat-wire-types-shared — runtime-validate the app-metadata
+  // response against the shared `appUserMetadataSchema` at this parse boundary.
+  // Drop-safe: a contract drift is reported to Sentry without throwing (the
+  // shape is single-sourced; a parse miss signals server drift to triage, not a
+  // flow to break).
+  const parsed = appUserMetadataSchema.safeParse(response.data.appMetadata);
+  if (!parsed.success) {
+    captureException(parsed.error, { context: "customerEntity.updateAppMetadata", validation: "appUserMetadataSchema" });
+  }
   return response.data.appMetadata;
 };
 
