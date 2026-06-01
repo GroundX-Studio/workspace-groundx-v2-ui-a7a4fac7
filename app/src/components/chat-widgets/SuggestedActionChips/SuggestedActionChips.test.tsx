@@ -15,7 +15,6 @@ import { SuggestedActionChips, type SuggestedAction } from "./SuggestedActionChi
  */
 type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _assertSuggestedAction = Assert<Eq<SuggestedAction, SharedSuggestedAction>>;
 
 describe("SuggestedActionChips shared contract (§4 #13)", () => {

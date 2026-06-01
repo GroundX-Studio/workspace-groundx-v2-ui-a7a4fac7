@@ -150,13 +150,16 @@ export async function searchGroundX(
   const composed = composeFilters(options.rbacFilter ?? null, scopeFilter);
   if (composed) body.filter = composed;
 
-  // Dev-side full request log so the console shows what we're
-  // actually asking GroundX. Query goes through pino's redact paths
-  // (the `query` field is on the redact list), so prod logs see
-  // [REDACTED] for the prompt itself but keep scope info.
+  // Dev-side request log so the console shows what we're actually asking
+  // GroundX — scope/path/filter shape ONLY. The free-form `query` is
+  // DELIBERATELY NOT logged: it is user chat content that can carry PII
+  // (names/SSNs/account numbers), and the module invariant (lib/logger.ts)
+  // is that chat content MUST NOT be logged anywhere — not even
+  // redacted-in-prod, since pino's redact paths don't match this nested
+  // field and any non-prod/debug deploy would emit it in cleartext.
   logger.info(
     {
-      groundxSearch: { path, scope: scope?.type ?? "none", bodyKeys: Object.keys(body), query: body.query, n: body.n, filter: body.filter ?? null },
+      groundxSearch: { path, scope: scope?.type ?? "none", bodyKeys: Object.keys(body), n: body.n, filter: body.filter ?? null },
     },
     "groundx search dispatch",
   );
@@ -189,7 +192,9 @@ export async function searchGroundX(
   // the first pass, so they never pay this second round-trip.
   if (rawResults.length === 0 && Number.isFinite(RAG_FALLBACK_RELEVANCE)) {
     logger.info(
-      { groundxSearchRetry: { path, query: body.query, fallbackRelevance: RAG_FALLBACK_RELEVANCE } },
+      // `query` deliberately omitted — see the dispatch-log comment above
+      // (free-form chat content MUST NOT be logged).
+      { groundxSearchRetry: { path, fallbackRelevance: RAG_FALLBACK_RELEVANCE } },
       "groundx search: 0 results at default relevance — retrying with low floor",
     );
     rawResults = await runSearch(RAG_FALLBACK_RELEVANCE);

@@ -533,6 +533,66 @@ describe("middleware scaffold", () => {
     expect(messages).toHaveLength(0);
   });
 
+  // Finding 1 (creative review, step 2-7l) — the AUTHED arm of
+  // assertChatSessionOwnership (ownerUserId === groundxUsername) was only
+  // UNIT-tested (sessionOwnership.test.ts); at the HTTP layer ONLY the anon
+  // arm was exercised, so inverting the authed arm left app.test.ts fully
+  // green. Drive the authed branch end-to-end: an AUTHENTICATED user
+  // (logged in as gx-user) is 403'd POSTing to a chat_session owned by a
+  // DIFFERENT customer id. (Defense-in-depth — the production code is
+  // already correct.)
+  it("POST /api/chat/messages returns 403 when an authed user doesn't own the session (authed arm)", async () => {
+    const { app, repository } = setup();
+    // Plant a chat_session owned by a DIFFERENT gx customer (authed owner).
+    const now = new Date();
+    await repository.upsertChatSession({
+      id: "chat-other-customer",
+      onboardingSessionId: "chat-other-customer",
+      ownerUserId: "gx-other-customer",
+      ownerAnonId: null,
+      title: "Another customer's thread",
+      isOnboarding: false,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+    // Authenticate — the agent's session becomes authed as gx-user.
+    const agent = request.agent(app);
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+    await agent
+      .post("/api/chat/messages")
+      .send({ chatSessionId: "chat-other-customer", newUserMessage: "leak the other customer's thread" })
+      .expect(403, { error: "not_session_owner" });
+    // The guard runs BEFORE handleChatMessage — the foreign thread is untouched.
+    const messages = await repository.listChatMessages("chat-other-customer");
+    expect(messages).toHaveLength(0);
+  });
+
+  it("GET /api/chat-sessions/:id/messages returns 403 when an authed user doesn't own the session (authed arm)", async () => {
+    const { app, repository } = setup();
+    const now = new Date();
+    await repository.upsertChatSession({
+      id: "cs-other-customer",
+      onboardingSessionId: "cs-other-customer",
+      ownerUserId: "gx-other-customer",
+      ownerAnonId: null,
+      title: "Another customer's",
+      isOnboarding: false,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+    const agent = request.agent(app);
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+    await agent
+      .get("/api/chat-sessions/cs-other-customer/messages")
+      .expect(403, { error: "not_session_owner" });
+  });
+
   // Finding 2 (§4 #19 follow-up) — the messages-hydrate GET 403 path (its
   // error code was reconciled chat_session_forbidden→not_session_owner in
   // #19) had NO route-level 403 test. Lock the reconciled contract.

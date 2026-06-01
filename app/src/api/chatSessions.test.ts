@@ -39,9 +39,7 @@ import {
  */
 type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _assertProposedField = Assert<Eq<ProposedSchemaField, SharedProposedSchemaField>>;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _assertProvenance = Assert<Eq<ProposalEnvelopeProvenance, SharedProvenance>>;
 
 describe("proposal-envelope wire twins (§4 #18)", () => {

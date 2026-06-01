@@ -367,6 +367,42 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   messages-hydrate GET to state the actual auth-state-keyed semantics (claim re-keys the row; no
   either-match). Middleware suite 682 green; app `npm run build` (tsc+vite) clean; `openspec validate
   --strict` clean. — DONE (step 2-7k).
+  **CORRECTION (step 2-7l — a fresh CREATIVE adversarial review closed 1 MAJOR PII leak + 3 hygiene/coverage
+  nits):** **Finding 2 (MAJOR — PII leak, fixed):** `middleware/src/services/groundxSearch.ts` logged the
+  user's free-form RAG/chat query in CLEARTEXT at `logger.info` — both the search-dispatch payload
+  (`{ groundxSearch: { …, query: body.query } }`) and the zero-result retry payload
+  (`{ groundxSearchRetry: { …, query: body.query } }`). A comment FALSELY claimed the query was on pino's
+  redact list and showed `[REDACTED]` in prod, but the redact paths (`lib/logger.ts`: `req.body.query` +
+  `*.apiKey|password|token|email`) do NOT match the nested `groundxSearch.query`/`groundxSearchRetry.query`,
+  so the raw query (which can carry PII/SSNs) was emitted at the prod default `LOG_LEVEL=info` — violating
+  the module invariant "Free-form fields (chat content, document text) MUST NOT be logged anywhere." FIX:
+  REMOVED the `query` field entirely from BOTH payloads (kept the non-sensitive telemetry —
+  path/scope/bodyKeys/n/filter/fallbackRelevance) and CORRECTED the false comment to state the query is
+  deliberately NOT logged. `logger.ts` was NOT touched (payload-removal is the correct fix, not a redact
+  path — even redacted-in-prod still leaks in non-prod/debug deploys). Provenance: the leak was carried
+  VERBATIM from the pre-split `chatRouter.ts` (the §1 split moved it unchanged) — pre-existing, not
+  introduced here — but it sat under a false security comment in a reviewed file, so fixed now. Regression
+  guard (failing-first): new `middleware/src/services/groundxSearch.logging.test.ts` spies on `logger.info`
+  and asserts NO emitted payload contains the free-form query (a PII-shaped fixture) for BOTH the dispatch
+  and the retry paths — RED before the removal (query present in both), GREEN after; locks the invariant so
+  it cannot regress. **Finding 1 (NIT — authed-arm route coverage):** `assertChatSessionOwnership`'s AUTHED
+  arm (`ownerUserId === groundxUsername`) was only UNIT-tested — at the HTTP layer only the ANON arm was
+  exercised (inverting the authed arm left `app.test.ts` fully green). Added TWO route-level 403 tests in
+  `app.test.ts`: an authenticated user (logged in as gx-user) is 403'd `not_session_owner` POSTing to
+  `/api/chat/messages` AND GET-ting `/api/chat-sessions/:id/messages` on a session owned by a DIFFERENT
+  customer id (`ownerUserId: "gx-other-customer"`). Verified the tests genuinely drive the authed branch
+  (inverting the authed arm to `!==` reddens both new tests, then reverted). Defense-in-depth only — the
+  production code was already correct. **Finding 3 (NIT — dead imports):** the `createContextHook` refactor
+  (§3) left 8 unused `*ContextI` type imports; dropped them from
+  `app/src/contexts/{ApiKeys,Buckets,Documents,Groups,Health,Projects,Search,Workflows}Context/index.tsx`.
+  **Finding 4 (NIT — redundant eslint-disables):** removed 5 `// eslint-disable-next-line
+  @typescript-eslint/no-unused-vars` directives (added in step 2-7g) that suppressed NOTHING — the
+  `_`-prefixed naming already satisfies the rule, so they fired as "Unused eslint-disable directive"
+  warnings — at `app/src/api/chatSessions.test.ts` (×2), `app/src/api/extractField.test.ts` (×2),
+  `app/src/components/chat-widgets/SuggestedActionChips/SuggestedActionChips.test.tsx` (×1). Gates:
+  middleware suite 686 green (+2 logging +2 authed-arm), app suite 1464 green, app `npm run build`
+  (tsc+vite) clean, middleware tsc clean, ESLint clean on all touched files (the 5 unused-disable warnings
+  GONE, no new warnings), `openspec validate --strict` clean. — DONE (step 2-7l).
 
 ### 4e. Round-trip / dead-plumbing closeout (→ SEQUENTIAL/TDD)
 - [ ] **#17 §9 closeout.** Each persist chain gets a reader+writer or is DROPPED (the `attachments_json`
