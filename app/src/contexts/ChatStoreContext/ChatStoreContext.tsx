@@ -8,6 +8,13 @@ import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } fr
 import type { FFrame } from "@/types/onboarding";
 import { compileScopeFilter, parseCanvasIntent, type ContentScope, type NormalizedBbox } from "@groundx/shared";
 
+import {
+  parseChatStoreSnapshot,
+  STORAGE_VERSION,
+  type SerializedEntitySession,
+  type SerializedSession,
+  type SerializedSnapshot,
+} from "./parseChatStoreSnapshot";
 import { resolvePinTarget, type PinResolution, type PinTargetTemplate } from "./resolvePinTarget";
 import {
   EMPTY_PENDING_REPORT_OVERLAY,
@@ -79,7 +86,8 @@ const ChatStoreStateContext = createContext<ChatStoreState | null>(null);
 const ChatStoreActionsContext = createContext<ChatStoreActions | null>(null);
 
 const STORAGE_KEY = "groundx-onboarding.chat-store.v1";
-const STORAGE_VERSION = 1;
+// STORAGE_VERSION + the Serialized* shapes are single-sourced in
+// `parseChatStoreSnapshot.ts` (the localStorage trust-boundary validator).
 /**
  * Maximum messages persisted per session. In-memory messages are not
  * yet trimmed (compression will drop older ones into summaries before
@@ -141,40 +149,11 @@ function cryptoRandom(): string {
 // Persistence
 // ============================================================================
 
-interface SerializedEntitySession {
-  kind: EntityKind;
-  id: string;
-  lastFrame: FFrame;
-  completedFrames: FFrame[];
-  createdAt: number;
-  lastVisitedAt: number;
-}
-
-interface SerializedSession {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  messages: ChatMessage[];
-  entities: Array<[EntityKey, SerializedEntitySession]>;
-  activeEntityKey: EntityKey | null;
-  isOnboardingSession: boolean;
-  signupOpen: boolean;
-  /** 2026-05-31-onboarding-experiences — per-scope session key (optional). */
-  scopeKey?: string;
-  // gate, summaries, viewerHistory, currentIntent left out of v1
-  // serialization; they're either ephemeral (currentIntent, signupOpen,
-  // viewerHistory cached from intent_log) or not yet populated
-  // (summaries arrive in Phase I). They'll be added to vNext as those
-  // features land.
-}
-
-interface SerializedSnapshot {
-  version: number;
-  ownerKey: string;
-  activeSessionId: string | null;
-  sessions: SerializedSession[];
-}
+// `SerializedSnapshot` / `SerializedSession` / `SerializedEntitySession` are
+// single-sourced (Zod `z.infer<>`) in `parseChatStoreSnapshot.ts` — imported
+// above. `serialize` writes the shape the validator reads back. The v1
+// serialization deliberately omits gate / summaries / viewerHistory /
+// currentIntent (ephemeral or not-yet-populated); they join vNext as they land.
 
 function serialize(state: ChatStoreState): string {
   const sessions: SerializedSession[] = [];
@@ -255,8 +234,18 @@ function highestFrame(frames: ReadonlySet<FFrame>, fallback: FFrame): FFrame {
 
 function deserialize(raw: string): ChatStoreState | null {
   try {
-    const parsed = JSON.parse(raw) as SerializedSnapshot;
-    if (parsed.version !== STORAGE_VERSION) return null;
+    // localStorage is untrusted input — parse + validate at the boundary, never
+    // cast. A corrupt / wrong-version / structurally wrong blob (even one that
+    // JSON-parses) returns `null`, so rehydrate falls back to legacy migration
+    // / a fresh store exactly as the old throw-path did.
+    let json: unknown;
+    try {
+      json = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    const parsed = parseChatStoreSnapshot(json);
+    if (!parsed) return null;
     const sessions = new Map<string, ChatSession>();
     for (const s of parsed.sessions) {
       const entities = new Map<EntityKey, EntitySession>();
@@ -1688,11 +1677,15 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         const existing = current.pendingSchemaOverlay.addedFields[idx];
         // Reference-equality short-circuit so a repeat of the same
         // result (network retry, double-click) doesn't churn re-renders.
+        // `value`/`confidence` live ONLY on the "done" arm, so the value
+        // comparison is meaningful only when both sides are "done".
         const same =
           existing.extraction &&
           existing.extraction.status === result.status &&
-          existing.extraction.value === result.value &&
-          existing.extraction.confidence === result.confidence;
+          (result.status === "done" && existing.extraction.status === "done"
+            ? existing.extraction.value === result.value &&
+              existing.extraction.confidence === result.confidence
+            : true);
         if (same) return prev;
         const nextAdditions = current.pendingSchemaOverlay.addedFields.slice();
         // `expand-inline-editor-fields` — when transitioning to "done"

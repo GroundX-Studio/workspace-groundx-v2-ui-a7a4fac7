@@ -38,13 +38,15 @@ describe("SchemaFieldExtractionResult — single source (@groundx/shared)", () =
     ).toBe(true);
   });
 
-  it("accepts the minimal pending shape (value null, no citation)", () => {
-    expect(
-      schemaFieldExtractionResultSchema.safeParse({ status: "pending", value: null }).success,
-    ).toBe(true);
+  it("accepts the minimal pending shape (no value — success-only fields ride only the done arm)", () => {
+    // 2026-05-31-session-auth-subshapes — `SchemaFieldExtractionResult` is now a
+    // discriminated union; the `"pending"` arm carries NO `value`. A pending
+    // result with a `value` is rejected (the illegal flat shape).
+    expect(schemaFieldExtractionResultSchema.safeParse({ status: "pending" }).success).toBe(true);
+    expect(schemaFieldExtractionResultSchema.safeParse({ status: "pending", value: null }).success).toBe(false);
   });
 
   it("rejects an out-of-union status", () => {
-    expect(schemaFieldExtractionResultSchema.safeParse({ status: "queued", value: null }).success).toBe(false);
+    expect(schemaFieldExtractionResultSchema.safeParse({ status: "queued" }).success).toBe(false);
   });
 });

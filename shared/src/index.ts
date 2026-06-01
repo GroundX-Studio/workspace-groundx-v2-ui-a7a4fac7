@@ -521,14 +521,26 @@ export type ExtractFieldResult = z.infer<typeof extractFieldResultSchema>;
 // same shape shares ONE source. The `citation` reuses `extractFieldCitationSchema`
 // (the same `{documentId, page, snippet?}` best-match shape).
 // ──────────────────────────────────────────────────────────────────────
-export const schemaFieldExtractionResultSchema = z.object({
-  status: z.enum(["pending", "done", "error"]),
-  value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
-  confidence: z.number().optional(),
-  /** The previous extraction's confidence when this result is a re-run. */
-  previousConfidence: z.number().optional(),
-  citation: extractFieldCitationSchema.nullish(),
-});
+// 2026-05-31-session-auth-subshapes — discriminated union on `status`. The
+// success-only fields (`value`/`confidence`/`previousConfidence`/`citation`)
+// live ONLY on the `"done"` arm, so a `"pending"` result with a value, or an
+// `"error"` result carrying a confidence, is unrepresentable (and rejected at
+// the Zod boundary — each arm is `.strict()`). Behavior-preserving: an existing
+// `"done"` record keeps its exact field set.
+export const schemaFieldExtractionResultSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("pending") }).strict(),
+  z
+    .object({
+      status: z.literal("done"),
+      value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+      confidence: z.number().optional(),
+      /** The previous extraction's confidence when this result is a re-run. */
+      previousConfidence: z.number().optional(),
+      citation: extractFieldCitationSchema.nullish(),
+    })
+    .strict(),
+  z.object({ status: z.literal("error"), message: z.string().optional() }).strict(),
+]);
 export type SchemaFieldExtractionResult = z.infer<typeof schemaFieldExtractionResultSchema>;
 
 // ──────────────────────────────────────────────────────────────────────

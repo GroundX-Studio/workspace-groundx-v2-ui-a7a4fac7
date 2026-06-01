@@ -32,13 +32,13 @@ export const Login: FC = () => {
     setIsLoading(true);
     const result = await login(data);
 
-    if (result.banned) {
+    if (result.kind === "banned") {
       setIsLoading(false);
       navigate(ROUTER_PATHS.BANNED);
       return;
     }
 
-    if (result.isLoggedIn) {
+    if (result.kind === "success") {
       navigate(ROUTER_PATHS.HOME);
     } else {
       formikBag.resetForm();

@@ -226,7 +226,7 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
         : null;
       const priorConfidence =
         priorAddition?.extraction?.status === "done" ? priorAddition.extraction.confidence : undefined;
-      setSchemaFieldExtraction(fieldId, { status: "pending", value: null });
+      setSchemaFieldExtraction(fieldId, { status: "pending" });
       try {
         const result = await extractField({
           chatSessionId,
@@ -260,7 +260,7 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
           );
         }
       } catch {
-        setSchemaFieldExtraction(fieldId, { status: "error", value: null });
+        setSchemaFieldExtraction(fieldId, { status: "error" });
       }
     },
     [chatState.activeSessionId, chatState.sessions, setSchemaFieldExtraction, appendAgentMessage],

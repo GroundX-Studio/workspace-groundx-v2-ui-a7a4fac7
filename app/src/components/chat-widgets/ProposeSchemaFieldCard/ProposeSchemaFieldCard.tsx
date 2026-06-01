@@ -118,7 +118,7 @@ export const ProposeSchemaFieldCard: FC<ProposeSchemaFieldCardProps> = ({
     // same addition record.
     const chatSessionId = chatState.activeSessionId;
     if (!chatSessionId) return;
-    setSchemaFieldExtraction(fieldId, { status: "pending", value: null });
+    setSchemaFieldExtraction(fieldId, { status: "pending" });
     (async () => {
       try {
         const result = await extractField({
@@ -139,7 +139,7 @@ export const ProposeSchemaFieldCard: FC<ProposeSchemaFieldCardProps> = ({
         if (!(err instanceof ExtractFieldApiError)) {
           captureException(err, { route: "/api/extract-field" });
         }
-        setSchemaFieldExtraction(fieldId, { status: "error", value: null });
+        setSchemaFieldExtraction(fieldId, { status: "error" });
       }
     })();
   }, [addSchemaField, chatState.activeSessionId, proposedField, setSchemaFieldExtraction]);

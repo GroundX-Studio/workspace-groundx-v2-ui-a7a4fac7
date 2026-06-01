@@ -10,11 +10,19 @@ export interface Auth {
   xJwtToken: string;
 }
 
-export interface LoginReqCallback {
-  isLoggedIn: boolean;
-  error: boolean | unknown;
-  banned: boolean;
-}
+/**
+ * Result of `AuthProvider.login`. A discriminated union whose variant set is
+ * derived from the producer's real branches (success / thrown-error /
+ * no-response) plus the `banned` outcome the Login view routes on. Replaces a
+ * flat three-boolean record whose type was wider than its value space — the
+ * meaningless combinations (`{isLoggedIn:true; error:true}`, the all-false
+ * silent no-op) are now unrepresentable. `error` rides ONLY the error variant.
+ */
+export type LoginReqCallback =
+  | { kind: "success" }
+  | { kind: "error"; error: unknown }
+  | { kind: "banned" }
+  | { kind: "failed" };
 
 export interface AuthContextI {
   auth: Auth;

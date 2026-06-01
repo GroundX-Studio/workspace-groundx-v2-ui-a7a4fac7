@@ -30,7 +30,7 @@ const makeAuth = (isLoggedIn: boolean): AuthContextI => ({
   },
   user: null,
   setAuth: () => undefined,
-  login: async () => ({ isLoggedIn: false, error: false, banned: false }),
+  login: async () => ({ kind: "failed" }),
   register: async () => sdkFailure<void>(new Error("not implemented")),
   logout: async () => undefined,
   getUserData: async () => sdkFailure(new Error("not implemented")),

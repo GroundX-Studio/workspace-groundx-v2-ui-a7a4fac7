@@ -69,14 +69,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
 
           await getUserData(response.username);
 
-          return { isLoggedIn: true, error: false, banned: false };
+          return { kind: "success" };
         }
       } catch (error) {
         captureException(error, { context: "AuthProvider.login" });
-        return { isLoggedIn: false, error, banned: false };
+        return { kind: "error", error };
       }
 
-      return { isLoggedIn: false, error: false, banned: false };
+      return { kind: "failed" };
     },
     [getUserData]
   );
