@@ -2,12 +2,73 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// 2026-05-31-schemaview-live-only-extract — SchemaView reads the LIVE extract
+// as its sole source (the manifest arm is retired). The Accept round-trip
+// mounts `<SchemaView />` with no live props, so it self-resolves the live
+// extract via getDocument → getGroundXWorkflow → getDocumentExtract. Stub those
+// loaders so the standalone SchemaView has a genuine live source — the same
+// fixture path the Extract widget uses under MOCK_MODE.
+vi.mock("@/api/entities/groundxWorkflowsEntity", async () => {
+  const actual = await vi.importActual<typeof import("@/api/entities/groundxWorkflowsEntity")>(
+    "@/api/entities/groundxWorkflowsEntity",
+  );
+  return { ...actual, getGroundXWorkflow: vi.fn() };
+});
+vi.mock("@/api/entities/groundxDocumentsEntity", async () => {
+  const actual = await vi.importActual<typeof import("@/api/entities/groundxDocumentsEntity")>(
+    "@/api/entities/groundxDocumentsEntity",
+  );
+  return {
+    ...actual,
+    getGroundXDocument: vi.fn(),
+    getGroundXDocumentExtract: vi.fn(),
+  };
+});
+import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
+import {
+  getGroundXDocument,
+  getGroundXDocumentExtract,
+} from "@/api/entities/groundxDocumentsEntity";
+
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
 import type { ProposedSchemaField } from "@/api/chatSessions";
 import { SchemaView } from "@/components/viewer-widgets/Extract/SchemaView";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import { utilityTestScenario } from "@/test/scenarioFixtures";
+import type { ScenarioConfig } from "@/types/scenarios";
 
 import { ProposeSchemaFieldCard } from "./ProposeSchemaFieldCard";
+
+const LIVE_UTILITY_DOC_ID = "c3bfff49-6640-4213-822b-e81c3a771e45";
+const LIVE_WORKFLOW_ID = "9910308e-3100-473e-9da6-3ac29f5958a6";
+
+// Utility scenario whose primary document is the resolved live id so SchemaView
+// runs the MOCK_MODE live load (placeholder ids would skip it).
+const liveUtilityScenario: ScenarioConfig = {
+  ...utilityTestScenario,
+  documents: [{ documentId: LIVE_UTILITY_DOC_ID, fileName: "April 2026 Statement.pdf", order: 1 }],
+};
+
+// MOCK_MODE live workflow + extract — statement.account_number is the field the
+// proposal lands beside (categoryId "statement"), so the category exists to
+// host the accepted field.
+function installLiveExtract() {
+  vi.mocked(getGroundXWorkflow).mockResolvedValue({
+    workflow: {
+      workflowId: LIVE_WORKFLOW_ID,
+      name: "Utility Bill",
+      extract: {
+        statement: {
+          fields: { account_number: { prompt: { description: "account number", type: "str" } } },
+        },
+      },
+    },
+  } as never);
+  vi.mocked(getGroundXDocument).mockResolvedValue({
+    document: { documentId: LIVE_UTILITY_DOC_ID, filter: { workflow_id: LIVE_WORKFLOW_ID } },
+  } as never);
+  vi.mocked(getGroundXDocumentExtract).mockResolvedValue({ account_number: "9988776" } as never);
+}
 
 const originalFetch = global.fetch;
 
@@ -137,6 +198,10 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
 
   it("Accept → SchemaView shows the new field with a live extracted value (UI-01 Phase 2c round-trip)", async () => {
     const user = userEvent.setup();
+    // 2026-05-31-schemaview-live-only-extract — SchemaView's source is the live
+    // extract; install it so the standalone mount renders the statement
+    // category that hosts the accepted field.
+    installLiveExtract();
     // Mount BOTH the propose-card AND SchemaView under the same
     // provider tree so the ChatStore mutation lands in shared state.
     // SchemaView reads `pendingSchemaOverlay.addedFields[].extraction`
@@ -146,8 +211,10 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
         <ProposeSchemaFieldCard proposedField={sampleField} role="anonymous" scope={{ type: "none" }} />
         <SchemaView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      { initialFrame: "f3a", initialScenario: "utility", initialScenarios: [liveUtilityScenario] },
     );
+    // Wait for the live schema to resolve so the statement category is mounted.
+    await screen.findByTestId("schema-field-account_number");
 
     // Pre-stage the /api/extract-field response — beforeEach already
     // installed a default ensure-create mock; mockResolvedValueOnce

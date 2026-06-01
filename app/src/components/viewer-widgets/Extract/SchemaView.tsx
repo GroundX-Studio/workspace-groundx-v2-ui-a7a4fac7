@@ -35,6 +35,7 @@ import Typography from "@mui/material/Typography";
 import { useCallback, useMemo, useState, type FC } from "react";
 
 import { extractField } from "@/api/extractField";
+import { useLiveExtract } from "@/api/useLiveExtract";
 import {
   BODY_TEXT,
   BORDER,
@@ -72,24 +73,24 @@ import type {
 } from "@/types/scenarios";
 
 /**
- * Apply the per-session overlay onto the manifest schema:
- *   1. Drop manifest fields whose id is in `removedFieldIds`.
- *   2. Merge `editedFields` patches onto remaining manifest fields.
+ * Apply the per-session overlay onto the base (live) schema:
+ *   1. Drop base fields whose id is in `removedFieldIds`.
+ *   2. Merge `editedFields` patches onto remaining base fields.
  *   3. Append `addedFields` to the matching category.
- *   4. Orphan additions (categoryId not in manifest) land in a
+ *   4. Orphan additions (categoryId not in the base schema) land in a
  *      synthetic "Custom" category.
  */
 function applyOverlay(
-  manifest: ExtractionSchemaDef,
+  base: ExtractionSchemaDef,
   overlay: {
     addedFields: { categoryId: string; id: string; name: string; type: SchemaFieldDef["type"]; description: string }[];
     removedFieldIds: ReadonlySet<string>;
     editedFields: ReadonlyMap<string, SchemaFieldEdit>;
   },
 ): ExtractionSchemaDef {
-  const known = new Set(manifest.categories.map((c) => c.id));
+  const known = new Set(base.categories.map((c) => c.id));
   const orphanAdditions = overlay.addedFields.filter((a) => !known.has(a.categoryId));
-  const categories: SchemaCategoryDef[] = manifest.categories.map((cat) => {
+  const categories: SchemaCategoryDef[] = base.categories.map((cat) => {
     const baseFields = cat.fields
       .filter((f) => !overlay.removedFieldIds.has(f.id))
       .map<SchemaFieldDef>((f) => {
@@ -123,7 +124,7 @@ function applyOverlay(
       })),
     });
   }
-  return { ...manifest, categories };
+  return { ...base, categories };
 }
 
 const TYPE_COLOR: Record<SchemaFieldDef["type"], string> = {
@@ -136,9 +137,13 @@ const TYPE_COLOR: Record<SchemaFieldDef["type"], string> = {
 const FIELD_TYPES: SchemaFieldDef["type"][] = ["STRING", "NUMBER", "DATE", "BOOLEAN"];
 
 export interface SchemaViewProps {
-  /** WF-12 — live workflow schema from ExtractView (falls back to manifest). */
+  /**
+   * Live workflow schema from the Extract widget (the F3a workbench path).
+   * When omitted, SchemaView self-resolves the live extract from the
+   * scenario's primary document — there is NO manifest fallback.
+   */
   schema?: ExtractionSchemaDef | null;
-  /** WF-12 — live extract values from ExtractView (falls back to manifest). */
+  /** Live extract values from the Extract widget. See {@link schema}. */
   values?: ExtractedFieldValue[];
 }
 
@@ -159,21 +164,21 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
 
   const scenarioId = appMode.scenario ?? session.scenario ?? null;
   const scenario = scenarioId ? byId(scenarioId) : null;
-  // WF-12 — prefer the live schema/values passed from the Extract widget;
-  // manifest is the fallback.
-  //
-  // DEFERRED (kept, not retired) — tracked change:
-  // openspec/changes/2026-05-31-schemaview-live-only-extract.
-  // 2026-05-31-onboarding-experiences originally proposed dropping this
-  // `?? scenario?.manifest.*` arm so live is the sole source, but retiring it is
-  // BREAKING under MOCK_MODE: SchemaView's own ~27 tests + the
-  // ProposeSchemaFieldCard round-trip mount `<SchemaView />` with NO live props
-  // and rely on the manifest arm to render, and MOCK_MODE has no live extract to
-  // substitute. The tracked change provides a live extract under MOCK_MODE
-  // (failing test first), THEN drops this arm. Do NOT remove it until live is
-  // the genuine sole source under test + MOCK_MODE.
-  const manifestSchema = liveSchema ?? scenario?.manifest.extractionSchema ?? null;
-  const sampleValues = liveValues ?? scenario?.manifest.sampleExtractionValues ?? [];
+  // 2026-05-31-schemaview-live-only-extract — the live extract is the SOLE
+  // source. The Extract widget passes the resolved live schema/values as props
+  // (the F3a workbench path). When `<SchemaView />` is mounted WITHOUT live
+  // props (standalone demo surfaces + the ProposeSchemaFieldCard round-trip),
+  // it self-resolves the live extract from the SAME load path the Extract
+  // widget uses, keyed by the scenario's primary document. Under MOCK_MODE that
+  // resolves from the fixture path. There is NO manifest fallback: when the
+  // live extract is absent the widget renders its real empty/"live extract
+  // unavailable" state below.
+  const selfLive = useLiveExtract(scenario?.documents[0]?.documentId);
+  // Schema/values travel together: the self-resolved values only apply when the
+  // self-resolved schema is present (a live extract is a schema + its values).
+  const baseSchema = liveSchema ?? selfLive.schema ?? null;
+  const sampleValues =
+    liveValues ?? (selfLive.schema ? selfLive.values : null) ?? [];
 
   const activeChatSession = chatState.activeSessionId
     ? chatState.sessions.get(chatState.activeSessionId)
@@ -187,8 +192,8 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
     focusedCategoryId: null as string | null,
   };
   const effectiveSchema = useMemo<ExtractionSchemaDef | null>(
-    () => (manifestSchema ? applyOverlay(manifestSchema, overlay) : null),
-    [manifestSchema, overlay],
+    () => (baseSchema ? applyOverlay(baseSchema, overlay) : null),
+    [baseSchema, overlay],
   );
 
   // F3a single-row-open invariant: only one field row may show its
@@ -267,18 +272,25 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
   );
 
   if (!effectiveSchema) {
+    // 2026-05-31-schemaview-live-only-extract — the live extract is the sole
+    // source. With a scenario selected but no live schema resolved, this is the
+    // real "live extract unavailable" state (no manifest fixture stands in);
+    // with no scenario at all it's the pick-a-sample prompt.
+    const liveUnavailable = scenario != null;
     return (
       <Box
         data-testid="schema-view-empty"
+        data-extraction-status={liveUnavailable ? "unavailable" : "none"}
         sx={{ p: 4, height: "100%", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: WARM_OFFWHITE }}
       >
         <Card sx={{ p: 4, borderRadius: BORDER_RADIUS_CARD, maxWidth: 480, textAlign: "center" }}>
           <Typography variant="h5" sx={{ color: NAVY, mb: 1, fontWeight: FONT_WEIGHT_HEADLINE }}>
-            No schema yet
+            {liveUnavailable ? "Live extract unavailable" : "No schema yet"}
           </Typography>
           <Typography variant="body2" sx={{ color: BODY_TEXT }}>
-            Pick a sample with an extraction schema (Utility or Loan) to edit it here.
-            Solar scenarios are Interact + Report only.
+            {liveUnavailable
+              ? "We couldn't load a live extraction for this sample. Re-run the extraction or pick another sample."
+              : "Pick a sample with an extraction schema (Utility or Loan) to edit it here. Solar scenarios are Interact + Report only."}
           </Typography>
         </Card>
       </Box>
@@ -357,18 +369,18 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
           if (focused) {
             // Count overlay diff affecting THIS category (added or
             // edited fields whose category matches, or removed ids that
-            // were originally in this category's manifest). For tight
+            // were originally in this category's base live schema). For tight
             // scope we use addedFields(this category) + editedFields(this
-            // category) + manifest fields removed.
-            const focusedManifestFieldIds = new Set(
-              (manifestSchema?.categories.find((c) => c.id === focusedId)?.fields ?? []).map((f) => f.id),
+            // category) + base fields removed.
+            const focusedBaseFieldIds = new Set(
+              (baseSchema?.categories.find((c) => c.id === focusedId)?.fields ?? []).map((f) => f.id),
             );
             const addedInCategory = overlay.addedFields.filter((a) => a.categoryId === focusedId).length;
             const editedInCategory = [...overlay.editedFields.keys()].filter(
-              (id) => focusedManifestFieldIds.has(id) || overlay.addedFields.some((a) => a.id === id && a.categoryId === focusedId),
+              (id) => focusedBaseFieldIds.has(id) || overlay.addedFields.some((a) => a.id === id && a.categoryId === focusedId),
             ).length;
             const removedInCategory = [...overlay.removedFieldIds].filter((id) =>
-              focusedManifestFieldIds.has(id),
+              focusedBaseFieldIds.has(id),
             ).length;
             const unsaved = addedInCategory + editedInCategory + removedInCategory;
             return (
@@ -812,7 +824,11 @@ const SchemaFieldCard: FC<SchemaFieldCardProps> = ({
             </Typography>
             <Typography
               variant="body2"
-              data-extraction-status={extraction?.status ?? "manifest"}
+              // 2026-05-31-schemaview-live-only-extract — default off the live
+              // extraction STATE. A focused per-field re-run (`extraction`)
+              // reports its own status; otherwise the value is the base live
+              // extract ("live"), never the retired "manifest" literal.
+              data-extraction-status={extraction?.status ?? "live"}
               sx={{
                 color: NAVY,
                 fontWeight: FONT_WEIGHT_LABEL,
@@ -936,7 +952,7 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
   onRerunExtraction,
 }) => {
   // Local form state — discarded on Cancel; persisted on Save. Initial
-  // value is the effective field (already manifest ∪ overlay-edit).
+  // value is the effective field (already live ∪ overlay-edit).
   const [name, setName] = useState(field.name);
   const [type, setType] = useState<SchemaFieldDef["type"]>(field.type);
   const [required, setRequired] = useState(field.required ?? false);

@@ -11,6 +11,96 @@ vi.mock("@/api/extractField", async () => {
 });
 import { extractField } from "@/api/extractField";
 
+// 2026-05-31-schemaview-live-only-extract — SchemaView reads the LIVE extract
+// as its sole source. Standalone `<SchemaView />` mounts (no live props)
+// self-resolve the live extract from the same load path the Extract widget
+// uses (getDocument → filter.workflow_id → getGroundXWorkflow → extract). Under
+// MOCK_MODE these calls resolve from the fixture path; here we stub the
+// workflow + document/extract loaders so the standalone surfaces have a genuine
+// live source keyed by the scenario's primary document. The fixture's field ids
+// mirror the manifest (account_number / amount_due / meter_kwh) — same shape,
+// LIVE provenance — but the VALUES differ so a test can prove the data flows
+// through the live prop path, not the manifest's sampleExtractionValues.
+vi.mock("@/api/entities/groundxWorkflowsEntity", async () => {
+  const actual = await vi.importActual<typeof import("@/api/entities/groundxWorkflowsEntity")>(
+    "@/api/entities/groundxWorkflowsEntity",
+  );
+  return { ...actual, getGroundXWorkflow: vi.fn() };
+});
+vi.mock("@/api/entities/groundxDocumentsEntity", async () => {
+  const actual = await vi.importActual<typeof import("@/api/entities/groundxDocumentsEntity")>(
+    "@/api/entities/groundxDocumentsEntity",
+  );
+  return {
+    ...actual,
+    getGroundXDocument: vi.fn(),
+    getGroundXDocumentExtract: vi.fn(),
+  };
+});
+import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
+import {
+  getGroundXDocument,
+  getGroundXDocumentExtract,
+} from "@/api/entities/groundxDocumentsEntity";
+
+// Resolved (UUID-shaped, colon-free) doc id so `isResolvedDocumentId` accepts
+// it and SchemaView runs the live load. Placeholder ids (`utility-bill-2026-04`)
+// would skip the load — which is exactly why the manifest arm used to be needed.
+const LIVE_UTILITY_DOC_ID = "c3bfff49-6640-4213-822b-e81c3a771e45";
+const LIVE_WORKFLOW_ID = "9910308e-3100-473e-9da6-3ac29f5958a6";
+
+// MOCK_MODE live workflow — same field ids as the manifest schema so existing
+// row assertions stay valid, but sourced live (workflow → extract), not the
+// manifest. Statement: account_number (STRING) + amount_due (NUMBER).
+// Meters: meter_kwh (NUMBER).
+const LIVE_WORKFLOW = {
+  workflow: {
+    workflowId: LIVE_WORKFLOW_ID,
+    name: "Utility Bill",
+    extract: {
+      statement: {
+        fields: {
+          account_number: {
+            prompt: { description: "The account number printed in the statement header.", type: "str" },
+          },
+          amount_due: {
+            prompt: { description: "Total amount due across all meters and charges, USD.", type: ["int", "float"] },
+          },
+        },
+      },
+      meters: {
+        fields: {
+          meter_kwh: {
+            prompt: { description: "kWh consumed by the meter during the billing period.", type: ["int", "float"] },
+          },
+        },
+      },
+    },
+  },
+};
+
+// MOCK_MODE live extract VALUES — distinct from the manifest's
+// sampleExtractionValues (1023456 / 18742.16 / 4128) so a test proves the
+// rendered value came from the live extract, not the manifest.
+const LIVE_EXTRACT = {
+  account_number: "9988776",
+  amount_due: 20100.5,
+  meters: [{ meter_kwh: 5309 }],
+};
+
+/**
+ * Install the MOCK_MODE live extract for the standalone `<SchemaView />`
+ * surfaces. Returns a live-doc utility scenario the caller passes via
+ * `initialScenarios` so the scenario's primary document is the resolved id.
+ */
+function installLiveExtract() {
+  vi.mocked(getGroundXWorkflow).mockResolvedValue(LIVE_WORKFLOW as never);
+  vi.mocked(getGroundXDocument).mockResolvedValue({
+    document: { documentId: LIVE_UTILITY_DOC_ID, filter: { workflow_id: LIVE_WORKFLOW_ID } },
+  } as never);
+  vi.mocked(getGroundXDocumentExtract).mockResolvedValue(LIVE_EXTRACT as never);
+}
+
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
 import { Extract } from "@/components/viewer-widgets/Extract/Extract";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
@@ -23,8 +113,39 @@ import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProvid
 import { IngestView } from "@/views/Onboarding/IngestView/IngestView";
 
 import { SchemaView } from "@/components/viewer-widgets/Extract/SchemaView";
-import { useEffect, useMemo, useRef, type FC } from "react";
+import { utilityTestScenario } from "@/test/scenarioFixtures";
+import type { ScenarioConfig } from "@/types/scenarios";
+import { useEffect, useMemo, useRef, type FC, type ReactElement } from "react";
 import type { ContentScope } from "@groundx/shared";
+
+// Utility scenario whose primary document is the resolved live id, so the
+// standalone `<SchemaView />` runs the MOCK_MODE live load.
+const liveUtilityScenario: ScenarioConfig = {
+  ...utilityTestScenario,
+  documents: [
+    { documentId: LIVE_UTILITY_DOC_ID, fileName: "April 2026 Statement.pdf", order: 1 },
+  ],
+};
+const LIVE_SCENARIOS: ScenarioConfig[] = [liveUtilityScenario];
+
+/**
+ * 2026-05-31-schemaview-live-only-extract — render a standalone `<SchemaView />`
+ * over the MOCK_MODE live extract (the manifest arm is retired, so a bare mount
+ * has no source otherwise). Installs the live workflow/extract loaders + the
+ * live-doc scenario, then waits for the live load to surface the schema. Field
+ * ids mirror the manifest (account_number / amount_due / meter_kwh) so the
+ * re-grounded assertions are unchanged — only the SOURCE moved to live.
+ */
+async function renderLiveSchemaView(ui: ReactElement) {
+  installLiveExtract();
+  const result = renderWithOnboardingProviders(ui, {
+    initialFrame: "f3a",
+    initialScenario: "utility",
+    initialScenarios: LIVE_SCENARIOS,
+  });
+  await screen.findByTestId("schema-field-account_number");
+  return result;
+}
 
 /**
  * 2026-05-31-shared-canvas-affordance-restoration — the production
@@ -185,26 +306,95 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     expect(screen.getByTestId("schema-view-empty")).toBeInTheDocument();
   });
 
-  it("renders the Utility scenario's category sections + field cards", () => {
-    renderWithOnboardingProviders(<SchemaView />, { initialFrame: "f3a", initialScenario: "utility" });
+  // ── 2026-05-31-schemaview-live-only-extract · Task 1 ────────────
+  // With MOCK_MODE active, the standalone `<SchemaView />` mount (no live
+  // props) renders from the LIVE prop path — schema + values resolved via the
+  // same getDocument → getGroundXWorkflow → getDocumentExtract path the Extract
+  // widget uses — NOT the manifest. Assert via the live VALUE (distinct from
+  // the manifest's sampleExtractionValues) so the source is provably live.
+  it("MOCK_MODE: standalone SchemaView renders from the live extract (not the manifest)", async () => {
+    installLiveExtract();
+    renderWithOnboardingProviders(<SchemaView />, {
+      initialFrame: "f3a",
+      initialScenario: "utility",
+      initialScenarios: LIVE_SCENARIOS,
+    });
+    // Field card resolves from the live workflow schema.
+    await waitFor(() => {
+      expect(screen.getByTestId("schema-field-amount_due")).toBeInTheDocument();
+    });
+    // Value is the LIVE extract's amount_due (20,100.5), NOT the manifest's
+    // sampleExtractionValues (18,742.16).
+    const amountValue = screen.getByTestId("schema-field-value-amount_due");
+    expect(amountValue.textContent).toMatch(/20,100\.5/);
+    expect(amountValue.textContent).not.toMatch(/18,742\.16/);
+    // account_number live value (9988776), not the manifest's 1023456.
+    const acctValue = screen.getByTestId("schema-field-value-account_number");
+    expect(acctValue.textContent).toMatch(/9988776/);
+    expect(acctValue.textContent).not.toMatch(/1023456/);
+  });
+
+  // ── 2026-05-31-schemaview-live-only-extract · Task 2 ────────────
+  // When the live extract is ABSENT (no workflow on the doc → live load yields
+  // nothing), SchemaView surfaces its real empty ("live extract unavailable")
+  // state and does NOT fall back to scenario.manifest.extractionSchema. The
+  // manifest's fields (account_number / amount_due / meter_kwh) must NOT render.
+  it("no live extract → real empty state, NO manifest fallback", async () => {
+    // Doc resolves but carries no workflow_id → live schema is null.
+    vi.mocked(getGroundXDocument).mockResolvedValue({
+      document: { documentId: LIVE_UTILITY_DOC_ID },
+    } as never);
+    vi.mocked(getGroundXDocumentExtract).mockResolvedValue({} as never);
+    renderWithOnboardingProviders(<SchemaView />, {
+      initialFrame: "f3a",
+      initialScenario: "utility",
+      initialScenarios: LIVE_SCENARIOS,
+    });
+    // Empty / "live extract unavailable" state is shown.
+    expect(await screen.findByTestId("schema-view-empty")).toBeInTheDocument();
+    // The manifest schema's fields are NEVER rendered.
+    expect(screen.queryByTestId("schema-field-account_number")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("schema-field-amount_due")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("schema-field-meter_kwh")).not.toBeInTheDocument();
+    // No element defaults its extraction status to the literal "manifest".
+    expect(document.querySelector('[data-extraction-status="manifest"]')).toBeNull();
+  });
+
+  it("data-extraction-status reflects the live extraction state, never the literal \"manifest\"", async () => {
+    installLiveExtract();
+    renderWithOnboardingProviders(<SchemaView />, {
+      initialFrame: "f3a",
+      initialScenario: "utility",
+      initialScenarios: LIVE_SCENARIOS,
+    });
+    const amountValue = await screen.findByTestId("schema-field-value-amount_due");
+    const statusEl = amountValue.querySelector("[data-extraction-status]");
+    expect(statusEl).not.toBeNull();
+    // Live extract present but no per-field focused re-run → status is the
+    // base live "current" state, NOT the retired "manifest" literal.
+    expect(statusEl?.getAttribute("data-extraction-status")).not.toBe("manifest");
+  });
+
+  it("renders the Utility scenario's category sections + field cards", async () => {
+    await renderLiveSchemaView(<SchemaView />);
     expect(screen.getByTestId("schema-view")).toBeInTheDocument();
     expect(screen.getByTestId("schema-category-statement")).toBeInTheDocument();
     expect(screen.getByTestId("schema-category-meters")).toBeInTheDocument();
-    // Spot-check fields from the test fixture's utility schema.
+    // Spot-check fields from the live extract's utility schema.
     expect(screen.getByTestId("schema-field-account_number")).toBeInTheDocument();
     expect(screen.getByTestId("schema-field-amount_due")).toBeInTheDocument();
     expect(screen.getByTestId("schema-field-meter_kwh")).toBeInTheDocument();
   });
 
-  it("each field card surfaces its type badge + current sample value", () => {
-    renderWithOnboardingProviders(<SchemaView />, { initialFrame: "f3a", initialScenario: "utility" });
+  it("each field card surfaces its type badge + current sample value", async () => {
+    await renderLiveSchemaView(<SchemaView />);
     // STRING field
     expect(screen.getByTestId("schema-field-type-account_number")).toHaveTextContent("STRING");
-    // NUMBER field — current value pulled from sampleExtractionValues
+    // NUMBER field — current value pulled from the live extract.
     expect(screen.getByTestId("schema-field-type-amount_due")).toHaveTextContent("NUMBER");
     const amountValue = screen.getByTestId("schema-field-value-amount_due");
     expect(amountValue).toBeInTheDocument();
-    // Test fixture sets amount_due to a specific number; just confirm
+    // Live extract sets amount_due to a specific number; just confirm
     // a numeric-looking value renders (formatted via toLocaleString).
     expect(amountValue.textContent).toMatch(/\d/);
     // The second NUMBER field (kWh consumed) should also render.
@@ -321,7 +511,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("clicking Edit on a field opens the inline editor below; other rows stay collapsed", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SchemaView />, { initialFrame: "f3a", initialScenario: "utility" });
+    await renderLiveSchemaView(<SchemaView />);
     // Initial: no editor open.
     expect(screen.queryByTestId("schema-field-editor-account_number")).not.toBeInTheDocument();
     expect(screen.queryByTestId("schema-field-editor-amount_due")).not.toBeInTheDocument();
@@ -338,7 +528,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("inline editor exposes name, type, format, required, prompt, instructions, identifier chips, preview + Save/Cancel/Rerun (expand-inline-editor-fields)", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SchemaView />, { initialFrame: "f3a", initialScenario: "utility" });
+    await renderLiveSchemaView(<SchemaView />);
     await user.click(screen.getByTestId("schema-edit-field-account_number"));
     expect(screen.getByTestId("schema-field-editor-name-account_number")).toBeInTheDocument();
     expect(screen.getByTestId("schema-field-editor-type-account_number")).toBeInTheDocument();
@@ -365,7 +555,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("identifiers chip array supports add + remove via the editor (expand-inline-editor-fields)", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SchemaView />, { initialFrame: "f3a", initialScenario: "utility" });
+    await renderLiveSchemaView(<SchemaView />);
     await user.click(screen.getByTestId("schema-edit-field-account_number"));
     const addBtn = screen.getByTestId("schema-field-editor-identifier-add-account_number");
     // Click + add → enters input mode.
@@ -401,7 +591,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("Cancel discards the form state and closes the editor without changing the overlay", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SchemaView />, { initialFrame: "f3a", initialScenario: "utility" });
+    await renderLiveSchemaView(<SchemaView />);
     await user.click(screen.getByTestId("schema-edit-field-account_number"));
     const promptInput = screen.getByTestId("schema-field-editor-prompt-account_number").querySelector("textarea");
     await user.clear(promptInput!);

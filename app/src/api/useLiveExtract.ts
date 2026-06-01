@@ -1,0 +1,93 @@
+/**
+ * Shared live extraction source (schema + values) for surfaces that mount
+ * `<SchemaView />` WITHOUT explicit live props (the standalone demo-scenario
+ * mount + the ProposeSchemaFieldCard round-trip).
+ *
+ * This is the SAME load path the `Extract` widget runs for its live extract,
+ * lifted into a reusable hook so SchemaView has a genuine live source instead
+ * of falling back to `scenario.manifest.*`:
+ *
+ *   schema ← getDocument → filter.workflow_id → getGroundXWorkflow → workflowToSchema
+ *   values ← getDocumentExtract → extractToValues
+ *
+ * Under MOCK_MODE the document/workflow/extract calls resolve from the
+ * middleware fixture path (the same fixtures the Extract widget reads), so the
+ * standalone surfaces render live data keyed by the scenario's primary
+ * document. Returns `{ schema: null, values: [] }` for placeholder ids or
+ * fetch failures so the caller renders its real empty/error state — never the
+ * manifest.
+ */
+import { useEffect, useState } from "react";
+
+import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
+import { isResolvedDocumentId } from "@/api/documentId";
+import { extractToValues, workflowToSchema } from "@/api/extractLiveData";
+import { useDocumentsContext } from "@/contexts/DocumentsContext";
+import type { ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
+
+type DocumentsApi = ReturnType<typeof useDocumentsContext>;
+type GetDocument = DocumentsApi["getDocument"];
+type GetDocumentExtract = DocumentsApi["getDocumentExtract"];
+
+export interface LiveExtract {
+  schema: ExtractionSchemaDef | null;
+  values: ExtractedFieldValue[];
+}
+
+const EMPTY: LiveExtract = { schema: null, values: [] };
+
+/**
+ * Resolve `documentId → schema + values` via the shared `extractLiveData`
+ * helpers. Pure-ish (takes the loaders) so it's unit-testable without a
+ * provider. Returns `{ schema: null, values: [] }` when there is no workflow
+ * id or no extract.
+ */
+export async function fetchLiveExtract(
+  documentId: string,
+  getDocument: GetDocument,
+  getDocumentExtract: GetDocumentExtract,
+): Promise<LiveExtract> {
+  const doc = await getDocument(documentId);
+  const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
+  if (typeof workflowId !== "string") return EMPTY;
+  const wf = await getGroundXWorkflow(workflowId);
+  const schema = workflowToSchema((wf as { workflow?: unknown }).workflow as Record<string, unknown>);
+  if (!schema) return EMPTY;
+  const ex = await getDocumentExtract(documentId);
+  if (!ex.response) return { schema, values: [] };
+  const valueMap = extractToValues(ex.response as Record<string, unknown>, schema);
+  const values: ExtractedFieldValue[] = Object.entries(valueMap).map(([fieldId, value]) => ({
+    fieldId,
+    value,
+    citations: [],
+  }));
+  return { schema, values };
+}
+
+/**
+ * Hook form: resolves the live extract for `documentId`, re-running when the
+ * id changes. Placeholder ids / fetch failures resolve to the empty extract so
+ * the caller never reads the manifest.
+ */
+export function useLiveExtract(documentId: string | undefined): LiveExtract {
+  const { getDocument, getDocumentExtract } = useDocumentsContext();
+  const [live, setLive] = useState<LiveExtract>(EMPTY);
+
+  useEffect(() => {
+    if (!documentId || !isResolvedDocumentId(documentId)) {
+      setLive(EMPTY);
+      return;
+    }
+    let cancelled = false;
+    void fetchLiveExtract(documentId, getDocument, getDocumentExtract)
+      .catch(() => EMPTY)
+      .then((result) => {
+        if (!cancelled) setLive(result);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, getDocument, getDocumentExtract]);
+
+  return live;
+}
