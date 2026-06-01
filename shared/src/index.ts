@@ -1082,3 +1082,64 @@ export const scenarioConfigSchema = z.object({
   supportsJsonRender: z.boolean().optional(),
 });
 export type ScenarioConfig = z.infer<typeof scenarioConfigSchema>;
+
+/**
+ * 2026-06-01-data-model-tail item 4 — the canonical X-Ray response type family.
+ *
+ * The `/v1/ingest/document/xray/{id}` payload (verified 2026-05-25 against the
+ * real endpoint; recorded in `docs/agents/groundx-real-api-shapes.md`) used to
+ * be declared independently on the app side (`groundxDocumentsEntity.ts`) and
+ * had no relationship to the middleware's loose `XrayDoc` / `XrayChunk`
+ * (`citationGeometry.ts`), even though both describe the SAME payload. This is
+ * the ONE canonical strict shape; the app re-exports it directly, and the
+ * middleware derives its runtime-tolerant loose `XrayDoc` from it (relaxed to
+ * all-optional, because it casts a raw `res.json()`), with an assignability
+ * drift guard tying the two.
+ */
+
+/** A native page-pixel bounding box on an X-Ray chunk (corners, not normalized). */
+export const xrayBoundingBoxSchema = z.object({
+  pageNumber: z.number(),
+  topLeftX: z.number(),
+  topLeftY: z.number(),
+  bottomRightX: z.number(),
+  bottomRightY: z.number(),
+  corrected: z.boolean(),
+});
+export type XrayBoundingBox = z.infer<typeof xrayBoundingBoxSchema>;
+
+/** One X-Ray chunk: its text + suggested text, cited pages, and native boxes. */
+export const xrayChunkSchema = z.object({
+  chunk: z.string(),
+  contentType: z.array(z.string()),
+  pageNumbers: z.array(z.number()),
+  text: z.string(),
+  suggestedText: z.string(),
+  boundingBoxes: z.array(xrayBoundingBoxSchema),
+  /** Present on structured (table) chunks; opaque to us. */
+  json: z.array(z.unknown()).optional(),
+});
+export type XrayChunk = z.infer<typeof xrayChunkSchema>;
+
+/** One rendered page in the X-Ray: its image URL, native dims, and chunks. */
+export const xrayDocumentPageSchema = z.object({
+  pageNumber: z.number(),
+  pageUrl: z.string(),
+  width: z.number(),
+  height: z.number(),
+  chunks: z.array(xrayChunkSchema),
+});
+export type XrayDocumentPage = z.infer<typeof xrayDocumentPageSchema>;
+
+/** The top-level X-Ray response for a single document. */
+export const documentXrayResponseSchema = z.object({
+  fileName: z.string(),
+  fileType: z.string(),
+  fileKeywords: z.string().optional(),
+  fileSummary: z.string().optional(),
+  language: z.string().optional(),
+  sourceUrl: z.string(),
+  documentPages: z.array(xrayDocumentPageSchema),
+  chunks: z.array(xrayChunkSchema),
+});
+export type DocumentXrayResponse = z.infer<typeof documentXrayResponseSchema>;

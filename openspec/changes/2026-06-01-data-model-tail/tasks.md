@@ -138,25 +138,56 @@ blind-cast.
 
 ## 4. App X-Ray types — promote to `@groundx/shared` (item 4)
 
-- [ ] **Failing test FIRST:** add a test (app and/or middleware) importing the
+- [x] **Failing test FIRST:** add a test (app and/or middleware) importing the
       X-Ray type set from `@groundx/shared` and asserting both the app consumer
       (`groundxDocumentsEntity.ts`) and the middleware consumer
       (`citationGeometry.ts` `XrayDoc`) derive from it (e.g. an `Eq<>` assertion
       that the middleware `XrayDoc` is assignable from / structurally agrees with
       the shared set on the fields both read). RED first — the shared X-Ray types
       do not yet exist.
-- [ ] Promote the X-Ray type family (`XrayBoundingBox` / `XrayChunk` /
+      DONE: new `app/src/api/entities/xrayTypes.drift.test.ts` — `Eq<>` pins each
+      app re-export to the canonical `@groundx/shared` type + a runtime fixture
+      asserts the shared `documentXrayResponseSchema` validates a representative
+      X-Ray payload and rejects a box missing a required corner. RED first proven:
+      before promotion the test threw `TypeError: Cannot read properties of
+      undefined (reading 'safeParse')` (no shared `documentXrayResponseSchema`)
+      and the `Eq<>` asserts had no shared types to import.
+- [x] Promote the X-Ray type family (`XrayBoundingBox` / `XrayChunk` /
       `XrayDocumentPage` / `DocumentXrayResponse`, currently
       `groundxDocumentsEntity.ts:41-77`) into `@groundx/shared`. Re-export from
       the app entity; reconcile the middleware `citationGeometry.ts:155` `XrayDoc`
       to consume the shared set (the middleware reads a strict subset — keep its
       optional-field looseness but base it on the shared type). Build shared
       (`tsc -p tsconfig.json`); app + middleware `tsc --noEmit` GREEN.
-- [ ] **Adversarial review:** confirm there is now ONE X-Ray type source — grep
+      DONE: added schema-first canonical X-Ray types to `@groundx/shared`
+      (`xrayBoundingBoxSchema`/`xrayChunkSchema`/`xrayDocumentPageSchema`/
+      `documentXrayResponseSchema` + `z.infer` types). App entity now
+      `export type {...} from "@groundx/shared"` (+ a local `import type` for the
+      in-file `getGroundXDocumentXray` annotation, since a type-only re-export
+      doesn't bind the name locally under `tsc`). Middleware `XrayDoc`/`XrayChunk`
+      DERIVED from the shared canonical via `Pick` + an all-optional relaxation
+      (it casts a raw `res.json()` and reads a strict subset); page dims kept
+      required (they flow into `PageDim`). Shared rebuilt; app + middleware
+      `tsc --noEmit` GREEN.
+- [x] **Adversarial review:** confirm there is now ONE X-Ray type source — grep
       both files for independent `interface Xray*` / `interface DocumentXray*`
       declarations and confirm only re-exports / shared-derived types remain;
       confirm `resolveGeometryFromXray` and the `xrayCache` consumer still
       type-check against the reconciled type.
+      DONE: grep finds NO `interface Xray*`/`interface DocumentXray*` in app or
+      middleware — app is a pure re-export, middleware `XrayDoc` is a shared-derived
+      `Pick`/relaxation with an assignability drift guard (`SharedXrayChunk extends
+      XrayChunk`, `SharedDocumentXrayResponse extends XrayDoc`) in the production
+      module (middleware tsc excludes `*.test.ts`). BOTH guards proven to FIRE then
+      reverted: (1) app `Eq<>` — forking the app `XrayChunk` to a local interface
+      dropping `suggestedText` → `xrayTypes.drift.test.ts:51 TS2344 Type 'false'
+      does not satisfy 'true'`; (2) middleware tie — dropping `text` from the
+      canonical `xrayChunkSchema` + rebuilding shared → `citationGeometry.ts`
+      `TS2344` on the `Pick` + `TS2345` downstream. `resolveGeometryFromXray`,
+      `resolveFieldGeometry`, and `xrayCache.ts` all type-check against the
+      reconciled type (middleware `tsc --noEmit` EXIT 0; `xrayCache.test.ts` 5/5
+      GREEN). App suite 184/1508 GREEN (+1 file/+2 tests = the new drift test);
+      middleware 38/695 GREEN; app build + middleware tsc clean.
 
 ## 5. getDocumentXray cast — runtime-narrow the SDK boundary (item 5)
 

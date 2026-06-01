@@ -37,44 +37,23 @@ export interface DocumentResponse {
  * The xray endpoint returns this shape at top level (verified
  * 2026-05-25 against `/v1/ingest/document/xray/{id}`). Documented
  * in `docs/agents/groundx-real-api-shapes.md`.
+ *
+ * 2026-06-01-data-model-tail item 4 — single-sourced on `@groundx/shared`
+ * (the canonical strict X-Ray type family). Re-exported here so existing app
+ * imports (`import { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity"`)
+ * keep resolving. The app↔shared pin + the middleware-side assignability tie are
+ * enforced by `app/src/api/entities/xrayTypes.drift.test.ts` and
+ * `middleware/src/services/citationGeometry.ts`.
  */
-export interface XrayBoundingBox {
-  pageNumber: number;
-  topLeftX: number;
-  topLeftY: number;
-  bottomRightX: number;
-  bottomRightY: number;
-  corrected: boolean;
-}
-
-export interface XrayChunk {
-  chunk: string;
-  contentType: string[];
-  pageNumbers: number[];
-  text: string;
-  suggestedText: string;
-  boundingBoxes: XrayBoundingBox[];
-  json?: unknown[];
-}
-
-export interface XrayDocumentPage {
-  pageNumber: number;
-  pageUrl: string;
-  width: number;
-  height: number;
-  chunks: XrayChunk[];
-}
-
-export interface DocumentXrayResponse {
-  fileName: string;
-  fileType: string;
-  fileKeywords?: string;
-  fileSummary?: string;
-  language?: string;
-  sourceUrl: string;
-  documentPages: XrayDocumentPage[];
-  chunks: XrayChunk[];
-}
+export type {
+  XrayBoundingBox,
+  XrayChunk,
+  XrayDocumentPage,
+  DocumentXrayResponse,
+} from "@groundx/shared";
+// Local import for the in-file `getGroundXDocumentXray` annotation (a type-only
+// re-export above does not bring the name into this module's own scope).
+import type { DocumentXrayResponse } from "@groundx/shared";
 
 export interface IngestDocumentsInput {
   documents: DocumentSource[];

@@ -145,17 +145,58 @@ export function bboxForResult(
 // workflow-indexed doc). Match the citation snippet against the document's
 // X-Ray chunks, then lift the matched chunk's geometry.
 
-export interface XrayChunk {
-  text?: string;
-  suggestedText?: string;
-  pageNumbers?: number[];
-  boundingBoxes?: BoundingBox[];
-}
+// 2026-06-01-data-model-tail item 4 — the canonical X-Ray type family is
+// single-sourced on `@groundx/shared` (`SharedXrayChunk` / `SharedDocumentXrayResponse`).
+// The middleware casts a raw `res.json()` (`xrayCache.ts`) and reads only a
+// strict SUBSET of fields, so its working types are a runtime-tolerant
+// RELAXATION of the canonical shape: every field optional, boxes loosened to
+// the local `BoundingBox` (whose `corrected` is optional). They are DERIVED
+// from the shared types (not hand-redeclared) so a canonical field the
+// middleware reads cannot be dropped/renamed without breaking the
+// assignability assert below.
+import type {
+  XrayChunk as SharedXrayChunk,
+  XrayDocumentPage as SharedXrayDocumentPage,
+  DocumentXrayResponse as SharedDocumentXrayResponse,
+} from "@groundx/shared";
 
-export interface XrayDoc {
+/** All fields optional, recursively — the runtime payload is untrusted. */
+type DeepOptional<T> = T extends (infer U)[]
+  ? DeepOptional<U>[]
+  : T extends object
+    ? { [K in keyof T]?: DeepOptional<T[K]> }
+    : T;
+
+/** The fields the middleware reads off an X-Ray chunk (relaxed from canonical). */
+export type XrayChunk = DeepOptional<
+  Pick<SharedXrayChunk, "text" | "suggestedText" | "pageNumbers">
+> & {
+  // Loosened to the local `BoundingBox` (its `corrected` is optional) — the
+  // middleware re-parses boxes via `parseBoundingBoxes` anyway.
+  boundingBoxes?: BoundingBox[];
+};
+
+/**
+ * The fields the middleware reads off an X-Ray doc. Top-level fields are
+ * optional (untrusted payload); the page dims it consumes stay required (they
+ * flow straight into `PageDim`, which requires them) — matching the original
+ * middleware shape, now derived from the canonical type via `Pick`.
+ */
+export type XrayDoc = {
   chunks?: XrayChunk[];
-  documentPages?: Array<{ pageNumber: number; width: number; height: number }>;
-}
+  documentPages?: Array<Pick<SharedXrayDocumentPage, "pageNumber" | "width" | "height">>;
+};
+
+// --- drift guard (item 4): canonical ⊆ loose on the fields the middleware reads.
+// The shared canonical strict shape MUST stay assignable to the loose middleware
+// shape, so dropping/renaming a canonical field that the middleware reads breaks
+// the build here. (Test-file asserts are invisible — the middleware tsconfig
+// excludes `*.test.ts` — so this pin lives in a production module on purpose;
+// it is type-only and emits nothing. The `Eq<>` precedent for the app side is
+// `app/src/types/scenarios.drift.test.ts:52`.)
+type Assert<T extends true> = T;
+type _assertChunkAssignable = Assert<SharedXrayChunk extends XrayChunk ? true : false>;
+type _assertDocAssignable = Assert<SharedDocumentXrayResponse extends XrayDoc ? true : false>;
 
 /** Normalize text for fuzzy matching: lowercase, strip non-alphanumerics, collapse spaces. */
 export function normalizeText(s: string): string {
