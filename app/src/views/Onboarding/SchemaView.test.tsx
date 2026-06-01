@@ -144,6 +144,16 @@ async function renderLiveSchemaView(ui: ReactElement) {
     initialScenarios: LIVE_SCENARIOS,
   });
   await screen.findByTestId("schema-field-account_number");
+  // The schema card appears as soon as the live SCHEMA resolves, but the live
+  // VALUES land in the same `setLive` commit — wait for a live value to render
+  // before returning so callers that read value chips synchronously can't
+  // observe the pre-resolution chip (label "CURRENT", value "—") under
+  // full-suite CPU contention. Asserting the live account_number value
+  // ("9988776", distinct from the manifest) proves values committed; if they
+  // never do (a real load failure) this times out loudly rather than masking.
+  await waitFor(() =>
+    expect(screen.getByTestId("schema-field-value-account_number").textContent).toMatch(/9988776/),
+  );
   return result;
 }
 
@@ -319,14 +329,15 @@ describe("SchemaView (UI-01 Phase 1)", () => {
       initialScenario: "utility",
       initialScenarios: LIVE_SCENARIOS,
     });
-    // Field card resolves from the live workflow schema.
+    // Field card resolves from the live workflow schema. Value is the LIVE
+    // extract's amount_due (20,100.5), NOT the manifest's sampleExtractionValues
+    // (18,742.16). The schema card and live values land in the SAME `setLive`
+    // commit, but assert the value inside `waitFor` so the read can't race the
+    // pre-resolution chip ("CURRENT" / "—") under full-suite CPU contention.
     await waitFor(() => {
-      expect(screen.getByTestId("schema-field-amount_due")).toBeInTheDocument();
+      expect(screen.getByTestId("schema-field-value-amount_due").textContent).toMatch(/20,100\.5/);
     });
-    // Value is the LIVE extract's amount_due (20,100.5), NOT the manifest's
-    // sampleExtractionValues (18,742.16).
     const amountValue = screen.getByTestId("schema-field-value-amount_due");
-    expect(amountValue.textContent).toMatch(/20,100\.5/);
     expect(amountValue.textContent).not.toMatch(/18,742\.16/);
     // account_number live value (9988776), not the manifest's 1023456.
     const acctValue = screen.getByTestId("schema-field-value-account_number");
