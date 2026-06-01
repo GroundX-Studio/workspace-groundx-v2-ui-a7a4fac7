@@ -702,3 +702,25 @@ the shell on frame to choose a view. The signup gate SHALL remain a widget (`Sig
 - **AND** the gate, when active, is shown via its widgets, not as a `ChatExperience`
 - **AND** the shell does not pick a canvas view by `session.currentFrame`.
 
+### Requirement: The steady ScopedConversationShell SHALL mount viewer widgets via the shared ScopedCanvas path
+
+`ScopedConversationShell` SHALL render `<ScopedCanvas>` in its canvas slot, fed by the
+active `ViewerStep` plus the shell's `scope` and `role` — the SAME shared mount path
+`OnboardingShell` uses — so that orchestrator-pushed viewer steps (e.g. from a
+`highlightCitation` dispatch, a "Show source" action, or a pick-view pill) mount the
+production `PdfViewer` / `Extract` / `SmartReport` / `Integrate` widgets on real data.
+The steady canvas slot MUST NOT be a static placeholder that ignores the active viewer
+step, and MUST NOT import a viewer widget directly (the registry ban routes every mount
+through `ScopedCanvas`). When no viewer step is active, the slot SHALL render
+`ScopedCanvas`'s idle state, not an empty box.
+
+#### Scenario: Citation chip click mounts the PdfViewer in the steady canvas
+
+- **GIVEN** the steady shell is mounted with a workspace scope and an assistant turn that
+  carries citations
+- **WHEN** the user clicks a `CiteChip` (dispatching `highlightCitation` to the
+  `CanvasOrchestrator`)
+- **THEN** `scoped-shell-canvas-pane` contains a `pdf-viewer-widget` element mounted by
+  `ScopedCanvas` for the cited document/page
+- **AND** the widget renders at non-zero width and height (not a stub / zero-size canvas)
+
