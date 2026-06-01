@@ -7,18 +7,20 @@ import { __clearXrayCache } from "./xrayCache.js";
 import { searchGroundX } from "./groundxSearch.js";
 
 /**
- * Regression guard for the "no chat content in logs" invariant
- * (lib/logger.ts: "Free-form fields (chat content, document text) MUST NOT
- * be logged anywhere").
+ * Logging policy guard for searchGroundX (lib/logger.ts).
  *
- * The user's free-form RAG/chat query can carry PII (names, SSNs, account
- * numbers). It MUST NOT appear in ANY emitted log payload — not even
- * redacted-in-prod, because pino's redact paths don't match
- * `groundxSearch.query`/`groundxSearchRetry.query` and any non-prod/debug
- * deploy would emit it in cleartext. The fix removes `query` from both
- * `logger.info` payloads entirely; this test fails if it is ever re-added.
+ * POLICY (deliberate): the RAG search `query` IS logged in cleartext at the
+ * dispatch + retry sites — the team needs it to debug search behavior. These
+ * first two tests LOCK that decision (the query must appear in those payloads)
+ * so a future "no chat content in logs" sweep can't silently drop it without
+ * updating this policy.
+ *
+ * Retrieved document TEXT, by contrast, is still NOT logged (it can carry PII
+ * and is not needed for debugging at the summary site). The third test guards
+ * that: the result-summary payload must carry identifiers only, never snippet
+ * text.
  */
-describe("searchGroundX logging (PII guard)", () => {
+describe("searchGroundX logging policy", () => {
   function jsonOk(payload: unknown): Response {
     return new Response(JSON.stringify(payload), {
       status: 200,
@@ -47,7 +49,7 @@ describe("searchGroundX logging (PII guard)", () => {
     return JSON.stringify(value ?? null);
   }
 
-  it("does NOT emit the free-form query in the search-dispatch log payload", async () => {
+  it("emits the query in the search-dispatch log (deliberate debug policy)", async () => {
     const payloads = captureLoggerInfo();
     const client: GroundXClient = {
       forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "d1", text: "t" }] } })),
@@ -55,20 +57,17 @@ describe("searchGroundX logging (PII guard)", () => {
 
     await searchGroundX(SECRET_QUERY, { type: "bucket", bucketId: 42 }, client, "k");
 
-    // The dispatch log must carry the non-sensitive telemetry (scope/path/n)
-    // but never the free-form query.
+    // The dispatch log carries the query ON PURPOSE so search behavior is
+    // debuggable end-to-end.
     const dispatchLog = payloads.find((p) => flatten(p).includes("groundxSearch")) as Record<
       string,
       unknown
     >;
     expect(dispatchLog).toBeDefined();
-    for (const p of payloads) {
-      expect(flatten(p)).not.toContain(SECRET_QUERY);
-      expect(flatten(p)).not.toContain("123-45-6789");
-    }
+    expect(flatten(dispatchLog)).toContain(SECRET_QUERY);
   });
 
-  it("does NOT emit the free-form query in the zero-result retry log payload", async () => {
+  it("emits the query in the zero-result retry log (deliberate debug policy)", async () => {
     const payloads = captureLoggerInfo();
     // First search returns 0 results so the low-floor retry path fires.
     let call = 0;
@@ -85,10 +84,7 @@ describe("searchGroundX logging (PII guard)", () => {
     expect(call).toBeGreaterThanOrEqual(2); // retry actually fired
     const retryLog = payloads.find((p) => flatten(p).includes("groundxSearchRetry"));
     expect(retryLog).toBeDefined();
-    for (const p of payloads) {
-      expect(flatten(p)).not.toContain(SECRET_QUERY);
-      expect(flatten(p)).not.toContain("123-45-6789");
-    }
+    expect(flatten(retryLog)).toContain(SECRET_QUERY);
   });
 
   // Sibling of the query leak: the result-summary log MUST NOT emit retrieved

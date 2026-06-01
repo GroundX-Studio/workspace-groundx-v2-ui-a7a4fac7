@@ -150,16 +150,16 @@ export async function searchGroundX(
   const composed = composeFilters(options.rbacFilter ?? null, scopeFilter);
   if (composed) body.filter = composed;
 
-  // Dev-side request log so the console shows what we're actually asking
-  // GroundX — scope/path/filter shape ONLY. The free-form `query` is
-  // DELIBERATELY NOT logged: it is user chat content that can carry PII
-  // (names/SSNs/account numbers), and the module invariant (lib/logger.ts)
-  // is that chat content MUST NOT be logged anywhere — not even
-  // redacted-in-prod, since pino's redact paths don't match this nested
-  // field and any non-prod/debug deploy would emit it in cleartext.
+  // Dev/debug request log. Includes the user `query` ON PURPOSE: it is the key
+  // signal for debugging RAG/search behavior (reproducing why a search returned
+  // what it did) and the team needs it. NOTE: `query` is free-form user content
+  // that may contain PII (names/SSNs/account numbers) and is logged in
+  // CLEARTEXT — pino's redact paths (lib/logger.ts) do NOT cover this nested
+  // field. This is a deliberate trade-off; production log access + retention
+  // must be controlled accordingly.
   logger.info(
     {
-      groundxSearch: { path, scope: scope?.type ?? "none", bodyKeys: Object.keys(body), n: body.n, filter: body.filter ?? null },
+      groundxSearch: { path, scope: scope?.type ?? "none", query, bodyKeys: Object.keys(body), n: body.n, filter: body.filter ?? null },
     },
     "groundx search dispatch",
   );
@@ -192,9 +192,9 @@ export async function searchGroundX(
   // the first pass, so they never pay this second round-trip.
   if (rawResults.length === 0 && Number.isFinite(RAG_FALLBACK_RELEVANCE)) {
     logger.info(
-      // `query` deliberately omitted — see the dispatch-log comment above
-      // (free-form chat content MUST NOT be logged).
-      { groundxSearchRetry: { path, fallbackRelevance: RAG_FALLBACK_RELEVANCE } },
+      // `query` included for debugging (see the dispatch-log note above):
+      // cleartext free-form user content — ensure prod log access is controlled.
+      { groundxSearchRetry: { path, query, fallbackRelevance: RAG_FALLBACK_RELEVANCE } },
       "groundx search: 0 results at default relevance — retrying with low floor",
     );
     rawResults = await runSearch(RAG_FALLBACK_RELEVANCE);
