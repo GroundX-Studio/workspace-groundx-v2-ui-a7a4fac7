@@ -1,5 +1,13 @@
 # Phase 3 execution order — close out the core-data-followups tail
 
+> **STATUS 2026-06-01 — MOSTLY EXECUTED.** Steps 1–6 (the code folds: wf05b, chat-wire-types,
+> canvas-intent, generated-result, session-auth-subshapes, viewer-history-column-drop) are all
+> implemented + gated + **archived**. The follow-on `2026-06-01-data-model-tail` (the 6 residual
+> umbrella items) is also **executed + archived**. **Only two steps remain, both genuinely gated:**
+> step 7 `e2e-experience-audit` (interactive — Chrome DevTools MCP + visual sign-off) and step 8
+> `extraction-schemas-table-drop` (soak-gated on the `templates` migration soaking one prod release).
+> The ordering/dependency detail below is retained for those two + for history.
+
 `2026-05-31-core-data-followups` delivered §1–§5 + the security hardening (7a–7n) and is **archived**
 (`changes/archive/2026-06-01-2026-05-31-core-data-followups`). Its deferred tail — the 5 wide §4 folds,
 a full experience audit, and the soak-gated DB drop — was extracted into **6 focused changes**. This is
