@@ -195,7 +195,7 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   `SuggestedActionChips.test.tsx` (red — schema absent; green after). App + middleware suites green.
 
 ### 4b. Wire-types module + description-level drift guard (◑ MIXED — fold per twin, guard green)
-- [ ] **#18 shared wire-types module.** Move onto `@groundx/shared` `z.infer`: the `/api/chat/*`
+- [x] **#18 shared wire-types module.** **→ RELOCATED to `2026-05-31-chat-wire-types-shared`** (closed here by relocation; the remaining envelope/enum/customer-auth fold is owned by that focused change — the proposal-envelope twin + drift-guard mechanism already shipped in 2-7g). Move onto `@groundx/shared` `z.infer`: the `/api/chat/*`
   envelope (`ChatReply`/`ChatReplyDebug`/`ChatDispatchedIntent`/`ChatToolFailure` ↔ `ChatRouterResponse`/…,
   inline `_debug.scope`, `CreateChatSessionResult`, `scopeHint`), `AppUserMetadata`, the 7× `eventSource`
   enum (vs `IntentSource`), the WF-03 page-dim shape, `SchemaFieldExtractionResult`, the two customer-auth
@@ -214,7 +214,7 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   the `ChatReply`/`ChatRouterResponse` envelope fold, `AppUserMetadata`, the `eventSource`/`IntentSource`
   enum, the WF-03 page-dim shape, `SchemaFieldExtractionResult`, the customer-auth modules — each threads
   through many readers and is a multi-step fold of its own; left honestly open rather than half-wired.
-- [ ] **LOW — fold remaining inline wire-twins** onto the shared module: ~~`ProposalEnvelopeProvenance`
+- [x] **LOW — fold remaining inline wire-twins** **→ RELOCATED to `2026-05-31-chat-wire-types-shared`** (the X-Ray twin remains a cross-plan dependency of `wf05b`). onto the shared module: ~~`ProposalEnvelopeProvenance`
   (declared twice)~~ — DONE in step 2-7g (folded with #18 above; both declarations replaced by a
   `@groundx/shared` re-export, the twin can no longer drift). Still open: the debug-scope twin
   (`ChatRouterDebug.scope` ↔ `ChatReplyDebug.scope` → derive from shared `ContentScope`), the X-Ray
@@ -254,7 +254,7 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   `mysqlRepository.test.ts` ("row-mapper union validation (§4c)") — 3 corrupt-coercion (red first, green
   after) + 2 valid-passthrough (green throughout, proving behavior preserved). The MEDIUM `canvasIntentSchema`
   sub-item below is SEPARATE and remains open.
-- [ ] **MEDIUM — promote a single `canvasIntentSchema` (Zod) to `@groundx/shared`** and validate at both
+- [x] **MEDIUM — promote a single `canvasIntentSchema` (Zod) to `@groundx/shared`** **→ RELOCATED to `2026-05-31-canvas-intent-schema-shared`.** and validate at both
   boundaries that read `current_intent_json` (app ChatStore hydration `coerceHydratedIntent` structural
   guard + the middleware cast). Failing-first.
 
@@ -296,7 +296,7 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   source (grep) — the only surviving occurrences are the selector's own canonical implementation
   (`selectors.ts:25`) and a legitimate Probe in `SchemaView.test.tsx:644` (a test, not duplicated
   production logic).
-- [ ] **#20 illegal-states.** Session auth → `{kind:"anon"} | {kind:"authed";groundxUsername;
+- [x] **#20 illegal-states.** **→ leftover sub-shapes RELOCATED to `2026-05-31-session-auth-subshapes`** (the core `AnonSession | AuthedSession` union shipped in 2-7g; the `LoginReqCallback`/`SchemaFieldExtractionResult`/`parseChatStoreSnapshot` shapes move there). Session auth → `{kind:"anon"} | {kind:"authed";groundxUsername;
   groundxApiKey}`, collapse the ~12 empty-string `groundxUsername` checks; `LoginReqCallback` +
   `SchemaFieldExtractionResult` flat-record→discriminated union; add a `parseChatStoreSnapshot(unknown)`
   validator on the localStorage rehydration. Failing-first per shape.
@@ -439,7 +439,7 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   suite 687 green, middleware tsc clean. — DONE (step 2-7n, commit 5221923).
 
 ### 4e. Round-trip / dead-plumbing closeout (→ SEQUENTIAL/TDD)
-- [ ] **#17 §9 closeout.** Each persist chain gets a reader+writer or is DROPPED (the `attachments_json`
+- [x] **#17 §9 closeout.** **→ remaining `viewer_*` column drop RELOCATED to `2026-05-31-viewer-history-column-drop`** (the `chat_messages` dead-col drop + guard shipped in 2-7g). Each persist chain gets a reader+writer or is DROPPED (the `attachments_json`
   precedent): `chat_sessions` `viewer_history/overlays/workspace` cols (mutators issue no PATCH → NULL
   on reload — wire a viewer PATCH or delete cols + `chatSessionPatch` + the migration + `hydrateViewer`);
   `chat_messages` telemetry cols (written never read); `intent_log` (`listIntentLog` test-only). Per
@@ -603,10 +603,10 @@ independent test file with its own pass/fail. **AUTHOR THESE AFTER the bases the
 **Execution: → SEQUENTIAL (deploy-gated).** This task is **GATED, not ready.** It MUST NOT be started
 until the `templates` migration has soaked one release in production and the gate below is confirmed.
 
-- [ ] **UNBLOCK (soak gate):** confirm the `templates` migration has been live one release AND a code
+- [x] **UNBLOCK (soak gate):** **→ RELOCATED to `2026-05-31-extraction-schemas-table-drop`.** confirm the `templates` migration has been live one release AND a code
   sweep shows zero readers/writers of `extraction_schemas` remain (Phase-3 cutover removed them). Only
   after this passes may the drop task below begin.
-- [ ] **(gated on the UNBLOCK above)** Drop the `extraction_schemas` table AND in the same change remove
+- [x] **(gated on the UNBLOCK above)** **→ RELOCATED to `2026-05-31-extraction-schemas-table-drop`.** Drop the `extraction_schemas` table AND in the same change remove
   the boot copy-migration `INSERT…SELECT … FROM extraction_schemas` in `mysqlRepository.ts` (it reads
   that table; leaving it after the drop breaks `createSchema`/startup) AND drop the now-orphan
   `CREATE TABLE IF NOT EXISTS extraction_schemas`. A migration test confirms a fresh boot + `createSchema`
@@ -615,7 +615,7 @@ until the `templates` migration has soaked one release in production and the gat
 ## Closeout
 **Execution: → SEQUENTIAL (gate).** A single serial gate, never a workflow.
 
-- [ ] `openspec validate --all --strict` green; `scaffold/app` + `scaffold/middleware` suites green;
+- [x] `openspec validate --all --strict` green; `scaffold/app` + `scaffold/middleware` suites green;
   widget-contract + no-hardcoded-styles + tool-quality guards green.
-- [ ] Update `docs/agents/data-model.md` (remove the resolved duplicates/placeholders from the facts table).
-- [ ] Archive.
+- [x] Update `docs/agents/data-model.md` (the reconciliation matrix + guard-backed checklist landed in step 2-7h; the remaining facts-table duplicate/placeholder cleanup travels with the relocated folds' own closeouts).
+- [x] Archive. (The deferred tail was extracted into 6 focused changes — `chat-wire-types-shared`, `canvas-intent-schema-shared`, `session-auth-subshapes`, `viewer-history-column-drop`, `e2e-experience-audit`, `extraction-schemas-table-drop` — so this change archives on its delivered §1–§5 + security work; the §6 spec-delta moved to the drop change.)

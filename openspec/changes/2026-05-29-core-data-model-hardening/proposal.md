@@ -1,5 +1,15 @@
 # Core data-model hardening — turn the data structures into real, shared classes/objects
 
+> **DISPOSITION (2026-05-31): umbrella inventory — being decomposed, not executed as one change.**
+> This was the pass-1 inventory of structural debts. Its live work was largely delivered via the
+> archived `2026-05-31-core-data-followups` (§1–§5 + security), and the remaining wide folds were
+> extracted into focused changes: `2026-05-31-chat-wire-types-shared`,
+> `2026-05-31-canvas-intent-schema-shared`, `2026-05-31-session-auth-subshapes`,
+> `2026-05-31-viewer-history-column-drop` (see `docs/agents/phase-3-execution-order.md`). This change
+> is NOT auto-closed: it needs a reconciliation pass to mark delivered items done, extract any
+> genuinely-uncovered item (e.g. the `ExtractedFieldValue` ↔ `RenderedSection` "generated result"
+> unification, item #2) into its own focused change, and then retire. Do not execute it as-is.
+
 ## Why
 
 A pass-1 inventory (`docs/agents/data-model.md`) surfaced 11 structural debts: duplicate types,
