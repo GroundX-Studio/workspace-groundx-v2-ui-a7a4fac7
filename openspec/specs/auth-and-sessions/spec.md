@@ -115,3 +115,73 @@ The viewer overlay is the authoritative source for "is the sign-up surface up." 
 - **THEN** the topmost sign-up overlay is popped from `viewer.overlays`
 - **AND** `session.gate.status === "dismissed"`
 
+### Requirement: AppUserMetadata SHALL be single-sourced from @groundx/shared
+
+The `AppUserMetadata` shape SHALL be defined once as a `@groundx/shared`
+schema and consumed by both sides via re-export — replacing the twin declared
+on the middleware (`middleware/src/types.ts`, the persisted session-metadata
+record) and on the app (`app/src/api/entities/customerEntity.ts`, where the
+app currently declares a documented SUBSET). The shared schema SHALL make
+every session-metadata field OPTIONAL except `groundxUsername`, so each side
+narrows from one source rather than maintaining two divergent shapes. The
+twin SHALL be pinned with an `Eq<>` compile-time guard and validated at the
+app-metadata response parse boundary. The two customer-auth client modules
+(`customerEntity.ts`, `partnerCustomerEntity.ts`) SHALL likewise single-source
+their shared auth request/response wire shapes onto `@groundx/shared` where a
+middleware mirror exists.
+
+#### Scenario: App and middleware AppUserMetadata derive from one shared schema
+
+- **GIVEN** `appUserMetadataSchema` lives once on `@groundx/shared` with all fields optional except `groundxUsername`
+- **WHEN** the middleware persists metadata and the app reads it from the `getUserData` / `updateAppMetadata` responses
+- **THEN** both sides consume the shared type via re-export
+- **AND** an `Eq<AppUserMetadata, SharedAppUserMetadata>` guard pins the shape under the build
+- **AND** the app-metadata response validates against `appUserMetadataSchema` at the parse boundary.
+
+#### Scenario: The customer-auth client wire shapes single-source where a middleware mirror exists
+
+- **GIVEN** the customer-auth client modules declare login/register/auth-response (and partner credentials/profile) wire shapes
+- **WHEN** a shape has a middleware mirror on the same wire
+- **THEN** the shape is single-sourced on `@groundx/shared` and both sides re-export it under an `Eq<>` guard
+- **AND** the auth response validates against the shared schema at its parse boundary.
+
+### Requirement: Session/auth and rehydration shapes SHALL be discriminated unions validated at trust boundaries
+
+Session/auth and rehydration shapes SHALL be modeled as discriminated unions (a `kind`/`status`
+discriminant carrying ONLY the fields meaningful to that variant), and untrusted external input at a
+trust boundary SHALL be validated (parsed) before use rather than type-cast. No flat-record sentinels
+(empty-string, all-false boolean tuples, or success-only fields riding a non-success record) and no
+`as <Type>` casts of untrusted input.
+
+This generalizes the already-shipped `AnonSession | AuthedSession` request-session union to the
+remaining client-side shapes: the login-result callback, the per-field extraction result, and the
+localStorage ChatStore snapshot.
+
+#### Scenario: Login result is a discriminated union, not a boolean tuple
+
+- **GIVEN** the login callback type (`LoginReqCallback`)
+- **WHEN** `login()` resolves
+- **THEN** the result is a discriminated union narrowed on `kind` (success / error / banned / failed),
+  with `error` present only on the error variant
+- **AND** the old flat record (e.g. `{ isLoggedIn: true, error: true, banned: false }`) and the
+  all-false silent no-op are NOT assignable (illegal combinations unrepresentable).
+
+#### Scenario: Per-field extraction result models its states as variants
+
+- **GIVEN** a `SchemaFieldExtractionResult`
+- **WHEN** its `status` is `"pending"` or `"error"`
+- **THEN** the success-only fields (`value`, `confidence`, `citation`) are NOT present on the type
+- **AND** a `"done"` result carries `value` (plus optional `confidence`/`previousConfidence`/`citation`)
+- **AND** a `"pending"` result with a non-null `value`, or an `"error"` result carrying a `confidence`,
+  fails type-checking.
+
+#### Scenario: ChatStore snapshot is parsed at the localStorage boundary, not cast
+
+- **GIVEN** a ChatStore snapshot read from localStorage
+- **WHEN** `deserialize` rehydrates it
+- **THEN** it is validated via `parseChatStoreSnapshot(unknown): SerializedSnapshot | null` (a Zod
+  parse mirroring the serialized shape), not `JSON.parse(raw) as SerializedSnapshot`
+- **AND** a corrupt or wrong-version snapshot returns `null` and is NOT trusted (rehydration falls back
+  to legacy migration / a fresh store)
+- **AND** a valid current-version snapshot deserializes to the identical in-memory state as before.
+
