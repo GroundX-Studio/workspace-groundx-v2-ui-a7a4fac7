@@ -31,6 +31,7 @@ vi.mock("@/api", () => ({
       listGroundXProcesses: vi.fn(),
       getGroundXProcessingStatus: vi.fn(),
       cancelGroundXProcess: vi.fn(),
+      getGroundXDocumentXray: vi.fn(),
     },
   },
 }));
@@ -85,6 +86,52 @@ describe("DocumentsProvider (TS-02)", () => {
 
     expect(api.groundxDocuments.ingestGroundXRemoteDocuments).toHaveBeenCalledTimes(1);
     expect(result.current.msg.successMessage).toBe("Ingest started.");
+  });
+
+  // 2026-06-01-data-model-tail item 5 — `getDocumentXray` must runtime-narrow
+  // the SDK-boundary response against the shared `documentXrayResponseSchema`
+  // instead of blind-casting it through `as unknown as DocumentXrayResponse`.
+  describe("getDocumentXray (item 5 — runtime-narrow the SDK boundary)", () => {
+    const validXray = {
+      fileName: "utility-bill-april-2026.pdf",
+      fileType: "pdf",
+      sourceUrl: "https://upload.eyelevel.ai/prod/file/ssp/abc.pdf",
+      documentPages: [
+        { pageNumber: 1, pageUrl: "https://upload.eyelevel.ai/prod/page/1.jpg", width: 1700, height: 2200, chunks: [] },
+      ],
+      chunks: [],
+    };
+
+    it("returns the parsed X-Ray response for a valid SDK payload (behavior-preserving)", async () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(validXray);
+
+      const { result } = renderHook(() => useDocumentsContext(), { wrapper });
+      let actionResult: { isSuccess: boolean; response?: unknown } | undefined;
+      await act(async () => {
+        actionResult = await result.current.getDocumentXray("doc-1");
+      });
+
+      expect(actionResult?.isSuccess).toBe(true);
+      expect(actionResult?.response).toEqual(validXray);
+    });
+
+    it("rejects a malformed SDK response (does not blind-cast it through)", async () => {
+      // Missing required `documentPages`/`chunks`/`sourceUrl` — today's
+      // `as unknown as DocumentXrayResponse` would pass this straight through.
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue({
+        fileName: "broken.pdf",
+        fileType: "pdf",
+      });
+
+      const { result } = renderHook(() => useDocumentsContext(), { wrapper });
+      let actionResult: { isSuccess: boolean; error?: unknown } | undefined;
+      await act(async () => {
+        actionResult = await result.current.getDocumentXray("doc-1");
+      });
+
+      expect(actionResult?.isSuccess).toBe(false);
+      expect(actionResult?.error).toBeInstanceOf(Error);
+    });
   });
 
   it("a thrown API error surfaces 'Document operation failed.' and isSuccess=false", async () => {

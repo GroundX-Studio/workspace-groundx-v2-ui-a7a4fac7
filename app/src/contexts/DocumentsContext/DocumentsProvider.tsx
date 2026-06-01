@@ -1,3 +1,4 @@
+import { documentXrayResponseSchema } from "@groundx/shared";
 import { FC, ReactNode, useCallback, useState } from "react";
 
 import { api } from "@/api";
@@ -99,16 +100,15 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   const getDocumentXray = useCallback(
     (documentId: string, options?: RequestOptions) =>
       run(async () => {
-        // The entity wrapper currently types this as `{ xray: Metadata }`
-        // but the real API returns the response object at top level
-        // (verified 2026-05-25; see docs/agents/groundx-real-api-shapes.md).
-        // The entity type was updated; the cast guards the legacy shape
-        // through the SDK boundary.
-        const response = (await api.groundxDocuments.getGroundXDocumentXray(
-          documentId,
-          options,
-        )) as unknown as import("@/api/entities/groundxDocumentsEntity").DocumentXrayResponse;
-        return response;
+        // 2026-06-01-data-model-tail item 5 — runtime-narrow the SDK-boundary
+        // response against the canonical `@groundx/shared` X-Ray schema instead
+        // of blind-casting (`as unknown as DocumentXrayResponse`). The real API
+        // returns the response object at top level (verified 2026-05-25; see
+        // docs/agents/groundx-real-api-shapes.md). A malformed payload now
+        // throws here and surfaces as an `SdkActionResult` failure rather than
+        // being passed straight through as if it were well-formed.
+        const raw = await api.groundxDocuments.getGroundXDocumentXray(documentId, options);
+        return documentXrayResponseSchema.parse(raw);
       }),
     [run]
   );

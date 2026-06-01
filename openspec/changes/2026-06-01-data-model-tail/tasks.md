@@ -191,21 +191,46 @@ blind-cast.
 
 ## 5. getDocumentXray cast — runtime-narrow the SDK boundary (item 5)
 
-- [ ] **Failing test FIRST (app suite):** assert `getDocumentXray` returns a
+- [x] **Failing test FIRST (app suite):** assert `getDocumentXray` returns a
       value that passes a runtime parse of the X-Ray response shape, and that a
       malformed SDK response is rejected/coerced rather than blind-cast through.
       RED first — today's `as unknown as DocumentXrayResponse`
       (`DocumentsProvider.tsx:110`) passes any shape straight through.
-- [ ] Replace the `as unknown as DocumentXrayResponse` double-cast with a runtime
+      DONE: added two cases to `DocumentsProvider.test.tsx` under "getDocumentXray
+      (item 5 …)" — (a) a valid X-Ray payload round-trips to
+      `isSuccess:true`/`response` equal (behavior-preserving); (b) a malformed
+      payload (missing `documentPages`/`chunks`/`sourceUrl`) resolves to
+      `isSuccess:false` + `error instanceof Error`. RED first proven: against the
+      pre-change blind cast the malformed case returned `isSuccess:true`
+      (`expected true to be false` at line 132).
+- [x] Replace the `as unknown as DocumentXrayResponse` double-cast with a runtime
       parse/narrow against the shared X-Ray schema from task 4 (coerce/reject on
       invalid). If the legacy SDK return type (`{ xray: Metadata }`) genuinely
       precludes a clean parse, instead reduce it to a SINGLE documented guarded
       boundary with a runtime check (not a blind cast) and a comment naming the
       SDK-shape mismatch. App `tsc --noEmit` GREEN; test GREEN.
-- [ ] **Adversarial review:** confirm the `as unknown as` at
+      DONE: `DocumentsProvider.tsx` now imports `documentXrayResponseSchema` from
+      `@groundx/shared` (the canonical schema promoted in item 4) and the
+      `getDocumentXray` work fn returns `documentXrayResponseSchema.parse(raw)`. A
+      clean parse IS possible (item 4 already retyped the entity wrapper to
+      `Promise<DocumentXrayResponse>`, so the residual cast was a leftover no-op
+      double-cast, not a `{ xray: Metadata }` mismatch) — no residual boundary
+      cast needed. A malformed payload throws inside `run()` → `sdkFailure`. App
+      build (incl. `tsc`) clean; test GREEN.
+- [x] **Adversarial review:** confirm the `as unknown as` at
       `DocumentsProvider.tsx:110` is gone OR is now a single documented runtime-
       guarded boundary (not a blind cast); confirm the malformed-response test is
       real RED against the pre-change code.
+      DONE: grep of `src/contexts/DocumentsContext/` finds NO live
+      `as unknown as` — the only surviving occurrences are in explanatory
+      comments/test prose; the actual cast (and the now-unused inline
+      `DocumentXrayResponse` import) are gone, replaced by a `.parse()`. Malformed
+      test proven real RED against pre-change code (see above). Behavior-preserving
+      verified: the real consumers' fixtures (`PdfViewerWidget.test.tsx` `fakeXray`,
+      `App.test.tsx` xray mock) satisfy the schema and stay GREEN (PdfViewer 23/23,
+      App 2/2). App suite 184/1510 GREEN (+2 new tests vs item-4 closeout's 1508);
+      middleware 38/695 GREEN; app build + middleware `tsc --noEmit` (EXIT 0) clean;
+      `openspec validate 2026-06-01-data-model-tail --strict` valid.
 
 ## 6. IngestProcess shape — probe + reconcile (item 6)
 
