@@ -3,6 +3,28 @@
 Status: **IN PROGRESS** — harness stood up, methodology established, initial passes started,
 key setup finding resolved. NOT complete: the full §2 16-pass measured sweep + the §4 fix loop remain.
 
+## Live-data restart (2026-06-01, after MOCK_MODE removal — "live data only")
+Re-ran against REAL GroundX on the post-`retire-mock-mode` build (there is no MOCK_MODE anymore; the
+middleware boots with `APP_REPOSITORY_MODE=memory` + the Partner key). Finding **F-1 is now RESOLVED**
+(the mock dev-client stub that broke the viewer is deleted). Measured passes (all live, console clean):
+- **2.1 F1 Ingest — PASS (live):** sample-utility card + byo-pdf/url/folder tiles render; the parsed-doc
+  fetch (`/api/v1/ingest/document/c3bfff49…`) returns **200 real data**; clicking the sample advances to
+  `/onboarding/28454/utility`. (Note: the preview driver is flaky clicking on a freshly-loaded page —
+  needed a click-and-poll; not a product defect.)
+- **2.2 F2 Understand/PdfViewer — PASS (live), the 24px-collapse trap CLEARED:** the PDF renders as a real
+  page image **958×1240** (widget box 958×801) with 3 page thumbnails (p.1/p.2/p.3 = the 3-page utility
+  bill), `pdf-viewer-error` ABSENT. This is the exact check that FAILED under the mock stub — now correct
+  on live data.
+- **Report surface — PASS (live), no-template state graceful:** for a fresh customer (no template) the
+  `smart-report-render` widget shows `smart-report-empty`: "No report for this scope yet. Pin an answer or
+  open the builder to start one." — never an error/fixture. Validates live-report-render + mock-removal end
+  to end.
+Still to drive (live): 2.3 Extract field add/edit/JSON-toggle + provenance highlight · 2.4 chat send +
+citation chips · 2.5 report render-when-template-exists + section accept/reject + builder · 2.6 Integrate ·
+2.7 sign-up gate · 2.9 gates · 2.10 citation round-trip click→viewer highlight · 2.11 auth (password toggle,
+claim/flip) · 2.12 steady mode parity · 2.13 debug reset · 2.14 responsive/mobile · 2.15 reduced-motion ·
+2.16 console/network sweep. Plus §3 defect log + §4 fix loop + §5 sign-off.
+
 ## Harness setup (done)
 - Both dev servers run via `Claude_Preview preview_start` (frontend :5173, middleware :3001).
 - **`.claude/launch.json` fix (local, UNCOMMITTED — user-specific path):** the user's default shell node
