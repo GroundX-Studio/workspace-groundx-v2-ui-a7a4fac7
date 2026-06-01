@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { GroundXClient, LlmClient } from "../types.js";
 import type { WidgetRole } from "@groundx/shared";
 
-import { SERVER_TOOL_CATALOG } from "./toolCatalog.js";
+import { SERVER_TOOL_CATALOG, toolsForStep, UNKNOWN_VIEWER_STEP } from "./toolCatalog.js";
 import { __clearXrayCache } from "./xrayCache.js";
 import { __clearWordMapCache } from "./wordMapCache.js";
 import wordMapFixture from "./wordMap.fixture.json" with { type: "json" };
@@ -1926,6 +1926,50 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       "wizard_finish",
       "wizard_next",
     ]);
+  });
+
+  // ── 2026-06-01-data-model-tail item 2: validate activeStepKind, don't widen ──
+  //
+  // SECURITY: `request.activeStepKind` is an untrusted wire string. A
+  // present-but-INVALID kind must route to the SAFE MINIMUM (universal tools
+  // only) — NOT the full catalog (the old `as ViewerStepKind` cast let bogus
+  // input fall through and a naive `safeParse → undefined` fix would widen to
+  // FULL). See toolCatalog `UNKNOWN_VIEWER_STEP`.
+  async function toolNamesFor(activeStepKind: string | null | undefined): Promise<string[]> {
+    const { groundxClient, llmClient, llmForward } = mkClients("Answer.", []);
+    await routeChat(makeRequest({ newUserMessage: "Q", activeStepKind }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      mockMode: false,
+    });
+    const body = JSON.parse((llmForward.mock.calls[0][1] as RequestInit).body as string);
+    return (body.tools as Array<{ function: { name: string } }>).map((t) => t.function.name).sort();
+  }
+
+  it("a present-but-INVALID activeStepKind routes to the safe-minimum set, NOT the full catalog", async () => {
+    const safe = await toolNamesFor("totally-bogus-step");
+    // safe minimum == universal tools (no availableSteps) — the same set
+    // toolsForStep(UNKNOWN_VIEWER_STEP) yields.
+    const expectedSafe = toolsForStep(UNKNOWN_VIEWER_STEP).map((t) => t.name).sort();
+    expect(safe).toEqual(expectedSafe);
+    // Must be strictly narrower than the full catalog (anti-widening).
+    expect(safe.length).toBeLessThan(SERVER_TOOL_CATALOG.length);
+    // Must not be wider than any valid step's set.
+    const reportSet = new Set(toolsForStep("report").map((t) => t.name));
+    for (const name of safe) expect(reportSet.has(name)).toBe(true);
+  });
+
+  it("undefined activeStepKind still yields the FULL catalog (legacy caller)", async () => {
+    const full = await toolNamesFor(undefined);
+    expect(full.length).toBe(SERVER_TOOL_CATALOG.length);
+  });
+
+  it("a VALID activeStepKind yields its correctly-filtered set", async () => {
+    const docViewer = await toolNamesFor("doc-viewer");
+    expect(docViewer).toEqual(toolsForStep("doc-viewer").map((t) => t.name).sort());
   });
 });
 

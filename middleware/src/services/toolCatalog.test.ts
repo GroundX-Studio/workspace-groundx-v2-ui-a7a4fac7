@@ -8,11 +8,14 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { viewerStepKindSchema } from "@groundx/shared";
+
 import {
   getServerTool,
   roleExposes,
   SERVER_TOOL_CATALOG,
   toolsForStep,
+  UNKNOWN_VIEWER_STEP,
   type ServerTool,
 } from "./toolCatalog.js";
 
@@ -160,6 +163,49 @@ describe("server tool catalog", () => {
 
   it("toolsForStep with undefined returns the full catalog", () => {
     expect(toolsForStep(undefined).length).toBe(SERVER_TOOL_CATALOG.length);
+  });
+
+  // ── 2026-06-01-data-model-tail item 2a: "unknown step → safe minimum" ──
+  //
+  // SECURITY: the middleware faces the wire. `request.activeStepKind` is an
+  // untrusted string. A naive `safeParse → undefined` fallback would map an
+  // invalid kind to `undefined`, which `toolsForStep` treats as the LEGACY
+  // (full-catalog) caller — WIDENING the tool surface exposed to the LLM. The
+  // fix is an explicit "unknown" signal that resolves to the SAFE MINIMUM
+  // (universal/unrestricted tools only — strictly a subset of every valid
+  // step's set), never the full catalog and never wider than a valid step.
+  it("toolsForStep(UNKNOWN_VIEWER_STEP) returns ONLY the safe-minimum (universal) set", () => {
+    const safe = toolsForStep(UNKNOWN_VIEWER_STEP).map((t) => t.name).sort();
+    // safe minimum == tools with no `availableSteps` restriction (universal).
+    const universal = SERVER_TOOL_CATALOG.filter(
+      (t) => !t.availableSteps || t.availableSteps.length === 0,
+    )
+      .map((t) => t.name)
+      .sort();
+    expect(safe).toEqual(universal);
+    // Must NOT be the full catalog (the widening this guard exists to stop).
+    expect(safe.length).toBeLessThan(SERVER_TOOL_CATALOG.length);
+    // Must NOT be wider than ANY valid step's filtered set: safe ⊆ each valid set.
+    for (const kind of viewerStepKindSchema.options) {
+      const validSet = new Set(toolsForStep(kind).map((t) => t.name));
+      for (const name of safe) {
+        expect(validSet.has(name)).toBe(true);
+      }
+      // and the safe minimum is never larger than a valid step's set.
+      expect(safe.length).toBeLessThanOrEqual(validSet.size);
+    }
+  });
+
+  it("toolsForStep(UNKNOWN_VIEWER_STEP) composes with the role filter", () => {
+    // The unknown→safe-minimum path still honors the SERVER-derived role axis.
+    const anonSafe = new Set(
+      toolsForStep(UNKNOWN_VIEWER_STEP, "anonymous").map((t) => t.name),
+    );
+    const memberSafe = toolsForStep(UNKNOWN_VIEWER_STEP, "member").map((t) => t.name);
+    // anonymous safe-minimum is a subset of member safe-minimum.
+    for (const name of anonSafe) {
+      expect(memberSafe).toContain(name);
+    }
   });
 
   // ── 2026-05-31-tool-system-completion: server role axis + filter ──

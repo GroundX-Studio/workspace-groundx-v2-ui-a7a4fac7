@@ -22,7 +22,13 @@ import {
 } from "./citationGeometry.js";
 import { assignTier, confidenceFor, verifyQuote } from "./attribution.js";
 import { fetchDocumentWordMap } from "./wordMapCache.js";
-import { getServerTool, toolsForStep, type ViewerStepKind } from "./toolCatalog.js";
+import {
+  getServerTool,
+  toolsForStep,
+  UNKNOWN_VIEWER_STEP,
+  type UnknownViewerStep,
+  type ViewerStepKind,
+} from "./toolCatalog.js";
 import { toOpenAiTools, type OpenAiFunctionTool } from "./zodToJsonSchema.js";
 import { searchGroundX } from "./groundxSearch.js";
 import {
@@ -46,7 +52,7 @@ import {
 import type { LlmClient } from "../types.js";
 import { logger } from "../lib/logger.js";
 
-import type { ContentScope } from "@groundx/shared";
+import { viewerStepKindSchema, type ContentScope } from "@groundx/shared";
 
 export async function runRagPipeline(
   request: ChatRouterRequest,
@@ -85,22 +91,30 @@ export async function runRagPipeline(
   // (filtered to the active ViewerStep) + advertise it to the LLM via
   // native function calling. The empty-catalog case still sends a
   // `tools: []` so the test surface can assert request shape.
-  // NOTE: `as ViewerStepKind` is an unvalidated wire cast (a tracked loose-typing
-  // seam). Do NOT "fix" it by `safeParse → undefined` fallback: `toolsForStep(undefined)`
-  // returns the FULL catalog, but a present-but-invalid kind goes through the
-  // filter and returns the safe unrestricted-only set — so the naive validation
-  // WIDENS the tool surface for bogus input. A proper fix needs `toolsForStep` to
-  // express "unknown step → safe minimum" first. Tracked separately.
+  // SECURITY (2026-06-01-data-model-tail item 2): `request.activeStepKind` is an
+  // untrusted wire string. We validate it with `viewerStepKindSchema` and route
+  // each of the three cases EXPLICITLY (no bare `as ViewerStepKind` cast):
+  //   - absent (null/undefined) → `undefined` → FULL catalog (legacy caller);
+  //   - a valid `ViewerStepKind` → that step's filtered set;
+  //   - present-but-INVALID    → `UNKNOWN_VIEWER_STEP` → SAFE MINIMUM.
+  // Mapping an invalid kind to `undefined` would WIDEN the surface to the full
+  // catalog, so the `UNKNOWN_VIEWER_STEP` sentinel (toolCatalog item 2a) is what
+  // keeps a bogus value from exposing more tools than a legitimate step.
   // 2026-05-31-tool-system-completion — compose the step filter with the
   // SERVER-derived caller role. `request.callerRole` comes from chatHandler
   // (session.ownerUserId → member/anonymous); it is NEVER client-trusted. A
   // member-only tool (`availableIn: ["member"]`) is absent from the catalog an
   // anonymous caller's LLM sees. When `callerRole` is omitted the role filter
   // is a no-op (legacy/non-RAG callers) — the production path always supplies it.
-  const catalog = toolsForStep(
-    request.activeStepKind as ViewerStepKind | undefined,
-    request.callerRole,
-  );
+  const rawStepKind = request.activeStepKind;
+  let stepKind: ViewerStepKind | UnknownViewerStep | undefined;
+  if (rawStepKind === null || rawStepKind === undefined) {
+    stepKind = undefined; // legacy caller / no step context → full catalog
+  } else {
+    const parsed = viewerStepKindSchema.safeParse(rawStepKind);
+    stepKind = parsed.success ? parsed.data : UNKNOWN_VIEWER_STEP;
+  }
+  const catalog = toolsForStep(stepKind, request.callerRole);
   const openAiTools: OpenAiFunctionTool[] = toOpenAiTools(catalog);
 
   const llmResponse = await callGroundedLlm(

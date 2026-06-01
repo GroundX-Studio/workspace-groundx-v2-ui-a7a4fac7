@@ -49,7 +49,7 @@ blind-cast.
 > distinguishes "no step (legacy caller) → full" from "unknown/invalid step →
 > safe minimum". DO THIS FIRST.
 
-- [ ] **Failing test FIRST (middleware suite, file-serial):** in the
+- [x] **Failing test FIRST (middleware suite, file-serial):** in the
       `toolCatalog` test, assert: (a) `toolsForStep(undefined)` returns the full
       catalog (legacy caller — unchanged); (b) a NEW explicit "unknown" signal
       (e.g. a sentinel arg or a separate guard) returns ONLY the safe-minimum
@@ -57,11 +57,11 @@ blind-cast.
       a bogus string yields today; (c) a valid `ViewerStepKind` returns its
       filtered set unchanged. RED first — there is no "unknown → safe minimum"
       path today (`toolCatalog.ts:725`).
-- [ ] Extend `toolsForStep` (or add a sibling) so an explicitly-unknown step
+- [x] Extend `toolsForStep` (or add a sibling) so an explicitly-unknown step
       resolves to the safe-minimum set, leaving `undefined` (legacy) → full and a
       valid kind → its filter both unchanged. Honor the file-serial vitest config
       (no parallelism change). Tests GREEN.
-- [ ] **Adversarial review:** confirm the three cases are genuinely distinct in
+- [x] **Adversarial review:** confirm the three cases are genuinely distinct in
       the implementation (full vs safe-minimum vs filtered) and the test asserts
       all three; confirm no existing `toolsForStep` caller's behavior changed for
       `undefined` or a valid kind (grep callers).
@@ -70,21 +70,21 @@ blind-cast.
 
 > GATED on task 2a. Do not start until 2a is done and green.
 
-- [ ] **Failing test FIRST (middleware suite, file-serial):** in the ragPipeline
+- [x] **Failing test FIRST (middleware suite, file-serial):** in the ragPipeline
       test, feed a `request.activeStepKind` that is a present-but-invalid string;
       assert the assembled catalog is the SAFE-MINIMUM set (via the 2a path), NOT
       the widened unrestricted-only set and NOT the full catalog. Add/keep a valid-
       kind case asserting the correctly-filtered catalog, and an `undefined` case
       asserting the full catalog. RED first on the invalid-string case (today's
       `as ViewerStepKind` lets it fall through to the wide set).
-- [ ] Replace `request.activeStepKind as ViewerStepKind | undefined` at
+- [x] Replace `request.activeStepKind as ViewerStepKind | undefined` at
       `ragPipeline.ts:101` with a `viewerStepKindSchema`-validated read
       (`@groundx/shared`) that routes a present-but-invalid kind to the 2a
       "unknown → safe minimum" path, leaves `undefined` → full, and a valid kind
       → its filter. Drop the bare cast. Update the in-code comment (the seam is
       no longer "tracked separately" — it is fixed). Tests GREEN; middleware
       `tsc --noEmit` GREEN.
-- [ ] **Adversarial review:** confirm the bare `as ViewerStepKind` at
+- [x] **Adversarial review:** confirm the bare `as ViewerStepKind` at
       `ragPipeline.ts:101` is gone; confirm the invalid-input test FAILS against
       the pre-change code (true RED) and was not weakened; confirm the safe-
       minimum result is NOT wider than the legacy unrestricted-only set this

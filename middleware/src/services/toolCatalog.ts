@@ -714,6 +714,26 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
 ];
 
 /**
+ * Explicit "the step is present on the wire but is NOT a recognized
+ * `ViewerStepKind`" sentinel. Passing this to `toolsForStep` resolves to the
+ * SAFE MINIMUM (universal/unrestricted tools only) — strictly a subset of every
+ * valid step's set — NOT the full catalog.
+ *
+ * SECURITY (2026-06-01-data-model-tail item 2a): `request.activeStepKind` is an
+ * untrusted wire string. The naive `safeParse → undefined` fallback maps an
+ * invalid kind to `undefined`, which `toolsForStep` treats as the LEGACY caller
+ * and answers with the FULL catalog — WIDENING the tool surface exposed to the
+ * LLM for bogus input. Callers MUST distinguish the three cases explicitly:
+ *   - `undefined`            → legacy caller (no step context) → full catalog
+ *   - a valid `ViewerStepKind` → that step's filtered set
+ *   - `UNKNOWN_VIEWER_STEP`  → unrecognized/untrusted kind → safe minimum
+ * It is a unique sentinel object so it can never collide with a real kind
+ * string and the union below cannot be satisfied by an arbitrary string.
+ */
+export const UNKNOWN_VIEWER_STEP = Symbol("unknown-viewer-step");
+export type UnknownViewerStep = typeof UNKNOWN_VIEWER_STEP;
+
+/**
  * Tools exposed for the given ViewerStep + caller role. Mirrors the app-side
  * `toolRegistry.forStep`. The two filters COMPOSE: a tool is exposed IFF its
  * `availableSteps` admits `stepKind` (absent/empty → every step) AND
@@ -721,14 +741,27 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
  * `role` is omitted the role filter is a no-op (back-compat — full per-step
  * catalog). The caller's role is derived SERVER-side (`chatHandler.ts`), never
  * trusted from the client.
+ *
+ * `stepKind` is one of three EXPLICIT cases (see `UNKNOWN_VIEWER_STEP`):
+ * `undefined` → full catalog (legacy); a valid kind → its filtered set;
+ * `UNKNOWN_VIEWER_STEP` → safe minimum (universal tools only). An untrusted
+ * wire value must be coerced to exactly one of these by the caller (never
+ * blind-cast to `ViewerStepKind`).
  */
 export function toolsForStep(
-  stepKind: ViewerStepKind | undefined,
+  stepKind: ViewerStepKind | UnknownViewerStep | undefined,
   role?: WidgetRole,
 ): ServerTool[] {
+  // SAFE MINIMUM: an explicitly-unknown step exposes ONLY universal tools
+  // (no `availableSteps`). This is strictly a subset of every valid step's set
+  // and never the full catalog — so a bogus wire value can never widen the
+  // surface past a legitimate restricted step.
+  const isUnknown = stepKind === UNKNOWN_VIEWER_STEP;
   return SERVER_TOOL_CATALOG.filter((t) => {
-    const stepOk =
-      !stepKind || !t.availableSteps || t.availableSteps.length === 0 || t.availableSteps.includes(stepKind);
+    const unrestrictedStep = !t.availableSteps || t.availableSteps.length === 0;
+    const stepOk = isUnknown
+      ? unrestrictedStep
+      : !stepKind || unrestrictedStep || t.availableSteps!.includes(stepKind);
     const roleOk = role === undefined || roleExposes(t, role);
     return stepOk && roleOk;
   });
