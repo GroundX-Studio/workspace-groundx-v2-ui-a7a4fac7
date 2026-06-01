@@ -19,12 +19,14 @@ import { useNavigate } from "react-router-dom";
 
 import type { ContentScope } from "@groundx/shared";
 
+import { isResolvedDocumentId } from "@/api/documentId";
 import { AppShell } from "@/components/layout/AppShell";
 import {
   OnboardingNav,
   useOnboardingNavCollapsed,
   type OnboardingNavItemKey,
 } from "@/components/layout/OnboardingNav/OnboardingNav";
+import { ScopedCanvas } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 import {
   ONBOARDING_NAV_WIDTH_COLLAPSED,
   ONBOARDING_NAV_WIDTH_FULL,
@@ -33,8 +35,9 @@ import {
 } from "@/constants";
 import { chatExperienceRegistry } from "@/conversation/chatExperienceRegistry";
 import { ConversationFlow } from "@/conversation/ConversationFlow";
-import { useChatStore } from "@/contexts/ChatStoreContext";
+import { selectActiveStep, useChatStore, type ViewerStep } from "@/contexts/ChatStoreContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
+import { useWidgetRole } from "@/lib/widgetRole";
 
 // The demo workspace bucket, mirroring OnboardingShell's `scenarioRegistry
 // .bucketId ?? 28454` fallback (the seeded shared demo bucket). When the
@@ -103,6 +106,27 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
 
   const activeSessionId = chatState.activeSessionId;
 
+  // Canvas mount wiring — the SAME shared `<ScopedCanvas>` path OnboardingShell
+  // uses (DL-5: this shell previously stubbed the canvas, so no viewer widget
+  // ever mounted in the authed experience). The active viewer step selects the
+  // widget; the scope adapts by step kind.
+  const widgetRole = useWidgetRole();
+  const activeChatSession =
+    activeSessionId != null ? chatState.sessions.get(activeSessionId) : undefined;
+  const latestViewerStep = selectActiveStep(activeChatSession);
+
+  // A doc-viewer step (e.g. from a CiteChip / "Show source" dispatch) narrows
+  // to the cited single document; every other kind renders over the shell's
+  // base scope (bucket / bucket+project-filter), the correct scope for
+  // report / integrate / extract over the workspace or project.
+  const canvasStep: ViewerStep = latestViewerStep ?? { kind: "ingest-picker" };
+  const canvasScope: ContentScope = useMemo(() => {
+    if (canvasStep.kind === "doc-viewer" && isResolvedDocumentId(canvasStep.documentId)) {
+      return { type: "documents", documentIds: [canvasStep.documentId] };
+    }
+    return scope;
+  }, [canvasStep, scope]);
+
   const handleNavItemClick = (key: OnboardingNavItemKey) => {
     if (key === "workspaces") return void navigate("/workspaces");
     if (key === "projects") return void navigate("/projects");
@@ -132,9 +156,11 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
   const canvasPane = (
     <Box
       data-testid="scoped-shell-canvas-pane"
-      sx={{ width: "100%", flex: 1, height: "100%", backgroundColor: WHITE }}
+      sx={{ width: "100%", flex: 1, height: "100%", backgroundColor: WHITE, overflow: "hidden" }}
       aria-label="Canvas"
-    />
+    >
+      <ScopedCanvas scope={canvasScope} step={canvasStep} role={widgetRole} reportSurface="render" />
+    </Box>
   );
 
   return (

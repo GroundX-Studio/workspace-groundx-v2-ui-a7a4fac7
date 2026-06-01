@@ -32,7 +32,21 @@ Audited the post-`retire-mock-mode` build against REAL GroundX (no MOCK_MODE). O
   extracted-field data (Extract already has `amount`/`balance_payable` values) rather than raw RAG
   search; or re-ingest the sample as plain-layout so search carries prose. → ticket as its own change.
 
-### DL-5 · Steady mode (scoped shell canvas) · P1 · TRIAGED-TICKETED → `2026-06-01-steady-canvas-mount`
+### DL-5 · Steady mode (scoped shell canvas) · P1 · REVERIFIED (fixed in `2026-06-01-steady-canvas-mount`)
+- **FIX (2026-06-01):** `ScopedConversationShell` now renders `<ScopedCanvas step={activeViewerStep}
+  scope={canvasScope} role={widgetRole} reportSurface="render">` in its canvas slot (was an empty `<Box>`),
+  reading the active viewer step via `selectActiveStep` and narrowing scope to `documents:[docId]` for a
+  doc-viewer step — the same shared mount path OnboardingShell uses.
+- **Test:** `ScopedConversationShell.test.tsx` "a doc-viewer viewer step mounts the production PdfViewer in
+  the steady canvas pane" — confirmed RED against the stub, GREEN after the fix.
+- **Live re-verify (MEASURED, /workspaces):** sent a query → grounded answer (6 citations) → clicked
+  `cite-chip-1` (page 2) → `pdf-viewer-widget` now mounts in `scoped-shell-canvas-pane` (0→1 children), real
+  page renders 658×852, viewer jumped to `data-highlight-page="2"`. Screenshot corroborated (page-2 "Charge
+  Detail" in canvas). NOTE: the highlight BOX is absent because chat-search citations for this
+  extract-indexed doc are bare (no bbox) — the known geometry limitation, separate from DL-5.
+- **Gate:** revert→RED proven; OnboardingShell + ScopedCanvas tests (48) still green; drift guards (238) +
+  full app suite (1513) + `tsc` + `npm run build` green; no direct viewer-widget import (registry path used),
+  no fork.
 - **Measured (live, /workspaces):** the steady shell (`scoped-shell`) renders and the live LLM chat WORKS
   (workspace/bucket scope returned a rich grounded answer with `cite-chip-1..21` + a
   `suggested-action-chip-show-source` + pin). BUT the canvas NEVER mounts a widget: clicking the

@@ -4,7 +4,7 @@
  * with the looked-up `ChatExperience` (NO new flow component, NO flow `mode`),
  * against a per-scope chat session.
  */
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -23,27 +23,43 @@ vi.mock("@/api/chatSessions", async () => {
 import { AppModeProvider } from "@/contexts/AppModeContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
+import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
+import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
+import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarContext";
 import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
 import { GxThemeProvider } from "@/ThemeProvider";
 
 import { WorkspacesView, ProjectsView } from "./ScopedConversationShell";
 
+// A resolved (UUID) GroundX document id — the seeded utility sample.
+const SAMPLE_DOC_ID = "c3bfff49-6640-4213-822b-e81c3a771e45";
+
 function Harness({ children }: { children: React.ReactNode }) {
+  // DocumentsProvider (+ Loading/MessageBar deps) is required so the shared
+  // production PdfViewerWidget can mount via <ScopedCanvas> — mirrors
+  // renderWithOnboardingProviders, which is how the onboarding shell test
+  // exercises the same viewer mount path.
   return (
     <GxThemeProvider>
-      <AppModeProvider initialAuthState="signed-in">
-        <ScenarioRegistryProvider
-          initialScenarios={[
-            { id: "utility", manifest: { hero: { title: "Utility" } }, documents: [] } as never,
-          ]}
-        >
-          <ChatStoreProvider initialOwnerKey="anon-test">
-            <CanvasOrchestratorProvider>
-              <MemoryRouter>{children}</MemoryRouter>
-            </CanvasOrchestratorProvider>
-          </ChatStoreProvider>
-        </ScenarioRegistryProvider>
-      </AppModeProvider>
+      <LoadingProvider>
+        <MessageBarProvider>
+          <AppModeProvider initialAuthState="signed-in">
+            <ScenarioRegistryProvider
+              initialScenarios={[
+                { id: "utility", manifest: { hero: { title: "Utility" } }, documents: [] } as never,
+              ]}
+            >
+              <DocumentsProvider>
+                <ChatStoreProvider initialOwnerKey="anon-test">
+                  <CanvasOrchestratorProvider>
+                    <MemoryRouter>{children}</MemoryRouter>
+                  </CanvasOrchestratorProvider>
+                </ChatStoreProvider>
+              </DocumentsProvider>
+            </ScenarioRegistryProvider>
+          </AppModeProvider>
+        </MessageBarProvider>
+      </LoadingProvider>
     </GxThemeProvider>
   );
 }
@@ -87,6 +103,33 @@ describe("WorkspacesView (/workspaces)", () => {
     expect(api!.state.activeSessionId).toBeTruthy();
     const active = api!.state.sessions.get(api!.state.activeSessionId!);
     expect(active?.scopeKey).toContain("bucket");
+  });
+});
+
+describe("steady canvas mounts viewer widgets via ScopedCanvas (DL-5, P1)", () => {
+  it("a doc-viewer viewer step mounts the production PdfViewer in the steady canvas pane", async () => {
+    let api: ReturnType<typeof useChatStore> | null = null;
+    function Probe() {
+      api = useChatStore();
+      return null;
+    }
+    render(
+      <Harness>
+        <Probe />
+        <WorkspacesView />
+      </Harness>,
+    );
+    // The shell ensure-creates the per-scope chat session on mount.
+    await waitFor(() => expect(api!.state.activeSessionId).toBeTruthy());
+    // Simulate what a CiteChip / "Show source" dispatch lands in the store:
+    // a doc-viewer ViewerStep on the active session.
+    act(() => {
+      api!.pushStep({ kind: "doc-viewer", documentId: SAMPLE_DOC_ID });
+    });
+    // The steady canvas pane MUST mount the shared PdfViewerWidget (via
+    // ScopedCanvas) — not stay an empty stub Box.
+    const pane = screen.getByTestId("scoped-shell-canvas-pane");
+    expect(await within(pane).findByTestId("pdf-viewer-widget")).toBeInTheDocument();
   });
 });
 
