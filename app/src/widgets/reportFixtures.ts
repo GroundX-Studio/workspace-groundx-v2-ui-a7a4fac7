@@ -1,10 +1,12 @@
 /**
- * MOCK_MODE report fixtures — the Utility single-doc IC brief + a Solar
- * multi-doc stub (2026-05-29-smart-report-screen Phase 2 / design.md D9).
+ * Client-side report demo fixtures — the Utility single-doc IC brief + a Solar
+ * multi-doc stub (2026-05-29-smart-report-screen Phase 2 / design.md D9). These
+ * are a clearly-labeled client demo/test fixture module, NOT a runtime mock
+ * toggle (the middleware has no MOCK_MODE — its render path is live).
  *
- * These back `SmartReportRender` until the live render endpoint (Phase 6) +
- * live multi-doc fan-out (Phase 7, blocked on WF-10) land. The widget reads a
- * fixture keyed by the render-time `ContentScope`; the fixture is a fully
+ * `SmartReportBuilder` reads `getReportFixture(scope)` to SEED the builder's
+ * base section rows, and `SmartReportRender` reads `reportTemplateIdForScope`
+ * to pick the template id it renders live against. The fixture is a fully
  * formed `RenderedReport` (`Result = Template + Scope + answers`) — sections
  * with `renderAs` formatters + cited bodies.
  *
@@ -148,9 +150,9 @@ const SOLAR_REPORT_STUB: RenderedReport = {
 };
 
 /**
- * Look up the MOCK_MODE report fixture for a render-time `ContentScope`.
- * Returns `null` when no fixture matches (the surface then shows its empty /
- * idle state). Matching is scope-shape-aware:
+ * Look up the demo report fixture for a render-time `ContentScope` (used to
+ * seed the builder rows). Returns `null` when no fixture matches (the surface
+ * then shows its empty / idle state). Matching is scope-shape-aware:
  *   • `bucket` + `filter.project: "utility"` → the Utility IC brief.
  *   • `group` → the Solar multi-doc stub.
  */
@@ -171,8 +173,8 @@ export function getReportFixture(scope: ContentScope): RenderedReport | null {
  * read of the rendered report — `SmartReportRender` obtains the rendered
  * sections from the render endpoint (`renderReport`). Returns `null` when no
  * template applies to the scope (the surface then shows its empty state without
- * a network round-trip). MOCK_MODE: the Utility scope → the IC-brief template,
- * the Solar `group` scope → the portfolio template.
+ * a network round-trip). Demo routing: the Utility scope → the IC-brief
+ * template, the Solar `group` scope → the portfolio template.
  */
 export function reportTemplateIdForScope(scope: ContentScope): string | null {
   if (scope.type === "bucket") {

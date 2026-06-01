@@ -4,9 +4,10 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Phase 3 acceptance — Utility scenario golden journey across F1 → F7.
  *
- * Runs against `MOCK_MODE=true` + placeholder fixtures (FIXTURE_PLACEHOLDER
- * tags in `app/src/fixtures/utility.ts`). Real content swap-in lives in the
- * Phase 7 fixture-swap checkpoint per [[project-phased-plan]].
+ * Runs against the REAL GroundX backend (the middleware boots in real mode —
+ * there is no MOCK_MODE; 2026-06-01-retire-mock-mode). The deterministic data is
+ * the seeded sample doc c3bfff49 in bucket 28454. CI supplies the Partner key
+ * via the `dev`-environment secret (see .github/workflows/ci.yml).
  *
  * Coverage targets per [[project-phased-plan]] Utility acceptance row:
  *   • Single-doc Understand → Extract → Citations → Interact → Gate → Integrate

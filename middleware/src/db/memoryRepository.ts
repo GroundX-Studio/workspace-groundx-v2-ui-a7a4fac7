@@ -13,9 +13,9 @@ import type {
 import type { TemplateKind } from "@groundx/shared";
 
 /**
- * In-memory implementation of AppRepository. Used in MOCK_MODE and
- * tests. Mirrors the table shape of MySqlAppRepository so the contract
- * stays consistent.
+ * In-memory implementation of AppRepository. Used by the memory
+ * repository mode (`APP_REPOSITORY_MODE=memory`) and tests. Mirrors the
+ * table shape of MySqlAppRepository so the contract stays consistent.
  */
 export class MemoryAppRepository implements AppRepository {
   sessions = new Map<string, SessionRecord>();

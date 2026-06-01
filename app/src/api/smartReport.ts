@@ -5,8 +5,8 @@
  *
  *  • `renderReport` — `POST /api/widgets/smart-report/reports/render`. Runs a
  *    report Template over a `ContentScope` and returns the ordered, cited
- *    sections (MOCK_MODE returns the Utility fixture; a `sectionIds` subset
- *    scopes a re-render). Maps the snake_case wire response to the app-owned
+ *    sections via the live render path; a `sectionIds` subset
+ *    scopes a re-render. Maps the snake_case wire response to the app-owned
  *    `RenderedReport` the `SmartReportRender` surface consumes — OR surfaces the
  *    gate envelope (#10) for a BYO scope. Self-triggers `ensureServerChatSession`
  *    so the endpoint doesn't 404 before the chat-session row exists (mirrors

@@ -29,12 +29,14 @@ import {
  *      service consumes it to know which documents a scope targets.
  *   2. `reportTemplateToSaveInput(template)` — the report-kind
  *      `TemplateSaveInput` save bridge to the shared `saveTemplate` repo API.
- *   3. `renderReport(request, deps)` — MOCK_MODE returns the Utility fixture;
- *      a `section_ids` subset scopes a re-render; the sample renders
- *      `preview_only`; a BYO scope returns the gate envelope (#10); and the
- *      edge cases degrade visibly (unresolved variable → `{var}` + "bind it";
- *      no source → `—` + low-confidence; question edit → scoped single-section
- *      re-render).
+ *   3. `renderReport(request, deps)` — runs the persisted Template over a
+ *      `ContentScope` via the live search + grounded-generation path (fakes
+ *      injected at the dependency seam): a `section_ids` subset scopes a
+ *      re-render; the sample renders `preview_only`; a BYO scope returns the
+ *      gate envelope (#10); a missing template renders the no-template state;
+ *      and the edge cases degrade visibly (unresolved variable → `{var}` +
+ *      "bind it"; no source → `—` + low-confidence; question edit → scoped
+ *      single-section re-render). There is no MOCK_MODE fixture path.
  */
 
 const SAMPLE_BUCKET = 28454;
@@ -57,7 +59,54 @@ function baseRequest(overrides: Partial<RenderReportRequest> = {}): RenderReport
   };
 }
 
-const renderDeps = { mockMode: true, samplesBucketId: SAMPLE_BUCKET };
+/** A canned GroundX search hit + grounded LLM reply for the live render path
+ * (2026-06-01-retire-mock-mode re-grounded the former MOCK_MODE-fixture tests
+ * onto the live path with fakes injected at the dependency seam). The LLM emits
+ * the supplied `body` with a verifiable `citations` block citing `doc`. */
+function liveClients(doc: string, body: string): { groundxClient: GroundXClient; llmClient: LlmClient } {
+  const groundxClient: GroundXClient = {
+    forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: doc, text: body }] } })),
+  };
+  const llmAnswer = [
+    body,
+    "",
+    "```json",
+    `{"citations":[{"documentId":"${doc}","page":1,"quote":${JSON.stringify(body.slice(0, 40))}}]}`,
+    "```",
+  ].join("\n");
+  const llmClient: LlmClient = {
+    forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
+  };
+  return { groundxClient, llmClient };
+}
+
+/** The 4-section Utility IC-brief template the demo renders, used as the live
+ * `getTemplate` source for the re-grounded fixture-equivalent tests. */
+const utilityTemplate: ReportTemplate = {
+  id: "rt-utility-ic-brief",
+  name: "Utility IC Brief",
+  format: "ic-brief",
+  sections: [
+    { id: "billing_summary", name: "billing_summary", renderAs: "PARAGRAPH", question: "Summarize the billing period and total.", variables: [] },
+    { id: "charge_breakdown", name: "charge_breakdown", renderAs: "TABLE", question: "Break down the charges.", variables: [] },
+    { id: "anomalies", name: "anomalies", renderAs: "BULLETS", question: "List anomalies.", variables: [] },
+    { id: "recommendation", name: "recommendation", renderAs: "PARAGRAPH", question: "Recommend next steps.", variables: [] },
+  ],
+};
+
+/** Live render deps that resolve `rt-utility-ic-brief` to the 4-section
+ * template and ground every section against `utility-bill-2026-04`. */
+function utilityLiveDeps(): RenderReportDeps {
+  const { groundxClient, llmClient } = liveClients("utility-bill-2026-04", "The total amount due is $214.07.");
+  return {
+    samplesBucketId: SAMPLE_BUCKET,
+    getTemplate: async () => utilityTemplate,
+    groundxClient,
+    groundxApiKey: "k",
+    llmClient,
+    llmModelId: "test-model",
+  };
+}
 
 describe("resolveScopeDocSet + ScopeDocIndex", () => {
   it("resolves a bucket + project filter scope to the project's doc set", async () => {
@@ -131,9 +180,9 @@ describe("reportTemplateToSaveInput — report-kind save bridge", () => {
   });
 });
 
-describe("renderReport — MOCK_MODE Utility fixture", () => {
-  it("returns the four ordered Utility sections with renderAs + cited bodies", async () => {
-    const result = await renderReport(baseRequest(), renderDeps);
+describe("renderReport — live Utility render (re-grounded off the former MOCK_MODE fixture)", () => {
+  it("returns the four ordered Utility sections with renderAs taxonomy + cited bodies", async () => {
+    const result = await renderReport(baseRequest(), utilityLiveDeps());
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.status).toBe("complete");
     expect(result.sections.map((s) => s.name)).toEqual([
@@ -155,7 +204,7 @@ describe("renderReport — MOCK_MODE Utility fixture", () => {
   });
 
   it("renders the sample scope preview_only with the export formats", async () => {
-    const result = await renderReport(baseRequest(), renderDeps);
+    const result = await renderReport(baseRequest(), utilityLiveDeps());
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.preview_only).toBe(true);
     expect(result.export_formats).toContain("pdf");
@@ -166,7 +215,7 @@ describe("renderReport — MOCK_MODE Utility fixture", () => {
   it("section_ids subset scopes a re-render to those sections only (ordered)", async () => {
     const result = await renderReport(
       baseRequest({ sectionIds: ["anomalies", "billing_summary"] }),
-      renderDeps,
+      utilityLiveDeps(),
     );
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     // Returned in TEMPLATE order, not request order.
@@ -174,91 +223,41 @@ describe("renderReport — MOCK_MODE Utility fixture", () => {
   });
 
   it("an empty section_ids subset renders no sections (explicit subset, not 'all')", async () => {
-    const result = await renderReport(baseRequest({ sectionIds: [] }), renderDeps);
+    const result = await renderReport(baseRequest({ sectionIds: [] }), utilityLiveDeps());
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.sections).toHaveLength(0);
+  });
+
+  it("a question edit re-renders the single edited section only (scoped re-render)", async () => {
+    // Editing the anomalies question = a section_ids:["anomalies"] re-render.
+    const result = await renderReport(baseRequest({ sectionIds: ["anomalies"] }), utilityLiveDeps());
+    if ("gated" in result) throw new Error("expected a rendered report, got a gate");
+    expect(result.sections.map((s) => s.name)).toEqual(["anomalies"]);
   });
 });
 
 describe("renderReport — BYO scope → gate envelope (#10)", () => {
   it("a non-sample bucket returns the sign-in gate envelope (not a render)", async () => {
     const byoScope: ContentScope = { type: "bucket", bucketId: 70001 };
-    const result = await renderReport(baseRequest({ scope: byoScope }), renderDeps);
+    const result = await renderReport(baseRequest({ scope: byoScope }), utilityLiveDeps());
     if (!("gated" in result)) throw new Error("expected the gate envelope for a BYO scope");
     expect(result.gated).toBe(true);
     expect(result.gate).toBe("byo");
   });
 
   it("a sample scope does NOT gate (anon preview is allowed)", async () => {
-    const result = await renderReport(baseRequest(), renderDeps);
+    const result = await renderReport(baseRequest(), utilityLiveDeps());
     expect("gated" in result).toBe(false);
   });
 });
 
-describe("renderReport — multi-doc ContentScope (fixture-backed shape)", () => {
-  it("resolves a multi-doc group scope to a rendered report (live search is Phase 7/WF-10)", async () => {
+describe("renderReport — multi-doc ContentScope (live group render)", () => {
+  it("resolves a multi-doc group scope to a rendered report", async () => {
     const groupScope: ContentScope = { type: "group", groupId: 9001 };
-    const result = await renderReport(baseRequest({ scope: groupScope }), renderDeps);
+    const result = await renderReport(baseRequest({ scope: groupScope }), utilityLiveDeps());
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.status).toBe("complete");
     expect(result.sections.length).toBeGreaterThan(0);
-  });
-});
-
-describe("renderReport — edge cases degrade visibly", () => {
-  it("an unresolved variable renders the {var} placeholder + a 'bind it' warning", async () => {
-    // The Utility template's billing_summary question references {billing_period};
-    // with no binding supplied, the body keeps the literal {billing_period} token
-    // and the section warns to bind it.
-    const result = await renderReport(
-      baseRequest({ templateId: "rt-utility-unbound-variable" }),
-      renderDeps,
-    );
-    if ("gated" in result) throw new Error("expected a rendered report, got a gate");
-    const section = result.sections.find((s) => s.name === "billing_summary");
-    expect(section).toBeTruthy();
-    expect(section!.body).toContain("{billing_period}");
-    expect(section!.warnings?.some((w) => /bind it/i.test(w))).toBe(true);
-  });
-
-  it("a bound variable is substituted and does NOT warn", async () => {
-    const result = await renderReport(
-      baseRequest({
-        templateId: "rt-utility-unbound-variable",
-        variables: { billing_period: "March 2026" },
-      }),
-      renderDeps,
-    );
-    if ("gated" in result) throw new Error("expected a rendered report, got a gate");
-    const section = result.sections.find((s) => s.name === "billing_summary");
-    expect(section!.body).toContain("March 2026");
-    expect(section!.body).not.toContain("{billing_period}");
-    expect(section!.warnings?.some((w) => /bind it/i.test(w))).toBeFalsy();
-    expect(result.resolved_variables.billing_period).toBe("March 2026");
-  });
-
-  it("a section with no supporting source renders an em-dash + a low-confidence flag", async () => {
-    const result = await renderReport(
-      baseRequest({ templateId: "rt-utility-no-source" }),
-      renderDeps,
-    );
-    if ("gated" in result) throw new Error("expected a rendered report, got a gate");
-    const section = result.sections.find((s) => s.name === "unsupported_claim");
-    expect(section).toBeTruthy();
-    expect(section!.body).toBe("—");
-    expect(section!.cites).toHaveLength(0);
-    expect(section!.confidence).toBeLessThan(0.5);
-    expect(section!.warnings?.some((w) => /no support/i.test(w))).toBe(true);
-  });
-
-  it("a question edit re-renders the single edited section only (scoped re-render)", async () => {
-    // Editing the anomalies question = a section_ids:["anomalies"] re-render.
-    const result = await renderReport(
-      baseRequest({ sectionIds: ["anomalies"] }),
-      renderDeps,
-    );
-    if ("gated" in result) throw new Error("expected a rendered report, got a gate");
-    expect(result.sections.map((s) => s.name)).toEqual(["anomalies"]);
   });
 });
 
@@ -309,7 +308,6 @@ describe("renderReport — §1 no-template state (the new-customer norm)", () =>
   it("returns the graceful no-template state (reason: no_template) without touching clients", async () => {
     const { groundxClient, llmClient } = throwingClients();
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => null, // the new-customer norm — no template yet
       groundxClient,
@@ -349,7 +347,6 @@ describe("renderReport — §5 live per-section render (search → ground → ve
       forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
     };
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => liveTemplate,
       groundxClient,
@@ -384,7 +381,6 @@ describe("renderReport — §5 live per-section render (search → ground → ve
       forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "n/a" } }] })),
     };
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => liveTemplate,
       groundxClient,
@@ -410,7 +406,6 @@ describe("renderReport — §5 live per-section render (search → ground → ve
       forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "answer" } }] })),
     };
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => liveTemplate,
       groundxClient,
@@ -432,7 +427,6 @@ describe("renderReport — §4 live + fixture share one degradation path", () =>
       forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "Some unsupported prose." } }] })),
     };
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => ({
         ...liveTemplate,
@@ -469,7 +463,6 @@ describe("renderReport — §4 live + fixture share one degradation path", () =>
       forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
     };
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => ({ ...liveTemplate, sections: [liveTemplate.sections[0]] }),
       groundxClient,
@@ -485,14 +478,14 @@ describe("renderReport — §4 live + fixture share one degradation path", () =>
   });
 });
 
-describe("renderReport — §6 async + same wire shape mock vs live", () => {
+describe("renderReport — §6 async + stable wire shape", () => {
   it("renderReport returns a Promise", () => {
-    const r = renderReport(baseRequest(), renderDeps);
+    const r = renderReport(baseRequest(), utilityLiveDeps());
     expect(typeof (r as Promise<unknown>).then).toBe("function");
     return r; // settle it so no unhandled-promise warning
   });
 
-  it("the live result satisfies the SAME RenderReportResponse shape as the fixture", async () => {
+  it("the live result satisfies the documented RenderReportResponse wire shape", async () => {
     const groundxClient: GroundXClient = {
       forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "utility-bill-2026-04", text: "total amount due is $18,742.16" }] } })),
     };
@@ -503,7 +496,6 @@ describe("renderReport — §6 async + same wire shape mock vs live", () => {
       "```",
     ].join("\n");
     const liveDeps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => ({ ...liveTemplate, sections: [liveTemplate.sections[0]] }),
       groundxClient,
@@ -512,13 +504,12 @@ describe("renderReport — §6 async + same wire shape mock vs live", () => {
       llmModelId: "test-model",
     };
     const live = await renderReport(baseRequest({ templateId: "rt-live-1" }), liveDeps);
-    const mock = await renderReport(baseRequest(), renderDeps);
-    if ("gated" in live || "gated" in mock) throw new Error("expected renders");
-    // Identical top-level wire keys (live may additionally omit `reason`).
-    const liveKeys = Object.keys(live).filter((k) => k !== "reason").sort();
-    const mockKeys = Object.keys(mock).filter((k) => k !== "reason").sort();
-    expect(liveKeys).toEqual(mockKeys);
-    // Section wire keys identical.
+    if ("gated" in live) throw new Error("expected a render");
+    // The documented top-level wire keys (a render omits the `reason` field).
+    expect(Object.keys(live).filter((k) => k !== "reason").sort()).toEqual(
+      ["export_formats", "preview_only", "report_id", "resolved_variables", "sections", "status", "template_id"],
+    );
+    // Section wire keys.
     expect(Object.keys(live.sections[0]).sort()).toEqual(
       expect.arrayContaining(["name", "render_as", "body", "cites"]),
     );
@@ -530,7 +521,6 @@ describe("renderReport — §7 gate + idle parity (no MOCK_MODE)", () => {
     const { groundxClient, llmClient } = throwingClients();
     const byoScope: ContentScope = { type: "bucket", bucketId: 70001 };
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => liveTemplate,
       groundxClient,
@@ -550,7 +540,6 @@ describe("renderReport — §7 gate + idle parity (no MOCK_MODE)", () => {
     // A bucket the doc index can't place → empty doc set.
     const emptyScope: ContentScope = { type: "bucket", bucketId: SAMPLE_BUCKET, filter: { project: "no-such-project" } };
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => liveTemplate,
       groundxClient,
@@ -568,7 +557,6 @@ describe("renderReport — §7 gate + idle parity (no MOCK_MODE)", () => {
 
   it("missing live deps throw a clear error (not 'not yet wired')", async () => {
     const deps: RenderReportDeps = {
-      mockMode: false,
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => liveTemplate,
       // no groundxClient / apiKey / llm

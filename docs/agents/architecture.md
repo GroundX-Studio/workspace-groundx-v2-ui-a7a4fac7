@@ -192,9 +192,9 @@ interface AppRepository {
 }
 ```
 
-Two implementations: `MemoryAppRepository` (in-memory, used in
-MOCK_MODE + tests) and `MySqlAppRepository` (real SQL + transactions
-+ CREATE TABLE on `createSchema`).
+Two implementations: `MemoryAppRepository` (in-memory, used with
+`APP_REPOSITORY_MODE=memory` + tests) and `MySqlAppRepository` (real
+SQL + transactions + CREATE TABLE on `createSchema`).
 
 ## Where to add what (cheat sheet)
 

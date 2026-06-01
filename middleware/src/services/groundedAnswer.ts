@@ -49,7 +49,7 @@ import type { ContentScope, GeneratedResult } from "@groundx/shared";
 import { type OpenAiFunctionTool } from "./zodToJsonSchema.js";
 
 /** Dependencies the grounded-answer pipeline needs. Mirrors the RAG / Extract
- * required-deps guard: outside MOCK_MODE the live clients are mandatory. */
+ * required-deps guard: the live clients are always mandatory. */
 export interface GroundedAnswerDeps {
   groundxClient: GroundXClient;
   groundxApiKey: string;

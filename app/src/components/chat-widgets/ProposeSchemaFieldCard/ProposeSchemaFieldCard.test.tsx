@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // as its sole source (the manifest arm is retired). The Accept round-trip
 // mounts `<SchemaView />` with no live props, so it self-resolves the live
 // extract via getDocument → getGroundXWorkflow → getDocumentExtract. Stub those
-// loaders so the standalone SchemaView has a genuine live source — the same
-// fixture path the Extract widget uses under MOCK_MODE.
+// loaders so the standalone SchemaView has a genuine live source — a real-shaped
+// live extract injected at the seam (the runtime has no MOCK_MODE path).
 vi.mock("@/api/entities/groundxWorkflowsEntity", async () => {
   const actual = await vi.importActual<typeof import("@/api/entities/groundxWorkflowsEntity")>(
     "@/api/entities/groundxWorkflowsEntity",
@@ -43,15 +43,15 @@ const LIVE_UTILITY_DOC_ID = "c3bfff49-6640-4213-822b-e81c3a771e45";
 const LIVE_WORKFLOW_ID = "9910308e-3100-473e-9da6-3ac29f5958a6";
 
 // Utility scenario whose primary document is the resolved live id so SchemaView
-// runs the MOCK_MODE live load (placeholder ids would skip it).
+// runs the live load off the injected seam (placeholder ids would skip it).
 const liveUtilityScenario: ScenarioConfig = {
   ...utilityTestScenario,
   documents: [{ documentId: LIVE_UTILITY_DOC_ID, fileName: "April 2026 Statement.pdf", order: 1 }],
 };
 
-// MOCK_MODE live workflow + extract — statement.account_number is the field the
-// proposal lands beside (categoryId "statement"), so the category exists to
-// host the accepted field.
+// Injected live workflow + extract (test seam) — statement.account_number is the
+// field the proposal lands beside (categoryId "statement"), so the category
+// exists to host the accepted field.
 function installLiveExtract() {
   vi.mocked(getGroundXWorkflow).mockResolvedValue({
     workflow: {

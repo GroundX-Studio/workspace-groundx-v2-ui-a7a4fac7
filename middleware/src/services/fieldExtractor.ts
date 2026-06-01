@@ -58,7 +58,6 @@ export interface ExtractFieldDeps {
   groundxClient?: GroundXClient;
   groundxApiKey?: string;
   llmModelId?: string;
-  mockMode: boolean;
   /**
    * Server-derived RBAC filter. Composed into the GroundX search the
    * same way chatRouter handles it.
@@ -70,28 +69,6 @@ export interface ExtractFieldDeps {
 const FIELD_SNIPPET_LIMIT = 4;
 /** Per-snippet character budget; the focused prompt is intentionally tight. */
 const FIELD_SNIPPET_CHARS = 400;
-
-/**
- * Plausible mock value per type — used when `mockMode=true` so the dev
- * loop can verify the propose-card → field-card animation without
- * burning real GroundX + LLM calls. Values are deliberately distinct
- * enough that QA can see "this came from the mock pipeline" but
- * formatted correctly for type.
- */
-function mockValueFor(type: SchemaFieldType): string | number | boolean | null {
-  switch (type) {
-    case "NUMBER":
-      return 42.0;
-    case "STRING":
-      return "(mock value)";
-    case "DATE":
-      return "2026-05-27";
-    case "BOOLEAN":
-      return true;
-    default:
-      return null;
-  }
-}
 
 /**
  * Coerce the LLM's emitted value to the declared field type. Returns
@@ -212,26 +189,20 @@ function parseLlmOutput(
 }
 
 /**
- * Run a focused single-field extraction. In MOCK_MODE returns a
- * type-plausible canned value so the dev loop sees the propose-card →
- * field-card flow without burning credentials.
+ * Run a focused single-field extraction: search the scope for the field,
+ * then ask the LLM to extract the typed value with a citation. The
+ * GroundX client + key + model id are always required (tests inject fakes
+ * at the dependency seam).
  */
 export async function extractField(
   request: ExtractFieldRequest,
   deps: ExtractFieldDeps,
 ): Promise<ExtractFieldResult> {
-  if (deps.mockMode) {
-    return {
-      value: mockValueFor(request.field.type),
-      confidence: 0.5,
-      citation: null,
-    };
-  }
   if (!deps.groundxClient || !deps.groundxApiKey) {
-    throw new Error("extractField: groundxClient + groundxApiKey are required outside MOCK_MODE");
+    throw new Error("extractField: groundxClient + groundxApiKey are required");
   }
   if (!deps.llmModelId) {
-    throw new Error("extractField: llmModelId is required outside MOCK_MODE");
+    throw new Error("extractField: llmModelId is required");
   }
 
   // Search query — name + description biases GroundX to the right

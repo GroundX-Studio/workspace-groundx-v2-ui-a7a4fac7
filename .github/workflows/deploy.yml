@@ -81,7 +81,6 @@ jobs:
       MIDDLEWARE_NODE_ENV: ${{ vars.MIDDLEWARE_NODE_ENV || secrets.MIDDLEWARE_NODE_ENV || 'production' }}
       LOG_LEVEL: ${{ vars.LOG_LEVEL || secrets.LOG_LEVEL || '' }}
       APP_REPOSITORY_MODE: ${{ vars.APP_REPOSITORY_MODE || secrets.APP_REPOSITORY_MODE || 'mysql' }}
-      MOCK_MODE: ${{ vars.MOCK_MODE || secrets.MOCK_MODE || 'false' }}
       ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN || secrets.ALLOWED_ORIGIN || '' }}
       GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || secrets.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
       GROUNDX_SAMPLES_BUCKET_ID: ${{ vars.GROUNDX_SAMPLES_BUCKET_ID || secrets.GROUNDX_SAMPLES_BUCKET_ID || '' }}
@@ -289,7 +288,6 @@ jobs:
             printf 'PORT=3001\n'
             append_optional_env 'LOG_LEVEL' "$LOG_LEVEL"
             printf 'APP_REPOSITORY_MODE=%s\n' "$APP_REPOSITORY_MODE"
-            printf 'MOCK_MODE=%s\n' "$MOCK_MODE"
             append_optional_env 'ALLOWED_ORIGIN' "$ALLOWED_ORIGIN"
             printf 'GROUNDX_BASE_URL=%s\n' "$GROUNDX_BASE_URL"
             printf 'GROUNDX_PARTNER_API_KEY=%s\n' "$GROUNDX_PARTNER_API_KEY"

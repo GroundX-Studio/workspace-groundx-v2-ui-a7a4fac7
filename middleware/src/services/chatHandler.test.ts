@@ -84,7 +84,6 @@ describe("handleChatMessage — validation", () => {
           groundxApiKey: null,
           samplesBucketId: null,
           llmModelId: "test-model",
-          mockMode: true,
         },
       ),
     ).rejects.toMatchObject({
@@ -104,7 +103,6 @@ describe("handleChatMessage — validation", () => {
           groundxApiKey: null,
           samplesBucketId: null,
           llmModelId: "test-model",
-          mockMode: true,
         },
       ),
     ).rejects.toThrow(/non-empty/);
@@ -121,7 +119,6 @@ describe("handleChatMessage — validation", () => {
           groundxApiKey: null,
           samplesBucketId: null,
           llmModelId: "test-model",
-          mockMode: true,
         },
       ),
     ).rejects.toThrow(/8000/);
@@ -138,7 +135,6 @@ describe("handleChatMessage — validation", () => {
           groundxApiKey: null,
           samplesBucketId: null,
           llmModelId: "test-model",
-          mockMode: true,
         },
       ),
     ).rejects.toMatchObject({
@@ -148,7 +144,7 @@ describe("handleChatMessage — validation", () => {
   });
 });
 
-describe("handleChatMessage — mock mode happy path", () => {
+describe("handleChatMessage — live RAG happy path (injected fakes at the seam)", () => {
   let repo: MemoryAppRepository;
   let llmClient: LlmClient;
   let groundxClient: GroundXClient;
@@ -156,11 +152,26 @@ describe("handleChatMessage — mock mode happy path", () => {
   beforeEach(async () => {
     repo = new MemoryAppRepository();
     await repo.upsertChatSession(makeSession());
-    llmClient = { forward: vi.fn(async () => jsonResponse({})) };
-    groundxClient = { forward: vi.fn(async () => jsonResponse({})) };
+    // GroundX returns one search hit; the LLM grounds an answer with a
+    // verifiable citation block. This is the live RAG path with fakes injected
+    // at the dependency seam (2026-06-01-retire-mock-mode — there is no mock
+    // path; the former canned `chatMocks` reply is gone).
+    groundxClient = {
+      forward: vi.fn(async () =>
+        jsonResponse({ search: { results: [{ documentId: "doc-1", pageNumber: 1, text: "RAG grounds answers in retrieved snippets." }] } }),
+      ),
+    };
+    const llmAnswer = [
+      "RAG grounds answers in retrieved snippets.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"doc-1","page":1,"quote":"RAG grounds answers"}]}',
+      "```",
+    ].join("\n");
+    llmClient = { forward: vi.fn(async () => jsonResponse({ choices: [{ message: { content: llmAnswer } }] })) };
   });
 
-  it("persists the user message, then a mock assistant reply, and returns ids", async () => {
+  it("persists the user message, then the live assistant reply, and returns ids", async () => {
     let counter = 0;
     const idGen = () => `id-${counter++}`;
 
@@ -170,10 +181,9 @@ describe("handleChatMessage — mock mode happy path", () => {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
-        samplesBucketId: null,
+        groundxApiKey: "k",
+        samplesBucketId: 28454,
         llmModelId: "test-model",
-        mockMode: true,
         idGen,
       },
     );
@@ -182,7 +192,7 @@ describe("handleChatMessage — mock mode happy path", () => {
     expect(result.assistantMessageId).toBe("id-1");
     expect(result.compressionRan).toBe(false);
     expect(result.reply.mode).toBe("rag");
-    expect(result.reply.answer).toMatch(/Mock RAG/);
+    expect(result.reply.answer).toBe("RAG grounds answers in retrieved snippets.");
 
     const messages = await repo.listChatMessages("chat-1");
     expect(messages.map((m) => ({ id: m.id, role: m.role, content: m.content }))).toEqual([
@@ -191,29 +201,28 @@ describe("handleChatMessage — mock mode happy path", () => {
     ]);
 
     const assistant = messages[1];
-    expect(assistant.llmProvider).toBe("mock");
+    expect(assistant.llmProvider).toBe("live");
     expect(assistant.llmModelId).toBe("test-model");
     expect(assistant.latencyMs).toBeGreaterThanOrEqual(0);
     expect(assistant.errorCode).toBeNull();
-    // Mock RAG embeds a single citation.
+    // The live grounded answer carries its verified citation.
     expect(assistant.citationsJson).not.toBeNull();
   });
 
-  it("does not call the LLM or GroundX client when mockMode is true", async () => {
+  it("calls the live LLM + GroundX clients (no mock short-circuit)", async () => {
     await handleChatMessage(
       { chatSessionId: "chat-1", newUserMessage: "What is RAG?" },
       {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
-        samplesBucketId: null,
+        groundxApiKey: "k",
+        samplesBucketId: 28454,
         llmModelId: "test-model",
-        mockMode: true,
       },
     );
-    expect(llmClient.forward).not.toHaveBeenCalled();
-    expect(groundxClient.forward).not.toHaveBeenCalled();
+    expect(llmClient.forward).toHaveBeenCalled();
+    expect(groundxClient.forward).toHaveBeenCalled();
   });
 });
 
@@ -229,6 +238,10 @@ describe("handleChatMessage — compression pre-flight", () => {
     // something to fold — handler appends the new user message third.
     await repo.appendChatMessage(makeMessage("m1", "chat-1", 1, "user", "first turn content " + "x".repeat(400)));
     await repo.appendChatMessage(makeMessage("m2", "chat-1", 2, "assistant", "second turn content " + "x".repeat(400)));
+    // The LLM fake serves BOTH the compression summary call AND the live RAG
+    // turn (same canned body — the compression assertions key off the persisted
+    // summary, not the call count). GroundX returns no search hits so the RAG
+    // turn grounds an (un-cited) answer without extra setup.
     llmClient = {
       forward: vi.fn(async () =>
         jsonResponse({
@@ -237,7 +250,7 @@ describe("handleChatMessage — compression pre-flight", () => {
         }),
       ),
     };
-    groundxClient = { forward: vi.fn(async () => jsonResponse({})) };
+    groundxClient = { forward: vi.fn(async () => jsonResponse({ search: { results: [] } })) };
   });
 
   it("runs compression when the bundle exceeds 70% of contextWindowTokens", async () => {
@@ -250,11 +263,10 @@ describe("handleChatMessage — compression pre-flight", () => {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
-        samplesBucketId: null,
+        groundxApiKey: "k",
+        samplesBucketId: 28454,
         llmModelId: "test-model",
         compressionModelId: "compress-model",
-        mockMode: true,
         // Tiny window so the seeded ~200 tokens easily exceed 70%.
         contextWindowTokens: 100,
         idGen,
@@ -263,8 +275,8 @@ describe("handleChatMessage — compression pre-flight", () => {
 
     expect(result.compressionRan).toBe(true);
 
-    // A summary was written via the LLM client.
-    expect(llmClient.forward).toHaveBeenCalledTimes(1);
+    // A summary was written via the LLM client (the live RAG turn also calls the
+    // LLM — the assertion keys off the persisted summary, not a call count).
     const summaries = await repo.listConversationSummaries("chat-1");
     expect(summaries).toHaveLength(1);
     expect(summaries[0].content).toBe("compressed summary body");
@@ -282,15 +294,16 @@ describe("handleChatMessage — compression pre-flight", () => {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
-        samplesBucketId: null,
+        groundxApiKey: "k",
+        samplesBucketId: 28454,
         llmModelId: "test-model",
-        mockMode: true,
         contextWindowTokens: 1_000_000,
       },
     );
     expect(result.compressionRan).toBe(false);
-    expect(llmClient.forward).not.toHaveBeenCalled();
+    // No compression summary was written (the live RAG turn still calls the LLM).
+    const summaries = await repo.listConversationSummaries("chat-1");
+    expect(summaries).toHaveLength(0);
   });
 });
 
@@ -327,7 +340,6 @@ describe("handleChatMessage — router failure", () => {
           groundxApiKey: "test-api-key",
           samplesBucketId: 7,
           llmModelId: "test-model",
-          mockMode: false,
         },
       ),
     ).rejects.toMatchObject({
@@ -384,7 +396,6 @@ describe("handleChatMessage — typed error mapping", () => {
         groundxApiKey: "k",
         samplesBucketId: null,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(result.reply.mode).toBe("structured");
@@ -419,7 +430,6 @@ describe("handleChatMessage — typed error mapping", () => {
           groundxApiKey: "k",
           samplesBucketId: 7,
           llmModelId: "test-model",
-          mockMode: false,
         },
       ),
     ).rejects.toMatchObject({
@@ -503,7 +513,6 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         groundxApiKey: "test-key",
         samplesBucketId: null,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(lastSearchPath()).toBe("/search/42");
@@ -526,7 +535,6 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         groundxApiKey: "test-key",
         samplesBucketId: null,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(lastSearchBody()).toMatchObject({ filter: { projectId: "solo" } });
@@ -543,7 +551,6 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         groundxApiKey: "test-key",
         samplesBucketId: 999, // env default — entity should win
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(lastSearchPath()).toBe("/search/7");
@@ -560,7 +567,6 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         groundxApiKey: "test-key",
         samplesBucketId: null,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(lastSearchPath()).toBe("/search/99");
@@ -581,7 +587,6 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         groundxApiKey: "test-key",
         samplesBucketId: null,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(lastSearchPath()).toBe("/search/documents");
@@ -602,7 +607,6 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         groundxApiKey: "test-key",
         samplesBucketId: 100,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(lastSearchPath()).toBe("/search/100");
@@ -622,7 +626,6 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
         groundxApiKey: "test-key",
         samplesBucketId: null,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(lastSearchPath()).toBe("/search/5");
@@ -680,7 +683,6 @@ describe("handleChatMessage — CF-03 rbacFilter end-to-end", () => {
         groundxApiKey: "test-key",
         samplesBucketId: null,
         llmModelId: "test-model",
-        mockMode: false,
         // The BFF-derived RBAC filter. Real production callers will
         // build this from session.groundxUsername → org/role; the
         // seam is the same.
@@ -725,7 +727,6 @@ describe("handleChatMessage — CF-03 rbacFilter end-to-end", () => {
         groundxApiKey: "test-key",
         samplesBucketId: null,
         llmModelId: "test-model",
-        mockMode: false,
         // no rbacFilter
       },
     );
@@ -789,7 +790,6 @@ describe("handleChatMessage — CF-16 light LLM vs chat LLM split", () => {
         samplesBucketId: 42,
         llmModelId: "chat-model",
         lightLlmModelId: "light-model",
-        mockMode: false,
       },
     );
     // Compression fired against the LIGHT client.
@@ -827,7 +827,6 @@ describe("handleChatMessage — CF-16 light LLM vs chat LLM split", () => {
         groundxApiKey: "test-key",
         samplesBucketId: 42,
         llmModelId: "chat-model",
-        mockMode: false,
       },
     );
     // Light client was never created; chat client serves both compression + RAG.
@@ -851,7 +850,6 @@ describe("handleChatMessage — CF-16 light LLM vs chat LLM split", () => {
         groundxApiKey: "test-key",
         samplesBucketId: 42,
         llmModelId: "chat-model",
-        mockMode: false,
       },
     );
     expect(lightLlmForward).toHaveBeenCalled();
@@ -889,6 +887,10 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
   beforeEach(async () => {
     repo = new MemoryAppRepository();
     await repo.upsertChatSession(makeSession());
+    // The LLM fake serves both the compression call and the live RAG turn; the
+    // compression assertions key off persisted summaries, not call counts. The
+    // live RAG turn requires a GroundX client + key, so both are supplied at the
+    // dependency seam (2026-06-01-retire-mock-mode — no mock short-circuit).
     llmClient = {
       forward: vi.fn(async () =>
         jsonResponse({
@@ -897,7 +899,7 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         }),
       ),
     };
-    groundxClient = { forward: vi.fn(async () => jsonResponse({})) };
+    groundxClient = { forward: vi.fn(async () => jsonResponse({ search: { results: [] } })) };
   });
 
   it("`maxActiveSummariesBeforeMeta` controls when level-2 meta-compaction fires", async () => {
@@ -910,10 +912,9 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
+        groundxApiKey: "k",
         samplesBucketId: null,
         llmModelId: "m",
-        mockMode: true,
       },
     );
     expect(defaultResult.compressionRan).toBe(false);
@@ -945,10 +946,9 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         repository: repo2,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
+        groundxApiKey: "k",
         samplesBucketId: null,
         llmModelId: "m",
-        mockMode: true,
         maxActiveSummariesBeforeMeta: 3,
       },
     );
@@ -968,10 +968,9 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
+        groundxApiKey: "k",
         samplesBucketId: null,
         llmModelId: "m",
-        mockMode: true,
         maxActiveSummariesBeforeMeta: 4,
         metaCompactionBatchSize: 3,
       },
@@ -999,10 +998,9 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
+        groundxApiKey: "k",
         samplesBucketId: null,
         llmModelId: "m",
-        mockMode: true,
         contextWindowTokens: 1000,
         compressionTriggerRatio: 0.5,
       },
@@ -1020,10 +1018,9 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         repository: repo2,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
+        groundxApiKey: "k",
         samplesBucketId: null,
         llmModelId: "m",
-        mockMode: true,
         contextWindowTokens: 300,
         compressionTriggerRatio: 0.5,
       },
@@ -1047,10 +1044,9 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
+        groundxApiKey: "k",
         samplesBucketId: null,
         llmModelId: "m",
-        mockMode: true,
         contextWindowTokens: 100,
         compressionTargetTokens: 150,
       },
@@ -1102,19 +1098,25 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         repository: repo,
         llmClient,
         groundxClient,
-        groundxApiKey: null,
+        groundxApiKey: "k",
         samplesBucketId: null,
         llmModelId: "m",
-        mockMode: true,
         contextWindowTokens: 100,
         maxSummaryOutputTokens: 250,
       },
     );
     // The leaf-compaction LLM call should have included
-    // max_completion_tokens=250 (gpt-5 family deprecated max_tokens).
-    const summarizerCall = (llmClient.forward as ReturnType<typeof vi.fn>).mock.calls.find(
-      (c) => c[0] === "/chat/completions",
-    );
+    // max_completion_tokens=250 (gpt-5 family deprecated max_tokens). The live
+    // RAG turn also posts to /chat/completions, so select the call that carries
+    // the summarizer's max_completion_tokens (the RAG grounding call does not).
+    const summarizerCall = (llmClient.forward as ReturnType<typeof vi.fn>).mock.calls.find((c) => {
+      if (c[0] !== "/chat/completions") return false;
+      try {
+        return JSON.parse((c[1] as RequestInit).body as string).max_completion_tokens === 250;
+      } catch {
+        return false;
+      }
+    });
     expect(summarizerCall).toBeDefined();
     const body = JSON.parse((summarizerCall![1] as RequestInit).body as string);
     expect(body.max_completion_tokens).toBe(250);

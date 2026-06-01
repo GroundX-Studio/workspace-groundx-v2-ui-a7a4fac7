@@ -25,14 +25,12 @@
  *   - chatClassifier.ts  — the deterministic mode classifier.
  *   - groundxSearch.ts   — `searchGroundX` + filter composition.
  *   - ragPipeline.ts     — grounded search → prompt → LLM → citations.
- *   - chatMocks.ts        — MOCK_MODE canned responses + fixtures.
  */
 
 import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
 import { classifyChatMode } from "./chatClassifier.js";
 import { searchGroundX } from "./groundxSearch.js";
 import { runRagPipeline } from "./ragPipeline.js";
-import { mockResponseFor } from "./chatMocks.js";
 import {
   ChatRouteNotImplementedError,
   type ChatRouterDeps,
@@ -78,16 +76,12 @@ export { parseGroundedAnswer, buildSnippetBlock } from "./ragPipeline.js";
 
 /**
  * Route a request through the appropriate mode and produce the
- * typed response. In MOCK_MODE every mode returns a canned envelope
- * so the chat surface can boot in dev without GroundX / LLM
- * credentials.
+ * typed response. Every mode runs the live path (RAG search + grounded
+ * LLM, or the structured/hybrid handlers) — there is no mock/dev path;
+ * tests inject fake clients at the dependency seam.
  */
 export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps): Promise<ChatRouterResponse> {
   const mode = classifyChatMode(request);
-
-  if (deps.mockMode) {
-    return mockResponseFor(mode, request);
-  }
 
   if (mode === "rag") {
     return runRagPipeline(request, deps);
@@ -98,9 +92,8 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
   // returns a real answer (for the kinds whose data readers ARE built —
   // pages_remaining, onboarding_state, current_entity) or a frank
   // "needs reader" reply (for saved_schemas / my_projects / api_keys
-  // until those tables/Partner reads land). MOCK_MODE bypasses the
-  // whole path; this gives us a real surface in production without
-  // fabricating answers.
+  // until those tables/Partner reads land). This gives us a real surface
+  // in production without fabricating answers.
   if (!deps.repository || !deps.chatSessionId) {
     throw new ChatRouteNotImplementedError(mode);
   }

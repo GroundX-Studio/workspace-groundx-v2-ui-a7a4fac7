@@ -17,8 +17,10 @@ import { expect, test } from "@playwright/test";
  *      animation is the worst offender for jsdom and OS-reduced users —
  *      this confirms it's actually gone in a real browser.
  *
- * This runs against the same MOCK_MODE preview as the rest of the e2e
- * suite — no live LLM / GroundX required.
+ * This runs against the same real-backend preview as the rest of the e2e
+ * suite (the middleware boots in real mode — there is no MOCK_MODE). This
+ * particular spec asserts CSS/animation behavior and does not depend on live
+ * GroundX responses.
  */
 test.use({ reducedMotion: "reduce" });
 

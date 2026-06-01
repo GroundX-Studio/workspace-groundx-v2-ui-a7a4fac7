@@ -15,7 +15,7 @@ sections, each `name + renderAs + question + instructions + variables`. The
 inline editor exposes exactly those fields. The builder is a
 **ScopedViewerWidget** — it takes a real `ContentScope` (which template's
 sections to seed from) and adapts on scope change; v1 seeds rows from the
-MOCK_MODE fixture (`getReportFixture`); the live template read lands with the
+client-side demo fixture (`getReportFixture`); the live template read lands with the
 authored-question template read (ticketed). The `↻ render` control re-runs the
 template over the current scope through the render endpoint (`renderReport`)
 and advances to the render surface (f4).

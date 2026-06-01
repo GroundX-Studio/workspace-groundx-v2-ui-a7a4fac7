@@ -30,9 +30,9 @@ const UTILITY_SCOPE: ContentScope = {
 };
 
 /**
- * The Utility IC-brief report the endpoint returns in MOCK_MODE — the four
- * sections + the leading CiteChip into the bill. The tests drive the surface
- * through this mocked endpoint response (NOT a synchronous fixture read).
+ * The Utility IC-brief report the endpoint returns — the four sections + the
+ * leading CiteChip into the bill. The tests drive the surface through this
+ * injected endpoint response (NOT a synchronous fixture read).
  */
 const UTILITY_REPORT: RenderedReport = {
   reportId: "rr-utility-ic-brief",

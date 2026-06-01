@@ -169,10 +169,10 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
   // (the F3a workbench path). When `<SchemaView />` is mounted WITHOUT live
   // props (standalone demo surfaces + the ProposeSchemaFieldCard round-trip),
   // it self-resolves the live extract from the SAME load path the Extract
-  // widget uses, keyed by the scenario's primary document. Under MOCK_MODE that
-  // resolves from the fixture path. There is NO manifest fallback: when the
-  // live extract is absent the widget renders its real empty/"live extract
-  // unavailable" state below.
+  // widget uses, keyed by the scenario's primary document (tests inject a
+  // real-shaped live extract at that seam — there is no MOCK_MODE runtime path).
+  // There is NO manifest fallback: when the live extract is absent the widget
+  // renders its real empty/"live extract unavailable" state below.
   const selfLive = useLiveExtract(scenario?.documents[0]?.documentId);
   // Schema/values travel together: the self-resolved values only apply when the
   // self-resolved schema is present (a live extract is a schema + its values).

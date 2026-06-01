@@ -116,7 +116,6 @@ const envLines = [
     "PORT=3001",
     "LOG_LEVEL=info",
     "ALLOWED_ORIGIN=http://localhost:5173",
-    "MOCK_MODE=true",
     "APP_REPOSITORY_MODE=memory",
     `SESSION_SECRET=${randomBytes(32).toString("hex")}`,
     "GROUNDX_BASE_URL=https://api.groundx.ai/api/v1",

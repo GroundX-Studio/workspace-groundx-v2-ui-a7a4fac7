@@ -24,8 +24,8 @@
  * exactly like the **↻ re-render** control — both converge on ONE fetch path
  * (`runRender`), so the surface the user first sees on the Report pill is the
  * endpoint response, not a synchronous client-side fixture read
- * (2026-05-31-smart-report-followups closes that round-trip; MOCK_MODE backs
- * the server response, so the displayed sections are unchanged). The first
+ * (2026-05-31-smart-report-followups closes that round-trip; the server runs
+ * the live render path, so the displayed sections come from the endpoint). The first
  * paint has an explicit lifecycle — `loading` (fetch in flight) → `ready`
  * (endpoint response shown) / `empty` (endpoint returned no sections) /
  * `error` (the call rejected, with a retry). `useScopeAdapter` re-runs the
@@ -33,7 +33,7 @@
  * (BLOCKED on WF-10) — the same endpoint serves it with no surface rework.
  *
  * The template id the first paint renders is resolved from the scope via
- * `reportTemplateIdForScope` (MOCK_MODE: the Utility scope → the IC-brief
+ * `reportTemplateIdForScope` (demo routing: the Utility scope → the IC-brief
  * template). When the scope has no template, the surface shows the empty state
  * without a network round-trip.
  *
@@ -140,8 +140,8 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
 
   // ── The one fetch path ──────────────────────────────────────────────
   // Initial paint AND ↻ re-render both call this — the surface has a single
-  // source of truth for "what the report is" (the render endpoint), MOCK_MODE-
-  // backed server-side. `phase` selects which lifecycle state machine to drive
+  // source of truth for "what the report is" (the render endpoint), served by
+  // the live render path server-side. `phase` selects which lifecycle state machine to drive
   // (the first paint vs. a later re-render) so the loading/error affordances
   // stay distinct, but the network call + response handling are identical.
   const runRender = useCallback(

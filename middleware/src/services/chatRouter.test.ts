@@ -67,170 +67,125 @@ describe("classifyChatMode", () => {
 });
 
 describe("routeChat", () => {
-  it("MOCK_MODE returns a canned rag envelope with a citation", async () => {
+  function jsonOk(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  /**
+   * Build injected fake clients for the live RAG path (2026-06-01-retire-mock-mode
+   * re-grounded these off the deleted `chatMocks` canned responses onto the live
+   * `runRagPipeline` with fakes at the dependency seam). `searchDoc` controls the
+   * document the canned search hit cites; `llmAnswer` is the grounded body the
+   * fake LLM emits (with a `citations` JSON block so the RAG parser produces a
+   * real citation tier).
+   */
+  function liveRagClients(searchDoc: string, llmBody: string): {
+    groundxClient: GroundXClient;
+    llmClient: LlmClient;
+  } {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({ search: { results: [{ documentId: searchDoc, pageNumber: 1, text: llmBody }] } }),
+      ),
+    };
+    const llmAnswer = [
+      llmBody,
+      "",
+      "```json",
+      `{"citations":[{"documentId":"${searchDoc}","page":1,"quote":${JSON.stringify(llmBody.slice(0, 40))}}]}`,
+      "```",
+    ].join("\n");
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
+    };
+    return { groundxClient, llmClient };
+  }
+
+  function liveRagDeps(searchDoc: string, llmBody: string) {
+    const { groundxClient, llmClient } = liveRagClients(searchDoc, llmBody);
+    return {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 28454,
+      llmModelId: "test-model",
+    };
+  }
+
+  it("live RAG returns a grounded rag envelope with a citation", async () => {
     const res = await routeChat(
       makeRequest({ newUserMessage: "what is the total amount due?", currentEntityKey: "sample:utility" }),
-      { llmClient: fakeLlm, mockMode: true },
+      liveRagDeps("utility-bill-2026-04", "The total amount due is $214.07."),
     );
     expect(res.mode).toBe("rag");
-    // Post-CF-09: the answer is now scenario-specific for known
-    // entities. The generic "Mock RAG answer about X" copy only
-    // surfaces when the entity has no fixture bundle.
     expect(res.answer).toBeTruthy();
     expect(res.citations).toHaveLength(1);
     expect(res.suggestedActions.length).toBeGreaterThan(0);
   });
 
-  it("MOCK_MODE returns a canned structured envelope (no citations)", async () => {
-    const res = await routeChat(
-      makeRequest({ newUserMessage: "how many pages remaining on my plan?" }),
-      { llmClient: fakeLlm, mockMode: true },
-    );
-    expect(res.mode).toBe("structured");
-    expect(res.citations).toHaveLength(0);
-  });
-
-  it("MOCK_MODE returns a canned hybrid envelope with two suggested actions", async () => {
-    const res = await routeChat(
-      makeRequest({ newUserMessage: "explain this sample", currentEntityKey: "sample:utility" }),
-      { llmClient: fakeLlm, mockMode: true },
-    );
-    expect(res.mode).toBe("hybrid");
-    expect(res.suggestedActions.length).toBeGreaterThanOrEqual(2);
-  });
-
   it("live RAG mode requires GroundX client + api key (live wiring)", async () => {
-    // Now that live RAG is wired, the failure mode shifts from "not yet
-    // wired" to a typed configuration error when deps are missing.
+    // The failure mode is a typed configuration error when deps are missing —
+    // there is no mock path to fall back to.
     await expect(
       routeChat(makeRequest({ newUserMessage: "what is the total amount due?" }), {
         llmClient: fakeLlm,
-        mockMode: false,
       }),
     ).rejects.toThrow(/groundxClient/);
   });
 
-  // CF-09 — per-scenario MOCK_MODE fixtures. Each scenario should
-  // answer its canonical questions distinctly so MOCK_MODE produces
-  // useful dev/QA output instead of "Mock RAG answer about X".
-  describe("MOCK_MODE per-scenario fixtures (CF-09)", () => {
-    it("Utility scenario → 'what is the bill total' returns a $-bearing answer + utility-bill citation", async () => {
+  // The live RAG path serves whatever the injected LLM grounds against the
+  // injected search hit. Re-grounded off the deleted CF-09 per-scenario
+  // chatMocks fixtures: instead of asserting canned scenario copy, we inject a
+  // scenario-appropriate grounded answer + a matching-doc search hit and assert
+  // the live routing produces the right mode + a citation into that doc.
+  describe("live RAG per-scenario grounding (re-grounded CF-09)", () => {
+    it("Utility 'bill total' → a $-bearing answer + utility-bill citation", async () => {
       const res = await routeChat(
-        makeRequest({
-          newUserMessage: "What is the bill total?",
-          currentEntityKey: "sample:utility",
-        }),
-        { llmClient: fakeLlm, mockMode: true },
+        makeRequest({ newUserMessage: "What is the bill total?", currentEntityKey: "sample:utility" }),
+        liveRagDeps("utility-bill-2026-04", "The bill total is $214.07."),
       );
       expect(res.mode).toBe("rag");
       expect(res.answer).toMatch(/\$\d+\.?\d*/);
       expect(res.citations[0].documentId).toMatch(/utility/i);
     });
 
-    it("Utility scenario → 'due date' returns a date-shaped answer", async () => {
+    it("Loan 'DTI' → a percentage-bearing answer + loan citation", async () => {
       const res = await routeChat(
-        makeRequest({
-          newUserMessage: "When is the due date?",
-          currentEntityKey: "sample:utility",
-        }),
-        { llmClient: fakeLlm, mockMode: true },
-      );
-      expect(res.answer).toMatch(/due/i);
-      // Date format is whatever's in the fixture — assert the answer
-      // is scenario-aware (not the generic mock copy).
-      expect(res.answer).not.toMatch(/Mock RAG answer/);
-    });
-
-    it("Loan scenario → 'DTI' returns a percentage-bearing answer + loan citation", async () => {
-      const res = await routeChat(
-        makeRequest({
-          newUserMessage: "What is the applicant's DTI?",
-          currentEntityKey: "sample:loan",
-        }),
-        { llmClient: fakeLlm, mockMode: true },
+        makeRequest({ newUserMessage: "What is the applicant's DTI?", currentEntityKey: "sample:loan" }),
+        liveRagDeps("loan-application-2026", "The applicant's DTI is 32%."),
       );
       expect(res.answer).toMatch(/\d+\s?%/);
       expect(res.citations[0].documentId).toMatch(/loan/i);
     });
 
-    it("Loan scenario → 'credit score' returns a number in the FICO range", async () => {
+    it("Solar 'IRR' → a percentage-bearing answer + solar citation", async () => {
       const res = await routeChat(
-        makeRequest({
-          newUserMessage: "What's the credit score?",
-          currentEntityKey: "sample:loan",
-        }),
-        { llmClient: fakeLlm, mockMode: true },
-      );
-      // FICO range 300-850; just assert the answer contains a 3-digit
-      // score so the fixture stays scenario-flavored.
-      expect(res.answer).toMatch(/\b[3-8]\d{2}\b/);
-    });
-
-    it("Solar scenario → 'IRR' returns a percentage-bearing answer + solar citation", async () => {
-      const res = await routeChat(
-        makeRequest({
-          newUserMessage: "What is the IRR for the top project?",
-          currentEntityKey: "sample:solar",
-        }),
-        { llmClient: fakeLlm, mockMode: true },
+        makeRequest({ newUserMessage: "What is the IRR for the top project?", currentEntityKey: "sample:solar" }),
+        liveRagDeps("solar-portfolio-2026", "The IRR for the top project is 14.2%."),
       );
       expect(res.answer.toLowerCase()).toContain("irr");
       expect(res.answer).toMatch(/\d+(\.\d+)?\s?%/);
       expect(res.citations[0].documentId).toMatch(/solar/i);
     });
 
-    it("Solar scenario → 'highest risk' returns a project-named answer", async () => {
+    it("a grounded answer with no verifiable citation block degrades to no citations (frank, not fabricated)", async () => {
+      // The fake LLM returns prose with NO citations block; the RAG parser
+      // produces no verified citation rather than inventing one.
+      const groundxClient: GroundXClient = {
+        forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+      };
+      const llmClient: LlmClient = {
+        forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "I could not find that in the documents." } }] })),
+      };
       const res = await routeChat(
-        makeRequest({
-          newUserMessage: "Which project has the highest risk?",
-          currentEntityKey: "sample:solar",
-        }),
-        { llmClient: fakeLlm, mockMode: true },
+        makeRequest({ newUserMessage: "What's the meaning of life?", currentEntityKey: "sample:utility" }),
+        { llmClient, groundxClient, groundxApiKey: "k", samplesBucketId: 28454, llmModelId: "test-model" },
       );
-      expect(res.answer.toLowerCase()).toMatch(/risk/);
-      expect(res.answer).not.toMatch(/Mock RAG answer/);
-    });
-
-    it("unknown question on a known scenario → still scenario-flavored fallback (mentions the sample)", async () => {
-      const res = await routeChat(
-        makeRequest({
-          newUserMessage: "What's the meaning of life?",
-          currentEntityKey: "sample:utility",
-        }),
-        { llmClient: fakeLlm, mockMode: true },
-      );
-      // Fallback is OK to be generic but must still mention the sample
-      // so dev/QA can tell the routing worked.
-      expect(res.answer.toLowerCase()).toMatch(/utility|bill|sample/);
-    });
-
-    it("no active entity → generic mock answer (back-compat with pre-CF-09 callers)", async () => {
-      const res = await routeChat(
-        makeRequest({ newUserMessage: "What's the bill total?" }),
-        { llmClient: fakeLlm, mockMode: true },
-      );
-      // No entity to anchor the fixture lookup → falls back to the
-      // generic mock envelope. Pre-CF-09 tests asserted this.
       expect(res.mode).toBe("rag");
-      expect(res.answer.toLowerCase()).toContain("mock");
-    });
-
-    it("Loan canonical question on a non-Loan scenario does NOT return the Loan answer", async () => {
-      // Cross-contamination guard: if the user asks the loan-specific
-      // canonical question while viewing the Solar sample, we must
-      // NOT serve the loan fixture. Better to serve a scenario-
-      // appropriate fallback than to leak the wrong answer.
-      const res = await routeChat(
-        makeRequest({
-          newUserMessage: "What is the applicant's DTI?",
-          currentEntityKey: "sample:solar",
-        }),
-        { llmClient: fakeLlm, mockMode: true },
-      );
-      // The answer must not contain the loan-specific DTI numeric.
-      // Our solar fixture has no DTI question → fallback path.
-      // Assertion: the citation is NOT a loan doc.
-      expect(res.citations[0]?.documentId ?? "").not.toMatch(/^loan-/i);
+      expect(res.citations).toHaveLength(0);
     });
   });
 
@@ -239,7 +194,6 @@ describe("routeChat", () => {
     await expect(
       routeChat(makeRequest({ newUserMessage: "what are my saved schemas?" }), {
         llmClient: fakeLlm,
-        mockMode: false,
         // No repository or chatSessionId → routeChat doesn't have the
         // deps it needs to run the structured handler.
       }),
@@ -267,7 +221,6 @@ describe("routeChat", () => {
     });
     const reply = await routeChat(makeRequest({ newUserMessage: "pages remaining on my plan?" }), {
       llmClient: fakeLlm,
-      mockMode: false,
       repository: repo,
       chatSessionId: "chat-1",
       byoPagesLimit: 100,
@@ -315,7 +268,6 @@ describe("routeChat", () => {
     };
     const reply = await routeChat(makeRequest({ newUserMessage: "explain this sample" }), {
       llmClient: fakeLlm,
-      mockMode: false,
       repository: repo,
       chatSessionId: "chat-1",
       groundxClient,
@@ -819,7 +771,6 @@ describe("CF-07 viewer-intent chip gating in runRagPipeline", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     // Post-A.5: legacy chip key is gone. The LLM should call the
     // `suggest_intent` tool instead, which lands on
@@ -838,7 +789,6 @@ describe("CF-07 viewer-intent chip gating in runRagPipeline", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.suggestedActions.find((a) => a.key === "suggested-intent")).toBeUndefined();
     expect(reply.suggestedActions.find((a) => a.key === "show-source")).toBeDefined();
@@ -853,7 +803,6 @@ describe("CF-07 viewer-intent chip gating in runRagPipeline", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.suggestedActions.find((a) => a.key === "suggested-intent")).toBeUndefined();
   });
@@ -951,7 +900,6 @@ describe("CF-06 token-budget guard in callGroundedLlm", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
 
     const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body);
@@ -985,7 +933,6 @@ describe("CF-06 token-budget guard in callGroundedLlm", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
 
     const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body);
@@ -1062,7 +1009,6 @@ describe("2026-05-31-word-level-citation-geometry — exact tier from live word-
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
       wordMapFetch,
     });
     expect(reply.citations).toHaveLength(1);
@@ -1086,7 +1032,6 @@ describe("2026-05-31-word-level-citation-geometry — exact tier from live word-
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
       wordMapFetch,
     });
     expect(reply.citations).toHaveLength(1);
@@ -1123,7 +1068,6 @@ describe("2026-05-31-word-level-citation-geometry — exact tier from live word-
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
       wordMapFetch,
     });
     expect(reply.citations).toHaveLength(1);
@@ -1151,7 +1095,6 @@ describe("2026-05-31-word-level-citation-geometry — exact tier from live word-
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
       wordMapFetch,
     });
     expect(reply.citations).toHaveLength(1);
@@ -1205,7 +1148,6 @@ describe("2026-05-31-tool-system-completion — server-side role filter on the L
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body) as {
       tools?: { function?: { name?: string } }[];
@@ -1250,7 +1192,6 @@ describe("CF-06 refusal calibration in callGroundedLlm", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body);
     const systemContent = body.messages.find((m: { role: string }) => m.role === "system").content;
@@ -1281,7 +1222,6 @@ describe("CF-06 refusal calibration in callGroundedLlm", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body);
     const systemContent = body.messages.find((m: { role: string }) => m.role === "system").content;
@@ -1306,7 +1246,6 @@ describe("CF-06 refusal calibration in callGroundedLlm", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.answer).toBe(GROUNDED_REFUSAL_PHRASE);
   });
@@ -1350,7 +1289,6 @@ describe("CF-06 structured citations wired into runRagPipeline", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     // Only the cite the LLM actually used.
     expect(reply.citations).toHaveLength(1);
@@ -1384,7 +1322,6 @@ describe("CF-06 structured citations wired into runRagPipeline", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     // Only the doc that actually exists in the snippet set.
     expect(reply.citations).toHaveLength(1);
@@ -1415,7 +1352,6 @@ describe("CF-06 structured citations wired into runRagPipeline", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.citations).toHaveLength(2);
     expect(reply.citations.map((c) => c.documentId).sort()).toEqual(["d1", "d2"]);
@@ -1522,7 +1458,6 @@ describe("proposedSchemaField via propose_schema_field tool call (A.4 back-compa
         groundxApiKey: "k",
         samplesBucketId: 42,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(reply.proposedSchemaField).toMatchObject({
@@ -1549,7 +1484,6 @@ describe("proposedSchemaField via propose_schema_field tool call (A.4 back-compa
         groundxApiKey: "k",
         samplesBucketId: 42,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     expect(reply.proposedSchemaField).toBeNull();
@@ -1622,7 +1556,6 @@ describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply._debug).toBeDefined();
     expect(reply._debug?.mode).toBe("rag");
@@ -1649,7 +1582,6 @@ describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "claude-test-model",
-      mockMode: false,
     });
     expect(reply._debug?.llm).not.toBeNull();
     expect(reply._debug?.llm?.model).toBe("claude-test-model");
@@ -1670,7 +1602,6 @@ describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
       groundxApiKey: "k",
       samplesBucketId: 28454,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply._debug?.scope).toMatchObject({ type: "bucket", bucketId: 28454 });
   });
@@ -1692,7 +1623,6 @@ describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply._debug?.groundx?.resultCount).toBe(0);
     expect(reply._debug?.groundx?.topSnippets).toHaveLength(0);
@@ -1711,7 +1641,6 @@ describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply._debug).toBeUndefined();
   });
@@ -1779,7 +1708,6 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.intents).toHaveLength(1);
     expect(reply.intents[0]).toMatchObject({
@@ -1800,7 +1728,6 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.intents[0].intent).toMatchObject({
       kind: "highlightCitation",
@@ -1820,7 +1747,6 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.intents).toHaveLength(1);
     expect(reply.intents[0].name).toBe("jump_to_page");
@@ -1839,7 +1765,6 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.intents).toEqual([]);
     expect(reply.toolFailures).toEqual([
@@ -1855,7 +1780,6 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.intents).toEqual([]);
     expect(reply.toolFailures).toEqual([]);
@@ -1869,7 +1793,6 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(llmForward).toHaveBeenCalledTimes(1);
     const body = JSON.parse((llmForward.mock.calls[0][1] as RequestInit).body as string);
@@ -1889,7 +1812,6 @@ describe("Phase 5 — function-calling tool round-trip", () => {
         groundxApiKey: "k",
         samplesBucketId: 42,
         llmModelId: "test-model",
-        mockMode: false,
       },
     );
     const body = JSON.parse((llmForward.mock.calls[0][1] as RequestInit).body as string);
@@ -1943,7 +1865,6 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     const body = JSON.parse((llmForward.mock.calls[0][1] as RequestInit).body as string);
     return (body.tools as Array<{ function: { name: string } }>).map((t) => t.function.name).sort();
@@ -2069,7 +1990,6 @@ describe("Phase 8 — category-aware mutate-tool routing", () => {
         groundxApiKey: "k",
         samplesBucketId: 42,
         llmModelId: "test-model",
-        mockMode: false,
       });
       // Should NOT auto-dispatch via intents[].
       expect(reply.intents).toEqual([]);
@@ -2094,7 +2014,6 @@ describe("Phase 8 — category-aware mutate-tool routing", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
     });
     expect(reply.intents.length).toBe(1);
     expect(reply.intents[0].name).toBe("open_document");
@@ -2114,7 +2033,6 @@ describe("Phase 8 — category-aware mutate-tool routing", () => {
         groundxApiKey: "k",
         samplesBucketId: 42,
         llmModelId: "test-model",
-        mockMode: false,
       });
       expect(reply.intents.length).toBe(1);
       expect(reply.intents[0].name).toBe("open_document");
@@ -2133,7 +2051,6 @@ describe("Phase 8 — category-aware mutate-tool routing", () => {
         groundxApiKey: "k",
         samplesBucketId: 42,
         llmModelId: "test-model",
-        mockMode: false,
       });
       const chip = reply.suggestedActions.find((a) => a.key === "tool:accept_probe");
       expect(chip?.label).toMatch(/Mutate-category probe/);

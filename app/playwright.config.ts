@@ -22,11 +22,33 @@ export default defineConfig({
     {
       command: [
         "npm --workspace @groundx/web-ui-scaffold-middleware run build",
-        `PORT=${middlewarePort} MOCK_MODE=true APP_REPOSITORY_MODE=memory METRICS_ENABLED=false npm --workspace @groundx/web-ui-scaffold-middleware run start`,
+        // The middleware boots in REAL mode against the live GroundX backend —
+        // there is no MOCK_MODE (2026-06-01-retire-mock-mode). The deterministic
+        // e2e data is the seeded sample doc c3bfff49 in bucket 28454, which is
+        // stable. The Partner key + GroundX base URL come from the environment
+        // (a CI secret in CI; .env.local locally). The repo stays in-memory.
+        `PORT=${middlewarePort} APP_REPOSITORY_MODE=memory METRICS_ENABLED=false npm --workspace @groundx/web-ui-scaffold-middleware run start`,
       ].join(" && "),
       url: `${middlewareBaseUrl}/api/healthz`,
       reuseExistingServer: false,
       timeout: 120_000,
+      env: {
+        // Pass the real GroundX credentials through to the middleware. Sourced
+        // from a CI secret (see .github/workflows/ci.yml, `dev` environment) or
+        // from .env.local locally. The middleware's loadEnv also reads .env.local
+        // directly, so a missing value here just falls back to that file.
+        ...(process.env.GROUNDX_PARTNER_API_KEY
+          ? { GROUNDX_PARTNER_API_KEY: process.env.GROUNDX_PARTNER_API_KEY }
+          : {}),
+        ...(process.env.GROUNDX_BASE_URL ? { GROUNDX_BASE_URL: process.env.GROUNDX_BASE_URL } : {}),
+        ...(process.env.GROUNDX_SAMPLES_BUCKET_ID
+          ? { GROUNDX_SAMPLES_BUCKET_ID: process.env.GROUNDX_SAMPLES_BUCKET_ID }
+          : { GROUNDX_SAMPLES_BUCKET_ID: "28454" }),
+        ...(process.env.LLM_SERVICE ? { LLM_SERVICE: process.env.LLM_SERVICE } : {}),
+        ...(process.env.LLM_BASE_URL ? { LLM_BASE_URL: process.env.LLM_BASE_URL } : {}),
+        ...(process.env.LLM_API_KEY ? { LLM_API_KEY: process.env.LLM_API_KEY } : {}),
+        ...(process.env.LLM_MODEL_ID ? { LLM_MODEL_ID: process.env.LLM_MODEL_ID } : {}),
+      },
     },
     {
       command: [

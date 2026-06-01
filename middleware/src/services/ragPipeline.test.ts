@@ -61,7 +61,6 @@ describe("runRagPipeline migrated onto groundedAnswerOverScope", () => {
       groundxApiKey: "k",
       samplesBucketId: 42,
       llmModelId: "test-model",
-      mockMode: false,
       wordMapFetch: async () => null,
     });
 

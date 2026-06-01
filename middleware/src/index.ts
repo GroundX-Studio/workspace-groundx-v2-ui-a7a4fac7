@@ -3,7 +3,6 @@ import { loadEnv } from "./config/env.js";
 import { MemoryAppRepository } from "./db/memoryRepository.js";
 import { MySqlAppRepository } from "./db/mysqlRepository.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
-import { DevGroundXClient, DevGroundXPartnerClient, DevLlmClient } from "./services/devClients.js";
 import { FetchGroundXClient } from "./services/groundxClient.js";
 import { FetchGroundXPartnerClient } from "./services/groundxPartnerClient.js";
 import { FetchLlmClient, isLightLlmConfigured } from "./services/llmClient.js";
@@ -14,7 +13,6 @@ const env = loadEnv();
 const useMemoryRepository =
   env.APP_REPOSITORY_MODE === "memory" ||
   (env.APP_REPOSITORY_MODE === "auto" && env.NODE_ENV !== "production" && !env.MYSQL_HOST);
-const useDevClients = env.NODE_ENV !== "production" && env.MOCK_MODE;
 
 await initTelemetry(env);
 
@@ -24,31 +22,29 @@ await repository.createSchema();
 // CF-16: build a separate light-side client only when LLM_LIGHT_* is
 // fully wired in env. Otherwise leave it undefined — chatHandler reuses
 // the chat client for compression (single-LLM back-compat).
-const lightLlmClient = useDevClients
-  ? undefined
-  : isLightLlmConfigured(env)
-    ? new FetchLlmClient(env, "light")
-    : undefined;
+const lightLlmClient = isLightLlmConfigured(env) ? new FetchLlmClient(env, "light") : undefined;
 
+// The runtime always uses the real Fetch* clients — there is no mock/dev-client
+// mode (2026-06-01-retire-mock-mode). Tests inject fakes at the dependency seam.
 const app = createApp({
   env,
   repository,
-  partnerClient: useDevClients ? new DevGroundXPartnerClient() : new FetchGroundXPartnerClient(env),
-  groundxClient: useDevClients ? new DevGroundXClient() : new FetchGroundXClient(env),
-  llmClient: useDevClients ? new DevLlmClient() : new FetchLlmClient(env),
+  partnerClient: new FetchGroundXPartnerClient(env),
+  groundxClient: new FetchGroundXClient(env),
+  llmClient: new FetchLlmClient(env),
   lightLlmClient,
   scenarioRegistry: new ScenarioRegistry(env),
 });
 
 const server = app.listen(env.PORT, () => {
-  logger.info({ port: env.PORT, repository: useMemoryRepository ? "memory" : "mysql", devClients: useDevClients }, "GroundX middleware scaffold listening");
+  logger.info({ port: env.PORT, repository: useMemoryRepository ? "memory" : "mysql" }, "GroundX middleware scaffold listening");
   logger.info(summarizeEnvForLog(env), "Recognized env vars (keys only; values redacted for secrets)");
 });
 
 /**
  * Diagnostic snapshot of the env vars the middleware recognizes —
  * keys + a `present`/`absent` flag (and the literal value for known-
- * non-secret config like APP_REPOSITORY_MODE / MOCK_MODE / NODE_ENV /
+ * non-secret config like APP_REPOSITORY_MODE / NODE_ENV /
  * LLM_SERVICE / LLM_MODEL_ID / GROUNDX_BASE_URL / MYSQL_HOST etc.).
  * Secret-bearing keys (anything matching /KEY|TOKEN|SECRET|PASSWORD/i)
  * surface only as `present: true` so the log doesn't leak values.
@@ -59,7 +55,7 @@ function summarizeEnvForLog(env: Record<string, unknown>) {
   const SECRET_PATTERN = /KEY|TOKEN|SECRET|PASSWORD/i;
   const recognized = [
     "NODE_ENV", "PORT", "LOG_LEVEL",
-    "APP_REPOSITORY_MODE", "MOCK_MODE",
+    "APP_REPOSITORY_MODE",
     "ALLOWED_ORIGIN",
     "GROUNDX_BASE_URL", "GROUNDX_SAMPLES_BUCKET_ID",
     "GROUNDX_PARTNER_API_KEY",

@@ -21,11 +21,11 @@ vi.mock("@/api/entities/onboardingSessionEntity", () => ({
 
 // 2026-05-31-smart-report-followups: the SmartReportRender FIRST paint now
 // routes through the render endpoint client (`renderReport`), so the shell-
-// level report tests drive the surface through this mock. MOCK_MODE backs the
-// real server with the same fixtures, so the mock here returns the fixture for
-// the render scope — the displayed sections / preview-lock / empty state are
-// the production output, now endpoint-sourced. We resolve the fixture lazily
-// (inside the mock factory) to avoid hoist-order issues.
+// level report tests drive the surface through this injected client mock. The
+// mock returns the demo fixture for the render scope — the displayed sections /
+// preview-lock / empty state are the production output, now endpoint-sourced.
+// We resolve the fixture lazily (inside the mock factory) to avoid hoist-order
+// issues.
 vi.mock("@/api/smartReport", async () => {
   const { getReportFixture } = await import("@/widgets/reportFixtures");
   return {

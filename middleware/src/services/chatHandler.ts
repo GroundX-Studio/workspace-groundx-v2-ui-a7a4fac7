@@ -6,7 +6,7 @@
  *   2. Append the new user message to the chat session.
  *   3. Build the 3-axis context bundle.
  *   4. If `shouldCompress` fires, run a compression pass (Phase I + J).
- *   5. Route through `routeChat` (mock OR live RAG pipeline).
+ *   5. Route through `routeChat` (live RAG / structured / hybrid path).
  *   6. Append the assistant reply (with provider/model + latency).
  *   7. Return a typed envelope to the client.
  *
@@ -141,8 +141,6 @@ export interface HandleChatMessageDeps {
    * light/chat split; `lightLlmModelId` wins when both are set.
    */
   compressionModelId?: string;
-  /** When true, skip GroundX/LLM and return canned router responses. */
-  mockMode: boolean;
   /** Free-tier BYO page budget surfaced by the "pages_remaining" structured query. */
   byoPagesLimit?: number;
   /**
@@ -354,10 +352,9 @@ export async function handleChatMessage(
     }
   }
 
-  // 4. Route the chat request. Mock mode returns canned responses;
-  //    live mode hits GroundX search + grounded LLM call for RAG,
-  //    falls back to mock for structured/hybrid (those branches need
-  //    app-state queries that aren't wired yet).
+  // 4. Route the chat request. The RAG path hits GroundX search +
+  //    a grounded LLM call; structured/hybrid run the live handlers.
+  //    There is no mock path — tests inject fake clients at the seam.
   const startedAt = Date.now();
   const routerRequest: ChatRouterRequest = {
     newUserMessage: request.newUserMessage,
@@ -404,7 +401,6 @@ export async function handleChatMessage(
       rbacFilter: deps.rbacFilter,
       byoPagesLimit: deps.byoPagesLimit,
       llmModelId: deps.llmModelId,
-      mockMode: deps.mockMode,
     });
   } catch (err) {
     // Record the failure as an assistant message so the conversation
@@ -456,7 +452,7 @@ export async function handleChatMessage(
     content: reply.answer,
     citationsJson: reply.citations.length ? JSON.stringify(reply.citations) : null,
     compressedIntoSummaryId: null,
-    llmProvider: deps.mockMode ? "mock" : "live",
+    llmProvider: "live",
     llmModelId: deps.llmModelId,
     latencyMs,
     promptTokens: null,

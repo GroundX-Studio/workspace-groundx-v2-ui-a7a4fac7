@@ -69,8 +69,8 @@ contacts in production. Columns:
 
 ## Out of scope for this audit
 
-- `MOCK_MODE` fixture URLs (`api.groundx.test`, `llm.test`) — test-only,
-  never reach production.
+- Test-fixture URLs (`api.groundx.test`, `llm.test`) — used only by
+  injected test doubles (vitest), never reach production.
 - IAM endpoints (`*.amazonaws.com`) — those are AWS-SDK-driven and
   configurable through the standard AWS env vars; not a "host" in the
   same sense.

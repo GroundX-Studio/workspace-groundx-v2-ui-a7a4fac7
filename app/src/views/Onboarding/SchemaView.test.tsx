@@ -14,8 +14,9 @@ import { extractField } from "@/api/extractField";
 // 2026-05-31-schemaview-live-only-extract — SchemaView reads the LIVE extract
 // as its sole source. Standalone `<SchemaView />` mounts (no live props)
 // self-resolve the live extract from the same load path the Extract widget
-// uses (getDocument → filter.workflow_id → getGroundXWorkflow → extract). Under
-// MOCK_MODE these calls resolve from the fixture path; here we stub the
+// uses (getDocument → filter.workflow_id → getGroundXWorkflow → extract). Tests
+// inject a real-shaped live extract at the seam (the runtime has no MOCK_MODE
+// path); here we stub the
 // workflow + document/extract loaders so the standalone surfaces have a genuine
 // live source keyed by the scenario's primary document. The fixture's field ids
 // mirror the manifest (account_number / amount_due / meter_kwh) — same shape,
@@ -49,9 +50,9 @@ import {
 const LIVE_UTILITY_DOC_ID = "c3bfff49-6640-4213-822b-e81c3a771e45";
 const LIVE_WORKFLOW_ID = "9910308e-3100-473e-9da6-3ac29f5958a6";
 
-// MOCK_MODE live workflow — same field ids as the manifest schema so existing
-// row assertions stay valid, but sourced live (workflow → extract), not the
-// manifest. Statement: account_number (STRING) + amount_due (NUMBER).
+// Injected live workflow (test seam) — same field ids as the manifest schema so
+// existing row assertions stay valid, but sourced live (workflow → extract), not
+// the manifest. Statement: account_number (STRING) + amount_due (NUMBER).
 // Meters: meter_kwh (NUMBER).
 const LIVE_WORKFLOW = {
   workflow: {
@@ -79,7 +80,7 @@ const LIVE_WORKFLOW = {
   },
 };
 
-// MOCK_MODE live extract VALUES — distinct from the manifest's
+// Injected live extract VALUES (test seam) — distinct from the manifest's
 // sampleExtractionValues (1023456 / 18742.16 / 4128) so a test proves the
 // rendered value came from the live extract, not the manifest.
 const LIVE_EXTRACT = {
@@ -89,7 +90,7 @@ const LIVE_EXTRACT = {
 };
 
 /**
- * Install the MOCK_MODE live extract for the standalone `<SchemaView />`
+ * Install the injected live extract (test seam) for the standalone `<SchemaView />`
  * surfaces. Returns a live-doc utility scenario the caller passes via
  * `initialScenarios` so the scenario's primary document is the resolved id.
  */
@@ -119,7 +120,7 @@ import { useEffect, useMemo, useRef, type FC, type ReactElement } from "react";
 import type { ContentScope } from "@groundx/shared";
 
 // Utility scenario whose primary document is the resolved live id, so the
-// standalone `<SchemaView />` runs the MOCK_MODE live load.
+// standalone `<SchemaView />` runs the live load (off the injected seam).
 const liveUtilityScenario: ScenarioConfig = {
   ...utilityTestScenario,
   documents: [
@@ -130,7 +131,7 @@ const LIVE_SCENARIOS: ScenarioConfig[] = [liveUtilityScenario];
 
 /**
  * 2026-05-31-schemaview-live-only-extract — render a standalone `<SchemaView />`
- * over the MOCK_MODE live extract (the manifest arm is retired, so a bare mount
+ * over the injected live extract (the manifest arm is retired, so a bare mount
  * has no source otherwise). Installs the live workflow/extract loaders + the
  * live-doc scenario, then waits for the live load to surface the schema. Field
  * ids mirror the manifest (account_number / amount_due / meter_kwh) so the
@@ -317,12 +318,13 @@ describe("SchemaView (UI-01 Phase 1)", () => {
   });
 
   // ── 2026-05-31-schemaview-live-only-extract · Task 1 ────────────
-  // With MOCK_MODE active, the standalone `<SchemaView />` mount (no live
-  // props) renders from the LIVE prop path — schema + values resolved via the
-  // same getDocument → getGroundXWorkflow → getDocumentExtract path the Extract
-  // widget uses — NOT the manifest. Assert via the live VALUE (distinct from
-  // the manifest's sampleExtractionValues) so the source is provably live.
-  it("MOCK_MODE: standalone SchemaView renders from the live extract (not the manifest)", async () => {
+  // With a live extract injected at the seam, the standalone `<SchemaView />`
+  // mount (no live props) renders from the LIVE prop path — schema + values
+  // resolved via the same getDocument → getGroundXWorkflow → getDocumentExtract
+  // path the Extract widget uses — NOT the manifest. Assert via the live VALUE
+  // (distinct from the manifest's sampleExtractionValues) so the source is
+  // provably live.
+  it("injected-seam: standalone SchemaView renders from the live extract (not the manifest)", async () => {
     installLiveExtract();
     renderWithOnboardingProviders(<SchemaView />, {
       initialFrame: "f3a",

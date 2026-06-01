@@ -167,11 +167,18 @@ Even with `MYSQL_HOST` etc. in the env, the middleware reads
 them but never opens a connection. To actually exercise the
 SQL impl, set `APP_REPOSITORY_MODE=mysql`.
 
-### `MOCK_MODE=true` swaps every upstream client for a Fake
+### No mock mode — the runtime always uses the real clients
 
-Affects Partner / GroundX / LLM clients. The fake clients
-return canned responses + record their calls. Useful in dev;
-asserts in tests rely on the fake recordings.
+There is NO `MOCK_MODE` env flag and no `Dev*` client classes
+(retired 2026-06-01-retire-mock-mode). The middleware always
+constructs the real `Fetch*` Partner / GroundX / LLM clients in
+every environment. Deterministic behavior in TESTS comes from
+`Fake*` clients (or real-shaped fixtures) INJECTED at the
+dependency seam — that is the legitimate test-double seam, not a
+runtime mode. A drift guard
+(`services/noMockMode.drift.test.ts`) fails if `MOCK_MODE`, a
+`Dev*` client, `chatMocks`, or a `mockMode` deps field
+reappears in runtime code.
 
 ### `requireAuthenticatedUser` returns 401 with `code: ANONYMOUS_SESSION`
 

@@ -29,7 +29,7 @@
  * `saveTemplate` repo API, the SAME persistence Extract uses). An `anonymous`
  * user's Save opens the sign-in gate (`commitGate`) and never persists.
  * `scope: ContentScope` selects which template's sections to seed from the
- * MOCK_MODE fixture (the demos open on `bucket + project filter`).
+ * client-side demo fixture (the demos open on `bucket + project filter`).
  *
  * The widget's `show_smart_report_edit` canvas-dispatch descriptor + the
  * per-control `*.tools.ts` surface are DEFERRED to Phase 5 (step 17) — the
@@ -113,7 +113,7 @@ function humanizeName(name: string): string {
 }
 
 /**
- * Seed the base section rows for a scope from the MOCK_MODE report fixture.
+ * Seed the base section rows for a scope from the client-side demo fixture.
  * The rendered fixture carries `name + renderAs`; the builder seeds a starter
  * `question` from the section name until the live template read (Phase 6)
  * supplies the authored question.

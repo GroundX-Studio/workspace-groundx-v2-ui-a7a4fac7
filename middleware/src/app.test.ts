@@ -26,9 +26,12 @@ describe("middleware scaffold", () => {
     expect(defaultDevEnv.APP_REPOSITORY_MODE).toBe("auto");
     expect(defaultDevEnv.MYSQL_HOST).toBeUndefined();
     expect(loadEnv({ ...testEnv, PORT: "3002" } as any).PORT).toBe(3002);
-    expect(loadEnv({ ...testEnv, MOCK_MODE: "true" } as any).MOCK_MODE).toBe(true);
-    expect(loadEnv({ ...testEnv, MOCK_MODE: " YES " } as any).MOCK_MODE).toBe(true);
-    expect(loadEnv({ ...testEnv, MOCK_MODE: "false" } as any).MOCK_MODE).toBe(false);
+    // 2026-06-01-retire-mock-mode: the MOCK_MODE env field is gone. loadEnv
+    // parses cleanly with no MOCK_MODE key, the schema exposes no MOCK_MODE
+    // field, and a stray MOCK_MODE env var is simply ignored (not parsed into
+    // a typed field) in every environment — including production.
+    expect("MOCK_MODE" in loadEnv({ ...testEnv } as any)).toBe(false);
+    expect("MOCK_MODE" in loadEnv({ ...testEnv, MOCK_MODE: "true" } as any)).toBe(false);
     expect(() =>
       loadEnv({
         NODE_ENV: "development",
@@ -37,9 +40,6 @@ describe("middleware scaffold", () => {
         SESSION_SECRET: "01234567890123456789012345678901",
       } as any),
     ).toThrow(/MYSQL_HOST/);
-    expect(() => loadEnv({ ...testEnv, NODE_ENV: "production", MOCK_MODE: "true" } as any)).toThrow(
-      /MOCK_MODE/,
-    );
     expect(() => loadEnv({ ...testEnv, NODE_ENV: "production", LLM_SERVICE: undefined } as any)).toThrow(
       /LLM_SERVICE/,
     );
@@ -445,14 +445,32 @@ describe("middleware scaffold", () => {
     expect(response.body.error).toMatch(/chat_session_not_found/);
   });
 
-  it("POST /api/chat/messages round-trips a user + assistant turn in mock mode", async () => {
+  it("POST /api/chat/messages round-trips a user + assistant turn via the live RAG path", async () => {
     const repository = new MemoryAppRepository();
     const partnerClient = new FakePartnerClient();
+    // Inject fakes at the dependency seam (2026-06-01-retire-mock-mode — no mock
+    // mode): GroundX returns one search hit, the LLM grounds a cited answer.
     const groundxClient = new FakeGroundXClient();
-    const llmClient = new FakeLlmClient();
+    groundxClient.responseByPathFragment.set("/search", {
+      search: { results: [{ documentId: "doc-1", pageNumber: 1, text: "RAG grounds answers in retrieved snippets." }] },
+    });
+    const llmAnswer = [
+      "RAG grounds answers in retrieved snippets.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"doc-1","page":1,"quote":"RAG grounds answers"}]}',
+      "```",
+    ].join("\n");
+    const llmClient: LlmClient = {
+      calls: [] as Array<{ path: string; init: RequestInit }>,
+      async forward(path: string, init: RequestInit) {
+        (this.calls as Array<{ path: string; init: RequestInit }>).push({ path, init });
+        return Response.json({ choices: [{ message: { content: llmAnswer } }] });
+      },
+    } as unknown as LlmClient & { calls: Array<{ path: string; init: RequestInit }> };
     const scenarioRegistry = new FakeScenarioRegistry();
-    const mockEnv = { ...testEnv, MOCK_MODE: true };
-    const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+    const liveEnv = { ...testEnv, GROUNDX_SAMPLES_BUCKET_ID: 28454 };
+    const app = createApp({ env: liveEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
 
     const agent = request.agent(app);
     const created = await agent.post("/api/onboarding/session").expect(200);
@@ -486,14 +504,14 @@ describe("middleware scaffold", () => {
     expect(response.body.userMessageId).toEqual(expect.any(String));
     expect(response.body.assistantMessageId).toEqual(expect.any(String));
     expect(response.body.reply.mode).toBe("rag");
-    expect(response.body.reply.answer).toMatch(/Mock RAG/);
+    expect(response.body.reply.answer).toBe("RAG grounds answers in retrieved snippets.");
     expect(response.body.compressionRan).toBe(false);
 
     const messages = await repository.listChatMessages("chat-1");
     expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-    // Mock mode must not have hit any upstream client.
-    expect(llmClient.calls).toHaveLength(0);
-    expect(groundxClient.calls).toHaveLength(0);
+    // The live path hit BOTH upstream clients (no mock short-circuit).
+    expect((llmClient as unknown as { calls: unknown[] }).calls.length).toBeGreaterThan(0);
+    expect(groundxClient.calls.length).toBeGreaterThan(0);
   });
 
   // Finding 3 (§4 #19 follow-up) — MAJOR IDOR. The route was gated only by
@@ -921,14 +939,23 @@ describe("middleware scaffold", () => {
       expect(response.body.error).toMatch(/chat_session_not_found/);
     });
 
-    it("returns a typed value envelope in mock mode (NUMBER field)", async () => {
+    it("returns a typed value envelope via the live extract path (NUMBER field)", async () => {
       const repository = new MemoryAppRepository();
       const partnerClient = new FakePartnerClient();
+      // Inject fakes at the seam (2026-06-01-retire-mock-mode — no mock mode):
+      // GroundX returns a snippet, the LLM extracts a typed NUMBER + citation.
       const groundxClient = new FakeGroundXClient();
-      const llmClient = new FakeLlmClient();
+      groundxClient.responseByPathFragment.set("/search", {
+        search: { results: [{ documentId: "utility-bill-2026-04", pageNumber: 1, text: "Total tax: $42.00" }] },
+      });
+      const llmClient: LlmClient = {
+        forward: async () =>
+          Response.json({
+            choices: [{ message: { content: '{"value": 42, "confidence": 0.9, "citation": {"documentId": "utility-bill-2026-04", "page": 1, "quote": "Total tax: $42.00"}}' } }],
+          }),
+      };
       const scenarioRegistry = new FakeScenarioRegistry();
-      const mockEnv = { ...testEnv, MOCK_MODE: true };
-      const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+      const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
       const agent = request.agent(app);
       // Anon bootstrap mints the server session — POST /api/chat-sessions
       // then sets `ownerAnonId = session.id` so the ownership check
@@ -947,7 +974,6 @@ describe("middleware scaffold", () => {
         })
         .expect(200);
 
-      // value can be a number (mock plausible) OR null (couldn't infer).
       // The contract is: shape is fixed; downstream UI renders both states.
       expect(response.body).toHaveProperty("value");
       expect(response.body).toHaveProperty("confidence");
@@ -969,8 +995,7 @@ describe("middleware scaffold", () => {
       const groundxClient = new FakeGroundXClient();
       const llmClient = new FakeLlmClient();
       const scenarioRegistry = new FakeScenarioRegistry();
-      const mockEnv = { ...testEnv, MOCK_MODE: true };
-      const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+      const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
       const agent = request.agent(app);
       await agent.post("/api/onboarding/session").expect(200);
       await agent
@@ -1028,19 +1053,67 @@ describe("middleware scaffold", () => {
   });
 });
 
-describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)", () => {
+describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 — route contract, live path)", () => {
   // The samples bucket the Utility report scope sits in. A scope on this
   // bucket is a sample preview; any other bucket is BYO → gate (#10).
   const SAMPLES_BUCKET = 28454;
 
-  function renderSetup() {
+  // 2026-06-01-retire-mock-mode: the render route's MOCK_MODE fixture path is
+  // gone — these route-contract tests now drive the LIVE render with a persisted
+  // 4-section template + grounded fakes injected at the dependency seam. The
+  // four sections + their cited bodies are produced by the live search → grounded
+  // LLM → WF-06b verify path, not an in-code fixture.
+  const UTILITY_TEMPLATE_BODY = {
+    sections: [
+      { id: "billing_summary", name: "billing_summary", renderAs: "PARAGRAPH", question: "Summarize the billing period and total.", variables: [] },
+      { id: "charge_breakdown", name: "charge_breakdown", renderAs: "TABLE", question: "Break down the charges.", variables: [] },
+      { id: "anomalies", name: "anomalies", renderAs: "BULLETS", question: "List anomalies.", variables: [] },
+      { id: "recommendation", name: "recommendation", renderAs: "PARAGRAPH", question: "Recommend next steps.", variables: [] },
+    ],
+  };
+
+  function groundedLlm(): LlmClient {
+    const llmAnswer = [
+      "The total amount due is $18,742.16.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"utility-bill-2026-04","page":1,"quote":"total amount due is $18,742.16"}]}',
+      "```",
+    ].join("\n");
+    return { forward: async () => Response.json({ choices: [{ message: { content: llmAnswer } }] }) };
+  }
+
+  function searchHit(): GroundXClient {
+    return {
+      forward: async () =>
+        Response.json({ search: { results: [{ documentId: "utility-bill-2026-04", text: "total amount due is $18,742.16" }] } }),
+    };
+  }
+
+  async function renderSetup() {
     const repository = new MemoryAppRepository();
     const partnerClient = new FakePartnerClient();
-    const groundxClient = new FakeGroundXClient();
-    const llmClient = new FakeLlmClient();
     const scenarioRegistry = new FakeScenarioRegistry();
-    const mockEnv = { ...testEnv, MOCK_MODE: true, GROUNDX_SAMPLES_BUCKET_ID: SAMPLES_BUCKET };
-    const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+    const liveEnv = { ...testEnv, GROUNDX_SAMPLES_BUCKET_ID: SAMPLES_BUCKET };
+    const app = createApp({
+      env: liveEnv,
+      repository,
+      partnerClient,
+      groundxClient: searchHit(),
+      llmClient: groundedLlm(),
+      scenarioRegistry,
+    });
+    // Persist the 4-section Utility template (server source of truth).
+    const now = new Date();
+    await repository.saveTemplate({
+      id: "rt-utility-ic-brief",
+      kind: "report",
+      groundxUsername: "owner",
+      name: "Utility IC Brief",
+      bodyJson: JSON.stringify(UTILITY_TEMPLATE_BODY),
+      createdAt: now,
+      updatedAt: now,
+    });
     return { app, repository };
   }
 
@@ -1069,7 +1142,7 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
   }
 
   it("rejects requests without a session cookie", async () => {
-    const { app } = renderSetup();
+    const { app } = await renderSetup();
     await request(app)
       .post("/api/widgets/smart-report/reports/render")
       .send(renderBody())
@@ -1077,7 +1150,7 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
   });
 
   it("returns 400 for a malformed payload (missing template_id / bad scope)", async () => {
-    const { app } = renderSetup();
+    const { app } = await renderSetup();
     const agent = await ownedAgent(app);
     await agent
       .post("/api/widgets/smart-report/reports/render")
@@ -1090,7 +1163,7 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
   });
 
   it("404 when the chat session row doesn't exist; 403 when not owned", async () => {
-    const { app } = renderSetup();
+    const { app } = await renderSetup();
     const agent = request.agent(app);
     await agent.post("/api/onboarding/session").expect(200);
     // No chat-1 row created → 404.
@@ -1110,7 +1183,7 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
   });
 
   it("returns the four ordered Utility sections (snake_case wire), preview_only", async () => {
-    const { app } = renderSetup();
+    const { app } = await renderSetup();
     const agent = await ownedAgent(app);
     const res = await agent
       .post("/api/widgets/smart-report/reports/render")
@@ -1131,7 +1204,7 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
   });
 
   it("section_ids subset scopes a re-render to those sections only", async () => {
-    const { app } = renderSetup();
+    const { app } = await renderSetup();
     const agent = await ownedAgent(app);
     const res = await agent
       .post("/api/widgets/smart-report/reports/render")
@@ -1141,7 +1214,7 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
   });
 
   it("a BYO scope returns the gate envelope (#10), not a render", async () => {
-    const { app } = renderSetup();
+    const { app } = await renderSetup();
     const agent = await ownedAgent(app);
     const res = await agent
       .post("/api/widgets/smart-report/reports/render")
@@ -1151,8 +1224,19 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
     expect(res.body.gate).toBe("byo");
   });
 
-  it("a multi-doc group ContentScope renders (fixture-backed shape; live search is Phase 7)", async () => {
-    const { app } = renderSetup();
+  it("a multi-doc group ContentScope renders live", async () => {
+    const { app, repository } = await renderSetup();
+    // The group scope resolves a multi-doc set; persist a template for it.
+    const now = new Date();
+    await repository.saveTemplate({
+      id: "rt-solar-portfolio",
+      kind: "report",
+      groundxUsername: "owner",
+      name: "Solar Portfolio",
+      bodyJson: JSON.stringify({ sections: [UTILITY_TEMPLATE_BODY.sections[0]] }),
+      createdAt: now,
+      updatedAt: now,
+    });
     const agent = await ownedAgent(app);
     const res = await agent
       .post("/api/widgets/smart-report/reports/render")
@@ -1162,31 +1246,10 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
     expect(res.body.sections.length).toBeGreaterThan(0);
   });
 
-  it("edge case: unresolved variable keeps {var} + a 'bind it' warning", async () => {
-    const { app } = renderSetup();
-    const agent = await ownedAgent(app);
-    const res = await agent
-      .post("/api/widgets/smart-report/reports/render")
-      .send(renderBody({ template_id: "rt-utility-unbound-variable" }))
-      .expect(200);
-    const section = res.body.sections.find((s: { name: string }) => s.name === "billing_summary");
-    expect(section.body).toContain("{billing_period}");
-    expect(section.warnings.some((w: string) => /bind it/i.test(w))).toBe(true);
-  });
-
-  it("edge case: no-source section renders an em-dash + low-confidence flag", async () => {
-    const { app } = renderSetup();
-    const agent = await ownedAgent(app);
-    const res = await agent
-      .post("/api/widgets/smart-report/reports/render")
-      .send(renderBody({ template_id: "rt-utility-no-source" }))
-      .expect(200);
-    const section = res.body.sections.find((s: { name: string }) => s.name === "unsupported_claim");
-    expect(section.body).toBe("—");
-    expect(section.cites).toHaveLength(0);
-    expect(section.confidence).toBeLessThan(0.5);
-    expect(section.warnings.some((w: string) => /no support/i.test(w))).toBe(true);
-  });
+  // The unresolved-variable + no-source degradations are exercised against the
+  // live render path in reportRenderer.test.ts §4 (the former MOCK_MODE edge
+  // fixtures are gone). This route-contract block covers auth / payload /
+  // ownership / gate / ordering only.
 });
 
 describe("POST /api/widgets/smart-report/reports/render — live path (2026-06-01-live-report-render)", () => {
@@ -1197,8 +1260,8 @@ describe("POST /api/widgets/smart-report/reports/render — live path (2026-06-0
     const repository = new MemoryAppRepository();
     const partnerClient = new FakePartnerClient();
     const scenarioRegistry = new FakeScenarioRegistry();
-    // NON-mock env (testEnv.MOCK_MODE is already false) + the samples bucket.
-    const liveEnv = { ...testEnv, MOCK_MODE: false, GROUNDX_SAMPLES_BUCKET_ID: SAMPLES_BUCKET };
+    // The live render path + the samples bucket. There is no MOCK_MODE.
+    const liveEnv = { ...testEnv, GROUNDX_SAMPLES_BUCKET_ID: SAMPLES_BUCKET };
     const app = createApp({ env: liveEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
     return { app, repository };
   }
@@ -1309,8 +1372,7 @@ describe("POST /api/widgets/smart-report/reports (smart-report Phase 6 — Save)
     const groundxClient = new FakeGroundXClient();
     const llmClient = new FakeLlmClient();
     const scenarioRegistry = new FakeScenarioRegistry();
-    const mockEnv = { ...testEnv, MOCK_MODE: true };
-    const app = createApp({ env: mockEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+    const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
     return { app, repository };
   }
 

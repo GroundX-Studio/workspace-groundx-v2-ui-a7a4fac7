@@ -13,8 +13,8 @@ and adapts on scope change. The **initial paint** routes through the render
 endpoint (`POST /api/widgets/smart-report/reports/render` via `renderReport`) —
 the same path the **↻ re-render** control uses — so the surface the user first
 sees is the endpoint response, not a synchronous client-side fixture read
-(2026-05-31-smart-report-followups closed that round-trip; MOCK_MODE backs the
-server response). First paint has an explicit lifecycle:
+(2026-05-31-smart-report-followups closed that round-trip; the server runs the
+live render path). First paint has an explicit lifecycle:
 `loading` (`smart-report-loading`) → `ready` / `empty` (`smart-report-empty`,
 endpoint returned no sections) / `error` (`smart-report-error` +
 `smart-report-retry`, retryable). `reportTemplateIdForScope(scope)` resolves

@@ -1172,7 +1172,6 @@ export function createApp({
             groundxClient,
             groundxApiKey: groundxApiKey ?? undefined,
             llmModelId: env.LLM_MODEL_ID,
-            mockMode: env.MOCK_MODE,
           },
         );
         res.status(200).json(result);
@@ -1185,10 +1184,10 @@ export function createApp({
   // ── Smart Report (smart-report Phase 6) ──────────────────────────
   //
   // Render: run a report Template over a `ContentScope` and return ordered,
-  // cited sections. MOCK_MODE returns the Utility fixture; a `section_ids`
-  // subset scopes a re-render; the sample renders `preview_only`; a BYO scope
-  // returns the gate envelope (#10). Live multi-doc render (search + grounded
-  // generation) is Phase 7 / WF-10 — not wired here.
+  // cited sections via the live search + grounded-generation path. A
+  // `section_ids` subset scopes a re-render; the sample renders `preview_only`;
+  // a BYO scope returns the gate envelope (#10); a missing template renders the
+  // graceful no-template state.
   //
   // Auth: `requireSession` (anon can preview the sample, mirroring Extract +
   // the chat surface). Ownership: the chat_session row must be owned by the
@@ -1250,23 +1249,17 @@ export function createApp({
               typeof body.parent_message_id === "string" ? body.parent_message_id : null,
           },
           {
-            mockMode: env.MOCK_MODE,
             samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
-            // MOCK_MODE keeps the fixture path (fixture templateIds aren't
-            // persisted rows); the live deps + template loader are wired ONLY
-            // outside MOCK_MODE, where the no-template state + live fan-out run.
-            ...(env.MOCK_MODE
-              ? {}
-              : {
-                  getTemplate: async (id) => {
-                    const record = await repository.getTemplate(id);
-                    return record ? reportTemplateFromRecord(record) : null;
-                  },
-                  llmClient,
-                  groundxClient,
-                  ...(groundxApiKey ? { groundxApiKey } : {}),
-                  ...(env.LLM_MODEL_ID ? { llmModelId: env.LLM_MODEL_ID } : {}),
-                }),
+            // The template loader is the server source of truth for section
+            // questions; a `null` result is the graceful no-template state.
+            getTemplate: async (id) => {
+              const record = await repository.getTemplate(id);
+              return record ? reportTemplateFromRecord(record) : null;
+            },
+            llmClient,
+            groundxClient,
+            ...(groundxApiKey ? { groundxApiKey } : {}),
+            ...(env.LLM_MODEL_ID ? { llmModelId: env.LLM_MODEL_ID } : {}),
           },
         );
         res.status(200).json(result);
@@ -1370,7 +1363,6 @@ export function createApp({
         samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
         llmModelId: env.LLM_MODEL_ID ?? "model",
         lightLlmModelId: env.LLM_LIGHT_MODEL_ID,
-        mockMode: env.MOCK_MODE,
         byoPagesLimit: env.BYO_PAGES_LIMIT,
         contextWindowTokens: env.LLM_CONTEXT_WINDOW_TOKENS,
         compressionTriggerRatio: env.COMPRESSION_TRIGGER_RATIO,

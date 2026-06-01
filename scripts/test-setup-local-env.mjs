@@ -76,7 +76,6 @@ try {
       "LLM_SERVICE=openai",
       "LLM_MODEL_ID=gpt-test",
       "LLM_API_KEY=test-llm-key",
-      "MOCK_MODE=true",
       "APP_REPOSITORY_MODE=memory",
       // GROUNDX_SAMPLES_BUCKET_ID is required for the onboarding
       // RAG flow — without it the chat router can't search the
@@ -87,6 +86,9 @@ try {
     ]) {
       if (!written.includes(required)) throw new Error(`${envPath} missing ${required}`);
     }
+    // 2026-06-01-retire-mock-mode: setup must NOT write a MOCK_MODE flag (the
+    // runtime has no mock mode — it always uses the real GroundX / LLM clients).
+    if (written.includes("MOCK_MODE")) throw new Error(`${envPath} must not contain MOCK_MODE`);
   }
 
   const aliasSuccess = spawnSync("node", ["scripts/setup-local-env.mjs", "--force"], {

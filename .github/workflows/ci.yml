@@ -13,6 +13,11 @@ jobs:
   scaffold:
     name: Scaffold build and test
     runs-on: ubuntu-latest
+    # The e2e step boots the middleware in REAL mode against the live GroundX
+    # backend (there is no MOCK_MODE — 2026-06-01-retire-mock-mode). Targeting
+    # the `dev` environment resolves the env-scoped GROUNDX_PARTNER_API_KEY
+    # secret (it is set as BOTH an org secret AND a `dev`-environment secret).
+    environment: dev
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -48,8 +53,23 @@ jobs:
       - name: Install Playwright browser
         run: npm --workspace app exec -- playwright install --with-deps chromium
 
+      # The e2e suite boots the middleware in REAL mode against the live GroundX
+      # backend (no MOCK_MODE). Fail LOUDLY if the Partner key secret is absent —
+      # never let the suite pass "quietly green" because it ran without GroundX.
+      # The deterministic e2e data is the seeded sample doc c3bfff49 in bucket
+      # 28454. The secret is referenced from the `dev` environment (job-level
+      # `environment: dev` above resolves the env-scoped secret).
       - name: Browser smoke tests
-        run: npm run test:e2e
+        env:
+          GROUNDX_PARTNER_API_KEY: ${{ secrets.GROUNDX_PARTNER_API_KEY }}
+          GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
+          GROUNDX_SAMPLES_BUCKET_ID: "28454"
+        run: |
+          if [ -z "${GROUNDX_PARTNER_API_KEY}" ]; then
+            echo "::error::GROUNDX_PARTNER_API_KEY is not set. The e2e suite runs against REAL GroundX and must not pass without it. Configure the secret on the 'dev' environment (and org)."
+            exit 1
+          fi
+          npm run test:e2e
 
   container-images:
     name: Build container images

@@ -62,7 +62,6 @@ second line right after "GroundX middleware scaffold listening":
     "NODE_ENV": "production",
     "PORT": 3001,
     "APP_REPOSITORY_MODE": "memory",
-    "MOCK_MODE": "false",
     "GROUNDX_PARTNER_API_KEY": "present",
     "LLM_API_KEY": "present",
     "MYSQL_HOST": "absent",

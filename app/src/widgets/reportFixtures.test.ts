@@ -4,7 +4,7 @@ import type { ContentScope } from "@groundx/shared";
 
 import { getReportFixture, reportTemplateIdForScope } from "./reportFixtures";
 
-describe("report MOCK_MODE fixtures — 2026-05-29-smart-report-screen Phase 2", () => {
+describe("report demo fixtures — 2026-05-29-smart-report-screen Phase 2", () => {
   const utilityScope: ContentScope = {
     type: "bucket",
     bucketId: 28454,

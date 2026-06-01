@@ -38,10 +38,10 @@ by git. It does not write `app/.env.local` because browser code must never recei
 GroundX, Partner, runner, provider, or LLM secrets. The Partner API key, LLM
 service/provider, LLM model ID, and LLM API key belong only in server-side env files.
 
-Local setup enables `MOCK_MODE=true` by default. That keeps Partner, GroundX, and LLM
-responses deterministic for near-instant preview while still exercising the same
-server-side secret plumbing as production. Set `MOCK_MODE=false` when you want middleware
-to call real upstream services with the configured keys.
+The middleware always calls the real Partner, GroundX, and LLM upstreams — there is no
+mock mode. Supply real keys in the generated server-side env files to exercise the live
+data path locally. Tests achieve deterministic behavior by injecting `Fake*` clients at
+the dependency seam (a standard test double), not via any runtime flag.
 
 Default local preview uses `APP_REPOSITORY_MODE=memory`; it must not require or contact
 MySQL. `npm run smoke:dev` intentionally runs with bogus MySQL env values while forcing

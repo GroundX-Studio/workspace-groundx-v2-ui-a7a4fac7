@@ -53,10 +53,10 @@ export async function runRagPipeline(
   deps: ChatRouterDeps,
 ): Promise<ChatRouterResponse> {
   if (!deps.groundxClient || !deps.groundxApiKey) {
-    throw new Error("rag mode: groundxClient + groundxApiKey are required outside MOCK_MODE");
+    throw new Error("rag mode: groundxClient + groundxApiKey are required");
   }
   if (!deps.llmModelId) {
-    throw new Error("rag mode: llmModelId is required outside MOCK_MODE");
+    throw new Error("rag mode: llmModelId is required");
   }
 
   // Derive the ContentScope. Callers can override via `deps.contentScope`

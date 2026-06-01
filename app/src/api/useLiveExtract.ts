@@ -10,9 +10,10 @@
  *   schema ← getDocument → filter.workflow_id → getGroundXWorkflow → workflowToSchema
  *   values ← getDocumentExtract → extractToValues
  *
- * Under MOCK_MODE the document/workflow/extract calls resolve from the
- * middleware fixture path (the same fixtures the Extract widget reads), so the
- * standalone surfaces render live data keyed by the scenario's primary
+ * The document/workflow/extract calls hit the real GroundX data path through
+ * the middleware (the same calls the Extract widget makes); tests inject
+ * real-shaped responses at the fetch seam. The standalone surfaces render live
+ * data keyed by the scenario's primary
  * document. Returns `{ schema: null, values: [] }` for placeholder ids or
  * fetch failures so the caller renders its real empty/error state — never the
  * manifest.

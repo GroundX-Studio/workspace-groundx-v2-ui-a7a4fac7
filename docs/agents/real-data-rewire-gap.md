@@ -254,9 +254,11 @@ the scenario count grows.
 - The `/api/scenarios` endpoint. It still returns the list of
   scenarios + their docs. Just with a slimmer manifest.
 - The chat infrastructure (CF-* closures).
-- `MOCK_MODE`. Still useful for local preview when GroundX isn't
-  reachable; the new code paths fall back to canned responses behind
-  it, same as today.
+
+> NOTE (2026-06-01-retire-mock-mode): `MOCK_MODE` has since been removed
+> entirely. The runtime always uses the real GroundX / LLM clients; tests
+> inject `Fake*` clients at the dependency seam. There is no canned-response
+> fallback. The bullet that previously described `MOCK_MODE` here is obsolete.
 
 ## Effort
 

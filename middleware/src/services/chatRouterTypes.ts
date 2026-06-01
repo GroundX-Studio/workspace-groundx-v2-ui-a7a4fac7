@@ -159,14 +159,14 @@ export interface ChatRouterDeps {
   llmClient: LlmClient;
   /**
    * GroundX client for document search (RAG path). Optional because
-   * non-RAG paths don't need it; MOCK_MODE skips entirely.
+   * non-RAG paths (structured) don't need it.
    */
   groundxClient?: GroundXClient;
   /**
    * GroundX API key the live RAG search should authenticate with.
    * Sourced from session.groundxApiKey (customer key after sign-up)
    * OR env.GROUNDX_PARTNER_API_KEY (samples bucket access for
-   * anonymous visitors) by the caller. Required when not in mockMode.
+   * anonymous visitors) by the caller. Required for the RAG path.
    */
   groundxApiKey?: string;
   /**
@@ -183,11 +183,10 @@ export interface ChatRouterDeps {
   contentScope?: ContentScope | null;
   /** Provider model id for the LLM call, e.g. "gpt-4o" or "claude-3-haiku". */
   llmModelId?: string;
-  mockMode: boolean;
   /**
    * Repository for structured/hybrid mode handlers (which read
-   * chat session + entity rows). Required for those modes outside
-   * MOCK_MODE; RAG-only deployments can omit.
+   * chat session + entity rows). Required for those modes;
+   * RAG-only deployments can omit.
    */
   repository?: AppRepository;
   /** chatSessionId — needed by structured/hybrid mode for context reads. */
@@ -199,7 +198,7 @@ export interface ChatRouterDeps {
   /**
    * CF-04: Partner API client. Required for the structured my_projects
    * + api_keys sub-handlers; optional for everything else (RAG path,
-   * MOCK_MODE, structured queries that read app DB only).
+   * structured queries that read app DB only).
    */
   partnerClient?: GroundXPartnerClient;
   /**
@@ -230,9 +229,9 @@ export interface ChatRouterDeps {
  * HTTP 501 so the client can distinguish "we don't support this yet"
  * from "the upstream broke" (502) or "you don't have access" (401).
  *
- * Replaces the previous silent fallback to mock responses in non-MOCK
- * mode — that path returned plausible-looking but fake data in
- * production, which is worse than failing fast.
+ * Replaces the previous silent fallback to fake responses — that path
+ * returned plausible-looking but fabricated data in production, which is
+ * worse than failing fast.
  */
 export class ChatRouteNotImplementedError extends ApiError {
   readonly mode: ChatMode;
