@@ -17,12 +17,6 @@
  */
 
 import {
-  resolveWordGeometry,
-  type NormalizedBbox,
-} from "./citationGeometry.js";
-import { assignTier, confidenceFor, verifyQuote } from "./attribution.js";
-import { fetchDocumentWordMap } from "./wordMapCache.js";
-import {
   getServerTool,
   toolsForStep,
   UNKNOWN_VIEWER_STEP,
@@ -30,7 +24,7 @@ import {
   type ViewerStepKind,
 } from "./toolCatalog.js";
 import { toOpenAiTools, type OpenAiFunctionTool } from "./zodToJsonSchema.js";
-import { searchGroundX } from "./groundxSearch.js";
+import { groundedAnswerOverScope } from "./groundedAnswer.js";
 import {
   MAX_SNIPPET_BLOCK_CHARS,
   RAG_SNIPPET_CHARS,
@@ -79,14 +73,6 @@ export async function runRagPipeline(
   const debugCapture: { groundx?: ChatRouterDebug["groundx"]; llm?: ChatRouterDebug["llm"] } = {};
   const debugEnabled = process.env.NODE_ENV !== "production";
 
-  const snippets = await searchGroundX(
-    request.newUserMessage,
-    scope,
-    deps.groundxClient,
-    deps.groundxApiKey,
-    { rbacFilter: deps.rbacFilter, ...(debugEnabled ? { debug: debugCapture } : {}) },
-  );
-
   // widget-llm-integration Phase 5 — assemble the tool catalog
   // (filtered to the active ViewerStep) + advertise it to the LLM via
   // native function calling. The empty-catalog case still sends a
@@ -117,15 +103,33 @@ export async function runRagPipeline(
   const catalog = toolsForStep(stepKind, request.callerRole);
   const openAiTools: OpenAiFunctionTool[] = toOpenAiTools(catalog);
 
-  const llmResponse = await callGroundedLlm(
+  // 2026-06-01-live-report-render §3 — the search → grounded-generation →
+  // WF-06b-verify per-answer pipeline is now the SHARED `groundedAnswerOverScope`
+  // seam (one home, two callers: this chat path + the Smart Report live render).
+  // It returns the verified-cited prose body PLUS the live by-products this chat
+  // path still needs: the `snippets` (debug + fallback set) and the LLM's native
+  // `toolCalls` (routed to intents / confirmable chips below). Behavior is
+  // preserved — the helper composes the same searchGroundX + callGroundedLlm +
+  // parseGroundedAnswer + verify loop that lived inline here.
+  const grounded = await groundedAnswerOverScope(
     request.newUserMessage,
-    snippets,
-    deps.llmClient,
-    deps.llmModelId,
-    request.scopeHint,
-    debugEnabled ? debugCapture : undefined,
-    openAiTools,
+    scope,
+    {
+      groundxClient: deps.groundxClient,
+      groundxApiKey: deps.groundxApiKey,
+      llmClient: deps.llmClient,
+      llmModelId: deps.llmModelId,
+      ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
+      ...(deps.wordMapFetch ? { wordMapFetch: deps.wordMapFetch } : {}),
+    },
+    {
+      ...(request.scopeHint ? { scopeHint: request.scopeHint } : {}),
+      tools: openAiTools,
+      ...(debugEnabled ? { debug: debugCapture } : {}),
+    },
   );
+  const snippets = grounded.snippets;
+  const llmResponse = { toolCalls: grounded.toolCalls };
 
   // widget-llm-integration Phase 5 — validate each emitted tool_call
   // against the server catalog. Successful calls land on
@@ -188,10 +192,6 @@ export async function runRagPipeline(
     }
   }
 
-  // Parse the LLM's optional JSON block. Post-A.5 (follow-up
-  // 2026-05-28) this only extracts `citations` — `suggestedIntent`
-  // + `proposedSchemaField` ship via `tool:*` chips now.
-  const parsed = parseGroundedAnswer(llmResponse.answer);
   const suggestedActions: ChatRouterResponse["suggestedActions"] = [
     { key: "show-source", label: "Show source" },
   ];
@@ -226,90 +226,26 @@ export async function runRagPipeline(
     }
   }
 
-  // CF-06 structured citations. When the LLM emitted a citations
-  // block AND at least one entry references a documentId that's in
-  // our snippet set, use the validated subset as `reply.citations`.
-  // Otherwise fall back to the legacy "all snippets become cites"
-  // behavior. Cross-checking against the snippet set is the trust
-  // boundary — we don't let the LLM invent references.
-  const allowedDocIds = new Set(snippets.map((s) => s.documentId));
-  const validatedCitations =
-    parsed.structuredCitations?.filter((c) => allowedDocIds.has(c.documentId)) ?? [];
-  // WF-03 — attach the normalized source-region bbox. For LLM-emitted
-  // (validated) citations, look up the matching snippet's geometry by
-  // documentId + page; for the ambient fallback, the snippet IS the source.
-  const bboxFor = (documentId: string, page: number): NormalizedBbox | undefined =>
-    snippets.find((s) => s.documentId === documentId && (s.pageNumber ?? 1) === page)?.bbox;
-  const snippetTextFor = (documentId: string, page: number): string =>
-    snippets.find((s) => s.documentId === documentId && (s.pageNumber ?? 1) === page)?.text ?? "";
-  // WF-06 — graduated attribution. For each LLM-emitted (validated) citation,
-  // verify the verbatim `quote` against the chunk it cited and assign a tier
-  // + confidence + the supported answer span. The `exact` (word-level) tier
-  // is now LIVE: for an ALREADY-VERIFIED citation we fetch the document's
-  // `-118-map.json` word-map (cached, best-effort) and run the shipped
-  // `resolveWordGeometry(quote, map)` resolver. On a hit, the tighter
-  // word-level bbox replaces the X-Ray chunk box and `hasAtomBox: true` lights
-  // the `exact` tier. The fetch fires ONLY for verified citations (an
-  // unverified quote can never reach `exact`, so it pays no word-map cost).
-  // Fallback chain: word-level box → X-Ray chunk box (WF-03) → none — a
-  // missing/unfetchable map or a non-verbatim span leaves the citation at
-  // `paraphrase`/geometry-less, and the turn never fails. The all-snippets
-  // fallback has no claim-level proof → `ambient` (source chip; bbox kept for
-  // click-to-view).
-  const wordMapFetch = deps.wordMapFetch ?? fetchDocumentWordMap;
-  const citations: Citation[] =
-    validatedCitations.length > 0
-      ? await Promise.all(
-          validatedCitations.map(async (c) => {
-            const v = verifyQuote(c.quote, snippetTextFor(c.documentId, c.page));
-            // Default: the X-Ray chunk box (WF-03) for this doc+page.
-            let bbox = bboxFor(c.documentId, c.page);
-            let hasAtomBox = false;
-            // Word-level upgrade — verified citations only.
-            if (v.verified && deps.groundxClient && deps.groundxApiKey) {
-              const map = await wordMapFetch(deps.groundxClient, deps.groundxApiKey, c.documentId);
-              if (map) {
-                const geo = resolveWordGeometry(c.quote, map);
-                if (geo) {
-                  bbox = geo.bbox;
-                  hasAtomBox = true;
-                }
-              }
-            }
-            const tier = assignTier(v, { hasAtomBox });
-            return {
-              documentId: c.documentId,
-              page: c.page,
-              snippet: c.quote.slice(0, RAG_SNIPPET_CHARS),
-              bbox,
-              tier,
-              confidence: confidenceFor(v),
-              ...(c.answerSpan ? { answerSpan: c.answerSpan } : {}),
-            };
-          }),
-        )
-      : snippets.map((s) => ({
-          documentId: s.documentId,
-          page: s.pageNumber ?? 1,
-          snippet: s.text ? s.text.slice(0, RAG_SNIPPET_CHARS) : undefined,
-          bbox: s.bbox,
-          tier: "ambient" as const,
-          confidence: 0,
-        }));
+  // CF-06 / WF-06b citations are produced inside `groundedAnswerOverScope`
+  // (§3): the LLM-emitted structured citations are cross-checked against the
+  // snippet set (trust boundary — no invented refs), each verified verbatim
+  // quote is assigned a graduated tier + confidence (with the WF-05b word-level
+  // `exact` upgrade), and the no-citation case falls back to ambient snippet
+  // cites. `grounded.body` is the JSON-block-stripped prose.
+  const citations: Citation[] = grounded.citations;
 
   return {
     mode: "rag",
-    answer: parsed.cleanedAnswer,
+    answer: grounded.body,
     citations,
     suggestedActions,
     tools: [],
     intents,
     toolFailures,
-    // widget-llm-integration follow-up A.4 — prefer the back-compat
-    // shim from the tool call; fall back to the fenced-JSON parse
-    // until A.5 deletes the legacy branch. After A.5, the parsed
-    // branch returns null and only the shim path is live.
-    proposedSchemaField: proposedSchemaFieldShim ?? parsed.proposedSchemaField,
+    // widget-llm-integration follow-up A.4 — the back-compat shim from the
+    // tool call. Post-A.5 the fenced-JSON `proposedSchemaField` parse is always
+    // null, so the shim (or null) is the only source.
+    proposedSchemaField: proposedSchemaFieldShim,
     ...(debugEnabled
       ? {
           _debug: {
@@ -435,7 +371,7 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
  * pass-through test stay as a regression guard against
  * legacy-phrase mutation.
  */
-async function callGroundedLlm(
+export async function callGroundedLlm(
   userMessage: string,
   snippets: GroundXSearchResult[],
   llmClient: LlmClient,

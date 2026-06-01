@@ -1,15 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   templateSaveInputSchema,
   type ContentScope,
 } from "@groundx/shared";
 
+import type { GroundXClient, LlmClient } from "../types.js";
+
 import {
   UTILITY_REPORT_DOC_INDEX,
   renderReport,
   reportTemplateToSaveInput,
   resolveScopeDocSet,
+  type RenderReportDeps,
   type ReportTemplate,
   type RenderReportRequest,
 } from "./reportRenderer.js";
@@ -57,32 +60,32 @@ function baseRequest(overrides: Partial<RenderReportRequest> = {}): RenderReport
 const renderDeps = { mockMode: true, samplesBucketId: SAMPLE_BUCKET };
 
 describe("resolveScopeDocSet + ScopeDocIndex", () => {
-  it("resolves a bucket + project filter scope to the project's doc set", () => {
+  it("resolves a bucket + project filter scope to the project's doc set", async () => {
     expect(resolveScopeDocSet(utilityScope, UTILITY_REPORT_DOC_INDEX)).toEqual([
       "utility-bill-2026-04",
     ]);
   });
 
-  it("resolves an explicit documents[] scope to its own ids (index-independent)", () => {
+  it("resolves an explicit documents[] scope to its own ids (index-independent)", async () => {
     const scope: ContentScope = { type: "documents", documentIds: ["a", "b"] };
     expect(resolveScopeDocSet(scope, UTILITY_REPORT_DOC_INDEX)).toEqual(["a", "b"]);
   });
 
-  it("resolves a bare bucket (no filter) to every doc the index lists for that bucket", () => {
+  it("resolves a bare bucket (no filter) to every doc the index lists for that bucket", async () => {
     const scope: ContentScope = { type: "bucket", bucketId: SAMPLE_BUCKET };
     expect(resolveScopeDocSet(scope, UTILITY_REPORT_DOC_INDEX)).toEqual([
       "utility-bill-2026-04",
     ]);
   });
 
-  it("resolves a multi-doc group scope (shape resolves; the LIVE search is Phase 7/WF-10)", () => {
+  it("resolves a multi-doc group scope (shape resolves; the LIVE search is Phase 7/WF-10)", async () => {
     const scope: ContentScope = { type: "group", groupId: 9001 };
     const docs = resolveScopeDocSet(scope, UTILITY_REPORT_DOC_INDEX);
     expect(Array.isArray(docs)).toBe(true);
     expect((docs ?? []).length).toBeGreaterThan(1);
   });
 
-  it("returns null for an unknown scope the index can't place", () => {
+  it("returns null for an unknown scope the index can't place", async () => {
     const scope: ContentScope = { type: "bucket", bucketId: 999999 };
     expect(resolveScopeDocSet(scope, UTILITY_REPORT_DOC_INDEX)).toBeNull();
   });
@@ -105,7 +108,7 @@ describe("reportTemplateToSaveInput — report-kind save bridge", () => {
     ],
   };
 
-  it("maps a ReportTemplate to a report-kind TemplateSaveInput that the shared schema accepts", () => {
+  it("maps a ReportTemplate to a report-kind TemplateSaveInput that the shared schema accepts", async () => {
     const input = reportTemplateToSaveInput(template);
     expect(input.kind).toBe("report");
     expect(input.id).toBe("rt-utility-ic-brief");
@@ -115,7 +118,7 @@ describe("reportTemplateToSaveInput — report-kind save bridge", () => {
     expect(templateSaveInputSchema.safeParse(input).success).toBe(true);
   });
 
-  it("carries the sections into the report body (no scope on the template)", () => {
+  it("carries the sections into the report body (no scope on the template)", async () => {
     const input = reportTemplateToSaveInput(template);
     if (input.kind !== "report") throw new Error("expected report kind");
     expect(input.body.sections).toHaveLength(1);
@@ -129,8 +132,8 @@ describe("reportTemplateToSaveInput — report-kind save bridge", () => {
 });
 
 describe("renderReport — MOCK_MODE Utility fixture", () => {
-  it("returns the four ordered Utility sections with renderAs + cited bodies", () => {
-    const result = renderReport(baseRequest(), renderDeps);
+  it("returns the four ordered Utility sections with renderAs + cited bodies", async () => {
+    const result = await renderReport(baseRequest(), renderDeps);
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.status).toBe("complete");
     expect(result.sections.map((s) => s.name)).toEqual([
@@ -151,8 +154,8 @@ describe("renderReport — MOCK_MODE Utility fixture", () => {
     }
   });
 
-  it("renders the sample scope preview_only with the export formats", () => {
-    const result = renderReport(baseRequest(), renderDeps);
+  it("renders the sample scope preview_only with the export formats", async () => {
+    const result = await renderReport(baseRequest(), renderDeps);
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.preview_only).toBe(true);
     expect(result.export_formats).toContain("pdf");
@@ -160,8 +163,8 @@ describe("renderReport — MOCK_MODE Utility fixture", () => {
     expect(result.template_id).toBe("rt-utility-ic-brief");
   });
 
-  it("section_ids subset scopes a re-render to those sections only (ordered)", () => {
-    const result = renderReport(
+  it("section_ids subset scopes a re-render to those sections only (ordered)", async () => {
+    const result = await renderReport(
       baseRequest({ sectionIds: ["anomalies", "billing_summary"] }),
       renderDeps,
     );
@@ -170,32 +173,32 @@ describe("renderReport — MOCK_MODE Utility fixture", () => {
     expect(result.sections.map((s) => s.name)).toEqual(["billing_summary", "anomalies"]);
   });
 
-  it("an empty section_ids subset renders no sections (explicit subset, not 'all')", () => {
-    const result = renderReport(baseRequest({ sectionIds: [] }), renderDeps);
+  it("an empty section_ids subset renders no sections (explicit subset, not 'all')", async () => {
+    const result = await renderReport(baseRequest({ sectionIds: [] }), renderDeps);
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.sections).toHaveLength(0);
   });
 });
 
 describe("renderReport — BYO scope → gate envelope (#10)", () => {
-  it("a non-sample bucket returns the sign-in gate envelope (not a render)", () => {
+  it("a non-sample bucket returns the sign-in gate envelope (not a render)", async () => {
     const byoScope: ContentScope = { type: "bucket", bucketId: 70001 };
-    const result = renderReport(baseRequest({ scope: byoScope }), renderDeps);
+    const result = await renderReport(baseRequest({ scope: byoScope }), renderDeps);
     if (!("gated" in result)) throw new Error("expected the gate envelope for a BYO scope");
     expect(result.gated).toBe(true);
     expect(result.gate).toBe("byo");
   });
 
-  it("a sample scope does NOT gate (anon preview is allowed)", () => {
-    const result = renderReport(baseRequest(), renderDeps);
+  it("a sample scope does NOT gate (anon preview is allowed)", async () => {
+    const result = await renderReport(baseRequest(), renderDeps);
     expect("gated" in result).toBe(false);
   });
 });
 
 describe("renderReport — multi-doc ContentScope (fixture-backed shape)", () => {
-  it("resolves a multi-doc group scope to a rendered report (live search is Phase 7/WF-10)", () => {
+  it("resolves a multi-doc group scope to a rendered report (live search is Phase 7/WF-10)", async () => {
     const groupScope: ContentScope = { type: "group", groupId: 9001 };
-    const result = renderReport(baseRequest({ scope: groupScope }), renderDeps);
+    const result = await renderReport(baseRequest({ scope: groupScope }), renderDeps);
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.status).toBe("complete");
     expect(result.sections.length).toBeGreaterThan(0);
@@ -203,11 +206,11 @@ describe("renderReport — multi-doc ContentScope (fixture-backed shape)", () =>
 });
 
 describe("renderReport — edge cases degrade visibly", () => {
-  it("an unresolved variable renders the {var} placeholder + a 'bind it' warning", () => {
+  it("an unresolved variable renders the {var} placeholder + a 'bind it' warning", async () => {
     // The Utility template's billing_summary question references {billing_period};
     // with no binding supplied, the body keeps the literal {billing_period} token
     // and the section warns to bind it.
-    const result = renderReport(
+    const result = await renderReport(
       baseRequest({ templateId: "rt-utility-unbound-variable" }),
       renderDeps,
     );
@@ -218,8 +221,8 @@ describe("renderReport — edge cases degrade visibly", () => {
     expect(section!.warnings?.some((w) => /bind it/i.test(w))).toBe(true);
   });
 
-  it("a bound variable is substituted and does NOT warn", () => {
-    const result = renderReport(
+  it("a bound variable is substituted and does NOT warn", async () => {
+    const result = await renderReport(
       baseRequest({
         templateId: "rt-utility-unbound-variable",
         variables: { billing_period: "March 2026" },
@@ -234,8 +237,8 @@ describe("renderReport — edge cases degrade visibly", () => {
     expect(result.resolved_variables.billing_period).toBe("March 2026");
   });
 
-  it("a section with no supporting source renders an em-dash + a low-confidence flag", () => {
-    const result = renderReport(
+  it("a section with no supporting source renders an em-dash + a low-confidence flag", async () => {
+    const result = await renderReport(
       baseRequest({ templateId: "rt-utility-no-source" }),
       renderDeps,
     );
@@ -248,13 +251,330 @@ describe("renderReport — edge cases degrade visibly", () => {
     expect(section!.warnings?.some((w) => /no support/i.test(w))).toBe(true);
   });
 
-  it("a question edit re-renders the single edited section only (scoped re-render)", () => {
+  it("a question edit re-renders the single edited section only (scoped re-render)", async () => {
     // Editing the anomalies question = a section_ids:["anomalies"] re-render.
-    const result = renderReport(
+    const result = await renderReport(
       baseRequest({ sectionIds: ["anomalies"] }),
       renderDeps,
     );
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
     expect(result.sections.map((s) => s.name)).toEqual(["anomalies"]);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// 2026-06-01-live-report-render — the LIVE path (no MOCK_MODE).
+// ────────────────────────────────────────────────────────────────────
+
+function jsonOk(payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+/** Injected clients that THROW if touched — proves a branch short-circuits
+ * BEFORE any search/LLM call (gate / no-template / empty-scope). */
+function throwingClients(): { groundxClient: GroundXClient; llmClient: LlmClient } {
+  return {
+    groundxClient: { forward: vi.fn(async () => { throw new Error("groundx must not be called"); }) },
+    llmClient: { forward: vi.fn(async () => { throw new Error("llm must not be called"); }) },
+  };
+}
+
+/** A real user-created report template (the live path's section-question source). */
+const liveTemplate: ReportTemplate = {
+  id: "rt-live-1",
+  name: "Live Report",
+  format: "ic-brief",
+  sections: [
+    {
+      id: "billing_summary",
+      name: "billing_summary",
+      renderAs: "PARAGRAPH",
+      question: "What is the total amount due?",
+      variables: [],
+    },
+    {
+      id: "anomalies",
+      name: "anomalies",
+      renderAs: "BULLETS",
+      question: "Are there any anomalies?",
+      variables: [],
+    },
+  ],
+};
+
+describe("renderReport — §1 no-template state (the new-customer norm)", () => {
+  it("returns the graceful no-template state (reason: no_template) without touching clients", async () => {
+    const { groundxClient, llmClient } = throwingClients();
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => null, // the new-customer norm — no template yet
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+    const result = await renderReport(baseRequest({ templateId: "does-not-exist" }), deps);
+    if ("gated" in result) throw new Error("expected a render, got a gate");
+    expect(result.status).toBe("complete");
+    expect(result.sections).toEqual([]);
+    expect(result.preview_only).toBe(true);
+    expect(result.reason).toBe("no_template");
+    // No search / LLM call was made.
+    expect(groundxClient.forward).not.toHaveBeenCalled();
+    expect(llmClient.forward).not.toHaveBeenCalled();
+  });
+});
+
+describe("renderReport — §5 live per-section render (search → ground → verify)", () => {
+  it("renders sections from the persisted template's questions with verified citations, in template order", async () => {
+    // One canned search hit + a grounded answer with a verbatim quote → a
+    // verified (paraphrase-tier) citation. Same canned reply for both sections.
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({ search: { results: [{ documentId: "utility-bill-2026-04", text: "the total amount due is $18,742.16" }] } }),
+      ),
+    };
+    const llmAnswer = [
+      "The total amount due is $18,742.16.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"utility-bill-2026-04","page":1,"quote":"total amount due is $18,742.16"}]}',
+      "```",
+    ].join("\n");
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
+    };
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => liveTemplate,
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+
+    const result = await renderReport(baseRequest({ templateId: "rt-live-1" }), deps);
+    if ("gated" in result) throw new Error("expected a render, got a gate");
+    // Template order honored.
+    expect(result.sections.map((s) => s.name)).toEqual(["billing_summary", "anomalies"]);
+    // Bodies are the LLM output (JSON block stripped).
+    expect(result.sections[0].body).toBe("The total amount due is $18,742.16.");
+    // Cites are verified — a WF-06b tier + confidence.
+    const cite = result.sections[0].cites[0];
+    expect(cite.documentId).toBe("utility-bill-2026-04");
+    expect(["exact", "paraphrase", "ambient"]).toContain(cite.tier);
+    expect(cite.tier).toBe("paraphrase");
+    expect(cite.confidence).toBeGreaterThan(0);
+    // Search + LLM actually ran per section (one grounded LLM call per section;
+    // groundx may issue an extra X-Ray/retry round-trip per search).
+    expect(groundxClient.forward).toHaveBeenCalled();
+    expect(llmClient.forward).toHaveBeenCalledTimes(2);
+  });
+
+  it("honors a section_ids subset in template order on the live path", async () => {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "n/a" } }] })),
+    };
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => liveTemplate,
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+    const result = await renderReport(
+      baseRequest({ templateId: "rt-live-1", sectionIds: ["anomalies"] }),
+      deps,
+    );
+    if ("gated" in result) throw new Error("expected a render, got a gate");
+    expect(result.sections.map((s) => s.name)).toEqual(["anomalies"]);
+    // Exactly one section was generated → exactly one grounded LLM call.
+    expect(llmClient.forward).toHaveBeenCalledTimes(1);
+  });
+
+  it("the old 'not yet wired' throw is gone — a live render no longer throws", async () => {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "answer" } }] })),
+    };
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => liveTemplate,
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+    await expect(renderReport(baseRequest({ templateId: "rt-live-1" }), deps)).resolves.toBeDefined();
+  });
+});
+
+describe("renderReport — §4 live + fixture share one degradation path", () => {
+  it("a live section with ZERO verified citations degrades to '—' + ⚠ no support in docs", async () => {
+    // Search returns nothing → no snippets → no citations → no-support degrade.
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "Some unsupported prose." } }] })),
+    };
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => ({
+        ...liveTemplate,
+        sections: [liveTemplate.sections[0]],
+      }),
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+    const result = await renderReport(baseRequest({ templateId: "rt-live-1" }), deps);
+    if ("gated" in result) throw new Error("expected a render, got a gate");
+    const section = result.sections[0];
+    expect(section.body).toBe("—");
+    expect(section.cites).toHaveLength(0);
+    expect(section.confidence).toBeLessThan(0.5);
+    expect(section.warnings?.some((w) => /no support/i.test(w))).toBe(true);
+  });
+
+  it("a live section body with an unbound {variable} keeps the placeholder + adds a bind-it warning", async () => {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "utility-bill-2026-04", text: "period is March 2026" }] } })),
+    };
+    // LLM emits a body with an unbound {billing_period} token + a verified cite
+    // (so the no-support degrade does NOT fire and the variable path is exercised).
+    const llmAnswer = [
+      "The billing period is {billing_period}.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"utility-bill-2026-04","page":1,"quote":"period is March 2026"}]}',
+      "```",
+    ].join("\n");
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
+    };
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => ({ ...liveTemplate, sections: [liveTemplate.sections[0]] }),
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+    const result = await renderReport(baseRequest({ templateId: "rt-live-1" }), deps);
+    if ("gated" in result) throw new Error("expected a render, got a gate");
+    const section = result.sections[0];
+    expect(section.body).toContain("{billing_period}");
+    expect(section.warnings?.some((w) => /bind it/i.test(w))).toBe(true);
+  });
+});
+
+describe("renderReport — §6 async + same wire shape mock vs live", () => {
+  it("renderReport returns a Promise", () => {
+    const r = renderReport(baseRequest(), renderDeps);
+    expect(typeof (r as Promise<unknown>).then).toBe("function");
+    return r; // settle it so no unhandled-promise warning
+  });
+
+  it("the live result satisfies the SAME RenderReportResponse shape as the fixture", async () => {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "utility-bill-2026-04", text: "total amount due is $18,742.16" }] } })),
+    };
+    const llmAnswer = [
+      "The total amount due is $18,742.16.",
+      "```json",
+      '{"citations":[{"documentId":"utility-bill-2026-04","page":1,"quote":"total amount due is $18,742.16"}]}',
+      "```",
+    ].join("\n");
+    const liveDeps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => ({ ...liveTemplate, sections: [liveTemplate.sections[0]] }),
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient: { forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })) },
+      llmModelId: "test-model",
+    };
+    const live = await renderReport(baseRequest({ templateId: "rt-live-1" }), liveDeps);
+    const mock = await renderReport(baseRequest(), renderDeps);
+    if ("gated" in live || "gated" in mock) throw new Error("expected renders");
+    // Identical top-level wire keys (live may additionally omit `reason`).
+    const liveKeys = Object.keys(live).filter((k) => k !== "reason").sort();
+    const mockKeys = Object.keys(mock).filter((k) => k !== "reason").sort();
+    expect(liveKeys).toEqual(mockKeys);
+    // Section wire keys identical.
+    expect(Object.keys(live.sections[0]).sort()).toEqual(
+      expect.arrayContaining(["name", "render_as", "body", "cites"]),
+    );
+  });
+});
+
+describe("renderReport — §7 gate + idle parity (no MOCK_MODE)", () => {
+  it("a BYO scope returns the gate envelope before any search/LLM call", async () => {
+    const { groundxClient, llmClient } = throwingClients();
+    const byoScope: ContentScope = { type: "bucket", bucketId: 70001 };
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => liveTemplate,
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+    const result = await renderReport(baseRequest({ scope: byoScope }), deps);
+    if (!("gated" in result)) throw new Error("expected the gate envelope for a BYO scope");
+    expect(result.gate).toBe("byo");
+    expect(groundxClient.forward).not.toHaveBeenCalled();
+    expect(llmClient.forward).not.toHaveBeenCalled();
+  });
+
+  it("a sample scope that resolves to an empty doc set idles (reason: empty_scope) without an LLM call", async () => {
+    const { groundxClient, llmClient } = throwingClients();
+    // A bucket the doc index can't place → empty doc set.
+    const emptyScope: ContentScope = { type: "bucket", bucketId: SAMPLE_BUCKET, filter: { project: "no-such-project" } };
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => liveTemplate,
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+    const result = await renderReport(baseRequest({ scope: emptyScope }), deps);
+    if ("gated" in result) throw new Error("expected an idle render, got a gate");
+    expect(result.sections).toEqual([]);
+    expect(result.reason).toBe("empty_scope");
+    expect(groundxClient.forward).not.toHaveBeenCalled();
+    expect(llmClient.forward).not.toHaveBeenCalled();
+  });
+
+  it("missing live deps throw a clear error (not 'not yet wired')", async () => {
+    const deps: RenderReportDeps = {
+      mockMode: false,
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => liveTemplate,
+      // no groundxClient / apiKey / llm
+    };
+    await expect(renderReport(baseRequest({ templateId: "rt-live-1" }), deps)).rejects.toThrow(
+      /live report render requires/i,
+    );
   });
 });

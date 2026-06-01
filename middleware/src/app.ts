@@ -23,6 +23,7 @@ import { resolveFieldGeometry } from "./services/citationGeometry.js";
 import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
 import {
   renderReport,
+  reportTemplateFromRecord,
   reportTemplateToSaveInput,
   type ReportSection,
   type ReportSectionRenderAs,
@@ -1229,7 +1230,16 @@ export function createApp({
           return;
         }
 
-        const result = renderReport(
+        // Load the report Template from the SERVER source of truth (the
+        // persisted `templates` row), not the request body — the live path
+        // reads each section's `question` from THIS template (one source of
+        // truth). When no row exists (the new-customer norm — `Pin→template =
+        // NO auto`), `getTemplate` resolves null and `renderReport` returns the
+        // graceful no-template state. Scope comes from `body.scope` (Report's
+        // scope is a render-time input per Template + Scope + Results) — NOT
+        // `deriveRagContentScope` (that is the extract/chat route's path).
+        const groundxApiKey = sessionApiKey(reqSession) ?? env.GROUNDX_PARTNER_API_KEY ?? null;
+        const result = await renderReport(
           {
             templateId,
             scope: scopeParsed.data,
@@ -1242,6 +1252,21 @@ export function createApp({
           {
             mockMode: env.MOCK_MODE,
             samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
+            // MOCK_MODE keeps the fixture path (fixture templateIds aren't
+            // persisted rows); the live deps + template loader are wired ONLY
+            // outside MOCK_MODE, where the no-template state + live fan-out run.
+            ...(env.MOCK_MODE
+              ? {}
+              : {
+                  getTemplate: async (id) => {
+                    const record = await repository.getTemplate(id);
+                    return record ? reportTemplateFromRecord(record) : null;
+                  },
+                  llmClient,
+                  groundxClient,
+                  ...(groundxApiKey ? { groundxApiKey } : {}),
+                  ...(env.LLM_MODEL_ID ? { llmModelId: env.LLM_MODEL_ID } : {}),
+                }),
           },
         );
         res.status(200).json(result);

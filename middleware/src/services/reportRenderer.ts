@@ -31,7 +31,17 @@
  * the bodies come from the fixture, not a live search.
  */
 
-import type { Citation, ContentScope, RenderedSection, TemplateSaveInput } from "@groundx/shared";
+import {
+  parseTemplate,
+  type Citation,
+  type ContentScope,
+  type GeneratedResult,
+  type RenderedSection,
+  type TemplateSaveInput,
+} from "@groundx/shared";
+
+import { groundedAnswerOverScope, type GroundedAnswerDeps } from "./groundedAnswer.js";
+import type { GroundXClient, LlmClient } from "../types.js";
 
 // ──────────────────────────────────────────────────────────────────────
 // App-owned report template shapes (the durable, scope-independent artifact).
@@ -177,6 +187,69 @@ export function reportTemplateToSaveInput(template: ReportTemplate): TemplateSav
   };
 }
 
+/**
+ * Reconstruct an app-owned `ReportTemplate` from a persisted template row — the
+ * READ side of the save bridge above (`getTemplate` → this). The persisted
+ * `bodyJson` is validated through the shared `parseTemplate` (the single
+ * boundary sanitizer) as a full `report`-kind `Template`, then the section list
+ * is mapped back into the app `ReportSection` shape the render path reads.
+ * Returns `null` for a non-report kind or a body that doesn't validate — the
+ * caller treats that as "no usable template" (the graceful no-template state).
+ *
+ * `format` is NOT persisted (the template is the question list; format is a
+ * presentation detail recorded elsewhere), so it reconstructs as an empty
+ * string — the render path does not read it.
+ */
+export function reportTemplateFromRecord(record: {
+  id: string;
+  kind: string;
+  name: string;
+  bodyJson: string;
+  groundxUsername?: string;
+}): ReportTemplate | null {
+  if (record.kind !== "report") return null;
+  let body: unknown;
+  try {
+    body = JSON.parse(record.bodyJson);
+  } catch {
+    return null;
+  }
+  const parsed = parseTemplate({
+    id: record.id,
+    kind: "report",
+    name: record.name,
+    ownerUsername: record.groundxUsername ?? "",
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    body,
+  });
+  if (!parsed || parsed.kind !== "report") return null;
+
+  const sections: ReportSection[] = [];
+  for (const raw of parsed.body.sections) {
+    const s = raw as Record<string, unknown>;
+    if (
+      typeof s.id !== "string" ||
+      typeof s.name !== "string" ||
+      typeof s.renderAs !== "string" ||
+      typeof s.question !== "string" ||
+      !Array.isArray(s.variables)
+    ) {
+      return null;
+    }
+    sections.push({
+      id: s.id,
+      name: s.name,
+      renderAs: s.renderAs as ReportSectionRenderAs,
+      question: s.question,
+      variables: s.variables.filter((v): v is string => typeof v === "string"),
+      ...(typeof s.instructions === "string" ? { instructions: s.instructions } : {}),
+      ...(typeof s.pinnedFromTurnId === "string" ? { pinnedFromTurnId: s.pinnedFromTurnId } : {}),
+    });
+  }
+  return { id: parsed.id, name: parsed.name, format: "", sections };
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Render contract.
 // ──────────────────────────────────────────────────────────────────────
@@ -234,6 +307,18 @@ export interface RenderReportResponse {
   resolved_variables: Record<string, string>;
   export_formats: ("pdf" | "md" | "link")[];
   preview_only: boolean;
+  /**
+   * Why an EMPTY render (`sections: []`) is empty — so the surface can show the
+   * right copy instead of one ambiguous empty state
+   * (make-illegal-states-unrepresentable). Two genuinely different user
+   * situations:
+   *   - `"no_template"` — the new-customer norm: no report template exists for
+   *     `template_id` yet → "create or pick a report template".
+   *   - `"empty_scope"` — a template exists but the scope resolves to zero docs
+   *     → "no documents match this scope".
+   * Absent on a NON-empty render (the section list is self-explanatory).
+   */
+  reason?: "no_template" | "empty_scope";
 }
 
 /**
@@ -254,10 +339,30 @@ export interface RenderReportDeps {
   samplesBucketId: number | null;
   /**
    * The doc-org index `resolveScopeDocSet` resolves the scope against. Defaults
-   * to the MOCK_MODE `UTILITY_REPORT_DOC_INDEX`; the live path (Phase 7) passes
-   * a GroundX-derived index.
+   * to the MOCK_MODE `UTILITY_REPORT_DOC_INDEX`; the live path passes a
+   * GroundX-derived index.
    */
   docIndex?: ScopeDocIndex;
+  /**
+   * Load the report Template by id (the SERVER source of truth). The live path
+   * reads each section's `question` from THIS template, never the client
+   * request (one source of truth). When it resolves `null` (the new-customer
+   * norm — `Pin→template = NO auto`), `renderReport` returns the graceful
+   * no-template state. Required outside MOCK_MODE.
+   */
+  getTemplate?: (templateId: string) => Promise<ReportTemplate | null>;
+  /**
+   * Live-generation deps (mirrors `ExtractFieldDeps` / the chat router). Outside
+   * MOCK_MODE these are REQUIRED — `renderReport` throws a clear error when a
+   * non-empty sample scope reaches the live fan-out without them (the Extract /
+   * RAG required-deps guard), never a "not yet wired" placeholder.
+   */
+  groundxClient?: GroundXClient;
+  groundxApiKey?: string;
+  llmClient?: LlmClient;
+  llmModelId?: string;
+  /** Server-derived RBAC / tenant filter (NEVER client-supplied). */
+  rbacFilter?: Record<string, unknown>;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -281,8 +386,6 @@ interface FixtureSection {
   warnings?: string[];
   /** Literal variables referenced by the section (drives unresolved-variable degradation). */
   variables?: string[];
-  /** True when this section has no supporting source (drives the em-dash degradation). */
-  noSource?: boolean;
 }
 
 interface ReportFixture {
@@ -374,7 +477,6 @@ const REPORT_FIXTURES: Record<string, ReportFixture> = {
         renderAs: "PARAGRAPH",
         body: "The customer has three open disputes with the utility.",
         cites: [],
-        noSource: true,
       },
     ],
   },
@@ -392,17 +494,38 @@ function resolveFixture(request: RenderReportRequest): ReportFixture | null {
 const VAR_TOKEN = /\{([a-zA-Z0-9_]+)\}/g;
 
 /**
- * Render one fixture section: substitute bound variables, flag unresolved
- * variables ({var} kept + "bind it" warning), and degrade a no-source section
- * to an em-dash + low-confidence flag.
+ * The display metadata a section carries on TOP of the shared generated-result
+ * core (`body` + `citations` + `confidence?` + `warnings?`). Both the fixture
+ * path and the live path produce this same shape, then route through the ONE
+ * `degradeSection` below — so the variable-substitution + unresolved-`{var}` +
+ * no-support degradations have a single home (§4).
  */
-function renderSection(
-  section: FixtureSection,
+type SectionRender = GeneratedResult & {
+  body: string;
+  name: string;
+  renderAs: ReportSectionRenderAs;
+};
+
+/**
+ * The ONE section degradation path the FIXTURE and LIVE paths share (§4).
+ * Operates on the shared generated-result core:
+ *   - no-support — ZERO citations → em-dash + `⚠ no support in docs` +
+ *     low-confidence flag (the live trigger replaces the fixture's `.noSource`
+ *     boolean: a fixture section with empty `cites` degrades identically);
+ *   - variable substitution — bound `{var}` → value (recorded on `resolved`);
+ *   - unresolved-variable warning — an unbound `{var}` keeps its placeholder and
+ *     adds a "bind it" warning.
+ */
+function degradeSection(
+  section: SectionRender,
   variables: Record<string, string>,
   resolved: Record<string, string>,
 ): RenderedSectionWire {
-  // No supporting source → em-dash + low-confidence flag (overrides body/cites).
-  if (section.noSource) {
+  // No supporting source (zero citations) → em-dash + low-confidence flag
+  // (overrides body/cites). Derived from the citation count, not a flag — so a
+  // live result with no verified citations degrades exactly like the fixture's
+  // no-source section.
+  if (section.citations.length === 0) {
     return {
       name: section.name,
       render_as: section.renderAs,
@@ -436,27 +559,77 @@ function renderSection(
     name: section.name,
     render_as: section.renderAs,
     body,
-    cites: section.cites,
+    cites: section.citations,
     ...(section.confidence !== undefined ? { confidence: section.confidence } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
 
+/** Adapt a MOCK_MODE `FixtureSection` to the shared `SectionRender` shape, then
+ * route it through the unified `degradeSection`. */
+function renderFixtureSection(
+  section: FixtureSection,
+  variables: Record<string, string>,
+  resolved: Record<string, string>,
+): RenderedSectionWire {
+  return degradeSection(
+    {
+      name: section.name,
+      renderAs: section.renderAs,
+      body: section.body,
+      citations: section.cites,
+      ...(section.confidence !== undefined ? { confidence: section.confidence } : {}),
+      ...(section.warnings !== undefined ? { warnings: section.warnings } : {}),
+    },
+    variables,
+    resolved,
+  );
+}
+
+/** A complete, empty render — the no-template / empty-scope idle shape. The
+ * `reason` discriminator tells the surface WHICH empty state to show. */
+function emptyRender(
+  templateId: string,
+  reason: "no_template" | "empty_scope",
+): RenderReportResponse {
+  return {
+    report_id: `rr-${templateId}`,
+    template_id: templateId,
+    status: "complete",
+    sections: [],
+    resolved_variables: {},
+    export_formats: ["pdf", "md", "link"],
+    preview_only: true,
+    reason,
+  };
+}
+
 /**
- * Render a report `Template` over a `ContentScope` (MOCK_MODE). Returns the
- * ordered cited sections, OR the gate envelope (#10) when the scope is BYO. A
- * `sectionIds` subset scopes a re-render to those template sections (in
- * template order); an explicit empty subset renders no sections.
+ * Render a report `Template` over a `ContentScope`. Returns the ordered cited
+ * sections, OR the gate envelope (#10) when the scope is BYO, OR a graceful
+ * empty render (no template / empty scope).
  *
- * Live multi-doc render (search + grounded generation + WF-06b verification)
- * is Phase 7 / WF-10. Outside MOCK_MODE this throws — the live path is not
- * wired here on purpose.
+ * Ordering (all BEFORE any live search/LLM fan-out):
+ *   1. BYO gate (#10) — a non-sample scope requires sign-in.
+ *   2. no-template state — when `getTemplate(templateId)` resolves `null` (the
+ *      new-customer norm), return the no-template empty render (`reason:
+ *      "no_template"`). NO sample template is seeded; its absence never errors.
+ *   3. empty-scope idle — a scope that resolves to zero docs → empty render
+ *      (`reason: "empty_scope"`).
+ *   4. fan-out — MOCK_MODE renders the fixture bodies; the LIVE path searches
+ *      each section's `question` (read from the persisted Template, never the
+ *      request) over the resolved scope, grounds the LLM, and verifies each
+ *      citation (WF-06b) via the shared `groundedAnswerOverScope` seam.
+ *
+ * The live + fixture paths share the SAME `RenderReportResponse` shape and the
+ * SAME section degradation path (`degradeSection`), so the render surface and
+ * `CiteChip` are unchanged regardless of which path produced the report.
  */
-export function renderReport(
+export async function renderReport(
   request: RenderReportRequest,
   deps: RenderReportDeps,
-): RenderReportResponse | RenderGateResponse {
-  // Sample vs BYO. A scope on the samples bucket (or the demo group) is a
+): Promise<RenderReportResponse | RenderGateResponse> {
+  // 1. Sample vs BYO. A scope on the samples bucket (or the demo group) is a
   // sample preview; any other scope is BYO → gate (#10), mirroring Extract.
   const isSample =
     (request.scope.type === "bucket" && request.scope.bucketId === deps.samplesBucketId) ||
@@ -469,41 +642,102 @@ export function renderReport(
     };
   }
 
+  // 2. No-template state — the legitimate new-customer starting point. When a
+  // `getTemplate` callback is supplied (the live route always supplies it) and
+  // it resolves `null`, there is no report template yet → the graceful
+  // no-template empty render, BEFORE any search/LLM. No sample template is
+  // seeded; the absence never errors. (MOCK_MODE callers omit `getTemplate` —
+  // the fixture path drives the section bodies there.)
+  let template: ReportTemplate | null = null;
+  if (deps.getTemplate) {
+    template = await deps.getTemplate(request.templateId);
+    if (!template) {
+      return emptyRender(request.templateId, "no_template");
+    }
+  }
+
   // Resolve the scope → doc set. This is what the live render fans each
-  // section's question over (Phase 7 / WF-10); in MOCK_MODE it confirms the
-  // scope places real documents (a scope the index can't place → empty render).
+  // section's question over; in MOCK_MODE it confirms the scope places real
+  // documents (a scope the index can't place → empty render).
   const docIndex = deps.docIndex ?? UTILITY_REPORT_DOC_INDEX;
   const docSet = resolveScopeDocSet(request.scope, docIndex);
 
-  if (!deps.mockMode) {
-    // Live multi-doc render is Phase 7 / WF-10 — deliberately not wired here.
-    throw new Error("live report render is not yet wired (Phase 7 / WF-10)");
+  // 3. No documents in scope → an empty render (the surface shows its idle
+  // state). Distinct from no-template via the `reason` discriminator.
+  if (docSet === null || docSet.length === 0) {
+    return emptyRender(request.templateId, "empty_scope");
   }
 
-  // No documents in scope → an empty render (the surface shows its idle state).
-  if (docSet === null || docSet.length === 0) {
+  // 4a. LIVE path — a real user-created Template exists; fan each section's
+  // `question` (from THAT template) through the shared seam. Outside MOCK_MODE
+  // the live deps are required (the Extract / RAG required-deps guard).
+  if (!deps.mockMode) {
+    if (!template) {
+      // Without a `getTemplate` callback we have no section questions to run;
+      // this is a misconfiguration, not the no-template user state (which is
+      // handled above when the callback resolves null).
+      throw new Error(
+        "live report render requires a getTemplate callback to resolve the template",
+      );
+    }
+    if (!deps.groundxClient || !deps.groundxApiKey || !deps.llmClient || !deps.llmModelId) {
+      throw new Error(
+        "live report render requires groundxClient + groundxApiKey + llmClient + llmModelId",
+      );
+    }
+    const groundedDeps: GroundedAnswerDeps = {
+      groundxClient: deps.groundxClient,
+      groundxApiKey: deps.groundxApiKey,
+      llmClient: deps.llmClient,
+      llmModelId: deps.llmModelId,
+      ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
+    };
+
+    // section_ids subset: render only those sections, IN TEMPLATE ORDER. `null`
+    // = whole template; `[]` = explicit empty subset (no sections).
+    const subset = request.sectionIds;
+    const liveSections =
+      subset === null
+        ? template.sections
+        : template.sections.filter((s) => subset.includes(s.name) || subset.includes(s.id));
+
+    const resolved: Record<string, string> = {};
+    const sections: RenderedSectionWire[] = [];
+    for (const section of liveSections) {
+      // The section question comes from the PERSISTED template — never the
+      // client request (one source of truth).
+      const grounded = await groundedAnswerOverScope(section.question, request.scope, groundedDeps);
+      sections.push(
+        degradeSection(
+          {
+            name: section.name,
+            renderAs: section.renderAs,
+            body: grounded.body,
+            citations: grounded.citations,
+            ...(grounded.confidence !== undefined ? { confidence: grounded.confidence } : {}),
+            ...(grounded.warnings !== undefined ? { warnings: grounded.warnings } : {}),
+          },
+          request.variables,
+          resolved,
+        ),
+      );
+    }
+
     return {
       report_id: `rr-${request.templateId}`,
       template_id: request.templateId,
       status: "complete",
-      sections: [],
-      resolved_variables: {},
+      sections,
+      resolved_variables: resolved,
       export_formats: ["pdf", "md", "link"],
       preview_only: true,
     };
   }
 
+  // 4b. MOCK_MODE path — the fixture bodies (unchanged).
   const fixture = resolveFixture(request);
   if (!fixture) {
-    return {
-      report_id: `rr-${request.templateId}`,
-      template_id: request.templateId,
-      status: "complete",
-      sections: [],
-      resolved_variables: {},
-      export_formats: ["pdf", "md", "link"],
-      preview_only: true,
-    };
+    return emptyRender(request.templateId, "empty_scope");
   }
 
   // section_ids subset: render only those sections, IN TEMPLATE ORDER. `null` =
@@ -515,7 +749,7 @@ export function renderReport(
       : fixture.sections.filter((s) => subset.includes(s.name) || subset.includes(s.id));
 
   const resolved: Record<string, string> = {};
-  const sections = sectionsToRender.map((s) => renderSection(s, request.variables, resolved));
+  const sections = sectionsToRender.map((s) => renderFixtureSection(s, request.variables, resolved));
 
   return {
     report_id: `rr-${request.templateId}`,

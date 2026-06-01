@@ -1189,6 +1189,119 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6)",
   });
 });
 
+describe("POST /api/widgets/smart-report/reports/render — live path (2026-06-01-live-report-render)", () => {
+  const SAMPLES_BUCKET = 28454;
+  const utilityScope = { type: "bucket", bucketId: SAMPLES_BUCKET, filter: { project: "utility" } };
+
+  function liveSetup(llmClient: LlmClient, groundxClient: GroundXClient) {
+    const repository = new MemoryAppRepository();
+    const partnerClient = new FakePartnerClient();
+    const scenarioRegistry = new FakeScenarioRegistry();
+    // NON-mock env (testEnv.MOCK_MODE is already false) + the samples bucket.
+    const liveEnv = { ...testEnv, MOCK_MODE: false, GROUNDX_SAMPLES_BUCKET_ID: SAMPLES_BUCKET };
+    const app = createApp({ env: liveEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+    return { app, repository };
+  }
+
+  async function ownedAgent(app: ReturnType<typeof createApp>) {
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    await agent
+      .post("/api/chat-sessions")
+      .send({ id: "chat-1", title: "Onboarding", isOnboarding: true })
+      .expect(200);
+    return agent;
+  }
+
+  function renderBody(overrides: Record<string, unknown> = {}) {
+    return {
+      template_id: "rt-persisted-1",
+      scope: utilityScope,
+      // The request body MUST NOT supply section questions — the live path reads
+      // them from the persisted template. Even if a malicious body carried a
+      // `questions` field, the route ignores it (RenderReportRequest has no such
+      // field). We include a bogus one here to prove it is never used.
+      questions: ["INJECTED — must be ignored"],
+      variables: {},
+      section_ids: null,
+      chat_session_id: "chat-1",
+      parent_message_id: null,
+      ...overrides,
+    };
+  }
+
+  it("a template_id with no persisted template returns the graceful no-template state, not an error", async () => {
+    // Clients that THROW if called — proves no search/LLM ran for no-template.
+    const llmClient: LlmClient = {
+      forward: async () => { throw new Error("llm must not be called for no-template"); },
+    };
+    const groundxClient: GroundXClient = {
+      forward: async () => { throw new Error("groundx must not be called for no-template"); },
+    };
+    const { app } = liveSetup(llmClient, groundxClient);
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ template_id: "does-not-exist" }))
+      .expect(200);
+    expect(res.body.status).toBe("complete");
+    expect(res.body.sections).toEqual([]);
+    expect(res.body.preview_only).toBe(true);
+    expect(res.body.reason).toBe("no_template");
+  });
+
+  it("loads the persisted template from the repo (server source) and renders its sections live", async () => {
+    const llmAnswer = [
+      "The total amount due is $18,742.16.",
+      "```json",
+      '{"citations":[{"documentId":"utility-bill-2026-04","page":1,"quote":"total amount due is $18,742.16"}]}',
+      "```",
+    ].join("\n");
+    const llmClient: LlmClient = {
+      forward: async () =>
+        Response.json({ choices: [{ message: { content: llmAnswer } }] }),
+    };
+    const groundxClient: GroundXClient = {
+      forward: async () =>
+        Response.json({ search: { results: [{ documentId: "utility-bill-2026-04", text: "total amount due is $18,742.16" }] } }),
+    };
+    const { app, repository } = liveSetup(llmClient, groundxClient);
+    // Persist a REAL report template (server source of truth) — its question is
+    // what the live path searches, NOT anything from the request body.
+    const now = new Date();
+    await repository.saveTemplate({
+      id: "rt-persisted-1",
+      kind: "report",
+      groundxUsername: "owner",
+      name: "Persisted Report",
+      bodyJson: JSON.stringify({
+        sections: [
+          {
+            id: "billing_summary",
+            name: "billing_summary",
+            renderAs: "PARAGRAPH",
+            question: "What is the total amount due?",
+            variables: [],
+          },
+        ],
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody())
+      .expect(200);
+    expect(res.body.status).toBe("complete");
+    expect(res.body.sections.map((s: { name: string }) => s.name)).toEqual(["billing_summary"]);
+    expect(res.body.sections[0].body).toBe("The total amount due is $18,742.16.");
+    expect(res.body.sections[0].cites[0].documentId).toBe("utility-bill-2026-04");
+    // The verified citation carries a WF-06b tier.
+    expect(["exact", "paraphrase", "ambient"]).toContain(res.body.sections[0].cites[0].tier);
+  });
+});
+
 describe("POST /api/widgets/smart-report/reports (smart-report Phase 6 — Save)", () => {
   function saveSetup() {
     const repository = new MemoryAppRepository();
