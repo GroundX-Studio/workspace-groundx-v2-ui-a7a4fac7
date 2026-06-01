@@ -6,9 +6,10 @@
 > extracted into focused changes: `2026-05-31-chat-wire-types-shared`,
 > `2026-05-31-canvas-intent-schema-shared`, `2026-05-31-session-auth-subshapes`,
 > `2026-05-31-viewer-history-column-drop` (see `docs/agents/phase-3-execution-order.md`). This change
-> is NOT auto-closed: it needs a reconciliation pass to mark delivered items done, extract any
-> genuinely-uncovered item (e.g. the `ExtractedFieldValue` ↔ `RenderedSection` "generated result"
-> unification, item #2) into its own focused change, and then retire. Do not execute it as-is.
+> is NOT auto-closed: it needs a reconciliation pass to mark delivered items done and then retire. Item #2
+> (the `ExtractedFieldValue` ↔ `RenderedSection` "generated result" unification) was found already shipped
+> 2026-05-30 — its remaining drift-guard + wire-twin gap is covered by `2026-05-31-generated-result-shared`
+> (step 4). No known item is left uncovered by a Phase-3 change. Do not execute this umbrella as-is.
 
 ## Why
 
