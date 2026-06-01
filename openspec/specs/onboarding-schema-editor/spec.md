@@ -426,9 +426,11 @@ The lockstep contract: every mutation that lands on the legacy slot SHALL be ref
 `scenario.manifest.extractionSchema` or `scenario.manifest.sampleExtractionValues`. When live data is
 absent, `SchemaView` SHALL surface the real empty/error ("live extract unavailable") state rather than
 stale manifest fixtures, and its `data-extraction-status` SHALL reflect the live extraction state, not a
-`"manifest"` default. Under MOCK_MODE the live extract SHALL be supplied from the MOCK_MODE fixture path
-(the same source the Extract widget uses), so the surfaces that mount `<SchemaView />` without explicit
-live props still have a genuine live source.
+`"manifest"` default. The live extract is sourced from the real Extract data path
+(`getGroundXWorkflow(filter.workflow_id)` for the schema, `getGroundXDocumentExtract(documentId)` for
+the values) the production Extract widget uses — there is no `MOCK_MODE` runtime path. In tests, the
+surfaces that mount `<SchemaView />` without explicit live props receive a real-shaped live extract
+INJECTED at the test seam (a stubbed fetch / fake client), not via a `MOCK_MODE` env flag.
 
 #### Scenario: No live data surfaces the real state, not the manifest
 
@@ -438,10 +440,11 @@ live props still have a genuine live source.
 - **AND** it does NOT read `scenario.manifest.extractionSchema` or `scenario.manifest.sampleExtractionValues`
 - **AND** `data-extraction-status` reflects the live extraction state rather than `"manifest"`.
 
-#### Scenario: MOCK_MODE supplies the live extract to the demo surfaces
+#### Scenario: A test-injected live extract supplies the demo surfaces
 
-- **GIVEN** MOCK_MODE is active and a demo scenario mounts `<SchemaView />` without explicit live props
+- **GIVEN** a test mounts `<SchemaView />` without explicit live props and injects a real-shaped live extract at the seam
 - **WHEN** `SchemaView` renders
-- **THEN** it renders the live schema/values sourced from the MOCK_MODE fixture path
-- **AND** it does not read `scenario.manifest.*` to populate the schema/values.
+- **THEN** it renders the live schema/values from the injected source
+- **AND** it does not read `scenario.manifest.*` to populate the schema/values
+- **AND** no `MOCK_MODE` env flag is involved (none exists).
 

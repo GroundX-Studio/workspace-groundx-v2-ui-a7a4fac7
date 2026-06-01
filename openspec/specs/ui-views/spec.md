@@ -492,8 +492,9 @@ F3 ExtractView sources the schema from `getGroundXWorkflow(filter.workflow_id)` 
 none of them read `scenario.manifest.extractionSchema`, `sampleExtractionValues`, or
 `sampleChatScript`. Each view MUST mount the same production widget used in steady mode and pass a
 `mode: "onboarding" | "steady"` prop that locks editing affordances in onboarding without forking
-the data path. `MOCK_MODE` MUST remain only a local fallback for when GroundX is unreachable, not
-the demo path.
+the data path. There SHALL be no `MOCK_MODE` runtime fallback for any of these views; deterministic
+behavior in tests is supplied by fakes/fixtures INJECTED at the data seam, not by a `MOCK_MODE` env
+flag (none exists).
 
 #### Scenario: F3 extract reads the live workflow schema, not the manifest
 
@@ -510,6 +511,13 @@ the demo path.
 - **THEN** they come from live chat replies (real `documentId` + `bbox`), not
   `scenario.manifest.sampleChatScript`
 - **AND** the `litRegions` painted on the PDF derive from those live citations.
+
+#### Scenario: No MOCK_MODE fallback path exists for the onboarding frame views
+
+- **GIVEN** the onboarding frame views in any environment
+- **WHEN** GroundX data is fetched
+- **THEN** the data comes from the real GroundX clients (or a test-injected fake at the seam)
+- **AND** there is no `MOCK_MODE` env-driven fallback path.
 
 ### Requirement: Steady-mode canvas SHALL mount live production widgets, not a placeholder
 
