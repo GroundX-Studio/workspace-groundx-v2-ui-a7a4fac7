@@ -1,18 +1,18 @@
 # Tasks — full end-to-end experience audit + remediation (2026-05-31)
 
-> **CLOSE-OUT (2026-06-01) — foundational live sweep DONE; remainder RELOCATED to tickets; archiving.**
-> The audit harness was stood up and re-run against REAL GroundX (MOCK_MODE removed). Foundational
-> surfaces PASSED live with measured evidence (see `audit-progress.md` + `defect-log.md`): F1 Ingest,
-> F2 Understand/PDF (the 24px-collapse trap CLEARED — 958×1240), F3 Extract (real fields/values), and
-> the Report no-template state. The audit served its purpose — it found a real defect mock had hidden.
-> Disposition of the rest:
-> - **DL-1 (P1) live chat RAG returns 0 snippets/no citations for an answerable query → RELOCATED to
->   `2026-06-01-rag-retrieval-correctness`** (a deep-dive: reproduce → root-cause the retrieval algorithm
->   → fix → an offline ground-truth regression suite).
-> - **DL-2 (P3) React Router v7 future-flag console warnings + ALL remaining §2 surfaces (2.3-deep, 2.5–2.16)
->   + the §4 fix loop → RELOCATED to `2026-06-01-e2e-audit-followups`.**
-> This change archives on the foundational sweep + the two relocations; the durable testing-suite
-> requirements (the audit-SHALL-happen policy) stand. No work is dropped — it's tracked in the two tickets.
+> **STATUS (2026-06-01) — IN PROGRESS, live testing continues (do NOT archive until all §2 surfaces are driven).**
+> Harness up + re-run against REAL GroundX (MOCK_MODE removed). Foundational surfaces PASSED live with
+> measured evidence (`audit-progress.md` + `defect-log.md`): F1 Ingest, F2 Understand/PDF (24px-collapse
+> CLEARED — 958×1240), F3 Extract (real fields/values), Report no-template state.
+> **Defects are ticketed to fix LATER (so the audit isn't blocked), but the TESTING is finished HERE:**
+> DL-1 (P1, live chat RAG returns 0 snippets/no citations for an answerable query) → deep-dive ticket
+> `2026-06-01-rag-retrieval-correctness`. DL-2 (P3, React Router v7 console warnings) → `defect-log.md`,
+> ticketed if not fixed inline.
+> **STILL TO DRIVE LIVE (this change is NOT done until these are tested):** 2.3-deep (extract field
+> add/edit, JSON-toggle, provenance highlight) · 2.5 report-with-template + section accept/reject + builder ·
+> 2.6 Integrate · 2.7 sign-up gate · 2.9 gates · 2.10 citation round-trip · 2.11 auth (password toggle,
+> claim/flip) · 2.12 steady-mode parity · 2.13 debug reset · 2.14 responsive/mobile · 2.15 reduced-motion ·
+> 2.16 console/network sweep.
 
 > TDD: failing test first, then implement, then adversarial review before marking done.
 > **Adversarial review gate after EVERY task (Discipline §10)** — a task is not `[x]` until
