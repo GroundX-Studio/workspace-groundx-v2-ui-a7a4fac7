@@ -427,6 +427,16 @@ them is ⟲ WORKFLOW-OK once the factories land — independent per file, fixed 
   removal (textPreview + doc text present), GREEN after; locks the invariant against re-add. Gates: middleware
   suite 687 green (+1 logging case), app suite 1464 green, app `npm run build` (tsc+vite) clean, middleware
   tsc clean, ESLint clean on the two touched files, `openspec validate --strict` clean. — DONE (step 2-7m).
+  **CORRECTION (step 2-7n — PRODUCT DECISION reverses the 2-7l QUERY removal):** the team needs the RAG
+  search `query` in the logs to debug search behavior, so it was RESTORED to the dispatch + retry
+  `logger.info` payloads in `middleware/src/services/groundxSearch.ts`. Done HONESTLY: the comment now states
+  plainly that the query is free-form user content logged in CLEARTEXT (may carry PII) and that prod log
+  access/retention must be controlled — NOT the prior false "it's redacted" claim. `logger.ts`'s invariant
+  comment is amended to document this DELIBERATE exception (query logged for debug; document text still NOT
+  logged). The two query regression guards in `groundxSearch.logging.test.ts` are FLIPPED to LOCK the
+  decision (query MUST appear in those payloads) so a future "no chat content in logs" sweep can't silently
+  drop it. The 2-7m document-text removal is UNCHANGED (only the query was requested back). Gates: middleware
+  suite 687 green, middleware tsc clean. — DONE (step 2-7n, commit 5221923).
 
 ### 4e. Round-trip / dead-plumbing closeout (→ SEQUENTIAL/TDD)
 - [ ] **#17 §9 closeout.** Each persist chain gets a reader+writer or is DROPPED (the `attachments_json`
