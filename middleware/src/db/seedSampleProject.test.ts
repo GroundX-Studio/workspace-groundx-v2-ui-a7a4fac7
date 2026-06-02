@@ -16,7 +16,7 @@ describe("projects + project_grants repository", () => {
       projectId: "proj_x",
       bucketId: 99,
       name: "X",
-      ownerCustomerId: "cust_a",
+      ownerUsername: "user_a",
       isSample: false,
       createdAt: now,
       updatedAt: now,
@@ -24,7 +24,7 @@ describe("projects + project_grants repository", () => {
     await repo.insertProjectGrant({
       projectId: "proj_x",
       principalType: "user",
-      principalId: "cust_a",
+      principalUsername: "user_a",
       role: "owner",
       createdAt: now,
     });
@@ -32,8 +32,8 @@ describe("projects + project_grants repository", () => {
     expect((await repo.getProject("proj_x"))?.bucketId).toBe(99);
     expect((await repo.listProjectsForBucket(99)).map((p) => p.projectId)).toEqual(["proj_x"]);
     // Owner can read; a different customer cannot; anon cannot.
-    expect((await repo.listGrantsForPrincipal("cust_a")).map((g) => g.projectId)).toContain("proj_x");
-    expect((await repo.listGrantsForPrincipal("cust_b")).map((g) => g.projectId)).not.toContain("proj_x");
+    expect((await repo.listGrantsForPrincipal("user_a")).map((g) => g.projectId)).toContain("proj_x");
+    expect((await repo.listGrantsForPrincipal("user_b")).map((g) => g.projectId)).not.toContain("proj_x");
     expect((await repo.listGrantsForPrincipal(null)).map((g) => g.projectId)).not.toContain("proj_x");
   });
 
@@ -44,7 +44,7 @@ describe("projects + project_grants repository", () => {
     const project = await repo.getProject(SAMPLE_PROJECT_ID);
     expect(project?.isSample).toBe(true);
     expect(project?.bucketId).toBe(28454);
-    expect(project?.ownerCustomerId).toBeNull();
+    expect(project?.ownerUsername).toBeNull();
 
     // Anonymous AND any authenticated customer can read the sample.
     for (const caller of [null, "cust_anyone"]) {

@@ -35,7 +35,7 @@ export class MemoryAppRepository implements AppRepository {
   intentLog = new Map<string, IntentLogRecord[]>();
   // 2026-06-01-projects-rbac-scope-filter — app-owned project rows + RBAC grants.
   projects = new Map<string, ProjectRecord>(); // key: projectId
-  projectGrants = new Map<string, ProjectGrantRecord>(); // key: `${projectId}|${principalType}|${principalId ?? ""}`
+  projectGrants = new Map<string, ProjectGrantRecord>(); // key: `${projectId}|${principalType}|${principalUsername ?? ""}`
 
   async createSchema(): Promise<void> {}
 
@@ -193,14 +193,17 @@ export class MemoryAppRepository implements AppRepository {
   }
 
   async insertProjectGrant(record: ProjectGrantRecord): Promise<void> {
-    this.projectGrants.set(`${record.projectId}|${record.principalType}|${record.principalId ?? ""}`, record);
+    this.projectGrants.set(
+      `${record.projectId}|${record.principalType}|${record.principalUsername ?? ""}`,
+      record,
+    );
   }
 
-  async listGrantsForPrincipal(customerId: string | null): Promise<ProjectGrantRecord[]> {
+  async listGrantsForPrincipal(username: string | null): Promise<ProjectGrantRecord[]> {
     return Array.from(this.projectGrants.values()).filter(
       (g) =>
         g.principalType === "public" ||
-        (customerId != null && g.principalType === "user" && g.principalId === customerId),
+        (username != null && g.principalType === "user" && g.principalUsername === username),
     );
   }
 

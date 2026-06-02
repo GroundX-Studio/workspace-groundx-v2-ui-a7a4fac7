@@ -230,20 +230,22 @@ export interface ProjectRecord {
   projectId: string; // proj_<uuid>
   bucketId: number; // the GroundX bucket the project's docs live in
   name: string;
-  ownerCustomerId: string | null; // GroundX customer id; null for the public sample / system
+  ownerUsername: string | null; // GroundX customer username; null for the public sample / system
   isSample: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export type ProjectPrincipalType = "public" | "user" | "account";
+// `user` = a GroundX customer username; `public` = everyone. (`account`/team
+// grouping is deferred — earn-the-axis — re-added when a teams feature lands.)
+export type ProjectPrincipalType = "public" | "user";
 export type ProjectRole = "owner" | "editor" | "viewer";
 
 /** A grant of `role` on `projectId` to a principal (RBAC + sharing / ACL). */
 export interface ProjectGrantRecord {
   projectId: string;
   principalType: ProjectPrincipalType;
-  principalId: string | null; // GroundX customerId or accountId; null when principalType="public"
+  principalUsername: string | null; // GroundX customer username; null when principalType="public"
   role: ProjectRole;
   createdAt: Date;
 }
@@ -266,14 +268,14 @@ export interface AppRepository {
 
   // Projects + RBAC grants (app-owned data-org filter layer;
   // 2026-06-01-projects-rbac-scope-filter). `listGrantsForPrincipal(null)`
-  // returns the public grants only (anonymous caller); a customerId returns
+  // returns the public grants only (anonymous caller); a `username` returns
   // public grants PLUS that user's grants — the authorized read set the RAG
   // filter is built from.
   insertProject(record: ProjectRecord): Promise<void>;
   getProject(projectId: string): Promise<ProjectRecord | null>;
   listProjectsForBucket(bucketId: number): Promise<ProjectRecord[]>;
   insertProjectGrant(record: ProjectGrantRecord): Promise<void>;
-  listGrantsForPrincipal(customerId: string | null): Promise<ProjectGrantRecord[]>;
+  listGrantsForPrincipal(username: string | null): Promise<ProjectGrantRecord[]>;
 
   // Chat sessions
   upsertChatSession(record: ChatSessionRecord): Promise<void>;

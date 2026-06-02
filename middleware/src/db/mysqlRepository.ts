@@ -273,12 +273,12 @@ export class MySqlAppRepository implements AppRepository {
         project_id VARCHAR(64) PRIMARY KEY,
         bucket_id INT NOT NULL,
         name VARCHAR(128) NOT NULL,
-        owner_customer_id VARCHAR(128) NULL,
+        owner_username VARCHAR(128) NULL,
         is_sample BOOLEAN NOT NULL DEFAULT FALSE,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX projects_bucket_idx (bucket_id),
-        INDEX projects_owner_idx (owner_customer_id)
+        INDEX projects_owner_idx (owner_username)
       )
     `);
 
@@ -291,14 +291,14 @@ export class MySqlAppRepository implements AppRepository {
       CREATE TABLE IF NOT EXISTS project_grants (
         project_id VARCHAR(64) NOT NULL,
         principal_type VARCHAR(16) NOT NULL,
-        -- NOT NULL DEFAULT '' (not NULL) so it can sit in the composite PK;
-        -- '' is the sentinel for principal_type='public'. Mapped null<->''
-        -- at the repo boundary.
-        principal_id VARCHAR(128) NOT NULL DEFAULT '',
+        -- GroundX customer username. NOT NULL DEFAULT '' (not NULL) so it can
+        -- sit in the composite PK; '' is the sentinel for
+        -- principal_type='public'. Mapped null<->'' at the repo boundary.
+        principal_username VARCHAR(128) NOT NULL DEFAULT '',
         role VARCHAR(16) NOT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (project_id, principal_type, principal_id),
-        INDEX project_grants_principal_idx (principal_type, principal_id),
+        PRIMARY KEY (project_id, principal_type, principal_username),
+        INDEX project_grants_principal_idx (principal_type, principal_username),
         FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
       )
     `);
@@ -719,19 +719,19 @@ export class MySqlAppRepository implements AppRepository {
 
   async insertProject(record: ProjectRecord): Promise<void> {
     await this.pool.execute(
-      `INSERT INTO projects (project_id, bucket_id, name, owner_customer_id, is_sample, created_at, updated_at)
+      `INSERT INTO projects (project_id, bucket_id, name, owner_username, is_sample, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
         bucket_id = VALUES(bucket_id),
         name = VALUES(name),
-        owner_customer_id = VALUES(owner_customer_id),
+        owner_username = VALUES(owner_username),
         is_sample = VALUES(is_sample),
         updated_at = VALUES(updated_at)`,
       [
         record.projectId,
         record.bucketId,
         record.name,
-        record.ownerCustomerId,
+        record.ownerUsername,
         record.isSample,
         record.createdAt,
         record.updatedAt,
@@ -741,7 +741,7 @@ export class MySqlAppRepository implements AppRepository {
 
   async getProject(projectId: string): Promise<ProjectRecord | null> {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
-      `SELECT project_id, bucket_id, name, owner_customer_id, is_sample, created_at, updated_at
+      `SELECT project_id, bucket_id, name, owner_username, is_sample, created_at, updated_at
        FROM projects WHERE project_id = ?`,
       [projectId],
     );
@@ -751,7 +751,7 @@ export class MySqlAppRepository implements AppRepository {
 
   async listProjectsForBucket(bucketId: number): Promise<ProjectRecord[]> {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
-      `SELECT project_id, bucket_id, name, owner_customer_id, is_sample, created_at, updated_at
+      `SELECT project_id, bucket_id, name, owner_username, is_sample, created_at, updated_at
        FROM projects WHERE bucket_id = ? ORDER BY created_at ASC`,
       [bucketId],
     );
@@ -760,32 +760,32 @@ export class MySqlAppRepository implements AppRepository {
 
   async insertProjectGrant(record: ProjectGrantRecord): Promise<void> {
     await this.pool.execute(
-      `INSERT INTO project_grants (project_id, principal_type, principal_id, role, created_at)
+      `INSERT INTO project_grants (project_id, principal_type, principal_username, role, created_at)
        VALUES (?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE role = VALUES(role)`,
       [
         record.projectId,
         record.principalType,
-        record.principalId ?? "", // null (public) -> '' sentinel for the composite PK
+        record.principalUsername ?? "", // null (public) -> '' sentinel for the composite PK
         record.role,
         record.createdAt,
       ],
     );
   }
 
-  async listGrantsForPrincipal(customerId: string | null): Promise<ProjectGrantRecord[]> {
+  async listGrantsForPrincipal(username: string | null): Promise<ProjectGrantRecord[]> {
     // Public grants ALWAYS apply; a signed-in customer additionally gets their
     // own user grants. (Account grants compose here when team accounts land.)
-    const [rows] = customerId
+    const [rows] = username
       ? await this.pool.execute<mysql.RowDataPacket[]>(
-          `SELECT project_id, principal_type, principal_id, role, created_at
+          `SELECT project_id, principal_type, principal_username, role, created_at
            FROM project_grants
            WHERE principal_type = 'public'
-              OR (principal_type = 'user' AND principal_id = ?)`,
-          [customerId],
+              OR (principal_type = 'user' AND principal_username = ?)`,
+          [username],
         )
       : await this.pool.execute<mysql.RowDataPacket[]>(
-          `SELECT project_id, principal_type, principal_id, role, created_at
+          `SELECT project_id, principal_type, principal_username, role, created_at
            FROM project_grants WHERE principal_type = 'public'`,
         );
     return rows.map(rowToProjectGrant);
@@ -964,7 +964,7 @@ function rowToProject(row: mysql.RowDataPacket): ProjectRecord {
     projectId: row.project_id,
     bucketId: Number(row.bucket_id),
     name: row.name,
-    ownerCustomerId: row.owner_customer_id ?? null,
+    ownerUsername: row.owner_username ?? null,
     isSample: Boolean(row.is_sample),
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -976,7 +976,7 @@ function rowToProjectGrant(row: mysql.RowDataPacket): ProjectGrantRecord {
     projectId: row.project_id,
     principalType: row.principal_type,
     // '' sentinel (public) <-> null at the boundary.
-    principalId: row.principal_id === "" ? null : row.principal_id,
+    principalUsername: row.principal_username === "" ? null : row.principal_username,
     role: row.role,
     createdAt: new Date(row.created_at),
   };

@@ -26,7 +26,7 @@ export async function seedSampleProject(
     projectId: SAMPLE_PROJECT_ID,
     bucketId: samplesBucketId,
     name: SAMPLE_PROJECT_NAME,
-    ownerCustomerId: null, // system-owned; visibility comes from the public grant
+    ownerUsername: null, // system-owned; visibility comes from the public grant
     isSample: true,
     createdAt: now,
     updatedAt: now,
@@ -35,7 +35,7 @@ export async function seedSampleProject(
   await repository.insertProjectGrant({
     projectId: SAMPLE_PROJECT_ID,
     principalType: "public",
-    principalId: null,
+    principalUsername: null,
     role: "viewer",
     createdAt: now,
   });
