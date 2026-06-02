@@ -95,50 +95,40 @@
       (real UUID `proj_c7701da7-…`, idempotent on boot). Sample doc re-stamped with
       that UUID via `document_update` (manifest/scenarioId KEPT for now — the
       scenario registry still reads them off the filter; flattening is Task 7).
-- [ ] **5.2 Wire the producer:** `produceEntityScope` resolves `sample:<scenarioId>`
-      → the real `SAMPLE_PROJECT_ID` (look up the projects table / the sample
-      mapping) instead of the `scenarioId` slug, so `deriveRagContentScope` emits
-      `{filter:{projectId:"proj_c7701da7-…"}}` matching the live doc.
-- [ ] **5.3 Codify the doc stamp in the seed-bucket script** — the seed must stamp
-      `filter.projectId = SAMPLE_PROJECT_ID` (today it's a manual `document_update`;
-      make it reproducible). Uses the shared `stampDocumentFilter` (Task 3).
-- [ ] **Adversarial review:** producer emits the UUID (re-run the search live);
-      Extract `workflow_id` read still works; the stamp is in the script, not manual.
+- [x] **5.2 Producer wired** — `produceEntityScope` resolves `sample:<scenarioId>`
+      → the real `SAMPLE_PROJECT_ID` via `SAMPLE_PROJECT_ID_BY_SCENARIO` (commit
+      11cad62), so `deriveRagContentScope` emits `{filter:{projectId:"proj_c7701…"}}`.
+- [x] **5.3 Doc stamp codified in `scripts/seed-bucket.ts`** — stamps
+      `filter.projectId` reproducibly (ingest + existing-doc reconcile; commit
+      801cd50). NOTE: the flat `DocumentFilter`/`stampDocumentFilter` helper is the
+      flat-filter end-state → moved to `2026-06-02-flatten-document-filter` (the
+      projectId stamp shipped additively via `sampleDocFilterSchema.projectId`).
+- [x] **Adversarial review:** producer emits the UUID (live search → count 12);
+      Extract `workflow_id` still works; the stamp is in the script, not manual.
 
 ## 6. Regression + closeout
-- [x] **6.2 LIVE re-verify DONE (done=user-visible):** fresh onboarding session →
-      "What is the total amount due on this bill?" → "$7,613.20 … Jul 30, 2025"
-      with 2 citation chips + Show source (screenshot). Middleware log:
-      `filter:{projectId:{$in:["proj_c7701da7-…"]}}` matched. DL-1 reverified.
 - [x] **6.1 Ground-truth regression suite** — `services/ragCorrectness.regression.test.ts`
-      (offline, fake clients, no live network): 3 Utility ground-truth pairs
-      (amount-due/addressee/meter-count) each → grounded answer + ≥1 citation +
-      non-ambient tier, plus a "never silently no-snippets" TRIPWIRE on the
-      amount-due pair. Complements the producer-emits-UUID + RBAC isolation
-      regressions (`entityScopeProducer.test` / `projectAccess.test`). 717 green.
-- [ ] **6.2 Live re-verify (done = user-visible):** onboarding chat "amount due"
-      returns a grounded citation; `_debug.groundx` shows the matched filter.
-- [x] **6.3 (docs)** `docs/agents/data-model.md` updated (projects + project_grants
-      tables row + the "New project/RBAC need" guidance + scope→filter→RBAC path);
-      `docs/agents/groundx-real-api-shapes.md` gains the search-filter +
-      `document_update`-re-ingest + verbosity-score operational facts; memory
-      `project_projects_rbac_filter.md` written. Suites/build/validate green
-      (re-run at final archive). Remaining: 6.1 broader fixture suite, Task 7.
-- [ ] **Final adversarial review:** no dup data structure FE↔MW; no dead stub
-      (every shared type consumed, every column read); durable spec updated;
-      `rag-retrieval-correctness` withdrawn; e2e-audit DL-1 repointed here.
+      (offline, fake clients, no live network): 3 Utility ground-truth pairs each →
+      grounded answer + ≥1 citation + non-ambient tier, plus a "never silently
+      no-snippets" TRIPWIRE. Complements producer/RBAC regressions. 717 green.
+- [x] **6.2 LIVE re-verify DONE (done=user-visible):** fresh onboarding session →
+      "$7,613.20 … Jul 30, 2025" with 2 citation chips + Show source (screenshot).
+      Middleware log: `filter:{projectId:{$in:["proj_c7701da7-…"]}}` matched.
+      DL-1 reverified in the e2e-audit defect log.
+- [x] **6.3 (docs)** `docs/agents/data-model.md` + `groundx-real-api-shapes.md`
+      updated; memory `project_projects_rbac_filter.md` written.
+- [x] **Final adversarial review:** spec reconciled to shipped code (username;
+      `public|user`; projectId stamped additively — flat filter split to the
+      follow-up); no dup/dead-stub; every column read; `rag-retrieval-correctness`
+      withdrawn; e2e-audit DL-1 repointed here. Suites 717 + build + `--strict` green.
 
-## 7. Manifest / registry relocation — SEQUENTIAL (makes the "no app metadata in the filter" requirement truthful)
-- [ ] **7.1** The scenario registry (`middleware/src/scenarios/registry.ts`)
-      currently builds the onboarding scenario list by reading `filter.kind`,
-      `filter.scenarioId`, `filter.manifest` OFF the GroundX doc filter. Move that
-      source app-side (a scenario config / the projects table) so the GroundX
-      `filter` can drop the `manifest`/`scenarioId`/`kind` blob and become flat
-      `{projectId, workflow_id}`.
-- [ ] **7.2** Re-stamp the sample doc to the flat filter (via the seed script) once
-      the registry no longer depends on the doc filter; confirm the onboarding
-      picker still lists scenarios and search still matches `{projectId}`.
-- [ ] **Adversarial review:** registry still returns scenarios from the new source;
-      GroundX doc filter is flat; `search_content(filter:{projectId})` still matches.
+## 7. Manifest/registry relocation → MOVED to `2026-06-02-flatten-document-filter`
+- [x] Split out (Option A, 2026-06-02): the manifest/registry relocation + the flat
+      `{projectId, workflow_id}` filter + the `DocumentFilter`/`stampDocumentFilter`
+      helper are tracked in `2026-06-02-flatten-document-filter` (cosmetic cleanup
+      that rewrites the live onboarding registry — safer as its own scoped change;
+      the additive filter works today). projects-rbac is functionally complete.
 
-- [ ] Archive.
+- [x] **Archive** — Tasks 0–6 done; 4.3 ticketed; Task 7 split to
+      `2026-06-02-flatten-document-filter`. The DL-1 fix + RBAC layer are complete,
+      tested (717 green), live-verified, and shipped.

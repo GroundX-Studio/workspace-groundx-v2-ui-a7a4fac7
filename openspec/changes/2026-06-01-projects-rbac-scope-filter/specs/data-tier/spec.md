@@ -52,21 +52,21 @@ SHALL build only a `ContentScope`.
   `{projectId: proj_sample}` matches the doc, and the answer is grounded with a
   citation
 
-### Requirement: The document filter SHALL be a shared flat structure stamped at upload
+### Requirement: Every sample document's GroundX filter SHALL carry the project id, stamped reproducibly by the seed
 
-The filter stamped on every uploaded document SHALL be a single `DocumentFilter`
-type with ONE definition (one source of truth) — a flat, GroundX-matchable map
-`{ projectId: string; workflow_id?: string }` — applied by both the seed and the
-BYO-upload path via one `stampDocumentFilter` helper. The type lives in the
-MIDDLEWARE (the only side that stamps documents); it SHALL NOT be added to the
-FE-shared `@groundx/shared` package without a frontend consumer (no dead stub).
-App/UI metadata (scenario manifest, etc.) SHALL NOT be stored in the GroundX
-document filter.
+The seed (`scripts/seed-bucket.ts`) SHALL stamp `filter.projectId` — the real
+`proj_<uuid>` resolved from the scenario via `SAMPLE_PROJECT_ID_BY_SCENARIO`
+(matching `produceEntityScope`, one source of truth) — on every sample document,
+on ingest AND by reconciling already-seeded docs, so the scope→GroundX-filter
+path matches without a manual `document_update`. (Flattening the filter — moving
+the scenario `manifest`/`scenarioId` app-side so the GroundX filter becomes just
+`{projectId, workflow_id}` — is the tracked follow-up
+`2026-06-02-flatten-document-filter`; until then the projectId is added
+ADDITIVELY alongside the existing manifest the scenario registry still reads.)
 
-#### Scenario: Seeded sample doc carries a flat, matchable filter
+#### Scenario: Seeded sample doc's filter carries the matchable project id
 
 - **GIVEN** the seed runs against the samples bucket
 - **WHEN** a sample document is stamped
-- **THEN** its GroundX `filter` is `{projectId: "proj_<sample>", workflow_id:"…"}`
-  with no nested `manifest`/`scenarioId` blob, and a
-  `search_content(filter:{projectId:"proj_<sample>"})` returns that document
+- **THEN** its GroundX `filter.projectId` is the scenario's real `proj_<uuid>`,
+  and `search_content(filter:{projectId:"proj_<uuid>"})` returns that document
