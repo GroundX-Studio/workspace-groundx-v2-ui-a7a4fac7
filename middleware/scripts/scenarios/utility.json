@@ -1,38 +1,6 @@
 {
   "id": "utility",
   "order": 1,
-  "manifest": {
-    "id": "utility",
-    "hero": {
-      "title": "Utility Bill",
-      "shortDesc": "a single billing statement with 8 meters and 56 charges across 3 pages",
-      "demonstrates": "messy layout → clean extraction",
-      "badges": [
-        "E"
-      ],
-      "chapters": {
-        "extract": "live",
-        "interact": "live",
-        "report": "off"
-      },
-      "docCount": "1 doc"
-    },
-    "thinkingScript": [
-      "parsing layout · page 1",
-      "found header · account 1023456",
-      "extracting meter table · 8 rows",
-      "extracting charge ledger · 56 rows",
-      "matching legend to charge codes",
-      "confidence check · 96% mean"
-    ],
-    "chatSeeds": [
-      {
-        "id": "u1",
-        "prompt": "What's our largest charge category this month?",
-        "rationale": "Tests RAG over the charge ledger."
-      }
-    ]
-  },
   "documents": [
     {
       "fileName": "utility-bill-april-2026.pdf",

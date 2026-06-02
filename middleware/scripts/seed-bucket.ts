@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadEnv } from "../src/config/env.js";
 import { SAMPLE_PROJECT_ID_BY_SCENARIO } from "../src/db/seedSampleProject.js";
+import { stampDocumentFilter } from "../src/services/documentFilter.js";
 import type { SampleDocFilter, ScenarioManifest } from "../src/scenarios/types.js";
 
 /**
@@ -42,7 +43,10 @@ interface SpecDoc {
 interface ScenarioSpec {
   id: string;
   order: number;
-  manifest: ScenarioManifest;
+  // The scenario manifest now lives app-side in `src/scenarios/sampleScenarios.ts`
+  // (the registry's source of truth); the seed no longer embeds it in the doc
+  // filter. Optional/vestigial in the seed config.
+  manifest?: ScenarioManifest;
   documents: SpecDoc[];
 }
 
@@ -86,7 +90,10 @@ async function listExistingDocs(scenarioId: string): Promise<ExistingDoc[]> {
       `/ingest/documents?${q.toString()}`
     );
     for (const doc of response.documents ?? []) {
-      if ((doc.filter as Partial<SampleDocFilter> | undefined)?.scenarioId === scenarioId) {
+      // Match by the flat projectId (the post-flatten key); fall back to the
+      // legacy scenarioId during the transition.
+      const f = doc.filter as (Partial<SampleDocFilter> & { projectId?: string }) | undefined;
+      if (f?.projectId === resolveSampleProjectId(scenarioId) || f?.scenarioId === scenarioId) {
         out.push(doc);
       }
     }
@@ -124,49 +131,33 @@ async function uploadLocalFile(filePath: string, fileName: string): Promise<stri
   return presign.Header["Gx-Hosted-Url"][0];
 }
 
-async function refreshManifestIfChanged(spec: ScenarioSpec, existing: ExistingDoc[]): Promise<void> {
-  // The first-ordered doc carries the manifest. If the spec's manifest has
-  // drifted from what's stored, push an update via document_update so the
-  // bucket stays the source of truth.
-  const manifestCarrier = existing.find(
-    (d) => (d.filter as Partial<SampleDocFilter> | undefined)?.manifest != null
-  );
-  if (!manifestCarrier) return;
-  const storedFilter = (manifestCarrier.filter as Partial<SampleDocFilter>) ?? {};
-  const stored = JSON.stringify(storedFilter.manifest);
-  const desired = JSON.stringify(spec.manifest);
-  // Reconcile BOTH the manifest AND the projectId (the RAG/RBAC filter key) —
-  // a doc seeded before projectId existed must get it on re-seed, else the
-  // scope filter won't match.
+async function reconcileProjectIdIfMissing(spec: ScenarioSpec, existing: ExistingDoc[]): Promise<void> {
+  // Ensure every existing scenario doc carries the FLAT filter
+  // {projectId, workflow_id?} — a doc seeded before projectId existed (or with
+  // the legacy manifest/scenarioId blob) gets reconciled to the flat shape, so
+  // the scope filter matches and no app metadata lingers in the GroundX filter.
+  // (The scenario manifest now lives app-side in sampleScenarios.ts.)
   const desiredProjectId = resolveSampleProjectId(spec.id);
-  const manifestUpToDate = stored === desired;
-  const projectIdUpToDate = storedFilter.projectId === desiredProjectId;
-  if (manifestUpToDate && projectIdUpToDate) {
-    console.log(`  ✓ manifest + projectId already up-to-date`);
-    return;
-  }
-  console.log(
-    `  → carrier filter drift (manifest:${!manifestUpToDate} projectId:${!projectIdUpToDate}) — updating ${manifestCarrier.documentId}`,
-  );
-  await gx<{ ingest: { processId: string; status: string } }>(
-    "/ingest/documents",
-    {
+  for (const doc of existing) {
+    const f = (doc.filter as (Partial<SampleDocFilter> & { projectId?: string; workflow_id?: string }) | undefined) ?? {};
+    const hasLegacyBlob = f.manifest != null || f.scenarioId != null || f.kind != null;
+    const projectIdOk = f.projectId === desiredProjectId;
+    if (projectIdOk && !hasLegacyBlob) continue; // already flat + correct
+    console.log(`  → reconciling filter → flat {projectId} for ${doc.documentId}`);
+    await gx<{ ingest: { processId: string; status: string } }>("/ingest/documents", {
       method: "PUT",
       body: JSON.stringify({
         documents: [
           {
-            documentId: manifestCarrier.documentId,
-            filter: {
-              ...(manifestCarrier.filter as Record<string, unknown>),
-              manifest: spec.manifest,
-              projectId: desiredProjectId,
-            },
+            documentId: doc.documentId,
+            // REPLACE with the flat filter, preserving workflow_id (Extract).
+            filter: stampDocumentFilter({ projectId: desiredProjectId, workflowId: f.workflow_id }),
           },
         ],
       }),
-    }
-  );
-  console.log(`  ← carrier filter update queued`);
+    });
+    console.log(`  ← flat filter update queued`);
+  }
 }
 
 async function seedScenario(spec: ScenarioSpec): Promise<void> {
@@ -176,7 +167,7 @@ async function seedScenario(spec: ScenarioSpec): Promise<void> {
   const existingByName = new Map(existing.map((d) => [d.fileName, d]));
   console.log(`  ${existing.length} existing docs in bucket for this scenario`);
 
-  await refreshManifestIfChanged(spec, existing);
+  await reconcileProjectIdIfMissing(spec, existing);
 
   // Determine which docs need ingest. We dedupe by fileName.
   const docsToIngest = spec.documents.filter((doc) => !existingByName.has(doc.fileName));
@@ -185,39 +176,15 @@ async function seedScenario(spec: ScenarioSpec): Promise<void> {
     return;
   }
 
-  // Decide which doc carries the manifest. The first doc (by order) is the
-  // canonical manifest carrier. If existing docs already cover that slot we
-  // do NOT re-embed the manifest on subsequent uploads — there should be
-  // exactly one manifest per scenario.
-  const manifestAlreadyPresent = existing.some(
-    (d) => (d.filter as Partial<SampleDocFilter> | undefined)?.manifest != null
-  );
-
   for (const doc of docsToIngest) {
     console.log(`  → uploading ${doc.fileName}`);
     const sourceUrl = await uploadLocalFile(doc.filePath, doc.fileName);
 
-    const isManifestCarrier = !manifestAlreadyPresent && doc.order === spec.order;
-    // Stamp the app-project id (the GroundX search-filter key for RAG scoping +
-    // RBAC) on every scenario doc — reproducibly, so a fresh bucket seed matches
-    // the producer's resolved projectId without a manual document_update.
-    const projectId = resolveSampleProjectId(spec.id);
-    const filter: SampleDocFilter = isManifestCarrier
-      ? {
-          kind: "sample-doc",
-          scenarioId: spec.id,
-          scenarioOrder: doc.order,
-          scenarioRole: "doc",
-          projectId,
-          manifest: spec.manifest,
-        }
-      : {
-          kind: "sample-doc",
-          scenarioId: spec.id,
-          scenarioOrder: doc.order,
-          scenarioRole: "doc",
-          projectId,
-        };
+    // Flat document filter — just the projectId scoping key (the GroundX
+    // search-filter key for RAG + RBAC). No manifest/scenarioId/kind: the
+    // scenario manifest lives app-side (`src/scenarios/sampleScenarios.ts`) and
+    // the registry joins docs to a scenario by `filter.projectId`.
+    const filter = stampDocumentFilter({ projectId: resolveSampleProjectId(spec.id) });
 
     const payload = {
       documents: [
