@@ -39,6 +39,8 @@
  * not introduce a parallel scope shape (one source of truth).
  */
 
+import { SAMPLE_PROJECT_ID_BY_SCENARIO } from "../db/seedSampleProject.js";
+
 /** The scope-column subset of `ChatSessionEntityRecord` the producer fills. */
 export interface ProducedEntityScope {
   bucketId: number | null;
@@ -81,11 +83,15 @@ export function produceEntityScope(
   const id = entityKey.slice(sep + 1);
 
   if (kind === "sample" && id.length > 0) {
-    // The demo scope: samples bucket narrowed by the scenarioId project
-    // filter. `deriveRagContentScope` maps projectIdsJson → filter.projectId.
+    // The demo scope: samples bucket narrowed by the project filter.
+    // `deriveRagContentScope` maps projectIdsJson → filter.projectId. Resolve
+    // the scenario slug to its REAL seeded project id (the value stamped on the
+    // doc's GroundX filter) so the filter actually matches; an unmapped
+    // scenario keeps its slug (not yet seeded as a project).
+    const projectId = SAMPLE_PROJECT_ID_BY_SCENARIO[id] ?? id;
     return {
       bucketId: samplesBucketId,
-      projectIdsJson: JSON.stringify([id]),
+      projectIdsJson: JSON.stringify([projectId]),
       // No producer here — kept as cf19 (multi-bucket→group) substrate
       // and single-doc-viewer (documentIdsJson) substrate respectively.
       groupId: null,

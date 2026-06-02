@@ -17,6 +17,18 @@ import type { AppRepository } from "../types.js";
 export const SAMPLE_PROJECT_ID = "proj_c7701da7-0e08-482a-a496-df9dfe991613";
 export const SAMPLE_PROJECT_NAME = "Utility Bill (sample)";
 
+/**
+ * Scenario-slug → real project id, for the seeded sample projects. The scope
+ * producer resolves a `sample:<scenarioId>` entity through this so the RAG
+ * filter uses the SAME `projectId` value stamped on the doc (a real id), not
+ * the slug. Only `utility` is seeded today; add a scenario here when its
+ * project + doc are seeded. An unmapped scenario falls back to its slug
+ * (unchanged, non-functional-until-seeded behavior).
+ */
+export const SAMPLE_PROJECT_ID_BY_SCENARIO: Readonly<Record<string, string>> = {
+  utility: SAMPLE_PROJECT_ID,
+};
+
 export async function seedSampleProject(
   repository: Pick<AppRepository, "insertProject" | "insertProjectGrant">,
   samplesBucketId: number,

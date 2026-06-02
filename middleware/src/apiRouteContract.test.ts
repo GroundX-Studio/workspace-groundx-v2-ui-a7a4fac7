@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
 import { MemoryAppRepository } from "./db/memoryRepository.js";
+import { SAMPLE_PROJECT_ID } from "./db/seedSampleProject.js";
 import { FakeGroundXClient, FakeLlmClient, FakePartnerClient, FakeScenarioRegistry, testEnv } from "./test/fakes.js";
 
 function setup() {
@@ -1097,7 +1098,7 @@ describe("middleware API route contract", () => {
       expect(rows[0]).toMatchObject({
         entityKey: "sample:utility",
         bucketId: 28454,
-        projectIdsJson: JSON.stringify(["utility"]),
+        projectIdsJson: JSON.stringify([SAMPLE_PROJECT_ID]),
         // No producer for these — kept as cf19 / single-doc substrate.
         groupId: null,
         documentIdsJson: null,
@@ -1136,7 +1137,7 @@ describe("middleware API route contract", () => {
       expect(rows[0]).toMatchObject({
         lastFrame: "f4",
         bucketId: 28454,
-        projectIdsJson: JSON.stringify(["utility"]),
+        projectIdsJson: JSON.stringify([SAMPLE_PROJECT_ID]),
       });
     });
 

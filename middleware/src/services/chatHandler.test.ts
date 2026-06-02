@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryAppRepository } from "../db/memoryRepository.js";
+import { SAMPLE_PROJECT_ID } from "../db/seedSampleProject.js";
 import type {
   ChatMessageRecord,
   ChatSessionEntityRecord,
@@ -1211,7 +1212,9 @@ describe("entity scope round-trip: producer writes → deriveRagContentScope rea
     expect(scope).toEqual({
       type: "bucket",
       bucketId: 28454,
-      filter: { projectId: ["utility"] },
+      // The producer resolves the `utility` scenario to its REAL seeded
+      // project id (the value stamped on the doc filter), not the slug.
+      filter: { projectId: [SAMPLE_PROJECT_ID] },
     });
   });
 

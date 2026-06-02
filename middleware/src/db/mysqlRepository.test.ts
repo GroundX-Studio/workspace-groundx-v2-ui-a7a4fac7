@@ -30,9 +30,10 @@ describe("MySqlAppRepository", () => {
     // 9 CREATE TABLE statements + shared-template-lifecycle Phase 2's
     // CREATE TABLE templates + the idempotent copy INSERT…SELECT from
     // extraction_schemas = 11. The Phase-1 viewer-column information_schema
-    // probe + ALTER were dropped (2026-05-31-viewer-history-column-drop), so
-    // the count drops from 13 to 11.
-    expect(statements).toHaveLength(11);
+    // probe + ALTER were dropped (2026-05-31-viewer-history-column-drop).
+    // 2026-06-01-projects-rbac-scope-filter adds CREATE TABLE projects +
+    // project_grants → 13.
+    expect(statements).toHaveLength(13);
     const joined = statements.join("\n");
     // Auth + metadata.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS sessions");
@@ -49,6 +50,9 @@ describe("MySqlAppRepository", () => {
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS extraction_schemas");
     // shared-template-lifecycle Phase 2 — templates table + idempotent copy.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS templates");
+    // 2026-06-01-projects-rbac-scope-filter — app-owned projects + RBAC grants.
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS projects");
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS project_grants");
     const copyStmt = statements.find((s) => /INSERT\s+INTO\s+templates/i.test(s))!;
     // Idempotent AND concurrent-safe: ON DUPLICATE KEY UPDATE no-ops on a
     // row already present, so re-runs do nothing and a multi-pod boot race on

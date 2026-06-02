@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { SAMPLE_PROJECT_ID } from "../db/seedSampleProject.js";
 import { produceEntityScope } from "./entityScopeProducer.js";
 
 // 2026-05-31-steady-scope-producer Phase 1 — producer contract.
@@ -19,17 +20,23 @@ import { produceEntityScope } from "./entityScopeProducer.js";
 // documented anon-onboarding behavior, unchanged).
 
 describe("produceEntityScope — sample EntityKind → demo scope columns", () => {
-  it("maps a sample:<scenarioId> entity to bucketId + projectIdsJson when the samples bucket is configured", () => {
+  it("maps the seeded sample scenario to its REAL project id (the value the doc filter carries), not the slug", () => {
+    // 2026-06-01-projects-rbac-scope-filter Task 5.2: the GroundX doc filter
+    // carries `projectId: SAMPLE_PROJECT_ID` (a real proj_<uuid>), so the
+    // producer MUST emit that id — emitting the "utility" slug filters to
+    // nothing (the live DL-1 failure).
     const produced = produceEntityScope("sample:utility", { samplesBucketId: 28454 });
     expect(produced).toEqual({
       bucketId: 28454,
-      projectIdsJson: JSON.stringify(["utility"]),
+      projectIdsJson: JSON.stringify([SAMPLE_PROJECT_ID]),
       groupId: null,
       documentIdsJson: null,
     });
   });
 
-  it("uses the scenarioId after the `sample:` prefix as the project filter value", () => {
+  it("falls back to the scenarioId slug for a sample scenario that has no seeded project yet", () => {
+    // Only `utility` is seeded as a project today; other sample scenarios keep
+    // the slug (no regression — they were never wired to a real project).
     const produced = produceEntityScope("sample:loan", { samplesBucketId: 42 });
     expect(produced).toEqual({
       bucketId: 42,
