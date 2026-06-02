@@ -18,6 +18,7 @@ import { createSessionRecord, clearSessionCookie, isAuthedSession, requireAuthen
 import { assertChatSessionOwnership, SESSION_NOT_OWNER_ERROR } from "./middleware/sessionOwnership.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { ChatHandlerError, deriveRagContentScope, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
+import { authorizedProjectIds, rbacFilterForProjects } from "./services/projectAccess.js";
 import { produceEntityScope } from "./services/entityScopeProducer.js";
 import { resolveFieldGeometry } from "./services/citationGeometry.js";
 import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
@@ -1238,6 +1239,12 @@ export function createApp({
         // scope is a render-time input per Template + Scope + Results) — NOT
         // `deriveRagContentScope` (that is the extract/chat route's path).
         const groundxApiKey = sessionApiKey(reqSession) ?? env.GROUNDX_PARTNER_API_KEY ?? null;
+        // RBAC (same server-side resolution as the chat route): restrict the
+        // report's per-section retrieval to the caller's authorized projects.
+        const reportAuthorizedProjects = await authorizedProjectIds(
+          repository,
+          sessionUsername(reqSession),
+        );
         const result = await renderReport(
           {
             templateId,
@@ -1259,6 +1266,7 @@ export function createApp({
             llmClient,
             groundxClient,
             ...(groundxApiKey ? { groundxApiKey } : {}),
+            rbacFilter: rbacFilterForProjects(reportAuthorizedProjects),
             ...(env.LLM_MODEL_ID ? { llmModelId: env.LLM_MODEL_ID } : {}),
           },
         );
@@ -1353,6 +1361,14 @@ export function createApp({
       // auth model (locked 2026-05-25).
       const groundxApiKey = sessionApiKey(session) ?? env.GROUNDX_PARTNER_API_KEY ?? null;
 
+      // RBAC (2026-06-01-projects-rbac-scope-filter): the caller may only read
+      // documents in projects they hold a grant on. Resolve the authorized
+      // project set from the grant graph (anon → public only) and pass it as the
+      // server-derived `rbacFilter`; `searchGroundX` composes it ($and) with the
+      // scope filter so it intersects the requested scope. SERVER-SIDE only.
+      const callerUsername = sessionUsername(session); // null for anonymous
+      const authorizedProjects = await authorizedProjectIds(repository, callerUsername);
+
       const result = await handleChatMessage(payload, {
         repository,
         llmClient,
@@ -1360,6 +1376,7 @@ export function createApp({
         groundxClient,
         partnerClient,
         groundxApiKey,
+        rbacFilter: rbacFilterForProjects(authorizedProjects),
         samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
         llmModelId: env.LLM_MODEL_ID ?? "model",
         lightLlmModelId: env.LLM_LIGHT_MODEL_ID,

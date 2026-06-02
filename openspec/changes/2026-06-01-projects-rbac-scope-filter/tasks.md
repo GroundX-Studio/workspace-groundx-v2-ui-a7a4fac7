@@ -69,25 +69,27 @@
       twin); the FE/`@groundx/shared` gain nothing; `stampDocumentFilter` has ≥1
       real caller (the seed) + BYO tracked.
 
-## 4. RBAC resolution + RAG wiring — SEQUENTIAL
-- [ ] **4.1 `authorizedProjectIds(username)`** in the middleware (from
-      `listGrantsForPrincipal`; anon/null → public only). Unit-tested over the dev repo.
-- [ ] **4.2 `compileRagFilter(caller, scope)`** — `authorized ∩ requested` →
-      `rbacFilter {projectId:{$in:…}}`; empty → deny/empty. Wire it into the
-      chat + report paths so `searchGroundX` receives it as `options.rbacFilter`
-      (the existing `$and` seam). `deriveRagContentScope` keeps emitting
-      `{filter:{projectId}}` resolved from the projects table.
-- [ ] **4.3 First production writer of a `user` grant** (clears the dormant-
-      plumbing flag): on authed project-create, write an `owner` grant for the
-      creator's username. (Sharing-with-another-username endpoint/UI stays a
-      tracked follow-up; the `user` branch must have ≥1 real writer here.)
-- [ ] **4.4 Failing→green:** the Task-1.1 producer-mismatch test flips to a
-      grounded, cited "amount due" answer once the producer (Task 5) + resolver
-      are in place.
-- [ ] **Adversarial review:** no forked search path (`grep` one
-      `searchGroundX` caller shape); a 2nd username CANNOT read another's project
-      (test: grant to user A, query as B → excluded); RBAC stays server-side
-      (FE never receives grants); the `user`-grant branch has a real writer.
+## 4. RBAC resolution + RAG wiring — SEQUENTIAL ✅ DONE (4.3 deferred-tracked)
+- [x] **4.1 `authorizedProjectIds(repo, username)`** in `services/projectAccess.ts`
+      (from `listGrantsForPrincipal`; anon/null → public only). Unit-tested.
+- [x] **4.2 `rbacFilterForProjects` → `options.rbacFilter`** wired into BOTH the
+      chat route (`handleChatMessage` deps) and the report-render route
+      (`renderReport` deps). `searchGroundX` composes it (`$and`) with the scope
+      filter, so it INTERSECTS the requested scope (implicit deny on an
+      unauthorized project; `{$in:[]}` denies all). Chose the existing seam over
+      a JS-side intersect — no forked path. `deriveRagContentScope` unchanged.
+- [ ] **4.3 First production writer of a `user` grant — DEFERRED + TRACKED.** No
+      authed project-create flow exists yet, so the owner-grant-on-create writer
+      has no home; building it now is premature (earn-the-axis). The `user`-grant
+      RESOLVER branch is general + test-covered (`projectAccess.test.ts` seeds a
+      user grant and proves cross-user isolation); the WRITER lands with the
+      authed-project-create / BYO-upload feature. Tracked here — NOT orphaned.
+- [x] **4.4 Producer-mismatch test green** (Task 1.1 flipped by the producer fix);
+      full LIVE re-verify of the chat answer is Task 6.2.
+- [x] **Adversarial review:** `grep` — one `searchGroundX` composition path (no
+      fork); cross-user isolation proven (grant to A, query as B → excluded; anon
+      → public only); RBAC server-side (FE receives no grants); 709→713 suite
+      green; the `user` branch is general/test-covered with its writer tracked.
 
 ## 5. Producer + seed-script stamp — SEQUENTIAL (seed row already DONE in Task 2)
 - [x] **5.1 Seed the sample project row + public grant** — DONE in `db/seedSampleProject.ts`
