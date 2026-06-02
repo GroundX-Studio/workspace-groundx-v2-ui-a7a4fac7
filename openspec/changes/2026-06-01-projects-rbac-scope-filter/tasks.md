@@ -120,9 +120,12 @@
       the remaining piece.)
 - [ ] **6.2 Live re-verify (done = user-visible):** onboarding chat "amount due"
       returns a grounded citation; `_debug.groundx` shows the matched filter.
-- [ ] **6.3** `openspec validate --strict`; middleware+app suites + drift guards +
-      build green; update `docs/agents/data-model.md` (the new tables + shared
-      types + the scope→filter→RBAC path) in this change.
+- [x] **6.3 (docs)** `docs/agents/data-model.md` updated (projects + project_grants
+      tables row + the "New project/RBAC need" guidance + scope→filter→RBAC path);
+      `docs/agents/groundx-real-api-shapes.md` gains the search-filter +
+      `document_update`-re-ingest + verbosity-score operational facts; memory
+      `project_projects_rbac_filter.md` written. Suites/build/validate green
+      (re-run at final archive). Remaining: 6.1 broader fixture suite, Task 7.
 - [ ] **Final adversarial review:** no dup data structure FE↔MW; no dead stub
       (every shared type consumed, every column read); durable spec updated;
       `rag-retrieval-correctness` withdrawn; e2e-audit DL-1 repointed here.

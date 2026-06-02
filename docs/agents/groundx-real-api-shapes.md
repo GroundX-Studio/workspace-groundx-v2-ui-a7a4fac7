@@ -322,3 +322,27 @@ The earlier "no workflow assigned" observation was a transient state: as of 2026
 3. **Extract widget** — pending. Reads `document.filter.workflow_id` → `getGroundXWorkflow(workflow_id)` for schema → `getGroundXDocumentExtract(documentId)` for values → merge by field id.
 4. **Strip the manifest's `extractionSchema` + `sampleExtractionValues` + `sampleChatScript`** from `utility.json` once the Extract widget lands. Re-seed.
 5. **Keep `chatSeeds` + `hero` + `thinkingScript`** as scenario-level UX strings (Option A in the rewire gap doc).
+
+## Search filtering + `document_update` — RAG scoping (2026-06-02, hard-won)
+
+The RAG scope→GroundX-filter path (`project_projects_rbac_filter`):
+
+- **Search `filter` pre-filters by the doc's stored `filter` field** (visible in
+  `document_get`). To scope by project, the doc's `filter` must carry
+  `projectId: "proj_<uuid>"`; the search sends `filter:{projectId:…}` (or the
+  RBAC `{projectId:{$in:[…]}}`). A doc whose filter has only `scenarioId`/`manifest`
+  and NO `projectId` matches nothing → "no snippets" (the DL-1 bug).
+- **There was a GroundX server-side filter-matching bug** (a flat, present
+  `{projectId}` returned 0). **Fixed server-side by eyelevel 2026-06-02** — after
+  the fix `search_content(filter:{projectId:"proj_…"})` → real results.
+- **`document_update` RE-INGESTS the doc** (`status: queued → complete`, takes
+  MINUTES — NOT instantaneous). **POLL `document_get` to `complete` before
+  searching** — a search mid-reprocess returns stale/0 and misleads. The
+  `filter`/`searchData` fields **REPLACE** (not merge) — pass the FULL desired
+  object; merge `manifest`/`workflow_id`/`projectId` yourself.
+- **Don't misread the verbosity-0 top-level `search.score`** (a recommended-
+  context relevance number that can be NEGATIVE) as a per-result score — use
+  `verbosity:2` + `results[].score` to judge searchability. The utility sample
+  re-indexes as rich structured text (per-page summaries + keywords) and scores
+  ~200 on NL queries; the old "extract-indexed → ~-30 → needs low-floor retry"
+  note is STALE.
