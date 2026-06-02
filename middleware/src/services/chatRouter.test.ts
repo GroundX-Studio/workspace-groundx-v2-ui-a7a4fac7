@@ -600,17 +600,14 @@ describe("searchGroundX (ContentScope dispatch)", () => {
           },
         },
       );
-      // The two $and-wrapped filters compose into a flat outer $and.
+      // #7 key-aware merge: both sides flatten to one clause PER KEY. Distinct
+      // keys here (region/tier/projectId) → no intersection, nested $and
+      // flattened, each key appears exactly once.
       expect(calls[0].body).toEqual({
         query: "hello",
         n: 6,
         filter: {
-          $and: [
-            {
-              $and: [{ region: "us-east-1" }, { tier: { $in: ["pro", "enterprise"] } }],
-            },
-            { projectId: "P1" },
-          ],
+          $and: [{ region: "us-east-1" }, { tier: { $in: ["pro", "enterprise"] } }, { projectId: "P1" }],
         },
       });
     });

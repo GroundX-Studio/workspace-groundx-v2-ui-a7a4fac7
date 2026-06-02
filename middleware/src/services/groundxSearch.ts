@@ -75,19 +75,90 @@ export interface SearchGroundXOptions {
 }
 
 /**
- * Compose two independent filters into one. Returns null when both
- * are absent. Uses Mongo-style `$and` for composition rather than a
- * shallow merge — shallow merge silently drops collisions and
- * collapses any structured logic the caller already encoded.
+ * Compose two independent filters (RBAC + scope) into one VALID GroundX filter.
+ *
+ * 2026-06-02-onboarding-review-bugfixes #7: a naive `$and: [rbac, scope]` is
+ * WRONG when both constrain the same key — e.g. rbac `{projectId:{$in:[…]}}`
+ * + scope `{projectId:"…"}`. GroundX 400s: "cannot query more than 1 data type
+ * per key." So we merge KEY-AWARE: flatten both sides to single-key clauses,
+ * INTERSECT the allowed value-set of any shared key into ONE clause, and keep
+ * distinct keys as separate clauses. Each key then appears exactly once.
+ *
+ * Value shapes handled: scalar equality (`{k:v}`), array, and `{$in:[…]}` — all
+ * "set-like", which is everything the scope/RBAC filters use (projectId,
+ * workflow_id). A nested `{$and:[…]}` (compileScopeFilter multi-field) is
+ * flattened. Any key whose constraint is NOT set-like (e.g. a range operator —
+ * none today) is preserved as its own clause without intersection.
  */
-function composeFilters(
+function valueToSet(value: unknown): { setLike: true; values: unknown[] } | { setLike: false; raw: unknown } {
+  if (Array.isArray(value)) return { setLike: true, values: value };
+  if (value !== null && typeof value === "object") {
+    const inVals = (value as Record<string, unknown>).$in;
+    if (Array.isArray(inVals)) return { setLike: true, values: inVals };
+    return { setLike: false, raw: value }; // a non-$in operator object
+  }
+  return { setLike: true, values: [value] }; // scalar equality
+}
+
+/** Flatten a filter into single-key clauses, descending into `$and`. */
+function flattenClauses(filter: Record<string, unknown>): Array<[string, unknown]> {
+  const out: Array<[string, unknown]> = [];
+  for (const [key, value] of Object.entries(filter)) {
+    if (key === "$and" && Array.isArray(value)) {
+      for (const sub of value) {
+        if (sub && typeof sub === "object") out.push(...flattenClauses(sub as Record<string, unknown>));
+      }
+    } else {
+      out.push([key, value]);
+    }
+  }
+  return out;
+}
+
+/** A merged value-set → the smallest valid clause value (scalar | $in | $in:[]). */
+function setToClauseValue(values: unknown[]): unknown {
+  if (values.length === 1) return values[0];
+  return { $in: values };
+}
+
+export function composeFilters(
   rbac: Record<string, unknown> | null,
   scope: Record<string, unknown> | null,
 ): Record<string, unknown> | null {
   if (!rbac && !scope) return null;
   if (!rbac) return scope;
   if (!scope) return rbac;
-  return { $and: [rbac, scope] };
+
+  const clauses = [...flattenClauses(rbac), ...flattenClauses(scope)];
+  // Preserve first-seen key order for deterministic output.
+  const order: string[] = [];
+  const byKey = new Map<string, unknown[]>();
+  const nonSetLike: Array<[string, unknown]> = [];
+  for (const [key, value] of clauses) {
+    const v = valueToSet(value);
+    if (!v.setLike) {
+      nonSetLike.push([key, value]);
+      continue;
+    }
+    if (!byKey.has(key)) {
+      byKey.set(key, v.values.slice());
+      order.push(key);
+    } else {
+      // INTERSECT with what's already accumulated for this key.
+      const prev = byKey.get(key)!;
+      const next = v.values;
+      byKey.set(
+        key,
+        prev.filter((x) => next.some((y) => Object.is(x, y) || x === y)),
+      );
+    }
+  }
+
+  const merged: Array<Record<string, unknown>> = order.map((key) => ({ [key]: setToClauseValue(byKey.get(key)!) }));
+  for (const [key, value] of nonSetLike) merged.push({ [key]: value });
+
+  if (merged.length === 1) return merged[0];
+  return { $and: merged };
 }
 
 export async function searchGroundX(

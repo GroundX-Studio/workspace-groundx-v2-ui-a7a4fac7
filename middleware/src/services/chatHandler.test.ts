@@ -694,9 +694,12 @@ describe("handleChatMessage — CF-03 rbacFilter end-to-end", () => {
     expect(groundxForward).toHaveBeenCalled();
     const init = groundxForward.mock.calls.at(-1)![1] as { body: string };
     const body = JSON.parse(init.body);
+    // #7 key-aware merge: one clause per key (distinct keys → no intersection,
+    // the multi-key rbac object splits into a clause each, each key once).
     expect(body.filter).toEqual({
       $and: [
-        { orgId: "org-X", clearance: { $in: ["public", "internal"] } },
+        { orgId: "org-X" },
+        { clearance: { $in: ["public", "internal"] } },
         { projectId: { $in: ["P1", "P2"] } },
       ],
     });
