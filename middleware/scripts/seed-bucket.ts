@@ -20,7 +20,18 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadEnv } from "../src/config/env.js";
+import { SAMPLE_PROJECT_ID_BY_SCENARIO } from "../src/db/seedSampleProject.js";
 import type { SampleDocFilter, ScenarioManifest } from "../src/scenarios/types.js";
+
+/**
+ * The app-project id stamped on a scenario's docs (the GroundX search-`filter`
+ * key for data-org + RBAC). Resolves the scenario slug to its real seeded
+ * `proj_<uuid>` (matching `produceEntityScope`); an unmapped scenario keeps its
+ * slug (not yet seeded as a real project).
+ */
+function resolveSampleProjectId(scenarioId: string): string {
+  return SAMPLE_PROJECT_ID_BY_SCENARIO[scenarioId] ?? scenarioId;
+}
 
 interface SpecDoc {
   fileName: string;
@@ -121,13 +132,22 @@ async function refreshManifestIfChanged(spec: ScenarioSpec, existing: ExistingDo
     (d) => (d.filter as Partial<SampleDocFilter> | undefined)?.manifest != null
   );
   if (!manifestCarrier) return;
-  const stored = JSON.stringify((manifestCarrier.filter as Partial<SampleDocFilter>).manifest);
+  const storedFilter = (manifestCarrier.filter as Partial<SampleDocFilter>) ?? {};
+  const stored = JSON.stringify(storedFilter.manifest);
   const desired = JSON.stringify(spec.manifest);
-  if (stored === desired) {
-    console.log(`  ✓ manifest already up-to-date`);
+  // Reconcile BOTH the manifest AND the projectId (the RAG/RBAC filter key) —
+  // a doc seeded before projectId existed must get it on re-seed, else the
+  // scope filter won't match.
+  const desiredProjectId = resolveSampleProjectId(spec.id);
+  const manifestUpToDate = stored === desired;
+  const projectIdUpToDate = storedFilter.projectId === desiredProjectId;
+  if (manifestUpToDate && projectIdUpToDate) {
+    console.log(`  ✓ manifest + projectId already up-to-date`);
     return;
   }
-  console.log(`  → manifest drift detected — pushing update for ${manifestCarrier.documentId}`);
+  console.log(
+    `  → carrier filter drift (manifest:${!manifestUpToDate} projectId:${!projectIdUpToDate}) — updating ${manifestCarrier.documentId}`,
+  );
   await gx<{ ingest: { processId: string; status: string } }>(
     "/ingest/documents",
     {
@@ -139,13 +159,14 @@ async function refreshManifestIfChanged(spec: ScenarioSpec, existing: ExistingDo
             filter: {
               ...(manifestCarrier.filter as Record<string, unknown>),
               manifest: spec.manifest,
+              projectId: desiredProjectId,
             },
           },
         ],
       }),
     }
   );
-  console.log(`  ← manifest update queued`);
+  console.log(`  ← carrier filter update queued`);
 }
 
 async function seedScenario(spec: ScenarioSpec): Promise<void> {
@@ -177,12 +198,17 @@ async function seedScenario(spec: ScenarioSpec): Promise<void> {
     const sourceUrl = await uploadLocalFile(doc.filePath, doc.fileName);
 
     const isManifestCarrier = !manifestAlreadyPresent && doc.order === spec.order;
+    // Stamp the app-project id (the GroundX search-filter key for RAG scoping +
+    // RBAC) on every scenario doc — reproducibly, so a fresh bucket seed matches
+    // the producer's resolved projectId without a manual document_update.
+    const projectId = resolveSampleProjectId(spec.id);
     const filter: SampleDocFilter = isManifestCarrier
       ? {
           kind: "sample-doc",
           scenarioId: spec.id,
           scenarioOrder: doc.order,
           scenarioRole: "doc",
+          projectId,
           manifest: spec.manifest,
         }
       : {
@@ -190,6 +216,7 @@ async function seedScenario(spec: ScenarioSpec): Promise<void> {
           scenarioId: spec.id,
           scenarioOrder: doc.order,
           scenarioRole: "doc",
+          projectId,
         };
 
     const payload = {

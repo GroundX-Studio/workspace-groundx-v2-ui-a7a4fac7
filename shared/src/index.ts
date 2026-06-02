@@ -1058,6 +1058,16 @@ export const sampleDocFilterSchema = z.object({
   scenarioRole: z.literal("doc"),
   /** Present only on the first doc per scenarioId. */
   manifest: scenarioManifestSchema.optional(),
+  /**
+   * 2026-06-01-projects-rbac-scope-filter — the app "project" id this doc
+   * belongs to (the GroundX search-`filter` key for data-org + RBAC). The seed
+   * stamps the real `proj_<uuid>` (resolved from the scenario). Optional during
+   * the transition; becomes the flat DocumentFilter's primary field once the
+   * manifest moves app-side (Task 7).
+   */
+  projectId: z.string().optional(),
+  /** The extraction workflow id (Extract widget schema discovery; WF). */
+  workflow_id: z.string().optional(),
 });
 export type SampleDocFilter = z.infer<typeof sampleDocFilterSchema>;
 
