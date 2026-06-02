@@ -6,6 +6,8 @@ import type {
   ChatSessionRecord,
   ConversationSummaryRecord,
   IntentLogRecord,
+  ProjectGrantRecord,
+  ProjectRecord,
   SessionRecord,
   TemplateRecord,
   ViewerEventRecord,
@@ -31,6 +33,9 @@ export class MemoryAppRepository implements AppRepository {
   templates = new Map<string, TemplateRecord>();
   // UI-10b — intent log (every canvas-orchestrator dispatch).
   intentLog = new Map<string, IntentLogRecord[]>();
+  // 2026-06-01-projects-rbac-scope-filter — app-owned project rows + RBAC grants.
+  projects = new Map<string, ProjectRecord>(); // key: projectId
+  projectGrants = new Map<string, ProjectGrantRecord>(); // key: `${projectId}|${principalType}|${principalId ?? ""}`
 
   async createSchema(): Promise<void> {}
 
@@ -169,6 +174,34 @@ export class MemoryAppRepository implements AppRepository {
     return Array.from(this.templates.values())
       .filter((t) => t.groundxUsername === groundxUsername && t.kind === kind)
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  }
+
+  // ── Projects + RBAC grants (2026-06-01-projects-rbac-scope-filter) ──
+
+  async insertProject(record: ProjectRecord): Promise<void> {
+    this.projects.set(record.projectId, record);
+  }
+
+  async getProject(projectId: string): Promise<ProjectRecord | null> {
+    return this.projects.get(projectId) ?? null;
+  }
+
+  async listProjectsForBucket(bucketId: number): Promise<ProjectRecord[]> {
+    return Array.from(this.projects.values())
+      .filter((p) => p.bucketId === bucketId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  async insertProjectGrant(record: ProjectGrantRecord): Promise<void> {
+    this.projectGrants.set(`${record.projectId}|${record.principalType}|${record.principalId ?? ""}`, record);
+  }
+
+  async listGrantsForPrincipal(customerId: string | null): Promise<ProjectGrantRecord[]> {
+    return Array.from(this.projectGrants.values()).filter(
+      (g) =>
+        g.principalType === "public" ||
+        (customerId != null && g.principalType === "user" && g.principalId === customerId),
+    );
   }
 
   // ── Login-claim (re-key, not bulk-upload) ───────────────────────

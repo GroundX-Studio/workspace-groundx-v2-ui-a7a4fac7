@@ -219,6 +219,35 @@ export interface TemplateRecord {
   updatedAt: Date;
 }
 
+/**
+ * 2026-06-01-projects-rbac-scope-filter — the app-owned data-organization +
+ * RBAC layer. A `project` is the WF-07 grouping of documents within a bucket; it
+ * is the value the GroundX search `filter` is keyed on (`filter.projectId`). The
+ * project id is a real unique id (`proj_<uuid>`), NEVER a slug. GroundX owns the
+ * customer/bucket/document; the app owns ONLY the project row + the grant graph.
+ */
+export interface ProjectRecord {
+  projectId: string; // proj_<uuid>
+  bucketId: number; // the GroundX bucket the project's docs live in
+  name: string;
+  ownerCustomerId: string | null; // GroundX customer id; null for the public sample / system
+  isSample: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type ProjectPrincipalType = "public" | "user" | "account";
+export type ProjectRole = "owner" | "editor" | "viewer";
+
+/** A grant of `role` on `projectId` to a principal (RBAC + sharing / ACL). */
+export interface ProjectGrantRecord {
+  projectId: string;
+  principalType: ProjectPrincipalType;
+  principalId: string | null; // GroundX customerId or accountId; null when principalType="public"
+  role: ProjectRole;
+  createdAt: Date;
+}
+
 export interface AppRepository {
   createSchema(): Promise<void>;
   createSession(session: SessionRecord): Promise<void>;
@@ -234,6 +263,17 @@ export interface AppRepository {
   saveTemplate(record: TemplateRecord): Promise<void>;
   getTemplate(id: string): Promise<TemplateRecord | null>;
   listTemplates(groundxUsername: string, kind: TemplateKind): Promise<TemplateRecord[]>;
+
+  // Projects + RBAC grants (app-owned data-org filter layer;
+  // 2026-06-01-projects-rbac-scope-filter). `listGrantsForPrincipal(null)`
+  // returns the public grants only (anonymous caller); a customerId returns
+  // public grants PLUS that user's grants — the authorized read set the RAG
+  // filter is built from.
+  insertProject(record: ProjectRecord): Promise<void>;
+  getProject(projectId: string): Promise<ProjectRecord | null>;
+  listProjectsForBucket(bucketId: number): Promise<ProjectRecord[]>;
+  insertProjectGrant(record: ProjectGrantRecord): Promise<void>;
+  listGrantsForPrincipal(customerId: string | null): Promise<ProjectGrantRecord[]>;
 
   // Chat sessions
   upsertChatSession(record: ChatSessionRecord): Promise<void>;

@@ -66,6 +66,20 @@ const GUARDED_TABLES: GuardedTable[] = [
       // Same — every intent_log data column round-trips into IntentLogRecord.
     },
   },
+  {
+    table: "projects",
+    mapperFn: "rowToProject",
+    structuralExempt: {
+      // Every projects data column round-trips into ProjectRecord.
+    },
+  },
+  {
+    table: "project_grants",
+    mapperFn: "rowToProjectGrant",
+    structuralExempt: {
+      // Every grant data column round-trips into ProjectGrantRecord.
+    },
+  },
 ];
 
 function readRepoSource(): string {

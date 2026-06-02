@@ -9,6 +9,8 @@ import type {
   ChatSessionRecord,
   ConversationSummaryRecord,
   IntentLogRecord,
+  ProjectGrantRecord,
+  ProjectRecord,
   SessionRecord,
   TemplateRecord,
   ViewerEventRecord,
@@ -259,6 +261,46 @@ export class MySqlAppRepository implements AppRepository {
       SELECT id, 'extract', groundx_username, name, schema_json, created_at, updated_at
       FROM extraction_schemas
       ON DUPLICATE KEY UPDATE id = id
+    `);
+
+    // 2026-06-01-projects-rbac-scope-filter — the app-owned data-organization
+    // layer. A `project` is the WF-07 grouping of documents within a bucket; its
+    // id is the value the GroundX search `filter` is keyed on. GroundX owns the
+    // customer/bucket/document — these tables hold ONLY the app's project row +
+    // the RBAC grant graph (never mirror a GroundX-owned concept).
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS projects (
+        project_id VARCHAR(64) PRIMARY KEY,
+        bucket_id INT NOT NULL,
+        name VARCHAR(128) NOT NULL,
+        owner_customer_id VARCHAR(128) NULL,
+        is_sample BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX projects_bucket_idx (bucket_id),
+        INDEX projects_owner_idx (owner_customer_id)
+      )
+    `);
+
+    // RBAC / sharing (ACL). principal_type ∈ public|user|account; principal_id
+    // is the GroundX customerId (or accountId), NULL for public. role ∈
+    // owner|editor|viewer (read = viewer+). The authorized read set the RAG
+    // filter is built from is "every project with a grant to the caller (or
+    // public)".
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS project_grants (
+        project_id VARCHAR(64) NOT NULL,
+        principal_type VARCHAR(16) NOT NULL,
+        -- NOT NULL DEFAULT '' (not NULL) so it can sit in the composite PK;
+        -- '' is the sentinel for principal_type='public'. Mapped null<->''
+        -- at the repo boundary.
+        principal_id VARCHAR(128) NOT NULL DEFAULT '',
+        role VARCHAR(16) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (project_id, principal_type, principal_id),
+        INDEX project_grants_principal_idx (principal_type, principal_id),
+        FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+      )
     `);
   }
 
@@ -673,6 +715,82 @@ export class MySqlAppRepository implements AppRepository {
     return rows.map(rowToTemplate).filter((t): t is TemplateRecord => t !== null);
   }
 
+  // ── Projects + RBAC grants (2026-06-01-projects-rbac-scope-filter) ──
+
+  async insertProject(record: ProjectRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO projects (project_id, bucket_id, name, owner_customer_id, is_sample, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+        bucket_id = VALUES(bucket_id),
+        name = VALUES(name),
+        owner_customer_id = VALUES(owner_customer_id),
+        is_sample = VALUES(is_sample),
+        updated_at = VALUES(updated_at)`,
+      [
+        record.projectId,
+        record.bucketId,
+        record.name,
+        record.ownerCustomerId,
+        record.isSample,
+        record.createdAt,
+        record.updatedAt,
+      ],
+    );
+  }
+
+  async getProject(projectId: string): Promise<ProjectRecord | null> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT project_id, bucket_id, name, owner_customer_id, is_sample, created_at, updated_at
+       FROM projects WHERE project_id = ?`,
+      [projectId],
+    );
+    const row = rows[0];
+    return row ? rowToProject(row) : null;
+  }
+
+  async listProjectsForBucket(bucketId: number): Promise<ProjectRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT project_id, bucket_id, name, owner_customer_id, is_sample, created_at, updated_at
+       FROM projects WHERE bucket_id = ? ORDER BY created_at ASC`,
+      [bucketId],
+    );
+    return rows.map(rowToProject);
+  }
+
+  async insertProjectGrant(record: ProjectGrantRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO project_grants (project_id, principal_type, principal_id, role, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE role = VALUES(role)`,
+      [
+        record.projectId,
+        record.principalType,
+        record.principalId ?? "", // null (public) -> '' sentinel for the composite PK
+        record.role,
+        record.createdAt,
+      ],
+    );
+  }
+
+  async listGrantsForPrincipal(customerId: string | null): Promise<ProjectGrantRecord[]> {
+    // Public grants ALWAYS apply; a signed-in customer additionally gets their
+    // own user grants. (Account grants compose here when team accounts land.)
+    const [rows] = customerId
+      ? await this.pool.execute<mysql.RowDataPacket[]>(
+          `SELECT project_id, principal_type, principal_id, role, created_at
+           FROM project_grants
+           WHERE principal_type = 'public'
+              OR (principal_type = 'user' AND principal_id = ?)`,
+          [customerId],
+        )
+      : await this.pool.execute<mysql.RowDataPacket[]>(
+          `SELECT project_id, principal_type, principal_id, role, created_at
+           FROM project_grants WHERE principal_type = 'public'`,
+        );
+    return rows.map(rowToProjectGrant);
+  }
+
   // ── Login-claim (re-key, not bulk-upload) ───────────────────────
 
   async rekeyAnonymousChatSessions(anonId: string, ownerUserId: string): Promise<{ rekeyedSessions: number }> {
@@ -838,5 +956,28 @@ function rowToTemplate(row: mysql.RowDataPacket): TemplateRecord | null {
     bodyJson: typeof row.body_json === "string" ? row.body_json : JSON.stringify(row.body_json),
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
+  };
+}
+
+function rowToProject(row: mysql.RowDataPacket): ProjectRecord {
+  return {
+    projectId: row.project_id,
+    bucketId: Number(row.bucket_id),
+    name: row.name,
+    ownerCustomerId: row.owner_customer_id ?? null,
+    isSample: Boolean(row.is_sample),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function rowToProjectGrant(row: mysql.RowDataPacket): ProjectGrantRecord {
+  return {
+    projectId: row.project_id,
+    principalType: row.principal_type,
+    // '' sentinel (public) <-> null at the boundary.
+    principalId: row.principal_id === "" ? null : row.principal_id,
+    role: row.role,
+    createdAt: new Date(row.created_at),
   };
 }

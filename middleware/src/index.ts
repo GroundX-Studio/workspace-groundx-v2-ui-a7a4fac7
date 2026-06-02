@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { loadEnv } from "./config/env.js";
 import { MemoryAppRepository } from "./db/memoryRepository.js";
 import { MySqlAppRepository } from "./db/mysqlRepository.js";
+import { seedSampleProject } from "./db/seedSampleProject.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { FetchGroundXClient } from "./services/groundxClient.js";
 import { FetchGroundXPartnerClient } from "./services/groundxPartnerClient.js";
@@ -18,6 +19,13 @@ await initTelemetry(env);
 
 const repository = useMemoryRepository ? new MemoryAppRepository() : new MySqlAppRepository(env);
 await repository.createSchema();
+
+// Seed the public sample project (first projects row) so the scope→GroundX
+// filter path resolves the sample doc for everyone. Idempotent; gated on a
+// configured samples bucket (the only place the sample doc can live).
+if (env.GROUNDX_SAMPLES_BUCKET_ID != null) {
+  await seedSampleProject(repository, env.GROUNDX_SAMPLES_BUCKET_ID);
+}
 
 // CF-16: build a separate light-side client only when LLM_LIGHT_* is
 // fully wired in env. Otherwise leave it undefined — chatHandler reuses
