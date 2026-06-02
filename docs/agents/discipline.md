@@ -158,6 +158,26 @@ Pending work lives in OpenSpec at the repo root:
 - `openspec/changes/<change-id>/` — in-flight proposals
   (proposal.md, tasks.md, spec deltas)
 
+**Deferred / not-yet-started work = GitHub Issues** (decided
+2026-06-02), on the managed repo
+`GroundX-Studio/workspace-groundx-v2-ui-a7a4fac7` via
+`gh issue create --repo <repo>`. OpenSpec `changes/` is for the
+IN-FLIGHT scoped effort you're actively executing; anything
+deferred lives as an Issue and graduates to its own change when
+picked up. **A change's "Deferred (future)" items MUST be filed as
+Issues before the change is archived** — otherwise they orphan as
+unchecked `[ ]` boxes in a frozen `changes/archive/*/tasks.md`
+that nobody reviews. Do NOT use `spawn_task` as durable tracking
+(it's an ephemeral UI chip, not saved in the repo); do NOT bury
+deferred work in auto-memory. Labels need TRIAGE+ on the repo
+(READ can open issues but not label them).
+
+Issue label scheme (composable axes): `backlog` (marker, every
+deferred item) · `blocked` (external dep unmet) · kind
+(`feature` / `enhancement` / `content` / `design-fidelity`) ·
+`area:*` (`area:citations|scenarios|ingest|integrate|steady|conversation`,
+add a new one per surface).
+
 Useful commands:
 
 ```bash
@@ -168,9 +188,11 @@ OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict
 
 Operational rules:
 
-- **One planning surface.** Do not create new top-level tracking
-  files (no `chat-fix-list.md`, `open-work.md`, `phase-X-tracker.md`).
-  OpenSpec is the truth.
+- **One planning surface + one backlog.** OpenSpec is the truth
+  for in-flight changes + durable specs; GitHub Issues is the
+  backlog for deferred work (above). Do not create rival
+  top-level tracking files (no `chat-fix-list.md`, `open-work.md`,
+  `phase-X-tracker.md`, no resurrected `backlog.md`).
 - **No tombstones.** When you remove a file, delete it. Don't leave
   a one-line stub saying "this file was merged into Y." Single-agent
   project; the audit trail is in git.
