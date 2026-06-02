@@ -54,16 +54,20 @@
 - [x] **Adversarial review:** no GroundX-owned concept duplicated; columns
       round-trip; dev + MySQL repos mirror the same methods.
 
-## 3. Shared types — SEQUENTIAL (one Zod source)
-- [ ] **3.1 `DocumentFilter`** Zod schema + `z.infer` in `@groundx/shared`
-      (`{ projectId: string; workflow_id?: string }`), plus `Role` enum. Export
-      a `stampDocumentFilter(project)` helper (pure) used by seed + BYO.
-- [ ] **3.2 Confirm `ContentScope`/`ScopeFilter` need NO change** (projectId is
-      already a valid `ScopeFilter` field) — assert via a type-level test; do NOT
-      add a FE `Project`/grant type (no consumer → no dead stub).
-- [ ] **Adversarial review:** `grep` proves no twin `DocumentFilter`/`Role` in
-      app or middleware; the FE imports nothing new; `stampDocumentFilter` has its
-      two callers named (seed now; BYO tracked).
+## 3. DocumentFilter type + stamp helper — SEQUENTIAL (one source; MIDDLEWARE, not @groundx/shared)
+- [ ] **3.1 `DocumentFilter` type + `stampDocumentFilter(project)` helper in a
+      single MIDDLEWARE module** (`{ projectId: string; workflow_id?: string }`).
+      **Correction (found during execution):** NOT in `@groundx/shared` — the FE
+      never stamps docs and never sees RBAC roles (it only builds a `ContentScope`),
+      so a shared `DocumentFilter`/`Role` would be a dead stub in the FE package.
+      `ProjectRole` already lives in middleware `types.ts` — keep it there. Build
+      this WITH its first consumer (Task 5.3 seed-bucket stamp; BYO tracked).
+- [ ] **3.2 Confirm `ContentScope`/`ScopeFilter` (the genuinely shared types)
+      need NO change** — `projectId` is already a valid `ScopeFilter` field. Add
+      NO new FE type (no consumer → no dead stub).
+- [ ] **Adversarial review:** `grep` proves one `DocumentFilter` definition (no
+      twin); the FE/`@groundx/shared` gain nothing; `stampDocumentFilter` has ≥1
+      real caller (the seed) + BYO tracked.
 
 ## 4. RBAC resolution + RAG wiring — SEQUENTIAL
 - [ ] **4.1 `authorizedProjectIds(username)`** in the middleware (from

@@ -54,11 +54,14 @@ SHALL build only a `ContentScope`.
 
 ### Requirement: The document filter SHALL be a shared flat structure stamped at upload
 
-The filter stamped on every uploaded document SHALL be a single shared
-`@groundx/shared` `DocumentFilter` Zod type — a flat, GroundX-matchable map
+The filter stamped on every uploaded document SHALL be a single `DocumentFilter`
+type with ONE definition (one source of truth) — a flat, GroundX-matchable map
 `{ projectId: string; workflow_id?: string }` — applied by both the seed and the
-BYO-upload path via one shared `stampDocumentFilter` helper. App/UI metadata
-(scenario manifest, etc.) SHALL NOT be stored in the GroundX document filter.
+BYO-upload path via one `stampDocumentFilter` helper. The type lives in the
+MIDDLEWARE (the only side that stamps documents); it SHALL NOT be added to the
+FE-shared `@groundx/shared` package without a frontend consumer (no dead stub).
+App/UI metadata (scenario manifest, etc.) SHALL NOT be stored in the GroundX
+document filter.
 
 #### Scenario: Seeded sample doc carries a flat, matchable filter
 
