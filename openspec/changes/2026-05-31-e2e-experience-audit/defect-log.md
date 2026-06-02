@@ -160,6 +160,18 @@ Audited the post-`retire-mock-mode` build against REAL GroundX (no MOCK_MODE). O
 - **Caveat:** may be a `preview_resize`-doesn't-fire-React-`useMediaQuery` artifact rather than a real
   breakpoint bug — **verify by loading at a mobile width (not resizing into it)** before fixing. → e2e-audit-followup / ticket.
 
+## Phase B re-verify (2026-06-02, after DL-1 + DL-5 shipped) — MEASURED
+- **2.4 + 2.10 chat→source round-trip (onboarding):** the live chat answer's citation
+  chip click renders `pdf-viewer-highlight` on the PDF — a real box (205×7px, the "Amount
+  Due" line) at bbox `{x:0.235,y:0.694,w:0.257,h:0.0095}` over the 798×1033 page 1. The
+  chat citation now carries geometry; the round-trip lands on real geometry. ✅
+- **2.12 steady widget parity (`/workspaces`):** the steady chat answered "$7,613.20" with
+  a citation; clicking it mounts the production `pdf-viewer-widget` in `scoped-shell-canvas-pane`
+  (0→1 child, 798×1033, page 1) — the DL-5 fix; production widgets mount on real data in the
+  authed experience. ✅
+- **All five defects resolved:** DL-1 REVERIFIED · DL-2 REVERIFIED · DL-3 CLOSED (not-a-defect)
+  · DL-4 REVERIFIED · DL-5 REVERIFIED. Zero `open` rows.
+
 ## Passes (live, measured — no defect)
 - **2.11 Auth — password show/hide:** the password input flips `type="password"` → `type="text"` on the
   visibility toggle (validates the `PasswordField` primitive).
