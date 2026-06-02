@@ -23,7 +23,7 @@ const OnboardingSessionContext = createContext<OnboardingSessionApi | null>(null
  * regardless of declaration order. The scenario id rides along on step
  * kinds that need it.
  */
-function frameToStepStandalone(
+export function frameToStepStandalone(
   frame: FFrame,
   scenario: Scenario | null,
 ): import("@/contexts/ChatStoreContext").ViewerStep {
@@ -31,7 +31,17 @@ function frameToStepStandalone(
     case "f1":
       return { kind: "ingest-picker" };
     case "f2":
-      return { kind: "doc-viewer", documentId: scenario ? `scenario:${scenario}` : "scenario:unknown" };
+      // WF-01 C5 — F2 is the "GroundX is reading the doc" beat: the
+      // doc-viewer step is active exactly while the chat ThinkingStream
+      // plays (its onDone auto-advances to F3). Flag `scanning: true` so
+      // <ScopedCanvas> mounts the PdfViewer with the reading scan-line.
+      // Citation-jump doc-viewer steps are pushed by the cite-click sink,
+      // NOT this projection, so they never carry the flag.
+      return {
+        kind: "doc-viewer",
+        documentId: scenario ? `scenario:${scenario}` : "scenario:unknown",
+        scanning: true,
+      };
     case "f3":
     case "f3a":
       return { kind: "extract-workbench", scenarioId: scenario ?? "unknown" };

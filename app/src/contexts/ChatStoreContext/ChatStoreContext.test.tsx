@@ -640,4 +640,32 @@ describe("ChatStoreContext", () => {
       expect(result.current.state.activeSessionId).toBe(workspaceId);
     });
   });
+
+  // WF-01 C5 — a citation jump is definitionally NOT the F2 "reading" beat.
+  // `gotoDocViewer` mutates the active doc-viewer step in place when it
+  // targets the same documentId; that mutate must NOT carry a prior
+  // `scanning: true` flag forward, or a cite-click on the doc being read
+  // would keep the reading sweep running over the highlight.
+  describe("gotoDocViewer clears the F2 reading scan on a citation jump", () => {
+    it("mutating a scanning doc-viewer step in place drops the scanning flag", () => {
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      act(() => {
+        result.current.newSession();
+      });
+      // Seed the F2 reading step (same documentId the cite-click will target).
+      act(() => {
+        result.current.pushStep({ kind: "doc-viewer", documentId: "doc-xyz", scanning: true });
+      });
+      act(() => {
+        result.current.gotoDocViewer({ documentId: "doc-xyz", page: 2, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.05 } });
+      });
+      const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+      const top = session.viewer.history[session.viewer.currentStep.stepIndex];
+      expect(top.kind).toBe("doc-viewer");
+      // The highlight landed…
+      expect(top).toMatchObject({ documentId: "doc-xyz", highlight: { page: 2 } });
+      // …and the reading sweep is gone (a cite-jump is not a reading beat).
+      expect(top.kind === "doc-viewer" && top.scanning).toBeFalsy();
+    });
+  });
 });

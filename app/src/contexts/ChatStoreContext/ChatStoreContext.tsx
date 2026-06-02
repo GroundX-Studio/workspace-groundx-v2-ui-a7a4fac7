@@ -1593,7 +1593,11 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
             return prev;
           }
           const nextHistory = current.viewer.history.slice();
-          nextHistory[cur] = { ...top, page: input.page, highlight };
+          // WF-01 C5 — a citation jump is NOT the F2 reading beat. If the
+          // step being mutated is the reading step (`scanning: true`), clear
+          // the flag so the sweep stops once the user clicks into a cited
+          // region (otherwise `...top` would carry it forward).
+          nextHistory[cur] = { ...top, page: input.page, highlight, scanning: false };
           const sessions = new Map(prev.sessions);
           sessions.set(prev.activeSessionId, {
             ...current,

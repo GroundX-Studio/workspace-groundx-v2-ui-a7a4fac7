@@ -163,6 +163,10 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({ scope, step, role, reportS
           targetPage: step.highlight?.page ?? step.page ?? null,
           highlightBbox: step.highlight?.bbox ?? null,
           highlightTier: step.highlight?.tier,
+          // WF-01 C5 — the F2 "reading" sweep. Only the F2 doc-viewer step
+          // carries `scanning`; cite-jump steps omit it, so the sweep plays
+          // exactly during the reading beat and never on a citation jump.
+          showScanAnimation: step.scanning ?? false,
         }
       : {};
 

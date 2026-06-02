@@ -19,7 +19,7 @@ vi.mock("@/lib/ga", () => ({
 }));
 import { gaSetDefaults } from "@/lib/ga";
 
-import { OnboardingSessionProvider, useOnboardingSession } from "./OnboardingSessionContext";
+import { OnboardingSessionProvider, frameToStepStandalone, useOnboardingSession } from "./OnboardingSessionContext";
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <OnboardingSessionProvider>{children}</OnboardingSessionProvider>
@@ -189,6 +189,35 @@ describe("OnboardingSessionContext", () => {
       act(() => result.current.openGate("save"));
       act(() => result.current.commitGate("engineer-call"));
       expect(findTrack("signup.completed")?.[1]).toMatchObject({ method: "engineer-call" });
+    });
+  });
+
+  // WF-01 C5 — the F2 "GroundX is reading the doc" scanner. The F2
+  // doc-viewer step is the reading beat (ThinkingStream's onDone
+  // auto-advances to F3), so the step that frames it carries an explicit
+  // `scanning: true` flag. <ScopedCanvas> forwards it to the PdfViewer's
+  // `showScanAnimation`. Citation-jump doc-viewer steps (pushed by the
+  // cite-click sink, NOT this projection) carry no flag and never scan.
+  describe("WF-01 C5 — F2 reading-scan flag on the doc-viewer step", () => {
+    it("f2 → a doc-viewer step with scanning:true", () => {
+      const step = frameToStepStandalone("f2", "utility");
+      expect(step).toMatchObject({
+        kind: "doc-viewer",
+        documentId: "scenario:utility",
+        scanning: true,
+      });
+    });
+
+    it("f2 with no scenario still flags scanning (the reading beat runs on the placeholder doc)", () => {
+      const step = frameToStepStandalone("f2", null);
+      expect(step).toMatchObject({ kind: "doc-viewer", scanning: true });
+    });
+
+    it("non-F2 frames do not produce a scanning doc-viewer step", () => {
+      // f5/f6 project to interact-chat (a different kind entirely) — no
+      // doc-viewer scan. Assert the f2 flag isn't leaking onto other kinds.
+      expect(frameToStepStandalone("f5", "utility")).not.toMatchObject({ scanning: true });
+      expect(frameToStepStandalone("f3", "utility")).not.toMatchObject({ scanning: true });
     });
   });
 });

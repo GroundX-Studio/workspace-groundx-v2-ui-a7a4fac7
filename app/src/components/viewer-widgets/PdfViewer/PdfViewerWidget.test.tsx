@@ -388,7 +388,7 @@ describe("PdfViewerWidget", () => {
   // false so steady-mode + post-thinking F2 don't get a perpetual
   // sweep. Implementation is a CSS-animated bar; we assert by testid.
   describe("WF-01 C5: scan animation overlay", () => {
-    it("renders the scan-line overlay when showScanAnimation is true", async () => {
+    it("renders the scan-line overlay + sweep beam when showScanAnimation is true", async () => {
       (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
       render(
         <PdfViewerWidget scope={docScope("doc-1")} role="anonymous" showScanAnimation />,
@@ -396,6 +396,10 @@ describe("PdfViewerWidget", () => {
       );
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
       expect(screen.getByTestId("pdf-viewer-scan-line")).toBeInTheDocument();
+      // The animated sweeper element (the one the reduced-motion @media rule
+      // zeroes the animation on) is testid'd so the e2e reduced-motion sweep
+      // can assert its computed animationName is "none".
+      expect(screen.getByTestId("pdf-viewer-scan-beam")).toBeInTheDocument();
     });
 
     it("omits the overlay by default", async () => {
@@ -403,6 +407,23 @@ describe("PdfViewerWidget", () => {
       render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
       expect(screen.queryByTestId("pdf-viewer-scan-line")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("pdf-viewer-scan-beam")).not.toBeInTheDocument();
+    });
+
+    // The prop is surfaced on the widget root as `data-scan-animation`
+    // (the prefetch-wiring contract, like `data-role` / `data-target-page`):
+    // consumers + tests assert the wiring without waiting on the async xray
+    // fetch that the visible overlay needs.
+    it("reflects showScanAnimation on the root via data-scan-animation", () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" showScanAnimation />, { wrapper });
+      expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "true");
+    });
+
+    it("data-scan-animation is 'false' by default", () => {
+      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
+      expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "false");
     });
   });
 

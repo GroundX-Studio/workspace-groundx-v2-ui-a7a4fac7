@@ -52,6 +52,41 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
     expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
   });
 
+  // WF-01 C5 — the F2 "GroundX is reading the doc" scanner. The F2
+  // doc-viewer step carries `scanning: true`; ScopedCanvas forwards it to
+  // the PdfViewer's `showScanAnimation`, surfaced on the widget root as
+  // `data-scan-animation` (the prefetch-wiring contract, like data-role).
+  it("doc-viewer step with scanning:true → PdfViewer mounted with the scan animation on", () => {
+    const step: ViewerStep = { kind: "doc-viewer", documentId: "doc-1", scanning: true };
+    renderWithOnboardingProviders(
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+    );
+    expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "true");
+  });
+
+  it("doc-viewer step without scanning → scan animation off", () => {
+    const step: ViewerStep = { kind: "doc-viewer", documentId: "doc-1" };
+    renderWithOnboardingProviders(
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+    );
+    expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "false");
+  });
+
+  it("doc-viewer citation-jump step (highlight, no scanning) → scan animation off", () => {
+    // A cite-click pushes a doc-viewer step with a `highlight` but no
+    // `scanning` flag — the viewer jumps to the cited region, it does NOT
+    // replay the F2 reading sweep.
+    const step: ViewerStep = {
+      kind: "doc-viewer",
+      documentId: "doc-1",
+      highlight: { page: 2, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.05 } },
+    };
+    renderWithOnboardingProviders(
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+    );
+    expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "false");
+  });
+
   it("report step → SmartReportRender, fed the scope", () => {
     const step: ViewerStep = { kind: "report" };
     renderWithOnboardingProviders(

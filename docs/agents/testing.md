@@ -167,5 +167,21 @@ Gotchas (all hit during `2026-06-02-e2e-live-data-realignment`):
   scaffold "Studio Workspace" / first-run-wizard.
 - **Port preconditions:** ensure nothing is on `:3001` (stop stray Claude_Preview
   middleware — `reuseExistingServer:false` aborts the run otherwise); node v20.
-- The onboarding **gate/BYO/provenance** journey (`advance-to-f6` etc.) is from a
-  superseded flow; those 9 tests are `test.fixme` pending a flow-aware re-ground.
+- **Sign-up gate trigger:** the gate is no longer opened by a removed
+  `advance-to-f6` pill. An anonymous user clicking the Extract **unlock banner**
+  (`extract-unlock-banner`) fires `openGate("save")` (the topbar `extract-topbar-save`
+  is disabled until there are unsaved edits, so it's not the reliable trigger).
+  BYO opens the same gate via `byo-pdf` → `/onboarding/signup`.
+- **The gate is a magic-link / SSO chat-rail**, not the old `SignUpWidget`
+  registration form: `gate-rail-email` (a MUI TextField — fill `.locator("input")`)
+  + `gate-rail-send-magic-link` commit the gate client-side → `gate-rail-committed`
+  → `gate-rail-continue-integrate` → F7. There is no inline register-error
+  affordance (commitGate is a pure state flip); empty-email Send is a no-op. The
+  gate dismisses via "Keep exploring" (`gate-rail-dismiss`), NOT ESC (chat-rail,
+  not a modal — LC5 updated).
+- **Canvas swap on gate-open:** `onboarding-frame-f3` is the persistent canvas
+  WRAPPER; the value-prop panel renders inside it, so assert the sample content
+  (`extract-workbench`) hides, not the wrapper.
+- **Provenance peek** (`field-provenance-panel`) lists citations as "page N"
+  source pills, not `cite-chip-*` (the panel + field-row read one
+  `valuesByFieldId` source).

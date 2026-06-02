@@ -224,6 +224,10 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
       data-target-page={typeof targetPage === "number" ? String(targetPage) : undefined}
       data-highlight-page={highlightBbox ? String(targetPage ?? activePage) : undefined}
       data-highlight-bbox={highlightBbox ? JSON.stringify(highlightBbox) : undefined}
+      // WF-01 C5 — surface the reading-scan prop so consumers + tests can
+      // assert the wiring without waiting on the async xray fetch the visible
+      // overlay needs. The overlay itself renders only once an image resolves.
+      data-scan-animation={showScanAnimation ? "true" : "false"}
       sx={{
         display: "flex",
         flexDirection: "column",
@@ -411,6 +415,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                 The band uses mix-blend `screen` so it visibly LIFTS the veil
                 where it passes — reads as a light sweeping over a dimmed doc. */}
             <Box
+              data-testid="pdf-viewer-scan-beam"
               aria-hidden
               sx={{
                 position: "absolute",

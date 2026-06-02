@@ -12,10 +12,13 @@ import { expect, test } from "@playwright/test";
  *      in the DOM, but the surfaces below are.
  *   2. `AppShell` carries `data-app-shell-reduced-motion="true"` so its
  *      drag/snap transitions are zero-duration.
- *   3. `UnderstandView` swaps its scan-line `<motion.div>` for a hidden
- *      placeholder (`display: none`). The looping `repeat: Infinity`
- *      animation is the worst offender for jsdom and OS-reduced users —
- *      this confirms it's actually gone in a real browser.
+ *   3. The F2 reading scanner (`PdfViewerWidget`, mounted by <ScopedCanvas>
+ *      for the `scanning` doc-viewer step) disables its sweeping beam via a
+ *      declarative `@media (prefers-reduced-motion: reduce){ animation: none }`
+ *      rule. The looping `2.8s infinite alternate` keyframe animation is the
+ *      worst offender for OS-reduced users — this confirms it's actually
+ *      disabled in a real browser. (Replaces the removed `understand-scan-line`
+ *      test; that element was deleted in the UnderstandView → PdfViewer merge.)
  *
  * This runs against the same real-backend preview as the rest of the e2e
  * suite (the middleware boots in real mode — there is no MOCK_MODE). This
@@ -54,17 +57,38 @@ test.describe("reduced-motion CI sweep (TS-09)", () => {
     await expect(shell).toHaveAttribute("data-app-shell-reduced-motion", "true");
   });
 
-  // NOTE: the former "F2 scan-line is hidden under reduced motion" test was
-  // removed here. It targeted `understand-scan-line`, an element deleted in the
-  // UnderstandView → production-PdfViewer unification. The replacement F2
-  // reading scanner now lives in `PdfViewerWidget` (testid
-  // `pdf-viewer-scan-overlay`), gated by a declarative CSS
-  // `@media (prefers-reduced-motion: reduce){ animation: none }` rule — but its
-  // `showScanAnimation` prop currently has NO production caller, so the scanner
-  // is not rendered in the live onboarding F2 flow and there is nothing to
-  // assert end-to-end. Its render path is unit-covered in
-  // `PdfViewerWidget.test.tsx`. Re-wiring the F2 reading scanner + restoring its
-  // reduced-motion e2e coverage is tracked as a separate ticket.
+  // WF-01 C5 — the F2 "GroundX is reading the doc" scanner. It lives in
+  // `PdfViewerWidget` (the production viewer, mounted by <ScopedCanvas> for the
+  // `doc-viewer` step). The F2 frame projection flags that step `scanning:true`,
+  // so the scanner IS live in the onboarding F2 flow: the page renders under a
+  // sweeping beam while the chat ThinkingStream plays, then F2 auto-advances to
+  // F3. The sweep is the worst offender for OS-reduced users (a `2.8s infinite
+  // alternate` keyframe animation), gated by a declarative
+  // `@media (prefers-reduced-motion: reduce){ animation: none }` rule on the
+  // beam element. This asserts the scanner actually mounts in F2 AND that its
+  // sweep is disabled under reduced motion — the e2e coverage that replaces the
+  // removed `understand-scan-line` test (that element was deleted in the
+  // UnderstandView → production-PdfViewer unification).
+  test("F2 reading scanner mounts and its sweep is disabled under reduced motion", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the PdfViewer/canvas is unmounted in compact mode until the view-swap pill reveals it");
+    await page.goto("/onboarding");
+    await page.getByTestId("sample-utility").click();
+
+    // F2 mounts the PdfViewer with the reading scanner while the thinking
+    // stream plays (~10-17s before auto-advancing to F3). The full-bleed
+    // dimming veil is the visible proof the scanner is live; wait for it to
+    // attach once the real xray page image resolves.
+    const overlay = page.getByTestId("pdf-viewer-scan-overlay");
+    await expect(overlay).toBeVisible({ timeout: 20_000 });
+
+    // The animated sweeper is height:0 (not "visible" to Playwright), so assert
+    // on attachment + its computed animation. Under reduced motion the @media
+    // rule zeroes the keyframe animation → `animationName` computes to "none".
+    const beam = page.getByTestId("pdf-viewer-scan-beam");
+    await expect(beam).toBeAttached();
+    const animationName = await beam.evaluate((el) => getComputedStyle(el).animationName);
+    expect(animationName).toBe("none");
+  });
 
   // The page-transition contract asserts motion on the CANVAS surface. In
   // compact mode the canvas is unmounted until the view-swap pill reveals it,

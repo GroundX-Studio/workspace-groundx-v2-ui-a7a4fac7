@@ -369,6 +369,16 @@ export type ViewerStep =
       documentId: string;
       page?: number;
       /**
+       * WF-01 C5 — the F2 "GroundX is reading the doc" beat. When true,
+       * <ScopedCanvas> mounts the PdfViewer with `showScanAnimation` so the
+       * page renders under the sweeping scan-line while the chat
+       * ThinkingStream plays. Set ONLY by the F2 frame projection
+       * (`frameToStepStandalone`); citation-jump doc-viewer steps (pushed by
+       * the cite-click sink) omit it, so a cite-click never replays the
+       * reading sweep. Optional/absent → no scan (the default).
+       */
+      scanning?: boolean;
+      /**
        * clickable-citations Phase 3 — region annotation produced by a
        * citation click. The viewer pane reads `highlight.page` for the
        * page to surface and renders a bbox overlay when
