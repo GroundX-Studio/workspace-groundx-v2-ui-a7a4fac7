@@ -1,5 +1,6 @@
 import type { AppEnv } from "../config/env.js";
 import { ScenarioRegistry } from "../scenarios/registry.js";
+import { UpstreamHttpError } from "../services/http.js";
 import type { ScenarioConfig } from "../scenarios/types.js";
 import type {
   AuthResponse,
@@ -55,6 +56,8 @@ export const testEnv: AppEnv = {
 
 export class FakePartnerClient implements GroundXPartnerClient {
   calls: Array<{ name: string; input?: unknown }> = [];
+  /** Usernames the Partner API does not know — `getCustomer` 404s for these. */
+  missingCustomers = new Set<string>();
 
   async registerCustomer(input: RegisterCustomerInput): Promise<AuthResponse> {
     this.calls.push({ name: "registerCustomer", input });
@@ -68,6 +71,9 @@ export class FakePartnerClient implements GroundXPartnerClient {
 
   async getCustomer(username: string): Promise<{ customer: Record<string, unknown> }> {
     this.calls.push({ name: "getCustomer", input: username });
+    if (this.missingCustomers.has(username)) {
+      throw new UpstreamHttpError("GroundX customer lookup failed", 404, "not found");
+    }
     return { customer: { username, email: "pat@example.com" } };
   }
 

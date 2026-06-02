@@ -7,7 +7,13 @@ import { describe, expect, it } from "vitest";
 
 import { MemoryAppRepository } from "../db/memoryRepository.js";
 import { seedSampleProject, SAMPLE_PROJECT_ID } from "../db/seedSampleProject.js";
-import { authorizedProjectIds, rbacFilterForProjects } from "./projectAccess.js";
+import {
+  authorizedProjectIds,
+  createProjectWithOwner,
+  rbacFilterForProjects,
+  roleOnProject,
+  writeUserGrant,
+} from "./projectAccess.js";
 
 async function repoWithGrants(): Promise<MemoryAppRepository> {
   const repo = new MemoryAppRepository();
@@ -50,6 +56,47 @@ describe("authorizedProjectIds — RBAC read set", () => {
     expect(a).toContain(SAMPLE_PROJECT_ID);
     expect(a).toContain("proj_a");
     expect(a).not.toContain("proj_b"); // cross-user isolation
+  });
+});
+
+describe("createProjectWithOwner — the first production user-grant writer", () => {
+  it("inserts a project + an owner user-grant, in the creator's read set only", async () => {
+    const repo = new MemoryAppRepository();
+    const project = await createProjectWithOwner(repo, {
+      name: "Q1 Filings",
+      bucketId: 42,
+      ownerUsername: "alice",
+    });
+
+    expect(project.projectId).toMatch(/^proj_/);
+    expect(project.ownerUsername).toBe("alice");
+    expect(project.isSample).toBe(false);
+    expect(await repo.getProject(project.projectId)).toMatchObject({
+      name: "Q1 Filings",
+      bucketId: 42,
+      ownerUsername: "alice",
+      isSample: false,
+    });
+
+    // The owner grant lands in the RBAC read set; nobody else sees it.
+    expect(await authorizedProjectIds(repo, "alice")).toContain(project.projectId);
+    expect(await authorizedProjectIds(repo, "bob")).not.toContain(project.projectId);
+    expect(await roleOnProject(repo, "alice", project.projectId)).toBe("owner");
+    expect(await roleOnProject(repo, "bob", project.projectId)).toBeNull();
+  });
+});
+
+describe("writeUserGrant — the share writer (cross-account)", () => {
+  it("writes a user grant that lands in the grantee's authorized read set", async () => {
+    const repo = new MemoryAppRepository();
+    const project = await createProjectWithOwner(repo, { name: "P", bucketId: 1, ownerUsername: "alice" });
+
+    await writeUserGrant(repo, { projectId: project.projectId, principalUsername: "carol", role: "viewer" });
+
+    expect(await authorizedProjectIds(repo, "carol")).toContain(project.projectId);
+    expect(await roleOnProject(repo, "carol", project.projectId)).toBe("viewer");
+    // The grant does not bleed to an unrelated user.
+    expect(await authorizedProjectIds(repo, "dave")).not.toContain(project.projectId);
   });
 });
 

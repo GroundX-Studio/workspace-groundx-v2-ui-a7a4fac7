@@ -6,6 +6,7 @@ import { loadEnv } from "./config/env.js";
 import { MemoryAppRepository } from "./db/memoryRepository.js";
 import { decryptSecret } from "./lib/crypto.js";
 import { SESSION_COOKIE } from "./middleware/session.js";
+import { authorizedProjectIds } from "./services/projectAccess.js";
 import { FakeGroundXClient, FakeLlmClient, FakePartnerClient, FakeScenarioRegistry, testEnv } from "./test/fakes.js";
 import type { GroundXClient, GroundXPartnerClient, LlmClient } from "./types.js";
 
@@ -1432,6 +1433,120 @@ describe("POST /api/widgets/smart-report/reports (smart-report Phase 6 — Save)
     await agent
       .post("/api/widgets/smart-report/reports")
       .send({ template: { id: "x" } })
+      .expect(400, { error: "invalid_payload" });
+  });
+});
+
+// 2026-06-01-authed-project-create-grant — the first production writer of a
+// `user` grant: an authed customer creates a project (→ owner grant) and shares
+// it with another GroundX username (→ viewer/editor grant). The round-trip into
+// the RBAC read path is asserted via authorizedProjectIds.
+describe("authed project-create + share grant", () => {
+  async function loginGxUser(app: import("express").Express) {
+    const agent = request.agent(app);
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+    return agent; // FakePartnerClient logs in as "gx-user"
+  }
+
+  it("POST /api/projects creates a project + an owner grant the creator can read", async () => {
+    const { app, repository } = setup();
+    const agent = await loginGxUser(app);
+
+    const res = await agent.post("/api/projects").send({ name: "Q1 Filings", bucketId: 42 }).expect(201);
+    const projectId: string = res.body.project.projectId;
+    expect(projectId).toMatch(/^proj_/);
+    expect(res.body.project).toMatchObject({ name: "Q1 Filings", bucketId: 42, isSample: false, role: "owner" });
+
+    // Persisted: project row + owner user-grant.
+    expect(await repository.getProject(projectId)).toMatchObject({ ownerUsername: "gx-user", isSample: false });
+    const grants = await repository.listGrantsForPrincipal("gx-user");
+    expect(grants).toContainEqual(
+      expect.objectContaining({ projectId, principalType: "user", principalUsername: "gx-user", role: "owner" }),
+    );
+    // RBAC read round-trip.
+    expect(await authorizedProjectIds(repository, "gx-user")).toContain(projectId);
+    expect(await authorizedProjectIds(repository, "someone-else")).not.toContain(projectId);
+  });
+
+  it("POST /api/projects is sign-in gated (401 for anon) and 400 for a bad body", async () => {
+    const { app } = setup();
+    await request(app).post("/api/projects").send({ name: "X", bucketId: 1 }).expect(401);
+
+    const agent = await loginGxUser(app);
+    await agent.post("/api/projects").send({ name: "", bucketId: 1 }).expect(400, { error: "invalid_payload" });
+    await agent.post("/api/projects").send({ name: "X" }).expect(400, { error: "invalid_payload" });
+    await agent.post("/api/projects").send({ name: "X", bucketId: -3 }).expect(400, { error: "invalid_payload" });
+  });
+
+  it("POST /api/projects/:id/grants — owner shares; the sharee's read set gains it", async () => {
+    const { app, repository, partnerClient } = setup();
+    const agent = await loginGxUser(app);
+    const projectId: string = (await agent.post("/api/projects").send({ name: "P", bucketId: 7 }).expect(201)).body
+      .project.projectId;
+
+    const res = await agent
+      .post(`/api/projects/${projectId}/grants`)
+      .send({ principalUsername: "gx-other", role: "viewer" })
+      .expect(201);
+    expect(res.body.grant).toMatchObject({ projectId, principalUsername: "gx-other", role: "viewer" });
+
+    // Target existence was validated via the Partner API.
+    expect(partnerClient.calls.some((c) => c.name === "getCustomer" && c.input === "gx-other")).toBe(true);
+    // RBAC read round-trip for the sharee.
+    expect(await authorizedProjectIds(repository, "gx-other")).toContain(projectId);
+  });
+
+  it("share is owner-only (403), rejects self-share (400), unknown project (404), unknown target (404)", async () => {
+    const { app, repository, partnerClient } = setup();
+    const agent = await loginGxUser(app); // "gx-user"
+
+    // A project owned by someone else → gx-user is not the owner → 403.
+    const now = new Date();
+    await repository.insertProject({
+      projectId: "proj_foreign",
+      bucketId: 1,
+      name: "Foreign",
+      ownerUsername: "owner-x",
+      isSample: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await repository.insertProjectGrant({
+      projectId: "proj_foreign",
+      principalType: "user",
+      principalUsername: "owner-x",
+      role: "owner",
+      createdAt: now,
+    });
+    await agent
+      .post("/api/projects/proj_foreign/grants")
+      .send({ principalUsername: "gx-other", role: "viewer" })
+      .expect(403, { error: "not_project_owner" });
+
+    // Owned project for the remaining cases.
+    const projectId: string = (await agent.post("/api/projects").send({ name: "P", bucketId: 7 }).expect(201)).body
+      .project.projectId;
+
+    await agent
+      .post(`/api/projects/${projectId}/grants`)
+      .send({ principalUsername: "gx-user", role: "viewer" })
+      .expect(400, { error: "cannot_share_with_self" });
+
+    await agent
+      .post("/api/projects/proj_missing/grants")
+      .send({ principalUsername: "gx-other", role: "viewer" })
+      .expect(404, { error: "project_not_found" });
+
+    partnerClient.missingCustomers.add("ghost");
+    await agent
+      .post(`/api/projects/${projectId}/grants`)
+      .send({ principalUsername: "ghost", role: "editor" })
+      .expect(404, { error: "principal_not_found" });
+
+    // A bad role is a 400.
+    await agent
+      .post(`/api/projects/${projectId}/grants`)
+      .send({ principalUsername: "gx-other", role: "admin" })
       .expect(400, { error: "invalid_payload" });
   });
 });

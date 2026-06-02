@@ -18,7 +18,7 @@ import { createSessionRecord, clearSessionCookie, isAuthedSession, requireAuthen
 import { assertChatSessionOwnership, SESSION_NOT_OWNER_ERROR } from "./middleware/sessionOwnership.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { ChatHandlerError, deriveRagContentScope, handleChatMessage, type HandleChatMessageRequest } from "./services/chatHandler.js";
-import { authorizedProjectIds, rbacFilterForProjects } from "./services/projectAccess.js";
+import { authorizedProjectIds, createProjectWithOwner, rbacFilterForProjects, roleOnProject, writeUserGrant } from "./services/projectAccess.js";
 import { produceEntityScope } from "./services/entityScopeProducer.js";
 import { resolveFieldGeometry } from "./services/citationGeometry.js";
 import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
@@ -30,7 +30,7 @@ import {
   type ReportSectionRenderAs,
   type ReportTemplate,
 } from "./services/reportRenderer.js";
-import { sendUpstreamResponse } from "./services/http.js";
+import { sendUpstreamResponse, UpstreamHttpError } from "./services/http.js";
 import { fetchDocumentXray } from "./services/xrayCache.js";
 import type {
   AppRepository,
@@ -38,6 +38,9 @@ import type {
   GroundXClient,
   GroundXPartnerClient,
   LlmClient,
+  ProjectGrantRecord,
+  ProjectRecord,
+  ProjectRole,
 } from "./types.js";
 
 function basicCredentials(req: Request): { email?: string; password?: string } {
@@ -129,6 +132,49 @@ function parseReportTemplate(body: unknown): ReportTemplate | null {
     });
   }
   return { id: t.id, name: t.name, format: t.format, sections };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Projects + RBAC sharing (2026-06-01-authed-project-create-grant).
+// Hand-rolled shape checks returning the parsed value or null (→ 400), matching
+// the codebase's parse-helper convention. The grant graph never crosses the
+// wire; the routes return these inline projections, not a shared FE type.
+// ──────────────────────────────────────────────────────────────────────────
+
+const PROJECT_NAME_MAX = 128; // mirrors projects.name VARCHAR(128)
+const PRINCIPAL_USERNAME_MAX = 128; // mirrors project_grants.principal_username VARCHAR(128)
+const SHAREABLE_ROLES = new Set<ProjectRole>(["viewer", "editor"]);
+
+function parseCreateProjectRequest(body: unknown): { name: string; bucketId: number } | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === "string" ? b.name.trim() : "";
+  if (!name || name.length > PROJECT_NAME_MAX) return null;
+  if (typeof b.bucketId !== "number" || !Number.isInteger(b.bucketId) || b.bucketId <= 0) return null;
+  return { name, bucketId: b.bucketId };
+}
+
+function parseShareGrantRequest(body: unknown): { principalUsername: string; role: ProjectRole } | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  const principalUsername = typeof b.principalUsername === "string" ? b.principalUsername.trim() : "";
+  if (!principalUsername || principalUsername.length > PRINCIPAL_USERNAME_MAX) return null;
+  if (typeof b.role !== "string" || !SHAREABLE_ROLES.has(b.role as ProjectRole)) return null;
+  return { principalUsername, role: b.role as ProjectRole };
+}
+
+function toProjectView(project: ProjectRecord, role: ProjectRole) {
+  return {
+    projectId: project.projectId,
+    bucketId: project.bucketId,
+    name: project.name,
+    isSample: project.isSample,
+    role,
+  };
+}
+
+function toGrantView(grant: ProjectGrantRecord) {
+  return { projectId: grant.projectId, principalUsername: grant.principalUsername, role: grant.role };
 }
 
 export interface AppDependencies {
@@ -1447,6 +1493,88 @@ export function createApp({
           return resolveFieldGeometry(value, typeof f.label === "string" ? f.label : "", xray);
         });
         res.json({ documentId, geometry });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Projects + RBAC sharing (2026-06-01-authed-project-create-grant).
+  //
+  // The FIRST production writers of a `user` grant. Both are sign-in gated;
+  // authorization (owner-only sharing) is enforced here (the composition root),
+  // while the writes are pure service ops. NOTE: `/api/projects` (plural) does
+  // NOT collide with the `/api/project` (singular) Partner proxy `app.use`
+  // below — Express mount matching respects the path-segment boundary.
+  // ────────────────────────────────────────────────────────────────────────
+  app.post("/api/projects", apiLimiter, requireAuthenticatedUser, async (req, res, next) => {
+    try {
+      const input = parseCreateProjectRequest(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+      // requireAuthenticatedUser guarantees the authed arm.
+      const ownerUsername = sessionUsername(req.session!)!;
+      const project = await createProjectWithOwner(repository, { ...input, ownerUsername });
+      res.status(201).json({ project: toProjectView(project, "owner") });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post<{ projectId: string }>(
+    "/api/projects/:projectId/grants",
+    apiLimiter,
+    requireAuthenticatedUser,
+    async (req, res, next) => {
+      try {
+        const input = parseShareGrantRequest(req.body);
+        if (!input) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        const granterUsername = sessionUsername(req.session!)!;
+        const { projectId } = req.params;
+
+        // Sharing with yourself would UPSERT-downgrade your own owner grant
+        // (PK = project_id+principal_type+principal_username) → lockout.
+        if (input.principalUsername === granterUsername) {
+          res.status(400).json({ error: "cannot_share_with_self" });
+          return;
+        }
+
+        const project = await repository.getProject(projectId);
+        if (!project) {
+          res.status(404).json({ error: "project_not_found" });
+          return;
+        }
+        // Owner check BEFORE the target lookup, so a non-owner cannot probe
+        // whether a username exists in GroundX via this endpoint.
+        const granterRole = await roleOnProject(repository, granterUsername, projectId);
+        if (granterRole !== "owner") {
+          res.status(403).json({ error: "not_project_owner" });
+          return;
+        }
+
+        // Validate the target customer exists in GroundX before granting.
+        try {
+          await partnerClient.getCustomer(input.principalUsername);
+        } catch (err) {
+          if (err instanceof UpstreamHttpError && err.upstreamStatus === 404) {
+            res.status(404).json({ error: "principal_not_found" });
+            return;
+          }
+          throw err;
+        }
+
+        const grant = await writeUserGrant(repository, {
+          projectId,
+          principalUsername: input.principalUsername,
+          role: input.role,
+        });
+        res.status(201).json({ grant: toGrantView(grant) });
       } catch (error) {
         next(error);
       }
