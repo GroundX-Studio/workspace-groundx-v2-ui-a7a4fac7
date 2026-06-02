@@ -27,13 +27,11 @@ describe("MySqlAppRepository", () => {
     await repository.createSchema();
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
-    // 9 CREATE TABLE statements + shared-template-lifecycle Phase 2's
-    // CREATE TABLE templates + the idempotent copy INSERT…SELECT from
-    // extraction_schemas = 11. The Phase-1 viewer-column information_schema
-    // probe + ALTER were dropped (2026-05-31-viewer-history-column-drop).
-    // 2026-06-01-projects-rbac-scope-filter adds CREATE TABLE projects +
-    // project_grants → 13.
-    expect(statements).toHaveLength(13);
+    // 11 CREATE TABLE statements + the DROP TABLE for the superseded
+    // extraction_schemas (2026-05-31-extraction-schemas-table-drop) = 12. The
+    // table + its boot copy-INSERT…SELECT were removed once `templates` soaked
+    // one full prod release; the DROP sheds the table on the next boot.
+    expect(statements).toHaveLength(12);
     const joined = statements.join("\n");
     // Auth + metadata.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS sessions");
@@ -46,30 +44,16 @@ describe("MySqlAppRepository", () => {
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS viewer_events");
     // UI-10b — intent_log table (canvas-orchestrator dispatch trail).
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS intent_log");
-    // CF-04 — app-owned saved-schemas table.
-    expect(joined).toContain("CREATE TABLE IF NOT EXISTS extraction_schemas");
-    // shared-template-lifecycle Phase 2 — templates table + idempotent copy.
+    // shared-template-lifecycle Phase 2 — templates table.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS templates");
     // 2026-06-01-projects-rbac-scope-filter — app-owned projects + RBAC grants.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS projects");
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS project_grants");
-    const copyStmt = statements.find((s) => /INSERT\s+INTO\s+templates/i.test(s))!;
-    // Idempotent AND concurrent-safe: ON DUPLICATE KEY UPDATE no-ops on a
-    // row already present, so re-runs do nothing and a multi-pod boot race on
-    // the PRIMARY KEY can't throw (a plain INSERT would → CrashLoopBackOff).
-    expect(copyStmt).toMatch(/ON\s+DUPLICATE\s+KEY\s+UPDATE\s+id\s*=\s*id/i);
-    // A plain INSERT (no conflict handling) would be the bug — assert it's absent.
-    expect(copyStmt).not.toMatch(/WHERE\s+id\s+NOT\s+IN/i);
-    // Column MAPPING must be exact — a swapped column silently corrupts the
-    // migration and substring matches wouldn't catch it. Pin INSERT target
-    // columns AND the SELECT projection order (body_json ← schema_json,
-    // kind ← literal 'extract', everything else 1:1).
-    expect(copyStmt).toMatch(
-      /INSERT\s+INTO\s+templates\s*\(\s*id\s*,\s*kind\s*,\s*groundx_username\s*,\s*name\s*,\s*body_json\s*,\s*created_at\s*,\s*updated_at\s*\)/i,
-    );
-    expect(copyStmt).toMatch(
-      /SELECT\s+id\s*,\s*'extract'\s*,\s*groundx_username\s*,\s*name\s*,\s*schema_json\s*,\s*created_at\s*,\s*updated_at\s+FROM\s+extraction_schemas/i,
-    );
+    // extraction_schemas is DROPPED — no CREATE, no copy-INSERT…SELECT survive;
+    // the DROP (idempotent) sheds it from an already-provisioned DB.
+    expect(joined).not.toContain("CREATE TABLE IF NOT EXISTS extraction_schemas");
+    expect(joined).not.toMatch(/FROM\s+extraction_schemas/i);
+    expect(joined).toMatch(/DROP\s+TABLE\s+IF\s+EXISTS\s+extraction_schemas/i);
     // App-owned only — no GroundX/Partner duplicates.
     const lower = joined.toLowerCase();
     expect(lower).not.toContain("stripe");

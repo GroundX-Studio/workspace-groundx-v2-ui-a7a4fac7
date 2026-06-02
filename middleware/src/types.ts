@@ -260,8 +260,8 @@ export interface AppRepository {
 
   // Templates (shared-template-lifecycle — Extract schema + Report template).
   // (The legacy `extraction_schemas` repo methods were removed at the Phase-3
-  // cutover — nothing calls them; the table itself is kept, read only by the
-  // boot-time copy-migration, until the deferred drop sweep.)
+  // cutover; the table + its boot copy-migration were dropped in
+  // 2026-05-31-extraction-schemas-table-drop after `templates` soaked a release.)
   saveTemplate(record: TemplateRecord): Promise<void>;
   getTemplate(id: string): Promise<TemplateRecord | null>;
   listTemplates(groundxUsername: string, kind: TemplateKind): Promise<TemplateRecord[]>;

@@ -209,26 +209,10 @@ export class MySqlAppRepository implements AppRepository {
       )
     `);
 
-    // CF-04: app-owned extraction schemas. Keyed by user so the saved-
-    // schemas reader scopes the list per `groundxUsername`. Cascade is
-    // intentionally NOT on the user — there's no user table; the
-    // username is the join key. App-level GC sweeps stale rows.
-    await this.pool.execute(`
-      CREATE TABLE IF NOT EXISTS extraction_schemas (
-        id VARCHAR(64) PRIMARY KEY,
-        groundx_username VARCHAR(128) NOT NULL,
-        name VARCHAR(128) NOT NULL,
-        schema_json JSON NOT NULL,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX extraction_schemas_user_idx (groundx_username, updated_at)
-      )
-    `);
-
     // shared-template-lifecycle Phase 2 — the durable Template store (Extract
     // schema + Report template). `kind` discriminates; `body_json` is the
     // opaque JSON body. No `version` column (versioning deferred until a reader
-    // needs it). Same per-user scoping as extraction_schemas, plus `kind`.
+    // needs it). Per-user scoping by `groundx_username`, plus `kind`.
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS templates (
         id VARCHAR(64) PRIMARY KEY,
@@ -242,26 +226,14 @@ export class MySqlAppRepository implements AppRepository {
       )
     `);
 
-    // Idempotent + concurrent-safe copy-migration: fold existing saved Extract
-    // schemas into `templates` as kind='extract'. `ON DUPLICATE KEY UPDATE id =
-    // id` is a NO-OP on rows already present — so re-runs do nothing AND two
-    // pods booting at once (multi-replica EKS / rolling update) can't crash on
-    // a PRIMARY KEY race (a plain INSERT would throw → createSchema rejects →
-    // CrashLoopBackOff). It is intentionally a no-op on existing rows (does NOT
-    // refresh an edited row) — the migration-window edge is closed by the
-    // Phase-3 cutover's explicit UPSERT-refresh, not here.
-    //
-    // `extraction_schemas` is left intact (deprecated; dropped in a later
-    // sweep — which MUST also remove this copy step, since it reads
-    // `extraction_schemas`). The verbatim `schema_json → body_json` copy is
-    // sound because the shared extract body schema is `.passthrough()` (the
-    // legacy `{id,name,categories}` blob parses unchanged).
-    await this.pool.execute(`
-      INSERT INTO templates (id, kind, groundx_username, name, body_json, created_at, updated_at)
-      SELECT id, 'extract', groundx_username, name, schema_json, created_at, updated_at
-      FROM extraction_schemas
-      ON DUPLICATE KEY UPDATE id = id
-    `);
+    // 2026-05-31-extraction-schemas-table-drop — the legacy `extraction_schemas`
+    // table (and its boot copy-INSERT…SELECT into `templates`) are GONE: the
+    // `templates` migration soaked one full production release, so all rows have
+    // folded over and nothing reads `extraction_schemas`. Shed the superseded
+    // table from any already-provisioned DB. `IF EXISTS` keeps a never-
+    // provisioned (fresh) DB booting cleanly; sequenced after `templates` so no
+    // statement references a table it just dropped.
+    await this.pool.execute(`DROP TABLE IF EXISTS extraction_schemas`);
 
     // 2026-06-01-projects-rbac-scope-filter — the app-owned data-organization
     // layer. A `project` is the WF-07 grouping of documents within a bucket; its
@@ -667,9 +639,10 @@ export class MySqlAppRepository implements AppRepository {
     return rows.map(rowToIntentLog);
   }
 
-  // (Legacy `extraction_schemas` repo methods removed at the Phase-3 cutover —
-  // no callers. The table is still created + read by the boot-time copy-
-  // migration into `templates`, until the deferred drop sweep.)
+  // (Legacy `extraction_schemas` repo methods removed at the Phase-3 cutover;
+  // the table + its boot copy-migration were dropped in
+  // 2026-05-31-extraction-schemas-table-drop after `templates` soaked one prod
+  // release — see the `DROP TABLE IF EXISTS extraction_schemas` step above.)
 
   // ── Templates (shared-template-lifecycle) ───────────────────────
 
