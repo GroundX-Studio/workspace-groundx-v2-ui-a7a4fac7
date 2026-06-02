@@ -78,12 +78,11 @@
       filter, so it INTERSECTS the requested scope (implicit deny on an
       unauthorized project; `{$in:[]}` denies all). Chose the existing seam over
       a JS-side intersect — no forked path. `deriveRagContentScope` unchanged.
-- [ ] **4.3 First production writer of a `user` grant — DEFERRED + TRACKED.** No
-      authed project-create flow exists yet, so the owner-grant-on-create writer
-      has no home; building it now is premature (earn-the-axis). The `user`-grant
-      RESOLVER branch is general + test-covered (`projectAccess.test.ts` seeds a
-      user grant and proves cross-user isolation); the WRITER lands with the
-      authed-project-create / BYO-upload feature. Tracked here — NOT orphaned.
+- [x] **4.3 First `user`-grant writer — DEFERRED + TICKETED** (spawn_task
+      2026-06-02: "Wire owner-grant writer + project-create/sharing flow"). No
+      authed project-create flow exists yet (earn-the-axis); the `user`-grant
+      RESOLVER branch is general + test-covered (`projectAccess.test.ts` cross-user
+      isolation); the WRITER lands with that ticket. Tracked, NOT orphaned.
 - [x] **4.4 Producer-mismatch test green** (Task 1.1 flipped by the producer fix);
       full LIVE re-verify of the chat answer is Task 6.2.
 - [x] **Adversarial review:** `grep` — one `searchGroundX` composition path (no
