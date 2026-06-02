@@ -111,13 +111,12 @@
       "What is the total amount due on this bill?" → "$7,613.20 … Jul 30, 2025"
       with 2 citation chips + Show source (screenshot). Middleware log:
       `filter:{projectId:{$in:["proj_c7701da7-…"]}}` matched. DL-1 reverified.
-- [ ] **6.1** Ground-truth regression suite (the surviving piece of the WITHDRAWN
-      `rag-retrieval-correctness`): offline, recorded fixtures, no live network —
-      each known-answerable query → grounded answer + ≥1 citation; "never silently
-      no-snippets" tripwire. (PARTIAL: the producer-emits-UUID + RBAC cross-user
-      isolation regressions are already locked by `entityScopeProducer.test.ts` +
-      `projectAccess.test.ts`; the broader multi-pair ground-truth-fixture suite is
-      the remaining piece.)
+- [x] **6.1 Ground-truth regression suite** — `services/ragCorrectness.regression.test.ts`
+      (offline, fake clients, no live network): 3 Utility ground-truth pairs
+      (amount-due/addressee/meter-count) each → grounded answer + ≥1 citation +
+      non-ambient tier, plus a "never silently no-snippets" TRIPWIRE on the
+      amount-due pair. Complements the producer-emits-UUID + RBAC isolation
+      regressions (`entityScopeProducer.test` / `projectAccess.test`). 717 green.
 - [ ] **6.2 Live re-verify (done = user-visible):** onboarding chat "amount due"
       returns a grounded citation; `_debug.groundx` shows the matched filter.
 - [x] **6.3 (docs)** `docs/agents/data-model.md` updated (projects + project_grants
