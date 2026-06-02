@@ -8,20 +8,21 @@ The app SHALL persist a `projects` table (the WF-07 filter-value grouping of
 documents within a bucket) and a `project_grants` table (the RBAC/ACL graph over
 those projects) in MySQL, and SHALL NOT create MySQL tables that mirror
 GroundX-owned concepts (customer identity, buckets, groups, documents, Partner
-Projects, workflows). An authenticated account is referenced by its GroundX
-customer id (`session.ownerUserId`); a grant `principal` is that customer id or
-`public`. Team/org grouping of multiple customers is out of scope until a real
-consumer exists.
+Projects, workflows). A customer is referenced by its GroundX **username**
+(consistent with the existing `groundx_username` columns); a grant `principal`
+is `public` or a `user` (that username). Team/org (`account`) grouping of
+multiple customers is out of scope until a real consumer exists (earn-the-axis),
+so `principal_type` is `public | user` only.
 
-#### Scenario: A project carries an owner and grants, referencing GroundX ids
+#### Scenario: A project carries an owner and grants, referencing GroundX usernames
 
-- **GIVEN** a `projects` row `{project_id:"proj_x", bucket_id, owner_customer_id}`
+- **GIVEN** a `projects` row `{project_id:"proj_x", bucket_id, owner_username}`
   and a `project_grants` row `{project_id:"proj_x", principal_type:"user",
-  principal_id:<customerId>, role:"owner"}`
+  principal_username:<username>, role:"owner"}`
 - **WHEN** the repository is inspected
 - **THEN** no MySQL table stores a copy of the GroundX customer, bucket, or
   document record — only the app-owned `project_id` ↔ `bucket_id` ↔
-  `owner_customer_id` references and the grant rows
+  `owner_username` references and the grant rows
 
 ### Requirement: ContentScope SHALL translate to a GroundX search filter intersected with the caller's authorized projects
 
@@ -35,9 +36,9 @@ SHALL build only a `ContentScope`.
 
 #### Scenario: Cross-user isolation through the filter
 
-- **GIVEN** `proj_a` granted `user/owner` to customer A and a document in it
+- **GIVEN** `proj_a` granted `user/owner` to username A and a document in it
   stamped `{projectId:"proj_a"}`
-- **WHEN** customer B (no grant on `proj_a`) issues a chat/search whose scope
+- **WHEN** username B (no grant on `proj_a`) issues a chat/search whose scope
   requests `proj_a`
 - **THEN** `compileRagFilter` intersects B's authorized set (which excludes
   `proj_a`) and the search returns no documents from `proj_a`

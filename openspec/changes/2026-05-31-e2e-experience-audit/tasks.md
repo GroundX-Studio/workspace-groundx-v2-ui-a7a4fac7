@@ -16,7 +16,7 @@
 > • **DL-3 (P2)** ✅ CLOSED — not a defect (loading at 375px IS compact; was a `preview_resize` artifact).
 > • **DL-1 (P1)** ⏳ REMAINING — doc-scope chat RAG returns 0 snippets (works at BUCKET scope → localized to
 >   the document-scoped filter). Deferred to a FOCUSED continuation (middleware deep-dive + ground-truth
->   regression suite) → `2026-06-01-rag-retrieval-correctness`.
+>   regression suite) → `2026-06-01-projects-rbac-scope-filter`.
 > **DO NOT ARCHIVE** until DL-1 lands AND the blocked surfaces re-verify live: 2.4 chat citation→source
 > (DL-1 onboarding), 2.10 chat-path round-trip, 2.12 steady widget parity (now mountable post-DL-5; full
 > drive pending). Light/LLM-driven not separately driven: 2.8 propose-schema-field / booking-status cards ·

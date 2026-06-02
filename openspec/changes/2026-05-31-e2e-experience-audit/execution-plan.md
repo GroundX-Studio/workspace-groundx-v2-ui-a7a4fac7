@@ -30,7 +30,7 @@ re-verification of DL-1 (chat answer → citation → source mount needs a worki
    + build green. → flip DL-5 `reverified`.
 
 ## Task 2 — DL-1 (P1): document-scoped chat RAG returns 0 snippets
-**Change:** `2026-06-01-rag-retrieval-correctness` (authored). **Lead:** the SAME query
+**Change:** `2026-06-01-projects-rbac-scope-filter` (authored). **Lead:** the SAME query
 works at BUCKET scope, fails at single-DOC scope → the bug is in the document-narrowed
 search request/filter, not generation.
 
@@ -87,5 +87,5 @@ artifact — desktop worked only after an explicit width set).
 - e2e-audit §5 closeout gate: every blocked surface (2.4/2.10/2.12) re-driven live and
   measured-correct; defect log has zero `open` rows; `npm test` + guards + build green;
   `openspec validate --strict` on all touched changes.
-- Archive `2026-06-01-steady-canvas-mount`, `2026-06-01-rag-retrieval-correctness`, then
+- Archive `2026-06-01-steady-canvas-mount`, `2026-06-01-projects-rbac-scope-filter`, then
   the e2e-audit change — in that order. Publish to dev at the end (or per checkpoints).

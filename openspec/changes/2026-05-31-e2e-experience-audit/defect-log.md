@@ -5,8 +5,17 @@ Audited the post-`retire-mock-mode` build against REAL GroundX (no MOCK_MODE). O
 
 ## Defects
 
-### DL-1 · Interact / live chat RAG · P1 · OPEN
-- **Measured:** asked "What is the total amount due on this bill?" in onboarding chat (scope =
+### DL-1 · Interact / live chat RAG · P1 · ROOT-CAUSED → fix in `2026-06-01-projects-rbac-scope-filter`
+- **ROOT CAUSE (confirmed 2026-06-02, supersedes the "likely cause" guess below):** two things, NOT
+  the relevance floor — (1) the onboarding scope filtered by `projectId` but the seeded doc carried no
+  `projectId` (its filter had `scenarioId` + a manifest blob); (2) a GroundX **server-side filter-matching
+  bug** (now FIXED by the GroundX team). With the bug fixed + a `projectId` stamped, the exact query
+  returns count 12, score 210, answer `$ 7,613.20`. The fix (projects table + RBAC grants + producer emits
+  the real projectId + document-filter stamp) lives in **`2026-06-01-projects-rbac-scope-filter`**, which
+  SUPERSEDES the withdrawn `2026-06-01-rag-retrieval-correctness` (its ground-truth regression suite was
+  folded into that plan's Task 6). The relevance-floor hypothesis below is FALSIFIED (the reprocessed doc
+  scores 210, well above the floor).
+- **Measured (original):** asked "What is the total amount due on this bill?" in onboarding chat (scope =
   bucket 28454 / utility, doc c3bfff49). Live RAG returned **0 citation chips** and the answer:
   *"I can't determine the total amount due because no snippets were found for this bill. If you open
   or re-run extraction on utility-bill-april-2026.pdf, I can read the amount due from the bill text."*
