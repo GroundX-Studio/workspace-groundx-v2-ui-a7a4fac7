@@ -63,9 +63,10 @@ the plan AND the real code.
 
 ## T6 — DEFERRED ticket (NOT built in this change)
 
-- [ ] BYO document upload + `filter.projectId` stamping via
-      `stampDocumentFilter`. No app-owned ingest endpoint exists today; building
-      stamp wiring with no caller would be dormant plumbing. Spin up when the BYO
-      upload UI/endpoint lands. Seam: `services/documentFilter.ts`
-      `stampDocumentFilter` + `scripts/seed-bucket.ts`'s stamp usage as the
-      precedent.
+- [x] TRACKED-DEFERRED via `spawn_task` ("Stamp filter.projectId on BYO doc
+      uploads"). Not an orphan `[ ]`. Original scope: BYO document upload +
+      `filter.projectId` stamping via `stampDocumentFilter`. No app-owned ingest
+      endpoint exists today; building stamp wiring with no caller would be
+      dormant plumbing. Spin up when the BYO upload UI/endpoint lands. Seam:
+      `services/documentFilter.ts` `stampDocumentFilter` +
+      `scripts/seed-bucket.ts`'s stamp usage as the precedent.
