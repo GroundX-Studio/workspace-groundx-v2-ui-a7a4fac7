@@ -107,10 +107,17 @@
       Extract `workflow_id` read still works; the stamp is in the script, not manual.
 
 ## 6. Regression + closeout
+- [x] **6.2 LIVE re-verify DONE (done=user-visible):** fresh onboarding session →
+      "What is the total amount due on this bill?" → "$7,613.20 … Jul 30, 2025"
+      with 2 citation chips + Show source (screenshot). Middleware log:
+      `filter:{projectId:{$in:["proj_c7701da7-…"]}}` matched. DL-1 reverified.
 - [ ] **6.1** Ground-truth regression suite (the surviving piece of the WITHDRAWN
       `rag-retrieval-correctness`): offline, recorded fixtures, no live network —
       each known-answerable query → grounded answer + ≥1 citation; "never silently
-      no-snippets" tripwire; + an RBAC cross-user-isolation test.
+      no-snippets" tripwire. (PARTIAL: the producer-emits-UUID + RBAC cross-user
+      isolation regressions are already locked by `entityScopeProducer.test.ts` +
+      `projectAccess.test.ts`; the broader multi-pair ground-truth-fixture suite is
+      the remaining piece.)
 - [ ] **6.2 Live re-verify (done = user-visible):** onboarding chat "amount due"
       returns a grounded citation; `_debug.groundx` shows the matched filter.
 - [ ] **6.3** `openspec validate --strict`; middleware+app suites + drift guards +

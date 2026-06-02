@@ -5,7 +5,13 @@ Audited the post-`retire-mock-mode` build against REAL GroundX (no MOCK_MODE). O
 
 ## Defects
 
-### DL-1 · Interact / live chat RAG · P1 · ROOT-CAUSED → fix in `2026-06-01-projects-rbac-scope-filter`
+### DL-1 · Interact / live chat RAG · P1 · REVERIFIED ✅ (fixed via `2026-06-01-projects-rbac-scope-filter`)
+- **LIVE RE-VERIFY (2026-06-02, done=user-visible):** fresh onboarding session, asked "What is the total
+  amount due on this bill?" → **"The total amount due is $7,613.20. Due date is Jul 30, 2025."** with **2
+  citation chips** + Show source (screenshot captured). Middleware log confirms the search dispatched
+  `filter:{projectId:{$in:["proj_c7701da7-…"]}}` (the RBAC filter) → matched. Was: "no snippets were found
+  for this bill." Fix = projects/RBAC layer (producer emits the real projectId + `rbacFilter` scopes to the
+  caller's authorized projects) + the GroundX server-side filter-bug fix. Middleware suite 713 green.
 - **ROOT CAUSE (confirmed 2026-06-02, supersedes the "likely cause" guess below):** two things, NOT
   the relevance floor — (1) the onboarding scope filtered by `projectId` but the seeded doc carried no
   `projectId` (its filter had `scenarioId` + a manifest blob); (2) a GroundX **server-side filter-matching
