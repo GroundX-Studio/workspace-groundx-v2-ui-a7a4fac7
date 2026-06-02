@@ -144,3 +144,28 @@ Playwright lives in `app/e2e/`. Today's suites:
 
 Run via `npm run test:e2e`. Slow (~30s+); demand-driven only. The
 unit + contract layers carry most of the regression weight.
+
+### E2E runs against LIVE GroundX — assert invariants, not fixtures (2026-06-02)
+
+There is no MOCK_MODE; the middleware boots in real mode and the chat is a real
+LLM. So e2e MUST assert **live-stable structural invariants** — frame testids,
+`field-row-*` / `cite-chip-*` presence, step transitions, gate lifecycle — and
+MUST NOT assert deterministic fixture strings (exact extracted values, canned
+LLM answers, fixture doc titles). It exercises the **actually-seeded** scenarios
+(Utility today); an unseeded scenario (Loan/Solar) is `describe.skip`ped with a
+seeding ticket, never asserted against absent data and never faked.
+
+Gotchas (all hit during `2026-06-02-e2e-live-data-realignment`):
+- **`test.use({ reducedMotion })` does NOT reach `window.matchMedia`** in the
+  `vite preview` setup (matchMedia stays false). Drive it with an explicit
+  `await page.emulateMedia({ reducedMotion: "reduce" })` in `beforeEach` — still
+  the real media-query path. (`reduced-motion.spec.ts`.)
+- **F2 auto-advances to F3** after its thinking stream (~10–18s); the legacy
+  `advance-to-f3` pill is preempted — wait for `onboarding-frame-f3`, don't click.
+- **`/home` is an auth-aware redirect** (ARCH-21): an authed user bootstraps a
+  session and deep-links to the steady `/c/<id>` shell — don't assert the deleted
+  scaffold "Studio Workspace" / first-run-wizard.
+- **Port preconditions:** ensure nothing is on `:3001` (stop stray Claude_Preview
+  middleware — `reuseExistingServer:false` aborts the run otherwise); node v20.
+- The onboarding **gate/BYO/provenance** journey (`advance-to-f6` etc.) is from a
+  superseded flow; those 9 tests are `test.fixme` pending a flow-aware re-ground.

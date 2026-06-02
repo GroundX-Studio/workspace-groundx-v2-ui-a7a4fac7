@@ -231,10 +231,13 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
         overflow: "hidden",
         backgroundColor: WHITE,
       }}
-      // The filename is surfaced as the widget's accessible name so
-      // screen-reader users know which document they're previewing.
-      // The visible shell (chat header) reads from the same fileName
+      // role="group" makes `aria-label` a permitted attribute on this container
+      // (a plain Box is role=generic, where aria-label is prohibited — axe
+      // `aria-prohibited-attr`). The filename is surfaced as the widget's
+      // accessible name so screen-reader users know which document they're
+      // previewing. The visible shell (chat header) reads from the same fileName
       // source via the scenario manifest.
+      role="group"
       aria-label={fileName ? `Document viewer · ${fileName}` : "Document viewer"}
     >
       {/* Main page-image area.

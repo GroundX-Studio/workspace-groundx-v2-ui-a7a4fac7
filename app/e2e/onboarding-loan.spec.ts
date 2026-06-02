@@ -10,9 +10,19 @@ import { expect, test } from "@playwright/test";
  *   • Cross-doc citations (gross_monthly_income references 4 paystubs)
  *
  * Desktop-only per D3.1 — tablet + mobile lands in Phase 6.
+ *
+ * SKIPPED (2026-06-02-e2e-live-data-realignment): the Loan scenario has NO
+ * seeded live document. The middleware boots in real mode (no MOCK_MODE), and
+ * the decoupled ScenarioRegistry joins bucket docs to a scenario by
+ * `filter.projectId` — with no Loan doc seeded, the picker never renders
+ * `sample-loan`, so every step below would fail on absent data. We do NOT fake
+ * it with mock data. Un-skip once the Loan (+ Solar) sample docs are seeded
+ * into bucket 28454 with their own `filter.projectId` +
+ * `SAMPLE_PROJECT_ID_BY_SCENARIO` entries — tracked by the "Seed Loan + Solar
+ * live sample docs" ticket (spawn_task, 2026-06-02).
  */
 
-test.describe("F1–F7 · Loan Eligibility scenario · golden journey @desktop-only", () => {
+test.describe.skip("F1–F7 · Loan Eligibility scenario · golden journey @desktop-only", () => {
   test.beforeEach(async ({}, testInfo) => {
     test.skip(testInfo.project.name !== "desktop", "Phase 4 golden journey runs on desktop only");
   });

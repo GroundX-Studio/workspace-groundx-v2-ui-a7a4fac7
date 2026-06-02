@@ -383,6 +383,11 @@ export const IngestView: FC = () => {
                     alignItems: "center",
                     justifyContent: "center",
                   }}
+                  // role="img" makes `aria-label` a permitted attribute on this
+                  // icon wrapper (a plain Box is role=generic, where aria-label is
+                  // prohibited — axe `aria-prohibited-attr`). The label names the
+                  // connector for AT; the SVG glyph itself is decorative.
+                  role="img"
                   title={CONNECTOR_LABELS[kind]}
                   aria-label={CONNECTOR_LABELS[kind]}
                 >
