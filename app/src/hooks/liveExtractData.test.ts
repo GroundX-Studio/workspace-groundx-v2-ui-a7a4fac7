@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { fetchLiveExtract } from "./useLiveExtract";
+import { fetchLiveExtract } from "./liveExtractData";
 
 // Real-shaped workflow + extract (9910308e vocab): statement scalar + a
 // meters array whose first row carries the metered field.

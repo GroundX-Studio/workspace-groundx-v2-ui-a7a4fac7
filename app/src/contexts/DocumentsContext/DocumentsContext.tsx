@@ -1,7 +1,7 @@
 import { createContext } from "react";
 
-import { RequestOptions, PaginationParams, Metadata } from "@/api/common";
-import {
+import type { RequestOptions, PaginationParams, Metadata } from "@/api/common";
+import type {
   CopyDocumentsInput,
   CrawlWebsiteInput,
   DeleteDocumentsInput,
@@ -9,8 +9,8 @@ import {
   IngestDocumentsInput,
   UpdateDocumentsInput,
 } from "@/api/entities/groundxDocumentsEntity";
-import { GroundXDocument, IngestProcess } from "@/api/entities/sdkTypes";
-import { SdkActionResult } from "@/contexts/sdkContextTypes";
+import type { GroundXDocument, IngestProcess } from "@/api/entities/sdkTypes";
+import type { SdkActionResult } from "@/contexts/sdkContextTypes";
 
 export interface DocumentsContextI {
   documents: GroundXDocument[];
@@ -43,4 +43,3 @@ export interface DocumentsContextI {
 }
 
 export const DocumentsContext = createContext<DocumentsContextI | undefined>(undefined);
-

@@ -115,9 +115,11 @@ renderWithAppProviders(<LoginRoute />, {
 ```
 
 Do not add per-file `vi.mock("@/api/...")` for migrated network
-boundaries. The pattern is the frontend equivalent of middleware
-`createApp({ ...fakeClients })`: one fake client per harness, not one
-module mock per test file.
+boundaries, and do not mock `@/lib/sentry` from rendered-runtime tests.
+Telemetry/error-branch assertions should override
+`api.telemetry.captureException` through the same fake client. The pattern is
+the frontend equivalent of middleware `createApp({ ...fakeClients })`: one fake
+client per harness, not one module mock per test file.
 
 ## Timer + animation tests
 

@@ -94,6 +94,11 @@ Production files to migrate:
 - `app/src/api/useLiveExtract.ts`
 - `app/src/api/useLiveExtractionSchema.ts`
 
+T6 cleanup moved the pure helper implementations to:
+
+- `app/src/hooks/liveExtractData.ts`
+- `app/src/hooks/liveExtractionSchemaData.ts`
+
 Tests to retarget:
 
 - `app/src/api/useLiveExtract.test.ts`

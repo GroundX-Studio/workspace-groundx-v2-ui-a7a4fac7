@@ -1,9 +1,9 @@
 import { createContext } from "react";
 
-import { RequestOptions } from "@/api/common";
-import { WorkflowInput, WorkflowRelationshipInput } from "@/api/entities/groundxWorkflowsEntity";
-import { Workflow } from "@/api/entities/sdkTypes";
-import { SdkActionResult } from "@/contexts/sdkContextTypes";
+import type { RequestOptions } from "@/api/common";
+import type { WorkflowInput, WorkflowRelationshipInput } from "@/api/entities/groundxWorkflowsEntity";
+import type { Workflow } from "@/api/entities/sdkTypes";
+import type { SdkActionResult } from "@/contexts/sdkContextTypes";
 
 export interface WorkflowsContextI {
   workflows: Workflow[];
@@ -22,4 +22,3 @@ export interface WorkflowsContextI {
 }
 
 export const WorkflowsContext = createContext<WorkflowsContextI | undefined>(undefined);
-

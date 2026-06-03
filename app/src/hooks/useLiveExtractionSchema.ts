@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { isResolvedDocumentId } from "@/api/documentId";
-import { fetchLiveSchema } from "@/api/useLiveExtractionSchema";
+import { fetchLiveSchema } from "@/hooks/liveExtractionSchemaData";
 import { useApi } from "@/contexts/ApiContext";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
 import type { ExtractionSchemaDef } from "@/types/scenarios";

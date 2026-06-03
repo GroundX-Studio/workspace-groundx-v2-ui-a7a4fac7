@@ -1,4 +1,3 @@
-import { api } from "@/api";
 import { upsertChatSessionEntity } from "@/api/chatSessionEntities";
 import { patchChatSession } from "@/api/chatSessionPatch";
 import {
@@ -9,8 +8,30 @@ import {
 } from "@/api/chatSessions";
 import { listChatSessions } from "@/api/chatSessionsList";
 import { claimAnonymousChat } from "@/api/claimAnonymousChat";
-import { resetSession } from "@/api/entities/customerEntity";
+import {
+  confirmUserChangingPassword,
+  getUserData,
+  login,
+  logout,
+  register,
+  resetSession,
+  resetUserPassword,
+  updateAppMetadata,
+} from "@/api/entities/customerEntity";
+import * as groundxApiKeys from "@/api/entities/groundxApiKeysEntity";
+import * as groundxBuckets from "@/api/entities/groundxBucketsEntity";
+import * as groundxCustomer from "@/api/entities/groundxCustomerEntity";
+import * as groundxDocuments from "@/api/entities/groundxDocumentsEntity";
+import * as groundxGroups from "@/api/entities/groundxGroupsEntity";
+import * as groundxHealth from "@/api/entities/groundxHealthEntity";
+import * as groundxSearch from "@/api/entities/groundxSearchEntity";
+import * as groundxWorkflows from "@/api/entities/groundxWorkflowsEntity";
 import { issueOnboardingSession, type OnboardingSessionResponse } from "@/api/entities/onboardingSessionEntity";
+import * as partnerApiKeys from "@/api/entities/partnerApiKeysEntity";
+import * as partnerBuckets from "@/api/entities/partnerBucketsEntity";
+import * as partnerCustomer from "@/api/entities/partnerCustomerEntity";
+import * as partnerGroups from "@/api/entities/partnerGroupsEntity";
+import * as partnerProjects from "@/api/entities/partnerProjectsEntity";
 import { listScenarios } from "@/api/entities/scenarioRegistryEntity";
 import { extractField } from "@/api/extractField";
 import { fetchFieldGeometry } from "@/api/fieldGeometry";
@@ -68,6 +89,30 @@ const renderReportWithClientEnsure: typeof renderReport = (input) =>
 const extractFieldWithClientEnsure: typeof extractField = (input) =>
   extractField(input, chatSessionEnsure);
 
+const legacyApiMembers = {
+  partnerCustomer,
+  partnerApiKeys,
+  partnerBuckets,
+  partnerGroups,
+  partnerProjects,
+  groundxApiKeys,
+  groundxBuckets,
+  groundxCustomer,
+  groundxDocuments,
+  groundxGroups,
+  groundxHealth,
+  groundxSearch,
+  groundxWorkflows,
+  login,
+  register,
+  logout,
+  getUserData,
+  updateAppMetadata,
+  resetUserPassword,
+  confirmUserChangingPassword,
+  issueOnboardingSession,
+};
+
 /**
  * The real frontend network client — the single composition root for ALL
  * network access. Consumers reach it through `useApi()` (see `ApiContext`),
@@ -84,15 +129,15 @@ const extractFieldWithClientEnsure: typeof extractField = (input) =>
  * safely place its methods in `useEffect` dependency arrays.
  */
 export const realApi = {
-  ...api,
+  ...legacyApiMembers,
   auth: {
-    login: api.login,
-    register: api.register,
-    logout: api.logout,
-    getUserData: api.getUserData,
-    updateAppMetadata: api.updateAppMetadata,
-    resetUserPassword: api.resetUserPassword,
-    confirmUserChangingPassword: api.confirmUserChangingPassword,
+    login,
+    register,
+    logout,
+    getUserData,
+    updateAppMetadata,
+    resetUserPassword,
+    confirmUserChangingPassword,
     resetSession,
   },
   session: {
@@ -119,7 +164,7 @@ export const realApi = {
     listScenarios,
   },
   workflow: {
-    getGroundXWorkflow: api.groundxWorkflows.getGroundXWorkflow,
+    getGroundXWorkflow: groundxWorkflows.getGroundXWorkflow,
   },
   template: {
     saveTemplate,

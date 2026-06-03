@@ -1,9 +1,9 @@
 import { createContext } from "react";
 
-import { RequestOptions, PaginationParams } from "@/api/common";
-import { PartnerBucketInput } from "@/api/entities/partnerBucketsEntity";
-import { Bucket } from "@/api/entities/sdkTypes";
-import { SdkActionResult } from "@/contexts/sdkContextTypes";
+import type { RequestOptions, PaginationParams } from "@/api/common";
+import type { PartnerBucketInput } from "@/api/entities/partnerBucketsEntity";
+import type { Bucket } from "@/api/entities/sdkTypes";
+import type { SdkActionResult } from "@/contexts/sdkContextTypes";
 
 export interface BucketsContextI {
   groundxBuckets: Bucket[];
@@ -22,4 +22,3 @@ export interface BucketsContextI {
 }
 
 export const BucketsContext = createContext<BucketsContextI | undefined>(undefined);
-

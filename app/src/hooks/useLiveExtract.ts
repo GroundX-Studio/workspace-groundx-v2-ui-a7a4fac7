@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { fetchLiveExtract, type LiveExtract } from "@/api/useLiveExtract";
+import { fetchLiveExtract, type LiveExtract } from "@/hooks/liveExtractData";
 import { useApi } from "@/contexts/ApiContext";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
 import { isResolvedDocumentId } from "@/api/documentId";

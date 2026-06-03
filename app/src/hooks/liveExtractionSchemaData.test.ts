@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { fetchLiveSchema } from "./useLiveExtractionSchema";
+import { fetchLiveSchema } from "./liveExtractionSchemaData";
 
 // Minimal real-shaped workflow (9910308e vocab): statement → addressee.
 const workflow = {

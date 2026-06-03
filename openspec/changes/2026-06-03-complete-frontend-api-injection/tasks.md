@@ -136,22 +136,22 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 
 ## T6 - Tighten the guard and retire the app-facing legacy aggregate (SEQUENTIAL)
 
-- [ ] **Failing test first:** temporarily introduce a direct app-facing
+- [x] **Failing test first:** temporarily introduce a direct app-facing
       `@/api` value import, a direct standalone API value import, a per-file
       `vi.mock("@/api...")`, and a per-file `vi.mock("@/lib/sentry")` in
       migrated consumer/test files; prove the guard fails each violation. Revert
       the temporary violations before proceeding.
-- [ ] Expand `frontend-api-injection-guard.test.ts` so all migrated runtime
+- [x] Expand `frontend-api-injection-guard.test.ts` so all migrated runtime
       consumers are covered, not only session/chat/auth.
-- [ ] Keep allowlists explicit and narrow: composition root, `api/client.ts`, API
+- [x] Keep allowlists explicit and narrow: composition root, `api/client.ts`, API
       implementation modules, API module unit tests that mock transport, Sentry
       wrapper initialization/tests, and type-only imports.
-- [ ] Remove or quarantine `app/src/api/index.ts` as an app-facing aggregate once
+- [x] Remove or quarantine `app/src/api/index.ts` as an app-facing aggregate once
       no runtime consumers import it. If implementation modules still need shared
       composition, move that composition behind `api/client.ts`.
-- [ ] Add guard output that groups offenders by domain so future regressions are
+- [x] Add guard output that groups offenders by domain so future regressions are
       obvious.
-- [ ] Update `docs/agents/data-model.md` and related agent references in the same
+- [x] Update `docs/agents/data-model.md` and related agent references in the same
       slice so they no longer describe session/chat/auth as the only guarded
       frontend Api domains.
 - **Adversarial review:** run the red/green proof; run

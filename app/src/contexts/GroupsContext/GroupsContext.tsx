@@ -1,10 +1,10 @@
 import { createContext } from "react";
 
-import { RequestOptions, PaginationParams } from "@/api/common";
-import { CreateGroundXGroupInput } from "@/api/entities/groundxGroupsEntity";
-import { PartnerGroupInput } from "@/api/entities/partnerGroupsEntity";
-import { Group } from "@/api/entities/sdkTypes";
-import { SdkActionResult } from "@/contexts/sdkContextTypes";
+import type { RequestOptions, PaginationParams } from "@/api/common";
+import type { CreateGroundXGroupInput } from "@/api/entities/groundxGroupsEntity";
+import type { PartnerGroupInput } from "@/api/entities/partnerGroupsEntity";
+import type { Group } from "@/api/entities/sdkTypes";
+import type { SdkActionResult } from "@/contexts/sdkContextTypes";
 
 export interface GroupsContextI {
   groundxGroups: Group[];
@@ -25,4 +25,3 @@ export interface GroupsContextI {
 }
 
 export const GroupsContext = createContext<GroupsContextI | undefined>(undefined);
-

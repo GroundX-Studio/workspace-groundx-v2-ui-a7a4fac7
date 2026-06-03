@@ -1,8 +1,8 @@
 import { createContext } from "react";
 
-import { RequestOptions } from "@/api/common";
-import { ServiceHealth } from "@/api/entities/groundxHealthEntity";
-import { SdkActionResult } from "@/contexts/sdkContextTypes";
+import type { RequestOptions } from "@/api/common";
+import type { ServiceHealth } from "@/api/entities/groundxHealthEntity";
+import type { SdkActionResult } from "@/contexts/sdkContextTypes";
 
 export interface HealthContextI {
   services: ServiceHealth[];
@@ -12,4 +12,3 @@ export interface HealthContextI {
 }
 
 export const HealthContext = createContext<HealthContextI | undefined>(undefined);
-

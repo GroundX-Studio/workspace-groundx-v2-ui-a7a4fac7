@@ -1,9 +1,9 @@
 import { createContext } from "react";
 
-import { RequestOptions } from "@/api/common";
-import { PartnerProjectCreateInput, PartnerProjectInput } from "@/api/entities/partnerProjectsEntity";
-import { Project } from "@/api/entities/sdkTypes";
-import { SdkActionResult } from "@/contexts/sdkContextTypes";
+import type { RequestOptions } from "@/api/common";
+import type { PartnerProjectCreateInput, PartnerProjectInput } from "@/api/entities/partnerProjectsEntity";
+import type { Project } from "@/api/entities/sdkTypes";
+import type { SdkActionResult } from "@/contexts/sdkContextTypes";
 
 export interface ProjectsContextI {
   projects: Project[];
@@ -15,4 +15,3 @@ export interface ProjectsContextI {
 }
 
 export const ProjectsContext = createContext<ProjectsContextI | undefined>(undefined);
-
