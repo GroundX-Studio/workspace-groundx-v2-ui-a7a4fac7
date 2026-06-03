@@ -51,7 +51,6 @@ import MuiStack from "@mui/material/Stack";
 import { useCallback, useEffect, useState, type FC, type FormEvent } from "react";
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
-import { register } from "@/api/entities/customerEntity";
 import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 import { useApi } from "@/contexts/ApiContext";
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
@@ -66,7 +65,6 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
-import { captureException } from "@/lib/sentry";
 
 export interface SignUpWidgetProps {
   /**
@@ -136,7 +134,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
 
       setSubmitting(true);
       try {
-        await register({
+        await api.auth.register({
           first: values.first.trim(),
           last: values.last.trim(),
           email: trimmedEmail,
@@ -151,7 +149,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
         try {
           await api.chat.claimAnonymousChat();
         } catch (claimErr) {
-          captureException(claimErr, {
+          api.telemetry.captureException(claimErr, {
             route: "/api/chat-sessions/claim",
             stage: "after-register",
           });
@@ -166,7 +164,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
         setSubmitting(false);
       }
     },
-    [api.chat, submitting, gateAwaitingCommit, commitGate, promoteToSignedIn],
+    [api.auth, api.chat, api.telemetry, submitting, gateAwaitingCommit, commitGate, promoteToSignedIn],
   );
 
   const handleSubmit = useCallback(

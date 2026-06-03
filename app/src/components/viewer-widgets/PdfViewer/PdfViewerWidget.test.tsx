@@ -1,12 +1,12 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 
-import { api } from "@/api";
 import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
 import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarContext";
+import { withApiProvider } from "@/test/withApiProvider";
 
 /**
  * PdfViewerWidget — the production PDF viewer.
@@ -27,29 +27,10 @@ import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarConte
  * than a raw `documentId`.
  */
 
-vi.mock("@/api", () => ({
-  api: {
-    groundxDocuments: {
-      listGroundXDocuments: vi.fn(),
-      getGroundXDocument: vi.fn(),
-      ingestGroundXRemoteDocuments: vi.fn(),
-      crawlGroundXWebsite: vi.fn(),
-      copyGroundXDocuments: vi.fn(),
-      updateGroundXDocuments: vi.fn(),
-      deleteGroundXDocument: vi.fn(),
-      deleteGroundXDocuments: vi.fn(),
-      lookupGroundXDocument: vi.fn(),
-      listGroundXProcesses: vi.fn(),
-      getGroundXProcessingStatus: vi.fn(),
-      cancelGroundXProcess: vi.fn(),
-      getGroundXDocumentXray: vi.fn(),
-      getGroundXDocumentExtract: vi.fn(),
-    },
-  },
-}));
+const getXrayMock = vi.fn();
 
 beforeEach(() => {
-  for (const fn of Object.values(api.groundxDocuments)) (fn as Mock).mockReset();
+  getXrayMock.mockReset();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
@@ -59,11 +40,14 @@ import { PdfViewerWidget } from "./PdfViewerWidget";
 const docScope = (id: string): ContentScope => ({ type: "documents", documentIds: [id] });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <LoadingProvider>
-    <MessageBarProvider>
-      <DocumentsProvider>{children}</DocumentsProvider>
-    </MessageBarProvider>
-  </LoadingProvider>
+  withApiProvider(
+    <LoadingProvider>
+      <MessageBarProvider>
+        <DocumentsProvider>{children}</DocumentsProvider>
+      </MessageBarProvider>
+    </LoadingProvider>,
+    { groundxDocuments: { getGroundXDocumentXray: getXrayMock } },
+  )
 );
 
 const fakeXray = {
@@ -83,7 +67,7 @@ const fakeXray = {
 describe("PdfViewerWidget", () => {
   it("renders a loading state immediately and then the first page image once xray resolves", async () => {
     let resolveXray: (v: unknown) => void = () => {};
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockReturnValue(
+    getXrayMock.mockReturnValue(
       new Promise((resolve) => {
         resolveXray = resolve;
       }),
@@ -117,7 +101,7 @@ describe("PdfViewerWidget", () => {
     const ROLES: WidgetRole[] = ["anonymous", "member"];
     for (const role of ROLES) {
       it(`mounts and renders for role="${role}" (available to both roles, no affordance lock)`, async () => {
-        (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+        getXrayMock.mockResolvedValue(fakeXray);
 
         render(<PdfViewerWidget scope={docScope("doc-1")} role={role} />, { wrapper });
 
@@ -133,18 +117,18 @@ describe("PdfViewerWidget", () => {
   });
 
   it("resolves the single-doc scope to the document id and fetches its xray", async () => {
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+    getXrayMock.mockResolvedValue(fakeXray);
 
     render(<PdfViewerWidget scope={docScope("some-doc-uuid")} role="member" />, { wrapper });
 
     await waitFor(() =>
-      expect(api.groundxDocuments.getGroundXDocumentXray).toHaveBeenCalledWith("some-doc-uuid", undefined),
+      expect(getXrayMock).toHaveBeenCalledWith("some-doc-uuid", undefined),
     );
   });
 
   describe("WF-15: placeholder-id X-Ray gate", () => {
     it("does NOT fetch an X-Ray for a scenario:* placeholder id in scope", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       render(<PdfViewerWidget scope={docScope("scenario:utility")} role="anonymous" />, { wrapper });
 
@@ -153,25 +137,25 @@ describe("PdfViewerWidget", () => {
       await act(async () => {
         await Promise.resolve();
       });
-      expect(api.groundxDocuments.getGroundXDocumentXray).not.toHaveBeenCalled();
+      expect(getXrayMock).not.toHaveBeenCalled();
       const root = screen.getByTestId("pdf-viewer-widget");
       expect(root.getAttribute("data-loading")).toBe("true");
       expect(screen.queryByText(/COULD NOT LOAD/i)).not.toBeInTheDocument();
     });
 
     it("fetches the X-Ray once the scope resolves to a real GroundX documentId", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       const { rerender } = render(
         <PdfViewerWidget scope={docScope("scenario:utility")} role="anonymous" />,
         { wrapper },
       );
-      expect(api.groundxDocuments.getGroundXDocumentXray).not.toHaveBeenCalled();
+      expect(getXrayMock).not.toHaveBeenCalled();
 
       rerender(<PdfViewerWidget scope={docScope("c3bfff49-6640-4213-822b-e81c3a771e45")} role="anonymous" />);
 
       await waitFor(() =>
-        expect(api.groundxDocuments.getGroundXDocumentXray).toHaveBeenCalledWith(
+        expect(getXrayMock).toHaveBeenCalledWith(
           "c3bfff49-6640-4213-822b-e81c3a771e45",
           undefined,
         ),
@@ -180,7 +164,7 @@ describe("PdfViewerWidget", () => {
   });
 
   it("does NOT render the in-pane filename header (filename now lives in the chat header)", async () => {
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+    getXrayMock.mockResolvedValue(fakeXray);
 
     render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
@@ -198,7 +182,7 @@ describe("PdfViewerWidget", () => {
     // Keeps the filename available to assistive tech + lets the
     // surrounding shell (chat header) read it via the testid contract
     // when xray data hasn't propagated through DocumentsContext yet.
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+    getXrayMock.mockResolvedValue(fakeXray);
 
     render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
@@ -208,7 +192,7 @@ describe("PdfViewerWidget", () => {
   });
 
   it("renders one thumbnail per documentPage with the real pageUrls", async () => {
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+    getXrayMock.mockResolvedValue(fakeXray);
 
     render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
@@ -218,7 +202,7 @@ describe("PdfViewerWidget", () => {
   });
 
   it("clicking a thumbnail switches the main image to that page", async () => {
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+    getXrayMock.mockResolvedValue(fakeXray);
     const user = (await import("@testing-library/user-event")).default.setup();
 
     render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
@@ -232,7 +216,7 @@ describe("PdfViewerWidget", () => {
   });
 
   it("renders an error state if the xray call fails", async () => {
-    (api.groundxDocuments.getGroundXDocumentXray as Mock).mockRejectedValue(new Error("boom"));
+    getXrayMock.mockRejectedValue(new Error("boom"));
 
     render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
 
@@ -242,7 +226,7 @@ describe("PdfViewerWidget", () => {
   // ── clickable-citations Phase 4 — controlled targetPage + bbox overlay
   describe("controlled targetPage + highlightBbox (clickable-citations Phase 4)", () => {
     it("mounts at targetPage when supplied (overrides default initialPage)", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={3} />, { wrapper });
       await waitFor(() =>
@@ -251,7 +235,7 @@ describe("PdfViewerWidget", () => {
     });
 
     it("re-renders with a new targetPage jumps the page image", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       const { rerender } = render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />, { wrapper });
       await waitFor(() =>
@@ -265,7 +249,7 @@ describe("PdfViewerWidget", () => {
     });
 
     it("renders a highlight overlay positioned proportionally when highlightBbox is supplied", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       render(
         <PdfViewerWidget
@@ -292,7 +276,7 @@ describe("PdfViewerWidget", () => {
     // (source chip only). The tier is surfaced as a data attribute so
     // the contract is assertable without computing rendered alpha.
     it("renders a SOLID (tight) highlight for an exact-tier citation", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       render(
         <PdfViewerWidget
@@ -312,7 +296,7 @@ describe("PdfViewerWidget", () => {
     });
 
     it("renders a TRANSLUCENT (chunk-region) highlight for a paraphrase-tier citation", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       render(
         <PdfViewerWidget
@@ -333,7 +317,7 @@ describe("PdfViewerWidget", () => {
     });
 
     it("renders NO inline highlight for an ambient-tier citation (source chip only)", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       render(
         <PdfViewerWidget
@@ -351,7 +335,7 @@ describe("PdfViewerWidget", () => {
     });
 
     it("does NOT render the highlight overlay when highlightBbox is absent or null", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
 
       const { rerender } = render(
         <PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />,
@@ -367,7 +351,7 @@ describe("PdfViewerWidget", () => {
     });
 
     it("thumb clicks still update activePage after a controlled targetPage mount (no lock-out)", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
       const user = (await import("@testing-library/user-event")).default.setup();
 
       render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />, { wrapper });
@@ -389,7 +373,7 @@ describe("PdfViewerWidget", () => {
   // sweep. Implementation is a CSS-animated bar; we assert by testid.
   describe("WF-01 C5: scan animation overlay", () => {
     it("renders the scan-line overlay + sweep beam when showScanAnimation is true", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
       render(
         <PdfViewerWidget scope={docScope("doc-1")} role="anonymous" showScanAnimation />,
         { wrapper },
@@ -403,7 +387,7 @@ describe("PdfViewerWidget", () => {
     });
 
     it("omits the overlay by default", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
       render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
       expect(screen.queryByTestId("pdf-viewer-scan-line")).not.toBeInTheDocument();
@@ -415,13 +399,13 @@ describe("PdfViewerWidget", () => {
     // consumers + tests assert the wiring without waiting on the async xray
     // fetch that the visible overlay needs.
     it("reflects showScanAnimation on the root via data-scan-animation", () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
       render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" showScanAnimation />, { wrapper });
       expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "true");
     });
 
     it("data-scan-animation is 'false' by default", () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
       render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
       expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "false");
     });
@@ -433,7 +417,7 @@ describe("PdfViewerWidget", () => {
   // corresponding `[N]` CiteChip in the answer.
   describe("WF-01 C10: litRegions multi-overlay", () => {
     it("paints one overlay per region on the active page", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
       render(
         <PdfViewerWidget
           scope={docScope("doc-1")}
@@ -454,7 +438,7 @@ describe("PdfViewerWidget", () => {
     });
 
     it("omits regions when litRegions is empty / unset", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(fakeXray);
+      getXrayMock.mockResolvedValue(fakeXray);
       render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
       expect(screen.queryAllByTestId(/^pdf-viewer-lit-region-/).length).toBe(0);

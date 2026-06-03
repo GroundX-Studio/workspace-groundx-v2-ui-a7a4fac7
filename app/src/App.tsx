@@ -2,7 +2,7 @@ import { HelmetProvider } from "react-helmet-async";
 import { RouterProvider } from "react-router-dom";
 import type { FC, ReactNode } from "react";
 
-import { realApi } from "@/api/client";
+import { realApi, type Api } from "@/api/client";
 import { ApiProvider } from "@/contexts/ApiContext";
 import { AuthProvider } from "@/contexts/AuthContext/AuthProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
@@ -34,14 +34,17 @@ import { router, ROUTER_FUTURE_FLAGS } from "@/router/router";
  * the helper had `DocumentsProvider`, this didn't. Lesson burned in
  * — keep the test helper aligned with this component.
  */
-export const AppProviders: FC<{ children: ReactNode }> = ({ children }) => (
+export const AppProviders: FC<{ children: ReactNode; apiClient?: Api }> = ({
+  children,
+  apiClient = realApi,
+}) => (
   <AppErrorBoundary>
     {/* ApiProvider is the OUTERMOST provider (above the consumer providers):
         DocumentsProvider / AuthProvider / OnboardingSessionProvider et al.
         read the injected network client via `useApi()`, so they must sit
         inside it. Production wires the real client (`realApi`); tests inject
         `makeFakeApi` through the render harnesses. */}
-    <ApiProvider value={realApi}>
+    <ApiProvider value={apiClient}>
       <GxThemeProvider>
         {/* UR-03: global MotionConfig — honors OS `prefers-reduced-motion`
           for every descendant `motion.X`. When reduced is on, the

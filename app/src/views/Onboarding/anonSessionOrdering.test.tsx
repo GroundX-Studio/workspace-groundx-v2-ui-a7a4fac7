@@ -31,24 +31,6 @@ const apiMocks = vi.hoisted(() => ({
     ],
     chunks: [],
   })),
-}));
-
-vi.mock("@/api", async () => {
-  const actual = await vi.importActual<typeof import("@/api")>("@/api");
-  return {
-    ...actual,
-    api: {
-      ...actual.api,
-      groundxDocuments: {
-        ...actual.api.groundxDocuments,
-        getGroundXDocument: apiMocks.getGroundXDocument,
-        getGroundXDocumentXray: apiMocks.getGroundXDocumentXray,
-      },
-    },
-  };
-});
-
-vi.mock("@/api/intentLog", () => ({
   recordIntent: vi.fn(async () => {}),
 }));
 
@@ -108,6 +90,13 @@ describe("anon session ordering (#8)", () => {
           },
           chat: {
             ensureServerChatSession,
+          },
+          groundxDocuments: {
+            getGroundXDocument: apiMocks.getGroundXDocument,
+            getGroundXDocumentXray: apiMocks.getGroundXDocumentXray,
+          },
+          intent: {
+            recordIntent: apiMocks.recordIntent,
           },
         },
       },

@@ -3,17 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // DBG-01 (2026-05-28). The reset helper is the single, exhaustive place
 // that returns the app to a first-time anonymous visitor. Forward-binding
 // invariant: any new app-owned session/state key must be cleared here.
-vi.mock("@/api/entities/customerEntity", () => ({
-  resetSession: vi.fn().mockResolvedValue({ success: true }),
-}));
-import { resetSession } from "@/api/entities/customerEntity";
-
 import { clearAppClientStorage, resetExperience } from "./resetExperience";
+
+const resetSession = vi.fn().mockResolvedValue({ success: true });
 
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
-  vi.mocked(resetSession).mockClear();
+  resetSession.mockClear();
+  resetSession.mockResolvedValue({ success: true });
 });
 
 afterEach(() => {
@@ -62,7 +60,7 @@ describe("resetExperience", () => {
     localStorage.setItem("groundx-onboarding.chat-store.v1", "x");
     const navigate = vi.fn();
 
-    await resetExperience({ navigate });
+    await resetExperience({ navigate, resetSession });
 
     expect(localStorage.getItem("groundx-onboarding.chat-store.v1")).toBeNull();
     expect(resetSession).toHaveBeenCalledTimes(1);
@@ -70,9 +68,9 @@ describe("resetExperience", () => {
   });
 
   it("navigates even if the server reset fails (best-effort)", async () => {
-    vi.mocked(resetSession).mockRejectedValueOnce(new Error("network"));
+    resetSession.mockRejectedValueOnce(new Error("network"));
     const navigate = vi.fn();
-    await resetExperience({ navigate });
+    await resetExperience({ navigate, resetSession });
     expect(navigate).toHaveBeenCalledWith("/onboarding");
   });
 });

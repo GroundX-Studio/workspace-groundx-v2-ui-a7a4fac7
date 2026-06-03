@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 
-import { listScenarios } from "@/api/entities/scenarioRegistryEntity";
+import { useApi } from "@/contexts/ApiContext";
 import { readRegistryDemoOverride } from "@/lib/demoState";
 import type { ScenarioConfig } from "@/types/scenarios";
 
@@ -39,6 +39,7 @@ export const ScenarioRegistryProvider: FC<ScenarioRegistryProviderProps> = ({
   initialScenarios,
   forcedDemoState,
 }) => {
+  const apiClient = useApi();
   // forcedDemoState wins over initialScenarios. If neither is set, the
   // provider starts in `idle` and the useEffect kicks off the real fetch.
   const [state, setState] = useState<ScenarioRegistryState>(() => {
@@ -57,13 +58,13 @@ export const ScenarioRegistryProvider: FC<ScenarioRegistryProviderProps> = ({
     }
     setState((previous) => ({ ...previous, status: "loading", error: null }));
     try {
-      const { bucketId, scenarios } = await listScenarios();
+      const { bucketId, scenarios } = await apiClient.scenario.listScenarios();
       setState({ status: "ready", scenarios, bucketId, error: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load scenarios";
       setState({ status: "error", scenarios: [], bucketId: null, error: message });
     }
-  }, [forcedDemoState]);
+  }, [apiClient.scenario, forcedDemoState]);
 
   useEffect(() => {
     // Demo mode: never fetch.

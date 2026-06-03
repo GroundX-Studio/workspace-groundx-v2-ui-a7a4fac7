@@ -9,6 +9,9 @@ describe("makeFakeApi", () => {
     // grouped standalone modules
     expect(vi.isMockFunction(api.chat.sendChatMessage)).toBe(true);
     expect(vi.isMockFunction(api.session.issueOnboardingSession)).toBe(true);
+    expect(vi.isMockFunction(api.scenario.listScenarios)).toBe(true);
+    expect(vi.isMockFunction(api.intent.recordIntent)).toBe(true);
+    expect(vi.isMockFunction(api.telemetry.captureException)).toBe(true);
     expect(vi.isMockFunction(api.report.renderReport)).toBe(true);
     // a heavy spread namespace from the @/api aggregate — proves no enumeration
     expect(vi.isMockFunction(api.groundxBuckets.listGroundXBuckets)).toBe(true);
@@ -33,6 +36,8 @@ describe("makeFakeApi", () => {
       ownerAnonId: "test-anon-owner",
     });
     await expect(api.chat.listChatMessages("chat-1")).resolves.toEqual([]);
+    await expect(api.scenario.listScenarios()).resolves.toEqual({ bucketId: null, scenarios: [] });
+    await expect(api.auth.resetSession()).resolves.toEqual({ success: true });
     await expect(api.auth.getUserData("acct-1")).resolves.toMatchObject({
       customer: { username: "acct-1" },
     });

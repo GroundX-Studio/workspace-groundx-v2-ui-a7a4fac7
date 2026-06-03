@@ -1,27 +1,26 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-// OB-08: adapter errors route to the Sentry wrapper. Mock the module
-// so we can assert the call without shipping events.
-vi.mock("@/lib/sentry", () => ({
-  captureException: vi.fn(),
-  initSentry: vi.fn(() => false),
-}));
-// UI-10b: mock the intent-log POST helper so we can assert it fires
-// on dispatch without hitting the network.
-vi.mock("@/api/intentLog", () => ({
-  recordIntent: vi.fn(async () => {}),
-}));
-import { captureException } from "@/lib/sentry";
-import { recordIntent } from "@/api/intentLog";
+import type { Api } from "@/api/client";
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
 import { OnboardingSessionProvider, useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { withApiProvider } from "@/test/withApiProvider";
 
 import { CanvasOrchestratorProvider, useCanvasOrchestrator } from "./CanvasOrchestratorContext";
 
+const recordIntentMock = vi.fn<
+  Parameters<Api["intent"]["recordIntent"]>,
+  ReturnType<Api["intent"]["recordIntent"]>
+>(async () => {});
+const captureExceptionMock = vi.fn();
+const withCanvasApi = (children: React.ReactNode) =>
+  withApiProvider(children, {
+    intent: { recordIntent: recordIntentMock },
+    telemetry: { captureException: captureExceptionMock },
+  });
+
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+  withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
 );
 
 describe("CanvasOrchestratorContext", () => {
@@ -86,7 +85,7 @@ describe("CanvasOrchestratorContext", () => {
   });
 
   it("swallows synchronous adapter errors, captures to Sentry, and still stamps (OB-08)", () => {
-    vi.mocked(captureException).mockReset();
+    captureExceptionMock.mockReset();
     const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper });
     const boom = new Error("boom");
     act(() => {
@@ -101,7 +100,7 @@ describe("CanvasOrchestratorContext", () => {
       result.current.dispatch({ kind: "showSample", scenario: "utility" });
     });
     expect(result.current.lastAppliedIntentId).toBe(1);
-    expect(captureException).toHaveBeenCalledWith(
+    expect(captureExceptionMock).toHaveBeenCalledWith(
       boom,
       expect.objectContaining({
         context: "CanvasOrchestrator.adapter",
@@ -112,7 +111,7 @@ describe("CanvasOrchestratorContext", () => {
   });
 
   it("captures async adapter rejections to Sentry (OB-08)", async () => {
-    vi.mocked(captureException).mockReset();
+    captureExceptionMock.mockReset();
     const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper });
     const rejection = new Error("async boom");
     act(() => {
@@ -126,7 +125,7 @@ describe("CanvasOrchestratorContext", () => {
     });
     // Promise rejections settle in a microtask — flush.
     await Promise.resolve();
-    expect(captureException).toHaveBeenCalledWith(
+    expect(captureExceptionMock).toHaveBeenCalledWith(
       rejection,
       expect.objectContaining({
         context: "CanvasOrchestrator.adapter",
@@ -161,7 +160,7 @@ describe("CanvasOrchestratorContext", () => {
   // ────────────────────────────────────────────────────────────────
   describe("UI-10 dispatchIntent → ChatStore triple-write", () => {
     const wiredWrapper = ({ children }: { children: React.ReactNode }) => (
-      withApiProvider(<ChatStoreProvider autoSeedDefaultSession>
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
       </ChatStoreProvider>)
     );
@@ -250,7 +249,7 @@ describe("CanvasOrchestratorContext", () => {
     });
 
     it("UI-10b: dispatch POSTs to /api/intent with chatSessionId + source + intent", () => {
-      vi.mocked(recordIntent).mockReset();
+      recordIntentMock.mockReset();
       const { result } = renderHook(useBoth, { wrapper: wiredWrapper });
       act(() => {
         result.current.orchestrator.dispatch(
@@ -258,8 +257,8 @@ describe("CanvasOrchestratorContext", () => {
           "agent",
         );
       });
-      expect(recordIntent).toHaveBeenCalledTimes(1);
-      const call = vi.mocked(recordIntent).mock.calls[0][0];
+      expect(recordIntentMock).toHaveBeenCalledTimes(1);
+      const call = recordIntentMock.mock.calls[0][0];
       expect(call.source).toBe("agent");
       expect(call.intent).toEqual({ kind: "openDocument", documentId: "d-42", page: 7 });
       expect(typeof call.chatSessionId).toBe("string");
@@ -267,22 +266,22 @@ describe("CanvasOrchestratorContext", () => {
     });
 
     it("UI-10b: dispatch does NOT POST when no ChatStoreProvider is mounted (back-compat)", () => {
-      vi.mocked(recordIntent).mockReset();
+      recordIntentMock.mockReset();
       const plainWrapper = ({ children }: { children: React.ReactNode }) => (
-        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
       );
       const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
       act(() => {
         result.current.dispatch({ kind: "openDocument", documentId: "d-1" }, "agent");
       });
-      expect(recordIntent).not.toHaveBeenCalled();
+      expect(recordIntentMock).not.toHaveBeenCalled();
     });
 
     it("when no ChatStoreProvider is mounted, dispatch still works (back-compat)", () => {
       // Plain CanvasOrchestratorProvider without ChatStore in the tree —
       // dispatch should NOT throw. Side effects are silently skipped.
       const plainWrapper = ({ children }: { children: React.ReactNode }) => (
-        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
       );
       const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
       expect(() => {
@@ -297,7 +296,7 @@ describe("CanvasOrchestratorContext", () => {
   // ── post-mvs-cleanup Phase A — chat↔viewer bus ────────────────────
   describe("chat↔viewer bus", () => {
     const busWrapper = ({ children }: { children: React.ReactNode }) => (
-      withApiProvider(<ChatStoreProvider ephemeral>
+      withCanvasApi(<ChatStoreProvider ephemeral>
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
       </ChatStoreProvider>)
     );
@@ -336,7 +335,7 @@ describe("CanvasOrchestratorContext", () => {
 
     it("openCitation and docOpened are no-ops without ChatStoreProvider in the tree (back-compat)", () => {
       const plainWrapper = ({ children }: { children: React.ReactNode }) => (
-        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
       );
       const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
       expect(() => {
@@ -352,7 +351,7 @@ describe("CanvasOrchestratorContext", () => {
   //    viewer pane to the cited doc + page with the bbox highlighted.
   describe("highlightCitation → doc-viewer step transition (clickable-citations Phase 3)", () => {
     const busWrapper = ({ children }: { children: React.ReactNode }) => (
-      withApiProvider(<ChatStoreProvider ephemeral>
+      withCanvasApi(<ChatStoreProvider ephemeral>
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
       </ChatStoreProvider>)
     );
@@ -467,7 +466,7 @@ describe("CanvasOrchestratorContext", () => {
 
     it("dispatching highlightCitation without a ChatStoreProvider is a no-op (back-compat)", () => {
       const plainWrapper = ({ children }: { children: React.ReactNode }) => (
-        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
       );
       const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
       expect(() => {
@@ -484,7 +483,7 @@ describe("CanvasOrchestratorContext", () => {
   //    "each tool performs the same mutation as its UI control" guarantee.
   describe("smart-report Phase 5 — pin + section proposal routing", () => {
     const wiredWrapper = ({ children }: { children: React.ReactNode }) => (
-      withApiProvider(<ChatStoreProvider autoSeedDefaultSession>
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
       </ChatStoreProvider>)
     );
@@ -571,7 +570,7 @@ describe("CanvasOrchestratorContext", () => {
     // only flips non-f1 frames when an entity is active). The scenario seeds
     // at f3 so an advance to f4/f4a is an observable transition.
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
-      withApiProvider(<ChatStoreProvider autoSeedDefaultSession>
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
         <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
@@ -632,7 +631,7 @@ describe("CanvasOrchestratorContext", () => {
 
     it("showIntegrate is a no-op (no throw) without an OnboardingSessionProvider", () => {
       const plainWrapper2 = ({ children }: { children: React.ReactNode }) => (
-        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
       );
       const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper2 });
       expect(() => {
@@ -644,7 +643,7 @@ describe("CanvasOrchestratorContext", () => {
 
     it("showReport / editTemplate are no-ops (no throw) without an OnboardingSessionProvider", () => {
       const plainWrapper = ({ children }: { children: React.ReactNode }) => (
-        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
       );
       const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
       expect(() => {
@@ -663,7 +662,7 @@ describe("CanvasOrchestratorContext", () => {
   // button) uses to open the sign-in gate on the live canvas — no parallel path.
   describe("openGate intent routes to OnboardingSession.openGate", () => {
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
-      withApiProvider(<ChatStoreProvider autoSeedDefaultSession>
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
         <OnboardingSessionProvider initialFrame="f5" initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
@@ -687,7 +686,7 @@ describe("CanvasOrchestratorContext", () => {
 
     it("openGate is a no-op (no throw) without an OnboardingSessionProvider", () => {
       const plainWrapper = ({ children }: { children: React.ReactNode }) => (
-        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
       );
       const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
       expect(() => {

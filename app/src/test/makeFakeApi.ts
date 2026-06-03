@@ -69,6 +69,9 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
   if (name === "issueOnboardingSession" || name === "ensureAnonSession") {
     return { sessionId: "test-anon-session", anonymous: true };
   }
+  if (name === "listScenarios") {
+    return { bucketId: null, scenarios: [] };
+  }
   if (name === "createChatSession") {
     const input = args[0] as { id?: string } | undefined;
     return {
@@ -104,6 +107,8 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
     if (path.includes("partnerProjects")) return { projects: [] };
     return [];
   }
+  if (name === "resetSession") return { success: true };
+  if (name === "captureException") return undefined;
   if (name.startsWith("reset") || name.startsWith("confirm")) return { message: "OK" };
   if (name.startsWith("delete") || name.startsWith("remove") || name === "logout") return { success: true };
   return undefined;

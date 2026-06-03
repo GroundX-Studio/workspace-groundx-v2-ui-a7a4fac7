@@ -1,10 +1,9 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
-import { recordIntent } from "@/api/intentLog";
 import type { NormalizedBbox } from "@groundx/shared";
+import { useApi } from "@/contexts/ApiContext";
 import { useChatStoreOptional } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
-import { captureException } from "@/lib/sentry";
 
 import type { CanvasAdapter, CanvasIntent, CanvasOrchestratorApi, IntentSource, StampedIntent } from "./types";
 
@@ -32,6 +31,7 @@ interface CanvasOrchestratorProviderProps {
 }
 
 export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = ({ children, now = Date.now }) => {
+  const apiClient = useApi();
   const adaptersRef = useRef(new Map<CanvasIntent["kind"], CanvasAdapter>());
   const intentCounterRef = useRef(0);
   const [lastAppliedIntentId, setLastAppliedIntentId] = useState<number | null>(null);
@@ -94,7 +94,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // Fire-and-forget: failure routes to Sentry inside recordIntent;
         // never blocks the dispatch path.
         if (chatStore.state.activeSessionId) {
-          void recordIntent({
+          void apiClient.intent.recordIntent({
             chatSessionId: chatStore.state.activeSessionId,
             source,
             intent,
@@ -309,7 +309,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
           const maybe = adapter.apply(intent as never);
           if (maybe && typeof (maybe as Promise<void>).catch === "function") {
             (maybe as Promise<void>).catch((error) => {
-              captureException(error, {
+              apiClient.telemetry.captureException(error, {
                 context: "CanvasOrchestrator.adapter",
                 phase: "async-rejection",
                 intentKind: intent.kind,
@@ -317,7 +317,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             });
           }
         } catch (error) {
-          captureException(error, {
+          apiClient.telemetry.captureException(error, {
             context: "CanvasOrchestrator.adapter",
             phase: "sync-throw",
             intentKind: intent.kind,
@@ -327,7 +327,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
       setLastAppliedIntentId(stamped.intentId);
       return stamped;
     },
-    [now, chatStore, onboardingSession]
+    [apiClient.intent, apiClient.telemetry, now, chatStore, onboardingSession]
   );
 
   // ── post-mvs-cleanup Phase A — chat↔viewer bus convenience channels ──

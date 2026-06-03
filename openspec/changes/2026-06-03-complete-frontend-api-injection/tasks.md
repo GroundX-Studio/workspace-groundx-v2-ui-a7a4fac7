@@ -58,18 +58,18 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 
 ## T2 - Migrate scenario, canvas intent, reset, sign-up, and PDF viewer consumers (SEQUENTIAL)
 
-- [ ] **Failing test first:** retarget one scenario/canvas/widget test to the
+- [x] **Failing test first:** retarget one scenario/canvas/widget test to the
       injected fake and prove it fails before its consumer switches to `useApi()`.
-- [ ] Add only the scenario, canvas intent, reset/sign-up helper, and PDF/viewer
+- [x] Add only the scenario, canvas intent, reset/sign-up helper, and PDF/viewer
       grouped members needed by this slice to `realApi` and `makeFakeApi`.
-- [ ] Migrate `ScenarioRegistryContext` to the injected scenario group.
-- [ ] Migrate `CanvasOrchestratorContext` and related intent tests to injected
+- [x] Migrate `ScenarioRegistryContext` to the injected scenario group.
+- [x] Migrate `CanvasOrchestratorContext` and related intent tests to injected
       canvas/intent and telemetry groups instead of direct `recordIntent` /
       `captureException` imports.
-- [ ] Migrate `resetExperience` and `SignUpWidget` customer-auth/reset calls to
+- [x] Migrate `resetExperience` and `SignUpWidget` customer-auth/reset calls to
       injected auth/reset helpers while preserving exhaustive debug-reset
       behavior.
-- [ ] Migrate `PdfViewerWidget` tests and any PDF-viewer app-facing network calls
+- [x] Migrate `PdfViewerWidget` tests and any PDF-viewer app-facing network calls
       to the injected viewer/document group.
 - **Adversarial review:** grep these domains for direct app-facing network
   imports and Sentry mocks; run focused scenario registry, canvas orchestrator,

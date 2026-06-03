@@ -1,7 +1,9 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { describe, expect, it, vi } from "vitest";
 import type { Catalog } from "@groundx/shared";
 
+import { withApiProvider } from "@/test/withApiProvider";
 import type { ScenarioConfig } from "@/types/scenarios";
 import type { ScenarioRegistryState } from "./types";
 import { ScenarioRegistryProvider, useScenarioRegistry } from "./ScenarioRegistryContext";
@@ -16,6 +18,11 @@ function Probe() {
     </div>
   );
 }
+
+const renderWithApi = (
+  ui: ReactElement,
+  api?: Parameters<typeof withApiProvider>[1],
+) => render(withApiProvider(ui, api));
 
 // ── RCC Phase 2: the ready-state data view satisfies Catalog<ScenarioConfig> ──
 function CatalogProbe() {
@@ -34,7 +41,7 @@ function CatalogProbe() {
 
 describe("ScenarioRegistryProvider", () => {
   it("uses initialScenarios when no override is provided", () => {
-    render(
+    renderWithApi(
       <ScenarioRegistryProvider
         initialScenarios={[
           { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
@@ -54,7 +61,7 @@ describe("ScenarioRegistryProvider", () => {
       bucketId: null,
       error: "Demo: bucket unreachable",
     };
-    render(
+    renderWithApi(
       <ScenarioRegistryProvider
         initialScenarios={[
           { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
@@ -71,7 +78,7 @@ describe("ScenarioRegistryProvider", () => {
 
   it("supports forcing the loading state", () => {
     const forced: ScenarioRegistryState = { status: "loading", scenarios: [], bucketId: null, error: null };
-    render(
+    renderWithApi(
       <ScenarioRegistryProvider forcedDemoState={forced}>
         <Probe />
       </ScenarioRegistryProvider>
@@ -81,7 +88,7 @@ describe("ScenarioRegistryProvider", () => {
 
   it("supports forcing the empty-ready state", () => {
     const forced: ScenarioRegistryState = { status: "ready", scenarios: [], bucketId: null, error: null };
-    render(
+    renderWithApi(
       <ScenarioRegistryProvider forcedDemoState={forced}>
         <Probe />
       </ScenarioRegistryProvider>
@@ -91,7 +98,7 @@ describe("ScenarioRegistryProvider", () => {
   });
 
   it("exposes all()/byId so the ready-state view satisfies Catalog<ScenarioConfig>", () => {
-    render(
+    renderWithApi(
       <ScenarioRegistryProvider
         initialScenarios={[
           { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
@@ -104,5 +111,25 @@ describe("ScenarioRegistryProvider", () => {
     expect(screen.getByTestId("all-count")).toHaveTextContent("2");
     expect(screen.getByTestId("byid-x")).toHaveTextContent("x");
     expect(screen.getByTestId("byid-missing")).toHaveTextContent("none");
+  });
+
+  it("fetches scenarios through the injected scenario client", async () => {
+    const listScenarios = vi.fn(async () => ({
+      bucketId: 28454,
+      scenarios: [
+        { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
+      ],
+    }));
+
+    renderWithApi(
+      <ScenarioRegistryProvider>
+        <Probe />
+      </ScenarioRegistryProvider>,
+      { scenario: { listScenarios } },
+    );
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"));
+    expect(screen.getByTestId("count")).toHaveTextContent("1");
+    expect(listScenarios).toHaveBeenCalledTimes(1);
   });
 });

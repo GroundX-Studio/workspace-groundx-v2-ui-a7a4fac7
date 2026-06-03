@@ -15,7 +15,7 @@
  * file.
  */
 
-import { resetSession } from "@/api/entities/customerEntity";
+import { realApi } from "@/api/client";
 
 /**
  * Storage-key prefixes the app owns. Any localStorage/sessionStorage
@@ -57,6 +57,8 @@ export function clearAppClientStorage(): void {
 export interface ResetExperienceOptions {
   /** Navigation seam (injectable for tests). Defaults to a hard nav. */
   navigate?: (url: string) => void;
+  /** Server reset seam. Defaults to the production injected client composition. */
+  resetSession?: () => Promise<unknown>;
 }
 
 /**
@@ -69,7 +71,7 @@ export async function resetExperience(options: ResetExperienceOptions = {}): Pro
   try {
     // Server clears the httpOnly session cookie (client JS can't) + csrf,
     // and drops the session row, so the next request mints a fresh anon id.
-    await resetSession();
+    await (options.resetSession ?? realApi.auth.resetSession)();
   } catch {
     // Best-effort: a reset must still land the user on a fresh F1 even
     // if the network call fails (the client storage is already cleared).

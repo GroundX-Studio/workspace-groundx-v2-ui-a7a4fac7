@@ -18,54 +18,8 @@
  */
 
 import { act, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-
-// Mock the GroundX API barrel so providers don't fire network on mount.
-vi.mock("@/api", () => ({
-  api: {
-    groundxBuckets: {
-      listGroundXBuckets: vi.fn(),
-      getGroundXBucket: vi.fn(),
-      createGroundXBucket: vi.fn(),
-      updateGroundXBucket: vi.fn(),
-      deleteGroundXBucket: vi.fn(),
-    },
-    partnerBuckets: {
-      listPartnerBuckets: vi.fn(),
-      getPartnerBucket: vi.fn(),
-      createPartnerBucket: vi.fn(),
-      updatePartnerBucket: vi.fn(),
-      deletePartnerBucket: vi.fn(),
-    },
-    groundxDocuments: {
-      listGroundXDocuments: vi.fn(),
-      getGroundXDocument: vi.fn(),
-      ingestGroundXRemoteDocuments: vi.fn(),
-      crawlGroundXWebsite: vi.fn(),
-      copyGroundXDocuments: vi.fn(),
-      updateGroundXDocuments: vi.fn(),
-      deleteGroundXDocument: vi.fn(),
-      deleteGroundXDocuments: vi.fn(),
-      lookupGroundXDocument: vi.fn(),
-      listGroundXProcesses: vi.fn(),
-      getGroundXProcessingStatus: vi.fn(),
-      cancelGroundXProcess: vi.fn(),
-      getGroundXDocumentXray: vi.fn(),
-      getGroundXDocumentExtract: vi.fn(),
-    },
-    confirmUserChangingPassword: vi.fn(),
-    getUserData: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-    register: vi.fn(),
-    resetUserPassword: vi.fn(),
-    updateAppMetadata: vi.fn(),
-  },
-}));
-
-vi.mock("@/api/entities/scenarioRegistryEntity", () => ({
-  listScenarios: vi.fn().mockResolvedValue({ scenarios: [], bucketId: null }),
-}));
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppProviders } from "./App";
 import { useAppMode } from "@/contexts/AppModeContext";
@@ -73,7 +27,7 @@ import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
-import { api } from "@/api";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 /**
  * Probe that touches every context a frame view / production widget
@@ -93,10 +47,27 @@ const ContextProbe = () => {
   return <div data-testid="probe-ok">all contexts available</div>;
 };
 
+const getXrayMock = vi.fn();
+const listScenariosMock = vi.fn();
+const renderAppProviders = (children: ReactNode) =>
+  render(
+    <AppProviders
+      apiClient={makeFakeApi({
+        groundxDocuments: { getGroundXDocumentXray: getXrayMock },
+        scenario: { listScenarios: listScenariosMock },
+      })}
+    >
+      {children}
+    </AppProviders>,
+  );
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
-  (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue({
+  listScenariosMock.mockReset();
+  listScenariosMock.mockResolvedValue({ scenarios: [], bucketId: null });
+  getXrayMock.mockReset();
+  getXrayMock.mockResolvedValue({
     fileName: "x.pdf",
     fileType: "pdf",
     sourceUrl: "https://example.com/x.pdf",
@@ -108,11 +79,7 @@ beforeEach(() => {
 describe("App provider tree (smoke)", () => {
   it("mounts the production AppProviders chain without throwing", async () => {
     await act(async () => {
-      render(
-        <AppProviders>
-          <ContextProbe />
-        </AppProviders>,
-      );
+      renderAppProviders(<ContextProbe />);
     });
     expect(screen.getByTestId("probe-ok")).toBeInTheDocument();
     expect(screen.queryByTestId("app-error-boundary")).not.toBeInTheDocument();
@@ -127,13 +94,11 @@ describe("App provider tree (smoke)", () => {
       "@/components/viewer-widgets/PdfViewer/PdfViewerWidget"
     );
     await act(async () => {
-      render(
-        <AppProviders>
-          <PdfViewerWidget
-            scope={{ type: "documents", documentIds: ["probe-doc"] }}
-            role="anonymous"
-          />
-        </AppProviders>,
+      renderAppProviders(
+        <PdfViewerWidget
+          scope={{ type: "documents", documentIds: ["probe-doc"] }}
+          role="anonymous"
+        />,
       );
     });
     expect(screen.queryByTestId("app-error-boundary")).not.toBeInTheDocument();

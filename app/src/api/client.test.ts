@@ -42,6 +42,18 @@ describe("realApi auth client", () => {
       updateAppMetadata: expect.any(Function),
       resetUserPassword: expect.any(Function),
       confirmUserChangingPassword: expect.any(Function),
+      resetSession: expect.any(Function),
+    });
+  });
+});
+
+describe("realApi scenario and telemetry clients", () => {
+  it("exposes scenario catalog and runtime telemetry under grouped members", () => {
+    expect(realApi.scenario).toMatchObject({
+      listScenarios: expect.any(Function),
+    });
+    expect(realApi.telemetry).toMatchObject({
+      captureException: expect.any(Function),
     });
   });
 });

@@ -9,11 +9,14 @@ import {
 } from "@/api/chatSessions";
 import { listChatSessions } from "@/api/chatSessionsList";
 import { claimAnonymousChat } from "@/api/claimAnonymousChat";
+import { resetSession } from "@/api/entities/customerEntity";
 import { issueOnboardingSession, type OnboardingSessionResponse } from "@/api/entities/onboardingSessionEntity";
+import { listScenarios } from "@/api/entities/scenarioRegistryEntity";
 import { extractField } from "@/api/extractField";
 import { recordIntent } from "@/api/intentLog";
 import { renderReport, saveReportTemplate } from "@/api/smartReport";
 import { recordViewerEvent } from "@/api/viewerEvents";
+import { captureException } from "@/lib/sentry";
 
 let pendingAnonSession: Promise<OnboardingSessionResponse> | null = null;
 let resolvedAnonSession: OnboardingSessionResponse | null = null;
@@ -88,6 +91,7 @@ export const realApi = {
     updateAppMetadata: api.updateAppMetadata,
     resetUserPassword: api.resetUserPassword,
     confirmUserChangingPassword: api.confirmUserChangingPassword,
+    resetSession,
   },
   session: {
     issueOnboardingSession,
@@ -108,6 +112,12 @@ export const realApi = {
   },
   intent: {
     recordIntent,
+  },
+  scenario: {
+    listScenarios,
+  },
+  telemetry: {
+    captureException,
   },
   report: {
     renderReport: renderReportWithClientEnsure,
