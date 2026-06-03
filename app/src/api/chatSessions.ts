@@ -22,9 +22,10 @@
  */
 
 import { csrfFetch } from "@/api/csrfFetch";
+import { ChatApiError } from "@/api/chatErrors";
 import { captureException } from "@/lib/sentry";
 
-interface CreateChatSessionInput {
+export interface CreateChatSessionInput {
   id: string;
   onboardingSessionId?: string;
   title: string;
@@ -38,7 +39,6 @@ interface CreateChatSessionInput {
 // `tier` drives highlight precision; both optional. Used directly as `Citation`
 // (no `ChatCitation` alias).
 import {
-  ApiError,
   chatReplySchema,
   createChatSessionResultSchema,
   type ChatReply as SharedChatReply,
@@ -52,6 +52,9 @@ import {
   type SuggestedAction,
   type ToolFailure as SharedToolFailure,
 } from "@groundx/shared";
+
+export { ChatApiError, chatErrorToUserCopy } from "@/api/chatErrors";
+export type { ChatErrorKind, ChatErrorMapping } from "@/api/chatErrors";
 
 // 2026-05-31-chat-wire-types-shared — the `POST /api/chat-sessions` result was
 // declared on BOTH sides of the wire. It is now single-sourced on
@@ -128,129 +131,85 @@ export interface SendChatMessageInput {
   activeStepKind?: string | null;
 }
 
-export class ChatApiError extends ApiError {
-  constructor(message: string, status: number, detail: unknown) {
-    super(message, status, detail);
-    this.name = "ChatApiError";
-  }
+export interface ChatSessionEnsureClient {
+  ensureServerChatSession(input: CreateChatSessionInput): Promise<void>;
+  ensureChatSessionForSend(input: CreateChatSessionInput): Promise<void>;
+  awaitChatSessionEnsured(chatSessionId: string): Promise<void>;
+  markChatSessionEnsured(chatSessionId: string): void;
+  forgetChatSessionEnsured(chatSessionId: string): void;
+  resetEnsuredChatSessions(): void;
 }
 
-/**
- * CF-08 — per-status error → user-facing UX mapping. The chat surface
- * (F2, F5, future steady-mode chat) consumes this in catch sites to
- * render the right copy without leaking raw status codes or stack
- * traces. Status branches:
- *
- *   401   → "sign in to continue" — re-auth flow surface (UI decides
- *           whether to open the gate or redirect to /auth/login).
- *   501   → "I can't answer that yet" — mode-not-wired surface
- *           (structured/hybrid in some deployments).
- *   504   → "took too long" — retryable, retry chip recommended.
- *   400   → "programming error" — developer-visible; the request
- *           should not have shipped.
- *   404   → "session row missing" — recommend refresh (the chatHandler
- *           cache invalidation already happens; this is the user copy).
- *   5xx   → "try again in a moment" — retryable.
- *   network (no status, e.g. fetch threw) → "couldn't reach the chat".
- *   anything else → generic.
- *
- * `retryable: true` is a hint, not an instruction — UIs decide whether
- * to show a retry chip, auto-retry, or just surface the message.
- */
-export type ChatErrorKind =
-  | "reauth"
-  | "not-yet"
-  | "timeout"
-  | "upstream"
-  | "bug"
-  | "not-found"
-  | "network"
-  | "unknown";
+export function createChatSessionEnsureClient(
+  createChatSessionFn: (input: CreateChatSessionInput) => Promise<CreateChatSessionResult> = createChatSession,
+): ChatSessionEnsureClient {
+  const ensuredSessionIds = new Set<string>();
+  const pendingEnsures = new Map<string, Promise<void>>();
 
-export interface ChatErrorMapping {
-  kind: ChatErrorKind;
-  message: string;
-  retryable: boolean;
-}
+  const forgetChatSessionEnsured = (chatSessionId: string): void => {
+    ensuredSessionIds.delete(chatSessionId);
+    pendingEnsures.delete(chatSessionId);
+  };
 
-export function chatErrorToUserCopy(err: unknown): ChatErrorMapping {
-  if (err instanceof ChatApiError) {
-    const status = err.status;
-    if (status === 401) {
-      return {
-        kind: "reauth",
-        message: "Please sign in to continue this conversation.",
-        retryable: false,
-      };
+  const createAndMark = async (input: CreateChatSessionInput, throwOnFailure: boolean): Promise<void> => {
+    try {
+      await createChatSessionFn(input);
+      ensuredSessionIds.add(input.id);
+    } catch (err) {
+      if (throwOnFailure) throw err;
+    } finally {
+      pendingEnsures.delete(input.id);
     }
-    if (status === 501) {
-      return {
-        kind: "not-yet",
-        message: "I can't answer that yet — that mode isn't available yet in this deployment.",
-        retryable: false,
-      };
+  };
+
+  const ensureServerChatSession = async (input: CreateChatSessionInput): Promise<void> => {
+    if (ensuredSessionIds.has(input.id)) return;
+    const existing = pendingEnsures.get(input.id);
+    if (existing) return existing;
+    const p = createAndMark(input, false);
+    pendingEnsures.set(input.id, p);
+    return p;
+  };
+
+  const ensureChatSessionForSend = async (input: CreateChatSessionInput): Promise<void> => {
+    if (ensuredSessionIds.has(input.id)) return;
+    const existing = pendingEnsures.get(input.id);
+    if (existing) {
+      await existing;
+      if (ensuredSessionIds.has(input.id)) return;
     }
-    if (status === 504) {
-      return {
-        kind: "timeout",
-        message: "That took too long — want to try again?",
-        retryable: true,
-      };
-    }
-    if (status === 400) {
-      return {
-        kind: "bug",
-        message: "Invalid request (programming error). Please report this if it keeps happening.",
-        retryable: false,
-      };
-    }
-    if (status === 404) {
-      return {
-        kind: "not-found",
-        message: "This chat session is no longer on the server — please refresh to start a new one.",
-        retryable: false,
-      };
-    }
-    if (status >= 500) {
-      return {
-        kind: "upstream",
-        message: "Something went wrong on our side — try again in a moment.",
-        retryable: true,
-      };
-    }
-  }
-  // Network-layer throws (fetch rejected before getting a status) come
-  // through as plain Errors. Distinguish from "really unknown" by
-  // matching the common runtime messages.
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase();
-    if (
-      msg.includes("failed to fetch") ||
-      msg.includes("networkerror") ||
-      msg.includes("network request failed") ||
-      msg.includes("load failed")
-    ) {
-      return {
-        kind: "network",
-        message: "Couldn't reach the chat service — check your connection and try again.",
-        retryable: true,
-      };
-    }
-  }
+    const p = createAndMark(input, true);
+    pendingEnsures.set(input.id, p);
+    return p;
+  };
+
+  const awaitChatSessionEnsured = (chatSessionId: string): Promise<void> => {
+    if (ensuredSessionIds.has(chatSessionId)) return Promise.resolve();
+    const pending = pendingEnsures.get(chatSessionId);
+    if (pending) return pending;
+    return Promise.resolve();
+  };
+
   return {
-    kind: "unknown",
-    message: "Something went wrong — please try again in a moment.",
-    retryable: false,
+    ensureServerChatSession,
+    ensureChatSessionForSend,
+    awaitChatSessionEnsured,
+    markChatSessionEnsured: (chatSessionId: string) => {
+      ensuredSessionIds.add(chatSessionId);
+    },
+    forgetChatSessionEnsured,
+    resetEnsuredChatSessions: () => {
+      ensuredSessionIds.clear();
+      pendingEnsures.clear();
+    },
   };
 }
 
-const ensuredSessionIds = new Set<string>();
-const pendingEnsures = new Map<string, Promise<void>>();
+const legacyChatSessionEnsure = createChatSessionEnsureClient();
 
 /** Test-only: forget which sessions have been ensured. */
 export function __resetEnsuredChatSessions(): void {
-  ensuredSessionIds.clear();
-  pendingEnsures.clear();
+  legacyChatSessionEnsure.resetEnsuredChatSessions();
 }
 
 /**
@@ -261,7 +220,7 @@ export function __resetEnsuredChatSessions(): void {
  * ensure-create round trip every test.
  */
 export function __markChatSessionEnsured(chatSessionId: string): void {
-  ensuredSessionIds.add(chatSessionId);
+  legacyChatSessionEnsure.markChatSessionEnsured(chatSessionId);
 }
 
 /**
@@ -279,27 +238,8 @@ export function __markChatSessionEnsured(chatSessionId: string): void {
  * (below) before their main POST/PUT/PATCH so they don't race
  * past the ensure POST and 404.
  */
-export async function ensureServerChatSession(
-  input: CreateChatSessionInput,
-): Promise<void> {
-  if (ensuredSessionIds.has(input.id)) return;
-  const existing = pendingEnsures.get(input.id);
-  if (existing) return existing;
-  const p = (async () => {
-    try {
-      await createChatSession(input);
-      ensuredSessionIds.add(input.id);
-    } catch {
-      // Swallow — next call retries. The fire-and-forget helpers
-      // will see no pending promise + an unensured id and fire
-      // optimistically; their own 404 handler captures to Sentry.
-    } finally {
-      pendingEnsures.delete(input.id);
-    }
-  })();
-  pendingEnsures.set(input.id, p);
-  return p;
-}
+export const ensureServerChatSession = (input: CreateChatSessionInput): Promise<void> =>
+  legacyChatSessionEnsure.ensureServerChatSession(input);
 
 /**
  * Wait for the in-flight ensure POST (if any) to complete before
@@ -312,10 +252,7 @@ export async function ensureServerChatSession(
  * dependent write lands AFTER the row exists server-side.
  */
 export function awaitChatSessionEnsured(chatSessionId: string): Promise<void> {
-  if (ensuredSessionIds.has(chatSessionId)) return Promise.resolve();
-  const pending = pendingEnsures.get(chatSessionId);
-  if (pending) return pending;
-  return Promise.resolve();
+  return legacyChatSessionEnsure.awaitChatSessionEnsured(chatSessionId);
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -374,17 +311,17 @@ export async function createChatSession(input: CreateChatSessionInput): Promise<
  *     ownership flip we missed), we DROP the id from the cache and
  *     re-throw, so the next call re-creates the row.
  */
-export async function sendChatMessage(input: SendChatMessageInput): Promise<SendChatMessageResult> {
-  if (!ensuredSessionIds.has(input.chatSessionId)) {
-    await createChatSession({
-      id: input.chatSessionId,
-      onboardingSessionId: input.sessionMeta.onboardingSessionId,
-      title: input.sessionMeta.title,
-      isOnboarding: input.sessionMeta.isOnboarding,
-      activeEntityKey: input.sessionMeta.activeEntityKey ?? null,
-    });
-    ensuredSessionIds.add(input.chatSessionId);
-  }
+export async function sendChatMessage(
+  input: SendChatMessageInput,
+  chatSessionEnsure: ChatSessionEnsureClient = legacyChatSessionEnsure,
+): Promise<SendChatMessageResult> {
+  await chatSessionEnsure.ensureChatSessionForSend({
+    id: input.chatSessionId,
+    onboardingSessionId: input.sessionMeta.onboardingSessionId,
+    title: input.sessionMeta.title,
+    isOnboarding: input.sessionMeta.isOnboarding,
+    activeEntityKey: input.sessionMeta.activeEntityKey ?? null,
+  });
 
   try {
     const result = await postJson<SendChatMessageResult>("/api/chat/messages", {
@@ -426,7 +363,7 @@ export async function sendChatMessage(input: SendChatMessageInput): Promise<Send
     if (err instanceof ChatApiError && err.status === 404) {
       // Server no longer has this row — invalidate the cache so the
       // next send re-creates it.
-      ensuredSessionIds.delete(input.chatSessionId);
+      chatSessionEnsure.forgetChatSessionEnsured(input.chatSessionId);
     }
     // CF-13: ship every chat-send failure to Sentry. The wrapper is a
     // no-op when DSN is unset, so this is safe in dev/test. Extras
@@ -489,11 +426,14 @@ interface ListChatMessagesResponse {
  * the empty-thread state without a try/catch. Other non-2xx
  * statuses throw `ChatApiError`.
  */
-export async function listChatMessages(chatSessionId: string): Promise<PersistedChatMessage[]> {
+export async function listChatMessages(
+  chatSessionId: string,
+  chatSessionEnsure: ChatSessionEnsureClient = legacyChatSessionEnsure,
+): Promise<PersistedChatMessage[]> {
   // Self-trigger ensure-create + wait so this GET doesn't race past
   // the chat_sessions row creation. Same pattern as the fire-and-forget
   // helpers — see ensureServerChatSession docstring.
-  await ensureServerChatSession({
+  await chatSessionEnsure.ensureServerChatSession({
     id: chatSessionId,
     onboardingSessionId: chatSessionId,
     title: "Onboarding",

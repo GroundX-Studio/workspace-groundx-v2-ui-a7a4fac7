@@ -24,15 +24,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  chatErrorToUserCopy,
-  listChatMessages,
-  sendChatMessage,
-  type ChatDispatchedIntent,
-  type ChatSuggestedAction,
-  type ProposedSchemaField,
-} from "@/api/chatSessions";
+import { chatErrorToUserCopy } from "@/api/chatErrors";
+import type { ChatDispatchedIntent, ChatSuggestedAction, ProposedSchemaField } from "@/api/chatSessions";
 import type { Citation } from "@groundx/shared";
+import { useApi } from "@/contexts/ApiContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
@@ -181,6 +176,7 @@ export function useConversation(
   chatSessionId: string | null,
   opts?: ConversationOptions,
 ): ConversationApi {
+  const api = useApi();
   const { state: chatState, enqueueFieldProposal, appendMessage } = useChatStore();
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
   const { dispatch: dispatchIntent } = useCanvasOrchestrator();
@@ -235,7 +231,7 @@ export function useConversation(
     let cancelled = false;
     (async () => {
       try {
-        const messages = await listChatMessages(chatSessionId);
+        const messages = await api.chat.listChatMessages(chatSessionId);
         if (cancelled || messages.length === 0) return;
         const turns: LiveTurn[] = messages
           .filter((m) => m.role === "user" || m.role === "assistant")
@@ -256,7 +252,7 @@ export function useConversation(
     return () => {
       cancelled = true;
     };
-  }, [chatSessionId]);
+  }, [api.chat, chatSessionId]);
 
   // `schema-agent-chat-affordances` — project ChatStore-emitted agent
   // messages (id prefix `agent-`) into the rendered live-turns list. The
@@ -312,7 +308,7 @@ export function useConversation(
         const activeStepKind =
           stepIdx >= 0 ? activeChatSession?.viewer.history[stepIdx]?.kind ?? null : null;
         const scopeHint = scopeHintRef.current;
-        const result = await sendChatMessage({
+        const result = await api.chat.sendChatMessage({
           chatSessionId,
           newUserMessage: trimmed,
           sessionMeta: {
@@ -377,7 +373,7 @@ export function useConversation(
         setSending(false);
       }
     },
-    [sending, chatSessionId, activeChatSession, enqueueFieldProposal, appendMessage, dispatchIntent],
+    [api.chat, sending, chatSessionId, activeChatSession, enqueueFieldProposal, appendMessage, dispatchIntent],
   );
 
   return { liveTurns, sending, firstUserMessageSent, send, handleSuggestedAction, seedTurns };

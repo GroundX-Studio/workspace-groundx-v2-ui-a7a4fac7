@@ -2,14 +2,15 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
+import { withApiProvider } from "@/test/withApiProvider";
 
 import { SessionSwitcher } from "./SessionSwitcher";
 
 function Harness({ children }: { children: React.ReactNode }) {
-  return (
+  return withApiProvider(
     <ChatStoreProvider initialOwnerKey="anon-test" autoSeedDefaultSession>
       {children}
-    </ChatStoreProvider>
+    </ChatStoreProvider>,
   );
 }
 

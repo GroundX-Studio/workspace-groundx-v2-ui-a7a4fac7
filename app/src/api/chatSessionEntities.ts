@@ -20,7 +20,7 @@
  * read `listChatSessionEntities` every turn — and always got [].
  */
 
-import { ensureServerChatSession } from "@/api/chatSessions";
+import { ensureServerChatSession, type ChatSessionEnsureClient } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
 
@@ -36,10 +36,15 @@ export interface UpsertChatSessionEntityInput {
   extractedValuesJson?: string | null;
 }
 
-export async function upsertChatSessionEntity(input: UpsertChatSessionEntityInput): Promise<void> {
+type ChatSessionEnsureDependency = Pick<ChatSessionEnsureClient, "ensureServerChatSession">;
+
+export async function upsertChatSessionEntity(
+  input: UpsertChatSessionEntityInput,
+  chatSessionEnsure: ChatSessionEnsureDependency = { ensureServerChatSession },
+): Promise<void> {
   // Self-trigger ensure-create + wait. See viewerEvents.ts for the
   // race rationale; same pattern here.
-  await ensureServerChatSession({
+  await chatSessionEnsure.ensureServerChatSession({
     id: input.chatSessionId,
     onboardingSessionId: input.chatSessionId,
     title: "Onboarding",

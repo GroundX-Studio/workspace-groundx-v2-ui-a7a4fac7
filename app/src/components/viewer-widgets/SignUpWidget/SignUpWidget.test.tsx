@@ -48,13 +48,15 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
-vi.mock("@/api/entities/customerEntity", () => ({
-  register: vi.fn(),
-}));
-
-vi.mock("@/api/claimAnonymousChat", () => ({
-  claimAnonymousChat: vi.fn(),
-}));
+vi.mock("@/api/entities/customerEntity", async () => {
+  const actual = await vi.importActual<typeof import("@/api/entities/customerEntity")>(
+    "@/api/entities/customerEntity",
+  );
+  return {
+    ...actual,
+    register: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/sentry", () => ({
   captureException: vi.fn(),
@@ -88,17 +90,21 @@ vi.mock("@/contexts/OnboardingSessionContext", () => ({
 }));
 
 import { register } from "@/api/entities/customerEntity";
-import { claimAnonymousChat } from "@/api/claimAnonymousChat";
+import { withApiProvider } from "@/test/withApiProvider";
 
 import { SignUpWidget } from "./SignUpWidget";
 
 const mockedRegister = vi.mocked(register);
-const mockedClaim = vi.mocked(claimAnonymousChat);
+const mockedClaim = vi.fn();
 
 const NONE_SCOPE: WidgetScope = { type: "none" };
 
 const renderWidget = (role: WidgetRole = "anonymous", scope: WidgetScope = NONE_SCOPE): ReturnType<typeof render> =>
-  render(<SignUpWidget role={role} scope={scope} />);
+  render(
+    withApiProvider(<SignUpWidget role={role} scope={scope} />, {
+      chat: { claimAnonymousChat: mockedClaim },
+    }),
+  );
 
 const fillForm = (overrides?: { confirm?: string; password?: string }) => {
   fireEvent.change(screen.getByTestId("signup-first-input"), { target: { value: "Pat" } });
@@ -161,7 +167,7 @@ describe("SignUpWidget", () => {
 
   it("happy-path submit: register → claim → promoteToSignedIn → commitGate('register')", async () => {
     mockedRegister.mockResolvedValueOnce({} as Awaited<ReturnType<typeof register>>);
-    mockedClaim.mockResolvedValueOnce(undefined as unknown as Awaited<ReturnType<typeof claimAnonymousChat>>);
+    mockedClaim.mockResolvedValueOnce(undefined);
     renderWidget();
     fillForm();
     fireEvent.click(screen.getByTestId("signup-submit"));
@@ -182,7 +188,7 @@ describe("SignUpWidget", () => {
 
   it("commits the gate from gate-state regardless of role (member role, open gate)", async () => {
     mockedRegister.mockResolvedValueOnce({} as Awaited<ReturnType<typeof register>>);
-    mockedClaim.mockResolvedValueOnce(undefined as unknown as Awaited<ReturnType<typeof claimAnonymousChat>>);
+    mockedClaim.mockResolvedValueOnce(undefined);
     renderWidget("member");
     fillForm();
     fireEvent.click(screen.getByTestId("signup-submit"));
@@ -216,7 +222,7 @@ describe("SignUpWidget", () => {
   it("does NOT commitGate when there is no active gate (idle) — gate-state, not role", async () => {
     mockGate = { status: "idle" };
     mockedRegister.mockResolvedValueOnce({} as Awaited<ReturnType<typeof register>>);
-    mockedClaim.mockResolvedValueOnce(undefined as unknown as Awaited<ReturnType<typeof claimAnonymousChat>>);
+    mockedClaim.mockResolvedValueOnce(undefined);
     renderWidget();
     fillForm();
     fireEvent.click(screen.getByTestId("signup-submit"));

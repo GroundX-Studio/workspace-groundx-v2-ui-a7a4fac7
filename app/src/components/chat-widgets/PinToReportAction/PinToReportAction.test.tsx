@@ -8,15 +8,11 @@
  */
 
 import { act, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return { ...actual, ensureServerChatSession: vi.fn().mockResolvedValue(undefined) };
-});
-
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
+import { withApiProvider } from "@/test/withApiProvider";
 
 import { PinToReportAction } from "./PinToReportAction";
 
@@ -38,15 +34,18 @@ function Probe({ onReady }: { onReady: (store: ReturnType<typeof useChatStore>) 
   return null;
 }
 
+const withStore = (children: ReactNode) =>
+  withApiProvider(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>);
+
 beforeEach(() => window.localStorage.clear());
 afterEach(() => window.localStorage.clear());
 
 describe("PinToReportAction", () => {
   it("renders the pin affordance on an assistant turn", () => {
     render(
-      <ChatStoreProvider autoSeedDefaultSession>
+      withStore(
         <Harness streaming={false} />
-      </ChatStoreProvider>,
+      ),
     );
     expect(screen.getByTestId("pin-to-report-action")).toBeTruthy();
     expect(screen.getByTestId("pin-to-report-button").textContent).toMatch(/pin to report/i);
@@ -55,10 +54,12 @@ describe("PinToReportAction", () => {
   it("clicking pins the turn's literal text as a section", () => {
     let store!: ReturnType<typeof useChatStore>;
     render(
-      <ChatStoreProvider autoSeedDefaultSession>
-        <Probe onReady={(s) => (store = s)} />
-        <Harness streaming={false} />
-      </ChatStoreProvider>,
+      withStore(
+        <>
+          <Probe onReady={(s) => (store = s)} />
+          <Harness streaming={false} />
+        </>,
+      ),
     );
     act(() => {
       screen.getByTestId("pin-to-report-button").click();
@@ -74,11 +75,13 @@ describe("PinToReportAction", () => {
   it("queues a mid-stream click and drains it when streaming ends", () => {
     let store!: ReturnType<typeof useChatStore>;
     const wrap = (streaming: boolean, children: ReactNode) => (
-      <ChatStoreProvider autoSeedDefaultSession>
-        <Probe onReady={(s) => (store = s)} />
-        {children}
-        <Harness streaming={streaming} />
-      </ChatStoreProvider>
+      withStore(
+        <>
+          <Probe onReady={(s) => (store = s)} />
+          {children}
+          <Harness streaming={streaming} />
+        </>,
+      )
     );
     const { rerender } = render(wrap(true, null));
 
@@ -108,10 +111,12 @@ describe("PinToReportAction", () => {
   it("does not pin when streaming ends WITHOUT a mid-stream click", () => {
     let store!: ReturnType<typeof useChatStore>;
     const wrap = (streaming: boolean) => (
-      <ChatStoreProvider autoSeedDefaultSession>
-        <Probe onReady={(s) => (store = s)} />
-        <Harness streaming={streaming} />
-      </ChatStoreProvider>
+      withStore(
+        <>
+          <Probe onReady={(s) => (store = s)} />
+          <Harness streaming={streaming} />
+        </>,
+      )
     );
     const { rerender } = render(wrap(true));
     act(() => {

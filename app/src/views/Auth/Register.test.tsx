@@ -29,7 +29,7 @@ const renderRegisterRoute = (route = "/auth/register") =>
       <Route path="/auth/register" element={<Register />} />
       <Route path="/home" element={<div>Home route</div>} />
     </Routes>,
-    route
+    { initialRoute: route }
   );
 
 const inviteRoute = (email: string) =>

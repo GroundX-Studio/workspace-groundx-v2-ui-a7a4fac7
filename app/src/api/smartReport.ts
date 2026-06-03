@@ -23,7 +23,7 @@
  * caller here yet — see the widget README).
  */
 
-import { ensureServerChatSession } from "@/api/chatSessions";
+import { ensureServerChatSession, type ChatSessionEnsureClient } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
 import { ApiError } from "@groundx/shared";
@@ -124,10 +124,15 @@ function isGateWire(body: unknown): body is RenderGateResponseWire {
  * `RenderedReport` (or the gate envelope). Throws `SmartReportApiError` on a
  * non-2xx response.
  */
-export async function renderReport(input: RenderReportInput): Promise<RenderReportResult> {
+type ChatSessionEnsureDependency = Pick<ChatSessionEnsureClient, "ensureServerChatSession">;
+
+export async function renderReport(
+  input: RenderReportInput,
+  chatSessionEnsure: ChatSessionEnsureDependency = { ensureServerChatSession },
+): Promise<RenderReportResult> {
   // Self-trigger ensure + wait so the endpoint's chat-session ownership check
   // doesn't 404 when the row hasn't been created yet (mirrors extractField).
-  await ensureServerChatSession({
+  await chatSessionEnsure.ensureServerChatSession({
     id: input.chatSessionId,
     onboardingSessionId: input.chatSessionId,
     title: "Onboarding",

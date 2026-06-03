@@ -12,6 +12,11 @@ import type { ContentScope, WidgetRole } from "@groundx/shared";
 // survives as the first-paint source.
 vi.mock("@/api/smartReport", () => ({
   renderReport: vi.fn(),
+  saveReportTemplate: vi.fn(async () => ({
+    id: "rt-test",
+    name: "Test report",
+    updatedAt: "2026-06-02T00:00:00Z",
+  })),
   SmartReportApiError: class SmartReportApiError extends Error {},
 }));
 import { renderReport } from "@/api/smartReport";

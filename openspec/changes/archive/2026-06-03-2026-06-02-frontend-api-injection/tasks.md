@@ -8,11 +8,11 @@ remaining domains are follow-on changes (see proposal roadmap).
 
 ## T1 — The `Api` injection seam (SEQUENTIAL)
 
-- [ ] **Failing test first** (`ApiContext.test.tsx`): a component calling
+- [x] **Failing test first** (`ApiContext.test.tsx`): a component calling
       `useApi()` inside `<ApiProvider value={fake}>` receives the injected client;
       `useApi()` outside a provider throws the not-found error (via
       `createContextHook`).
-- [ ] Define `Api` — BROADER than `typeof api`. The `src/api/index.ts` aggregate
+- [x] Define `Api` — BROADER than `typeof api`. The `src/api/index.ts` aggregate
       does NOT contain the session/chat domain; those are standalone modules
       (`chatSessions`, `chatSessionPatch`, `chatSessionsList`, `claimAnonymousChat`,
       `chatSessionEntities`, `viewerEvents`, `intentLog`, `smartReport`,
@@ -21,7 +21,7 @@ remaining domains are follow-on changes (see proposal roadmap).
       `viewerEvents`, `report`, `extract`, `partner`, `groundx`, `auth`). Add
       `src/contexts/ApiContext/` (`ApiContext`, `ApiProvider`, `useApi` via
       `createContextHook` — exported `createEntityContext.tsx:63`).
-- [ ] Wire the REAL client at the composition root (`App` / `AppInitialization`):
+- [x] Wire the REAL client at the composition root (`App` / `AppInitialization`):
       the `api` aggregate + the standalone module fns bound into the grouped shape,
       so production behavior is unchanged. The client value MUST be a STABLE
       reference (module singleton, or root `useMemo` with stable deps) — consumers
@@ -33,11 +33,11 @@ remaining domains are follow-on changes (see proposal roadmap).
 
 ## T2 — One injected test fake (SEQUENTIAL)
 
-- [ ] `src/test/makeFakeApi.ts`: `makeFakeApi(overrides?)` returns a full `Api`
+- [x] `src/test/makeFakeApi.ts`: `makeFakeApi(overrides?)` returns a full `Api`
       where every method is a `vi.fn` resolving a sensible default (empty list /
       success envelope / resolved void). Type-checked against `Api` so it can
       never drift from the real surface.
-- [ ] Inject it by default in the render harnesses (`renderWithOnboardingProviders`
+- [x] Inject it by default in the render harnesses (`renderWithOnboardingProviders`
       + `renderWithAppProviders`): `<ApiProvider>` must be the OUTERMOST provider —
       above `OnboardingSessionProvider` / `ScenarioRegistryProvider` /
       `DocumentsProvider` / `CanvasOrchestratorProvider`, because those providers
@@ -49,14 +49,14 @@ remaining domains are follow-on changes (see proposal roadmap).
 
 ## T3 — Migrate the session/chat domain + land #8 (SEQUENTIAL)
 
-- [ ] Migrate `OnboardingShell`, `OnboardingSessionContext`, the ChatStore write
+- [x] Migrate `OnboardingShell`, `OnboardingSessionContext`, the ChatStore write
       paths, `chatSessions` + `onboardingSessionEntity` consumers from direct
       imports to `useApi()`. NOTE scope: moving the chat-ensure module-state onto
       the client touches the 7 test files that reset it via
       `__resetEnsuredChatSessions` (incl. `extractField`/`viewerEvents`/
       `chatSessionEntities`/`chatSessionPatch`/`ProposeSchemaFieldCard`/`SchemaView`)
       — budget for them in this task.
-- [ ] Land #8 — single-flight on the ANON-SESSION ESTABLISH (the verified race):
+- [x] Land #8 — single-flight on the ANON-SESSION ESTABLISH (the verified race):
       the establish has ONE caller today (`OnboardingShell.tsx:281` →
       `issueOnboardingSession`, a bare `axios.post`, NO dedup); the SECOND flow is
       `ChatStoreContext`'s bootstrap `useEffect` (~line 514) calling
@@ -68,16 +68,16 @@ remaining domains are follow-on changes (see proposal roadmap).
       `ensureServerChatSession`. (The existing chat-ensure module-state
       `awaitChatSessionEnsured`/`__markChatSessionEnsured` moves onto the client
       too — distinct mechanism, don't conflate.) No 401/404.
-- [ ] Write the ordering unit test FRESH (TDD failing-first) — the prior attempt
+- [x] Write the ordering unit test FRESH (TDD failing-first) — the prior attempt
       was fully reverted (no `ensureAnonSession` exists today), so there is nothing
       to "move." Assert: bootstrap awaits a single establish; concurrent callers +
       a StrictMode double-invoke yield exactly ONE `POST /api/onboarding/session`.
-- [ ] Delete the per-file `@/api` / `@/api/chatSessions` /
+- [x] Delete the per-file `@/api` / `@/api/chatSessions` /
       `@/api/entities/onboardingSessionEntity` mocks in this domain's tests;
       replace with harness-fake overrides. Re-ground assertions onto the fake.
-- [ ] **Live re-verify (#8):** fresh anon `/onboarding` (Chrome DevTools) → NO
+- [x] **Live re-verify (#8):** fresh anon `/onboarding` (Chrome DevTools) → NO
       `chat-sessions` 401, NO `PATCH` 404, NO 403; one `POST /api/onboarding/session`.
-- [ ] **Close GitHub issue #8 on success:** once the live re-verify passes, comment
+- [x] **Close GitHub issue #8 on success:** once the live re-verify passes, comment
       the evidence (network trace: single `POST /api/onboarding/session`, no
       401/PATCH-404/403) on #8 and `gh issue close 8`. If the live check does NOT
       pass, #8 stays OPEN and T3 is not done.
@@ -88,7 +88,7 @@ remaining domains are follow-on changes (see proposal roadmap).
 
 ## T4 — Drift guard (scoped to migrated boundaries) (SEQUENTIAL)
 
-- [ ] A guard test (`frontend-api-injection-guard.test.ts`) that FAILS if: (a) a
+- [x] A guard test (`frontend-api-injection-guard.test.ts`) that FAILS if: (a) a
       file under the migrated domain imports a migrated network module directly
       instead of `useApi()`; or (b) any test `vi.mock`s a migrated network
       boundary. Allowlist = the composition root + the client implementation +
@@ -99,14 +99,14 @@ remaining domains are follow-on changes (see proposal roadmap).
 
 ## T5 — Close-out (SEQUENTIAL)
 
-- [ ] Full middleware + app vitest green; full Playwright e2e green; tsc + builds
+- [x] Full middleware + app vitest green; full Playwright e2e green; tsc + builds
       clean; `openspec validate --strict`.
-- [ ] `docs/agents/` note: frontend network = injected `Api` via `useApi()`;
+- [x] `docs/agents/` note: frontend network = injected `Api` via `useApi()`;
       tests inject one fake (`makeFakeApi`), never per-file network `vi.mock`;
       reference the middleware DI as the precedent. Update `data-model.md`'s
       "before you add" checklist (new API fn → add to `Api` + the fake, never a
       direct import).
-- [ ] Confirm issue #8 is CLOSED (done in T3 on live success). Comment progress on
+- [x] Confirm issue #8 is CLOSED (done in T3 on live success). Comment progress on
       issue #10 with the honest count (this change removes the session/chat-domain
       network mocks; ~76 api/telemetry mocks are removable across all phases; ~15
       non-network mocks are out of scope). The remaining domain migrations (roadmap

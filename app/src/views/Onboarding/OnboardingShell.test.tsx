@@ -11,14 +11,6 @@ import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProvid
 
 import { OnboardingShell } from "./OnboardingShell";
 
-const apiMocks = vi.hoisted(() => ({
-  issueOnboardingSession: vi.fn(),
-}));
-
-vi.mock("@/api/entities/onboardingSessionEntity", () => ({
-  issueOnboardingSession: apiMocks.issueOnboardingSession,
-}));
-
 // 2026-05-31-smart-report-followups: the SmartReportRender FIRST paint now
 // routes through the render endpoint client (`renderReport`), so the shell-
 // level report tests drive the surface through this injected client mock. The
@@ -47,14 +39,21 @@ vi.mock("@/api/smartReport", async () => {
         },
       };
     }),
+    saveReportTemplate: vi.fn(async () => ({
+      id: "rt-test",
+      name: "Test report",
+      updatedAt: "2026-06-02T00:00:00Z",
+    })),
     SmartReportApiError: class SmartReportApiError extends Error {},
   };
 });
 
+const ensureAnonSession = vi.fn();
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  apiMocks.issueOnboardingSession.mockReset();
-  apiMocks.issueOnboardingSession.mockResolvedValue({ sessionId: "anon-session-1", anonymous: true });
+  ensureAnonSession.mockReset();
+  ensureAnonSession.mockResolvedValue({ sessionId: "anon-session-1", anonymous: true });
 });
 
 afterEach(() => {
@@ -133,17 +132,25 @@ describe("OnboardingShell", () => {
         <OnboardingShell />
         <SessionProbe onSnapshot={(next) => (snapshot = next)} />
       </>,
-      { initialFrame: "f2", initialScenario: "utility" },
+      {
+        initialFrame: "f2",
+        initialScenario: "utility",
+        api: { session: { ensureAnonSession } },
+      },
     );
 
-    await waitFor(() => expect(apiMocks.issueOnboardingSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(ensureAnonSession).toHaveBeenCalled());
     await waitFor(() => expect(snapshot.sessionId).toBe("anon-session-1"));
   });
 
   it("keeps the preview usable when session bootstrap fails", async () => {
-    apiMocks.issueOnboardingSession.mockRejectedValueOnce(new Error("middleware offline"));
+    ensureAnonSession.mockRejectedValueOnce(new Error("middleware offline"));
 
-    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f2",
+      initialScenario: "utility",
+      api: { session: { ensureAnonSession } },
+    });
 
     expect(await screen.findByTestId("onboarding-frame-f2")).toBeInTheDocument();
     // The F2 canvas now hosts the production PdfViewerWidget (the

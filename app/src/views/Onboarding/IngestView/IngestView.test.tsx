@@ -1,12 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiProvider } from "@/contexts/ApiContext";
 import { AppModeProvider, useAppMode } from "@/contexts/AppModeContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { OnboardingSessionProvider, useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
 import type { ScenarioConfig } from "@/types/scenarios";
 
 import { IngestView } from "./IngestView";
@@ -77,28 +80,32 @@ const fixtureScenarios: ScenarioConfig[] = [
   },
 ];
 
-const wrap = (node: React.ReactNode) => (
-  <MemoryRouter initialEntries={["/onboarding"]}>
-    <AppModeProvider>
-      <ScenarioRegistryProvider initialScenarios={fixtureScenarios}>
-        <OnboardingSessionProvider>
-          <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
-        </OnboardingSessionProvider>
-      </ScenarioRegistryProvider>
-    </AppModeProvider>
-  </MemoryRouter>
+const wrap = (node: ReactNode) => (
+  <ApiProvider value={makeFakeApi()}>
+    <MemoryRouter initialEntries={["/onboarding"]}>
+      <AppModeProvider>
+        <ScenarioRegistryProvider initialScenarios={fixtureScenarios}>
+          <OnboardingSessionProvider>
+            <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
+          </OnboardingSessionProvider>
+        </ScenarioRegistryProvider>
+      </AppModeProvider>
+    </MemoryRouter>
+  </ApiProvider>
 );
 
-const wrapEmpty = (node: React.ReactNode) => (
-  <MemoryRouter initialEntries={["/onboarding"]}>
-    <AppModeProvider>
-      <ScenarioRegistryProvider initialScenarios={[]}>
-        <OnboardingSessionProvider>
-          <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
-        </OnboardingSessionProvider>
-      </ScenarioRegistryProvider>
-    </AppModeProvider>
-  </MemoryRouter>
+const wrapEmpty = (node: ReactNode) => (
+  <ApiProvider value={makeFakeApi()}>
+    <MemoryRouter initialEntries={["/onboarding"]}>
+      <AppModeProvider>
+        <ScenarioRegistryProvider initialScenarios={[]}>
+          <OnboardingSessionProvider>
+            <CanvasOrchestratorProvider>{node}</CanvasOrchestratorProvider>
+          </OnboardingSessionProvider>
+        </ScenarioRegistryProvider>
+      </AppModeProvider>
+    </MemoryRouter>
+  </ApiProvider>
 );
 
 describe("IngestView (F1)", () => {

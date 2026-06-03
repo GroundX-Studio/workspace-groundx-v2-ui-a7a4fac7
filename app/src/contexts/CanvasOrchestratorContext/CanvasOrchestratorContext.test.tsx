@@ -16,6 +16,7 @@ import { captureException } from "@/lib/sentry";
 import { recordIntent } from "@/api/intentLog";
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
 import { OnboardingSessionProvider, useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { withApiProvider } from "@/test/withApiProvider";
 
 import { CanvasOrchestratorProvider, useCanvasOrchestrator } from "./CanvasOrchestratorContext";
 
@@ -160,9 +161,9 @@ describe("CanvasOrchestratorContext", () => {
   // ────────────────────────────────────────────────────────────────
   describe("UI-10 dispatchIntent → ChatStore triple-write", () => {
     const wiredWrapper = ({ children }: { children: React.ReactNode }) => (
-      <ChatStoreProvider autoSeedDefaultSession>
+      withApiProvider(<ChatStoreProvider autoSeedDefaultSession>
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
-      </ChatStoreProvider>
+      </ChatStoreProvider>)
     );
 
     function useBoth() {
@@ -296,9 +297,9 @@ describe("CanvasOrchestratorContext", () => {
   // ── post-mvs-cleanup Phase A — chat↔viewer bus ────────────────────
   describe("chat↔viewer bus", () => {
     const busWrapper = ({ children }: { children: React.ReactNode }) => (
-      <ChatStoreProvider ephemeral>
+      withApiProvider(<ChatStoreProvider ephemeral>
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
-      </ChatStoreProvider>
+      </ChatStoreProvider>)
     );
 
     it("openCitation pushes a citation-peek overlay onto the active session's viewer", () => {
@@ -351,9 +352,9 @@ describe("CanvasOrchestratorContext", () => {
   //    viewer pane to the cited doc + page with the bbox highlighted.
   describe("highlightCitation → doc-viewer step transition (clickable-citations Phase 3)", () => {
     const busWrapper = ({ children }: { children: React.ReactNode }) => (
-      <ChatStoreProvider ephemeral>
+      withApiProvider(<ChatStoreProvider ephemeral>
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
-      </ChatStoreProvider>
+      </ChatStoreProvider>)
     );
 
     it("dispatching highlightCitation while no doc-viewer step exists PUSHES a new doc-viewer step with page + highlight", () => {
@@ -483,9 +484,9 @@ describe("CanvasOrchestratorContext", () => {
   //    "each tool performs the same mutation as its UI control" guarantee.
   describe("smart-report Phase 5 — pin + section proposal routing", () => {
     const wiredWrapper = ({ children }: { children: React.ReactNode }) => (
-      <ChatStoreProvider autoSeedDefaultSession>
+      withApiProvider(<ChatStoreProvider autoSeedDefaultSession>
         <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
-      </ChatStoreProvider>
+      </ChatStoreProvider>)
     );
     function useBoth() {
       return { orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() };
@@ -570,11 +571,11 @@ describe("CanvasOrchestratorContext", () => {
     // only flips non-f1 frames when an entity is active). The scenario seeds
     // at f3 so an advance to f4/f4a is an observable transition.
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
-      <ChatStoreProvider autoSeedDefaultSession>
+      withApiProvider(<ChatStoreProvider autoSeedDefaultSession>
         <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
-      </ChatStoreProvider>
+      </ChatStoreProvider>)
     );
     function useBoth() {
       return { orchestrator: useCanvasOrchestrator(), session: useOnboardingSession() };
@@ -662,11 +663,11 @@ describe("CanvasOrchestratorContext", () => {
   // button) uses to open the sign-in gate on the live canvas — no parallel path.
   describe("openGate intent routes to OnboardingSession.openGate", () => {
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
-      <ChatStoreProvider autoSeedDefaultSession>
+      withApiProvider(<ChatStoreProvider autoSeedDefaultSession>
         <OnboardingSessionProvider initialFrame="f5" initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
-      </ChatStoreProvider>
+      </ChatStoreProvider>)
     );
     function useBoth() {
       return { orchestrator: useCanvasOrchestrator(), session: useOnboardingSession() };

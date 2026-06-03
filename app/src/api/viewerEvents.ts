@@ -17,7 +17,7 @@
 
 import type { Source } from "@groundx/shared";
 
-import { ensureServerChatSession } from "@/api/chatSessions";
+import { ensureServerChatSession, type ChatSessionEnsureClient } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
 
@@ -38,14 +38,19 @@ export interface RecordViewerEventInput {
   detail?: Record<string, unknown>;
 }
 
-export async function recordViewerEvent(input: RecordViewerEventInput): Promise<void> {
+type ChatSessionEnsureDependency = Pick<ChatSessionEnsureClient, "ensureServerChatSession">;
+
+export async function recordViewerEvent(
+  input: RecordViewerEventInput,
+  chatSessionEnsure: ChatSessionEnsureDependency = { ensureServerChatSession },
+): Promise<void> {
   // Self-trigger ensure-create + wait. ChatStoreProvider's mount
   // effect also fires ensureServerChatSession (with the correct
   // title + isOnboarding flag), but action handlers can fire this
   // helper BEFORE the useEffect runs — at which point only the
   // helpers' ensure call exists to kick off the POST. Both paths
   // converge through the same cached promise so we never double-POST.
-  await ensureServerChatSession({
+  await chatSessionEnsure.ensureServerChatSession({
     id: input.chatSessionId,
     onboardingSessionId: input.chatSessionId,
     title: "Onboarding",

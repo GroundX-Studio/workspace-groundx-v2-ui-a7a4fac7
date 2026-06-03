@@ -1,10 +1,6 @@
 import { act, render, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// Mock the API helper so we can sniff the call + control resolved value.
-vi.mock("@/api/chatSessionsList", () => ({
-  listChatSessions: vi.fn(),
-}));
 
 // Mock the Sentry wrapper so error-branch tests can assert captureException.
 vi.mock("@/lib/sentry", () => ({
@@ -12,16 +8,25 @@ vi.mock("@/lib/sentry", () => ({
   initSentry: vi.fn(() => false),
 }));
 
-import { listChatSessions } from "@/api/chatSessionsList";
 import { captureException } from "@/lib/sentry";
 
 import { AuthContext } from "@/contexts/AuthContext/AuthContext";
+import { makeApiWrapper } from "@/test/withApiProvider";
 
 import { ChatStoreProvider, useChatStore } from "./ChatStoreContext";
 import { EMPTY_PENDING_REPORT_OVERLAY } from "./types";
 import { ChatStoreServerHydrator } from "./ChatStoreServerHydrator";
 
 import type { FC, ReactNode } from "react";
+
+const listChatSessions = vi.fn();
+
+const renderWithHydratorApi = (ui: ReactElement) =>
+  render(ui, {
+    wrapper: makeApiWrapper({
+      chat: { listChatSessions },
+    }),
+  });
 
 interface AuthShape {
   isLoggedIn: boolean;
@@ -51,7 +56,7 @@ const StoreProbe: FC<{ onSessions: (count: number) => void }> = ({ onSessions })
 };
 
 beforeEach(() => {
-  vi.mocked(listChatSessions).mockReset();
+  listChatSessions.mockReset();
   vi.mocked(captureException).mockReset();
 });
 
@@ -61,10 +66,10 @@ afterEach(() => {
 
 describe("ChatStoreServerHydrator (RT-05)", () => {
   it("no-op when AuthProvider is not in the tree (test scaffolding stays untouched)", async () => {
-    vi.mocked(listChatSessions).mockResolvedValue([
+    listChatSessions.mockResolvedValue([
       makeRemoteSession({ id: "s1", title: "Server-only" }),
     ]);
-    render(
+    renderWithHydratorApi(
       <ChatStoreProvider ephemeral>
         <ChatStoreServerHydrator />
       </ChatStoreProvider>,
@@ -74,10 +79,10 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   });
 
   it("no-op when auth.isLoggedIn is false (anon visitor — no remote list)", async () => {
-    vi.mocked(listChatSessions).mockResolvedValue([
+    listChatSessions.mockResolvedValue([
       makeRemoteSession({ id: "s1", title: "Server-only" }),
     ]);
-    render(
+    renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: false }}>
         <ChatStoreProvider ephemeral>
           <ChatStoreServerHydrator />
@@ -89,12 +94,12 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   });
 
   it("hydrates server sessions into ChatStore when auth.isLoggedIn is true", async () => {
-    vi.mocked(listChatSessions).mockResolvedValue([
+    listChatSessions.mockResolvedValue([
       makeRemoteSession({ id: "remote-1", title: "Remote 1" }),
       makeRemoteSession({ id: "remote-2", title: "Remote 2" }),
     ]);
     let observedCount = 0;
-    render(
+    renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: true }}>
         <ChatStoreProvider ephemeral>
           <ChatStoreServerHydrator />
@@ -111,7 +116,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   });
 
   it("merges with local cache — server wins on title; client-only fields preserved", async () => {
-    vi.mocked(listChatSessions).mockResolvedValue([
+    listChatSessions.mockResolvedValue([
       makeRemoteSession({ id: "shared-1", title: "Server-authoritative title" }),
     ]);
     const initialSessions = new Map([
@@ -167,7 +172,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
       observedMessageCount = s?.messages.length ?? -1;
       return null;
     };
-    render(
+    renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: true }}>
         <ChatStoreProvider initialSessions={initialSessions} initialActiveSessionId="shared-1">
           <ChatStoreServerHydrator />
@@ -183,9 +188,9 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   });
 
   it("non-2xx error is non-fatal — captures to Sentry, store state unchanged", async () => {
-    vi.mocked(listChatSessions).mockRejectedValueOnce(new Error("network down"));
+    listChatSessions.mockRejectedValueOnce(new Error("network down"));
     let observedCount = -1;
-    render(
+    renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: true }}>
         <ChatStoreProvider ephemeral>
           <ChatStoreServerHydrator />
@@ -204,7 +209,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   // guard so the strict `currentIntent: CanvasIntent | null` state type isn't
   // populated straight from an unchecked cast.
   it("hydrates a well-formed server currentIntent into the session", async () => {
-    vi.mocked(listChatSessions).mockResolvedValue([
+    listChatSessions.mockResolvedValue([
       makeRemoteSession({
         id: "ci-1",
         title: "Has intent",
@@ -216,7 +221,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
       observed = useChatStore().state.sessions.get("ci-1")?.currentIntent ?? "missing";
       return null;
     };
-    render(
+    renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: true }}>
         <ChatStoreProvider ephemeral>
           <ChatStoreServerHydrator />
@@ -230,7 +235,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   });
 
   it("coerces a malformed server currentIntent (no string `kind`) to null", async () => {
-    vi.mocked(listChatSessions).mockResolvedValue([
+    listChatSessions.mockResolvedValue([
       // `{}` has no `kind` — must NOT masquerade as a typed intent.
       makeRemoteSession({ id: "ci-2", title: "Garbage intent", currentIntent: {} }),
     ]);
@@ -240,7 +245,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
       observed = s ? s.currentIntent : "missing";
       return null;
     };
-    render(
+    renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: true }}>
         <ChatStoreProvider ephemeral>
           <ChatStoreServerHydrator />
@@ -259,7 +264,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
     // `parseCanvasIntent` schema rejects it (`openDocument` requires
     // `documentId`) so a corrupt/legacy row coerces to `null` instead of
     // masquerading as a typed intent flowing into the orchestrator.
-    vi.mocked(listChatSessions).mockResolvedValue([
+    listChatSessions.mockResolvedValue([
       makeRemoteSession({
         id: "ci-3",
         title: "Looks-real-but-corrupt intent",
@@ -272,7 +277,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
       observed = s ? s.currentIntent : "missing";
       return null;
     };
-    render(
+    renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: true }}>
         <ChatStoreProvider ephemeral>
           <ChatStoreServerHydrator />
@@ -293,7 +298,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   // workspace from the server payload" round-trip test was removed: it asserted
   // a persistence capability that no longer exists.)
   it("server-only session hydrates to an empty client-only ViewerSession", async () => {
-    vi.mocked(listChatSessions).mockResolvedValue([
+    listChatSessions.mockResolvedValue([
       makeRemoteSession({ id: "vs-1", title: "Viewer-state" }),
     ]);
     let observedViewer: { history: unknown[]; overlays: unknown[] } | null = null;
@@ -305,7 +310,7 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
       }
       return null;
     };
-    render(
+    renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: true }}>
         <ChatStoreProvider ephemeral>
           <ChatStoreServerHydrator />
@@ -321,8 +326,8 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
   });
 
   it("only hydrates once per false→true transition (StrictMode-safe)", async () => {
-    vi.mocked(listChatSessions).mockResolvedValue([]);
-    const { rerender } = render(
+    listChatSessions.mockResolvedValue([]);
+    const { rerender } = renderWithHydratorApi(
       <StubAuthProvider auth={{ isLoggedIn: true }}>
         <ChatStoreProvider ephemeral>
           <ChatStoreServerHydrator />

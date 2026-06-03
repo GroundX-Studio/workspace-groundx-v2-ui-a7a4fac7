@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppModeProvider } from "@/contexts/AppModeContext";
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
 import { ROUTER_PATHS } from "@/router/routerPaths";
+import { withApiProvider } from "@/test/withApiProvider";
 import { GxThemeProvider } from "@/ThemeProvider";
 
 // clickable-citations Phase 5 — mock PdfViewerWidget so the e2e test
@@ -30,26 +31,13 @@ vi.mock("@/components/viewer-widgets/PdfViewer/PdfViewerWidget", () => ({
   ),
 }));
 
-// Also mock listChatMessages / sendChatMessage so ChatColumn doesn't
-// reach out to fetch on mount — same pattern the other ChatColumn
-// tests use.
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return {
-    ...actual,
-    listChatMessages: vi.fn(async () => []),
-    sendChatMessage: vi.fn(),
-    ensureServerChatSession: vi.fn(async () => undefined),
-  };
-});
-
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 
 import { SteadyShell } from "./SteadyShell";
 
 function Harness({ initialUrl, children }: { initialUrl: string; children: React.ReactNode }) {
-  return (
+  return withApiProvider(
     <GxThemeProvider>
       <AppModeProvider initialAuthState="signed-in">
         <ChatStoreProvider initialOwnerKey="anon-test" autoSeedDefaultSession>
@@ -62,7 +50,7 @@ function Harness({ initialUrl, children }: { initialUrl: string; children: React
           </CanvasOrchestratorProvider>
         </ChatStoreProvider>
       </AppModeProvider>
-    </GxThemeProvider>
+    </GxThemeProvider>,
   );
 }
 
@@ -160,7 +148,7 @@ describe("SteadyShell (/c/:sessionId)", () => {
   //    PdfViewerWidget chain.
   describe("clickable-citations: click chip → PdfViewerWidget surfaces document + page + highlight (Phase 5 e2e)", () => {
     function E2EHarness({ initialUrl, children }: { initialUrl: string; children: React.ReactNode }) {
-      return (
+      return withApiProvider(
         <GxThemeProvider>
           <AppModeProvider initialAuthState="signed-in">
             <ChatStoreProvider initialOwnerKey="anon-cite-e2e" autoSeedDefaultSession>
@@ -173,7 +161,7 @@ describe("SteadyShell (/c/:sessionId)", () => {
               </CanvasOrchestratorProvider>
             </ChatStoreProvider>
           </AppModeProvider>
-        </GxThemeProvider>
+        </GxThemeProvider>,
       );
     }
 

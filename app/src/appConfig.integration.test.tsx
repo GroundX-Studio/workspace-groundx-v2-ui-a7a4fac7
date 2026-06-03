@@ -56,7 +56,7 @@ const renderRoute = (route: string, element: JSX.Element) =>
       <Route path="/auth/login" element={<div>Login route</div>} />
       <Route path="/auth/reset-password" element={<ResetPassword />} />
     </Routes>,
-    route
+    { initialRoute: route }
   );
 
 describe("configured app identity", () => {

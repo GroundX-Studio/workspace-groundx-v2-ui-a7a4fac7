@@ -26,7 +26,7 @@ const renderResetPasswordRoute = () =>
       <Route path="/auth/reset-password" element={<ResetPassword />} />
       <Route path="/auth/login" element={<div>Login route</div>} />
     </Routes>,
-    "/auth/reset-password"
+    { initialRoute: "/auth/reset-password" }
   );
 
 describe("ResetPassword screen", () => {

@@ -1,6 +1,6 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect } from "react";
+import { useEffect, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
@@ -13,20 +13,7 @@ vi.mock("framer-motion", async () => {
   return { ...actual, useReducedMotion: () => false };
 });
 
-// CF-18: chat input wires through the same sendChatMessage path. Mock the
-// API module so we can sniff the call + control the assistant reply.
-//
-// RT-01: `listChatMessages` is also mocked so the on-mount hydration effect
-// doesn't hit the network. Default `[]` so existing tests see an empty thread.
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return {
-    ...actual,
-    sendChatMessage: vi.fn(),
-    listChatMessages: vi.fn(),
-  };
-});
-import { ChatApiError, listChatMessages, sendChatMessage } from "@/api/chatSessions";
+import { ChatApiError } from "@/api/chatErrors";
 
 // WF-17: the onboarding pick-view pills read the live workflow schema via
 // this hook. Mock it so tests are deterministic. Default null → the
@@ -61,13 +48,31 @@ function SteadySessionMount(props: Parameters<typeof ChatColumn>[0]) {
   return <ChatColumn {...props} />;
 }
 
+const sendChatMessage = vi.fn();
+const listChatMessages = vi.fn();
+
+type RenderOptions = Parameters<typeof renderWithOnboardingProviders>[1];
+
+const renderWithChatColumnApi = (ui: ReactElement, options: RenderOptions = {}) =>
+  renderWithOnboardingProviders(ui, {
+    ...options,
+    api: {
+      ...options.api,
+      chat: {
+        ...options.api?.chat,
+        sendChatMessage,
+        listChatMessages,
+      },
+    },
+  });
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.mocked(sendChatMessage).mockReset();
-  vi.mocked(listChatMessages).mockReset();
+  sendChatMessage.mockReset();
+  listChatMessages.mockReset();
   // Default: no persisted thread (empty array). Individual tests
   // can override to assert RT-01 hydration behavior.
-  vi.mocked(listChatMessages).mockResolvedValue([]);
+  listChatMessages.mockResolvedValue([]);
   // WF-17 — default to manifest fallback; the precedence test overrides.
   vi.mocked(useLiveExtractionSchema).mockReturnValue(null);
 });
@@ -87,13 +92,13 @@ describe("ChatColumn", () => {
   // DBG-01 B (2026-05-28). The chat scroll container must reserve a
   // scrollbar gutter so the bar doesn't paint over the message bubbles.
   it("DBG-01 B: onboarding chat scroll container reserves a scrollbar gutter", () => {
-    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     const scroll = screen.getByTestId("chat-live-scroll");
     expect(scroll.style.scrollbarGutter).toBe("stable");
   });
 
   it("DBG-01 B: steady chat scroll container reserves a scrollbar gutter", async () => {
-    renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithChatColumnApi(<SteadySessionMount role="member" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     const scroll = await screen.findByTestId("chat-live-scroll");
     expect(scroll.style.scrollbarGutter).toBe("stable");
   });
@@ -109,7 +114,7 @@ describe("ChatColumn", () => {
 
     for (const role of roles) {
       it(`mounts under role="${role}" with the all-roles onboarding surface`, () => {
-        renderWithOnboardingProviders(
+        renderWithChatColumnApi(
           <ChatColumn role={role} scope={{ type: "none" }} />,
           { initialFrame: "f2", initialScenario: "utility" },
         );
@@ -120,7 +125,7 @@ describe("ChatColumn", () => {
       });
 
       it(`mounts under role="${role}" with the steady (bare) chat`, async () => {
-        renderWithOnboardingProviders(
+        renderWithChatColumnApi(
           <SteadySessionMount role={role} scope={{ type: "none" }} />,
           { initialFrame: "f2", initialScenario: "utility" },
         );
@@ -134,7 +139,7 @@ describe("ChatColumn", () => {
 
     it("accepts the required scope: { type: 'none' } without changing behavior", () => {
       // Scope is session-scoped sentinel; it does not gate any rendering.
-      renderWithOnboardingProviders(
+      renderWithChatColumnApi(
         <ChatColumn role="anonymous" scope={{ type: "none" }} />,
         { initialFrame: "f1", initialScenario: null },
       );
@@ -143,13 +148,13 @@ describe("ChatColumn", () => {
   });
 
   it("on F1 (no scenario picked), shows the idle placeholder", () => {
-    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f1", initialScenario: null });
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f1", initialScenario: null });
     expect(screen.getByText(/Ask anything about the sample/i)).toBeInTheDocument();
     expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
   });
 
   it("on F2 with a scenario, renders the wireframe conversation chrome", () => {
-    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     // Wireframe markers: a header that shows the FILE NAME, the scenario
     // name as the first user bubble, a sample-switcher subline.
     expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
@@ -169,7 +174,7 @@ describe("ChatColumn", () => {
       pathname = useLocation().pathname;
       return null;
     };
-    renderWithOnboardingProviders(
+    renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <PathProbe />
@@ -184,7 +189,7 @@ describe("ChatColumn", () => {
 
   it("streams thinking notes into the chat one at a time, then surfaces Done + Pick-a-view", () => {
     vi.useFakeTimers();
-    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
 
     // First note is visible immediately.
     expect(screen.getAllByTestId(/thinking-note-/).length).toBe(1);
@@ -218,7 +223,7 @@ describe("ChatColumn", () => {
       lastFrame = state.currentFrame;
       return null;
     }
-    renderWithOnboardingProviders(
+    renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <FrameProbe />
@@ -241,7 +246,7 @@ describe("ChatColumn", () => {
 
   it("derives Pick-a-view pills from the active scenario's extraction schema (Loan != Utility)", () => {
     vi.useFakeTimers();
-    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "loan" });
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "loan" });
     for (let i = 0; i < 12; i += 1) {
       act(() => {
         vi.advanceTimersByTime(3000);
@@ -267,7 +272,7 @@ describe("ChatColumn", () => {
         { id: "charges", type: "charges", name: "Charges", fields: [] },
       ],
     });
-    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     for (let i = 0; i < 12; i += 1) {
       act(() => {
         vi.advanceTimersByTime(3000);
@@ -286,7 +291,7 @@ describe("ChatColumn", () => {
       lastFrame = state.currentFrame;
       return null;
     }
-    renderWithOnboardingProviders(
+    renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <FrameProbe />
@@ -306,7 +311,7 @@ describe("ChatColumn", () => {
   });
 
   it("the sample switcher chip exposes the other scenarios as a menu", () => {
-    renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     const trigger = screen.getByTestId("onboarding-chat-sample-switch-trigger");
     act(() => {
       trigger.click();
@@ -322,7 +327,7 @@ describe("ChatColumn", () => {
   // ────────────────────────────────────────────────────────────────────
   describe("schema-agent-chat-affordances", () => {
     it("renders the Schema Agent header + sample switcher chip on F3a", () => {
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f3a",
         initialScenario: "utility",
       });
@@ -335,7 +340,7 @@ describe("ChatColumn", () => {
     });
 
     it("omits the Schema-Agent header on F2 (frame-conditional)", () => {
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -350,7 +355,7 @@ describe("ChatColumn", () => {
   // ────────────────────────────────────────────────────────────────────
   describe("chat input (CF-18)", () => {
     it("renders a real input + send button (not the visual stub copy)", () => {
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -359,7 +364,7 @@ describe("ChatColumn", () => {
     });
 
     it("submitting a question posts via sendChatMessage and renders the assistant reply", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-1",
         assistantMessageId: "a-1",
         reply: {
@@ -376,7 +381,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -394,16 +399,16 @@ describe("ChatColumn", () => {
       });
 
       expect(sendChatMessage).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(sendChatMessage).mock.calls[0][0]).toMatchObject({
+      expect(sendChatMessage.mock.calls[0][0]).toMatchObject({
         newUserMessage: "What is the bill total?",
       });
     });
 
     it("on a network failure, renders the 'couldn't reach' copy", async () => {
-      vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Failed to fetch"));
+      sendChatMessage.mockRejectedValueOnce(new Error("Failed to fetch"));
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -421,9 +426,9 @@ describe("ChatColumn", () => {
 
     // CF-08 — per-status copy in the catch site.
     it("504 → renders 'took too long' copy (CF-08)", async () => {
-      vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("timeout", 504, null));
+      sendChatMessage.mockRejectedValueOnce(new ChatApiError("timeout", 504, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -436,9 +441,9 @@ describe("ChatColumn", () => {
     });
 
     it("401 → renders 'sign in to continue' copy (CF-08)", async () => {
-      vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("unauth", 401, null));
+      sendChatMessage.mockRejectedValueOnce(new ChatApiError("unauth", 401, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -451,9 +456,9 @@ describe("ChatColumn", () => {
     });
 
     it("501 → renders 'can't answer that yet' copy (CF-08)", async () => {
-      vi.mocked(sendChatMessage).mockRejectedValueOnce(new ChatApiError("nyi", 501, null));
+      sendChatMessage.mockRejectedValueOnce(new ChatApiError("nyi", 501, null));
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -467,7 +472,7 @@ describe("ChatColumn", () => {
 
     it("empty / whitespace input does not post", async () => {
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -483,7 +488,7 @@ describe("ChatColumn", () => {
   // chat_messages; on-mount hydration replays them so a refresh survives.
   describe("RT-01 hydrate liveTurns from server on mount", () => {
     it("renders persisted turns on first mount (refresh survival)", async () => {
-      vi.mocked(listChatMessages).mockResolvedValueOnce([
+      listChatMessages.mockResolvedValueOnce([
         {
           id: "m1",
           chatSessionId: "rt-mount",
@@ -504,7 +509,7 @@ describe("ChatColumn", () => {
         },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -521,7 +526,7 @@ describe("ChatColumn", () => {
     });
 
     it("P3.c: assistant bubble renders markdown (bold/code), not literal `**`/backticks", async () => {
-      vi.mocked(listChatMessages).mockResolvedValueOnce([
+      listChatMessages.mockResolvedValueOnce([
         { id: "u1", chatSessionId: "md", turnIndex: 1, role: "user", content: "total?", errorCode: null, citations: [] },
         {
           id: "a1",
@@ -534,7 +539,7 @@ describe("ChatColumn", () => {
         },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
 
       const bubble = await screen.findByTestId("chat-live-assistant");
       expect(bubble.querySelector("strong")?.textContent).toBe("$7,613.20");
@@ -543,12 +548,12 @@ describe("ChatColumn", () => {
     });
 
     it("filters out system-role rows (UI only renders user + assistant)", async () => {
-      vi.mocked(listChatMessages).mockResolvedValueOnce([
+      listChatMessages.mockResolvedValueOnce([
         { id: "s1", chatSessionId: "rt-sys", turnIndex: 0, role: "system", content: "system bootstrap", errorCode: null, citations: [] },
         { id: "u1", chatSessionId: "rt-sys", turnIndex: 1, role: "user", content: "hi there", errorCode: null, citations: [] },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -560,9 +565,9 @@ describe("ChatColumn", () => {
     });
 
     it("empty persisted thread leaves the UI in its pre-RT-01 state (no live bubbles)", async () => {
-      vi.mocked(listChatMessages).mockResolvedValueOnce([]);
+      listChatMessages.mockResolvedValueOnce([]);
 
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -575,11 +580,11 @@ describe("ChatColumn", () => {
     });
 
     it("hydration failure is non-fatal — the UI still mounts + accepts new sends", async () => {
-      vi.mocked(listChatMessages).mockRejectedValueOnce(
+      listChatMessages.mockRejectedValueOnce(
         new ChatApiError("/api/chat-sessions/rt-fail/messages failed: 500", 500, null),
       );
 
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -590,12 +595,12 @@ describe("ChatColumn", () => {
 
     it("does NOT clobber optimistic state — if the user types while hydrate is in flight, the optimistic turn wins", async () => {
       let resolveHydrate: (msgs: never[]) => void = () => {};
-      vi.mocked(listChatMessages).mockReturnValueOnce(
+      listChatMessages.mockReturnValueOnce(
         new Promise((resolve) => {
           resolveHydrate = resolve as (msgs: never[]) => void;
         }) as ReturnType<typeof listChatMessages>,
       );
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-new",
         assistantMessageId: "a-new",
         reply: {
@@ -612,7 +617,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -639,7 +644,7 @@ describe("ChatColumn", () => {
   // clickable-citations Phase 2 — assistant replies render [n] chips.
   describe("citation chips render on assistant bubbles (clickable-citations Phase 2)", () => {
     it("onboarding chat: assistant reply carrying citations renders [1] [2] chips with documentId + page data attrs", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-cite-1",
         assistantMessageId: "a-cite-1",
         reply: {
@@ -659,7 +664,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -680,7 +685,7 @@ describe("ChatColumn", () => {
     });
 
     it("steady chat: assistant reply carrying citations renders [1] chip beneath the bubble", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-cite-s",
         assistantMessageId: "a-cite-s",
         reply: {
@@ -697,7 +702,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -713,7 +718,7 @@ describe("ChatColumn", () => {
     });
 
     it("RT-01 rehydrate: citations on persisted assistant turns survive a remount", async () => {
-      vi.mocked(listChatMessages).mockResolvedValueOnce([
+      listChatMessages.mockResolvedValueOnce([
         {
           id: "m1",
           chatSessionId: "rt-cite",
@@ -734,7 +739,7 @@ describe("ChatColumn", () => {
         },
       ]);
 
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -755,7 +760,7 @@ describe("ChatColumn", () => {
         </button>
       );
     }
-    renderWithOnboardingProviders(
+    renderWithChatColumnApi(
       <>
         <GateOpener />
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
@@ -776,7 +781,7 @@ describe("ChatColumn", () => {
   // no scripted decorations; RT-01 hydration + send path stay shared.
   describe("steady (bare) chat", () => {
     it("renders the bare conversation — no scripted decorations", async () => {
-      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -791,7 +796,7 @@ describe("ChatColumn", () => {
     });
 
     it("send path posts a message and renders the reply (isOnboarding=false from the session)", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-steady",
         assistantMessageId: "a-steady",
         reply: {
@@ -808,7 +813,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -821,7 +826,7 @@ describe("ChatColumn", () => {
         expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent("Steady reply.");
       });
       // The active session is a steady (non-onboarding) one → isOnboarding=false.
-      const sendCall = vi.mocked(sendChatMessage).mock.calls[0][0];
+      const sendCall = sendChatMessage.mock.calls[0][0];
       expect(sendCall.sessionMeta.isOnboarding).toBe(false);
     });
   });
@@ -847,7 +852,7 @@ describe("ChatColumn", () => {
   // send auto-advance the journey f2→f5, and assert the SAME turn content is
   // still present after the advance (no remount/wipe).
   it("Phase 3: liveTurns persist across an onboarding frame advance f2→f5 (no remount/wipe)", async () => {
-    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+    sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-persist",
       assistantMessageId: "a-persist",
       reply: {
@@ -877,7 +882,7 @@ describe("ChatColumn", () => {
     }
 
     const user = userEvent.setup();
-    renderWithOnboardingProviders(
+    renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <FrameProbe />
@@ -939,7 +944,7 @@ describe("ChatColumn", () => {
   // bounce it back to f5). Against the inline-construction implementation the
   // remounted Choreography re-fires and the frame flips back to f5 → FAIL.
   it("stable-experience-identity: an explicit advance back to f3 STAYS f3 (choreography does not re-fire to f5)", async () => {
-    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+    sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-id",
       assistantMessageId: "a-id",
       reply: {
@@ -965,7 +970,7 @@ describe("ChatColumn", () => {
     }
 
     const user = userEvent.setup();
-    renderWithOnboardingProviders(
+    renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <FrameProbe />
@@ -1003,7 +1008,7 @@ describe("ChatColumn", () => {
   // row beneath each assistant bubble, and dispatch chip clicks.
   describe("SuggestedActionChips integration (widget-llm-integration Phase 1)", () => {
     it("onboarding: assistant reply carrying suggestedActions renders one chip per action under the bubble", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-sa-1",
         assistantMessageId: "a-sa-1",
         reply: {
@@ -1023,7 +1028,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -1039,7 +1044,7 @@ describe("ChatColumn", () => {
     });
 
     it("steady: assistant reply carrying suggestedActions renders chips under the bubble", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-sa-s",
         assistantMessageId: "a-sa-s",
         reply: {
@@ -1056,7 +1061,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -1070,7 +1075,7 @@ describe("ChatColumn", () => {
     });
 
     it("Phase 8 — clicking a tool:<name> chip dispatches detail.intent via the orchestrator", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-t8",
         assistantMessageId: "a-t8",
         reply: {
@@ -1112,7 +1117,7 @@ describe("ChatColumn", () => {
       };
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<Harness />, {
+      renderWithChatColumnApi(<Harness />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -1133,7 +1138,7 @@ describe("ChatColumn", () => {
     });
 
     it("clicking the high-confidence suggested-intent chip dispatches a CanvasIntent via the orchestrator", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-si",
         assistantMessageId: "a-si",
         reply: {
@@ -1171,7 +1176,7 @@ describe("ChatColumn", () => {
       };
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<Harness />, {
+      renderWithChatColumnApi(<Harness />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -1194,7 +1199,7 @@ describe("ChatColumn", () => {
     // Empty-bubble guard (2026-05-28). An empty answer with chips must
     // suppress the bot bubble but keep the chip.
     it("onboarding: empty answer with chips suppresses the bot bubble but keeps the chip", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-empty",
         assistantMessageId: "a-empty",
         reply: {
@@ -1217,7 +1222,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });
@@ -1232,7 +1237,7 @@ describe("ChatColumn", () => {
     });
 
     it("steady: empty answer with chips suppresses the bot bubble but keeps the chip", async () => {
-      vi.mocked(sendChatMessage).mockResolvedValueOnce({
+      sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-empty-s",
         assistantMessageId: "a-empty-s",
         reply: {
@@ -1249,7 +1254,7 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
-      renderWithOnboardingProviders(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
+      renderWithChatColumnApi(<SteadySessionMount role="member" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",
       });

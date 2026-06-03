@@ -3,6 +3,8 @@ import { render } from "@testing-library/react";
 import { HelmetProvider } from "react-helmet-async";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
+import type { Api } from "@/api/client";
+import { ApiProvider } from "@/contexts/ApiContext";
 import { AppModeProvider } from "@/contexts/AppModeContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
@@ -12,6 +14,7 @@ import { OnboardingSessionProvider } from "@/contexts/OnboardingSessionContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
 import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
 import { GxThemeProvider } from "@/ThemeProvider";
+import { makeFakeApi, type ApiOverrides } from "@/test/makeFakeApi";
 import { allTestScenarios } from "@/test/scenarioFixtures";
 import type { AuthState, FFrame, Scenario } from "@/types/onboarding";
 import type { ScenarioConfig } from "@/types/scenarios";
@@ -35,6 +38,13 @@ interface RenderOnboardingOptions {
    * to 28454 (the staging/dev samples bucket).
    */
   registryBucketId?: number | null;
+  /**
+   * Override methods on the injected `Api` fake. By default every Api method
+   * is a resolved `vi.fn` (see `makeFakeApi`); pass only what this test
+   * asserts, e.g. `{ chat: { sendChatMessage: vi.fn()... } }`. Tests should
+   * use this instead of `vi.mock("@/api/...")`.
+   */
+  api?: ApiOverrides;
 }
 
 export const renderWithOnboardingProviders = (
@@ -46,6 +56,7 @@ export const renderWithOnboardingProviders = (
     initialScenarios = allTestScenarios,
     initialUrl,
     registryBucketId = 28454,
+    api,
   }: RenderOnboardingOptions = {},
 ) => {
   // If the caller didn't specify a URL, derive one from
@@ -57,6 +68,10 @@ export const renderWithOnboardingProviders = (
     initialUrl ??
     (initialScenario ? `/onboarding/${registryBucketId}/${initialScenario}` : "/onboarding");
   return render(
+    // ApiProvider is OUTERMOST: the providers below (OnboardingSession,
+    // ScenarioRegistry, Documents, Canvas) become useApi() consumers, so the
+    // fake must sit above them.
+    <ApiProvider value={makeFakeApi(api)}>
     <GxThemeProvider>
       <LoadingProvider>
         <MessageBarProvider>
@@ -100,6 +115,7 @@ export const renderWithOnboardingProviders = (
           </AppModeProvider>
         </MessageBarProvider>
       </LoadingProvider>
-    </GxThemeProvider>,
+    </GxThemeProvider>
+    </ApiProvider>,
   );
 };

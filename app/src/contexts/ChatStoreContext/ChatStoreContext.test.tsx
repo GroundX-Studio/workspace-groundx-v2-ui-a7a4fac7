@@ -1,18 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ChatStoreProvider's mount effect calls ensureServerChatSession for
-// the active session (fixes the cascade of 404s seen pre-2026-05-27
-// when RT-02..05 endpoints fired before the chat_sessions row existed
-// server-side). Mock the helper so tests don't try to hit the network.
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return {
-    ...actual,
-    ensureServerChatSession: vi.fn().mockResolvedValue(undefined),
-  };
-});
-import { ensureServerChatSession } from "@/api/chatSessions";
+import { withApiProvider } from "@/test/withApiProvider";
 
 import {
   ChatStoreProvider,
@@ -21,13 +10,25 @@ import {
   useChatStoreState,
 } from "./ChatStoreContext";
 
+const ensureAnonSession = vi.fn();
+const ensureServerChatSession = vi.fn();
+
+const withChatStoreApi = (children: React.ReactNode) =>
+  withApiProvider(children, {
+    session: { ensureAnonSession },
+    chat: { ensureServerChatSession },
+  });
+
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <ChatStoreProvider>{children}</ChatStoreProvider>
+  withChatStoreApi(<ChatStoreProvider>{children}</ChatStoreProvider>)
 );
 
 beforeEach(() => {
   window.localStorage.clear();
-  vi.mocked(ensureServerChatSession).mockClear();
+  ensureAnonSession.mockReset();
+  ensureAnonSession.mockResolvedValue({ sessionId: "anon-session-1", anonymous: true });
+  ensureServerChatSession.mockReset();
+  ensureServerChatSession.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -229,7 +230,7 @@ describe("ChatStoreContext", () => {
   describe("onboarding bootstrap (Phase D)", () => {
     it("autoSeedDefaultSession creates exactly one session flagged isOnboardingSession=true", () => {
       const wrap = ({ children }: { children: React.ReactNode }) => (
-        <ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>
+        withChatStoreApi(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>)
       );
       const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
       expect(result.current.state.sessions.size).toBe(1);
@@ -276,7 +277,7 @@ describe("ChatStoreContext", () => {
       window.localStorage.setItem("groundx-onboarding.chat-store.v1", JSON.stringify(snapshot));
 
       const wrap = ({ children }: { children: React.ReactNode }) => (
-        <ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>
+        withChatStoreApi(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>)
       );
       const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
 
@@ -311,7 +312,7 @@ describe("ChatStoreContext", () => {
       );
 
       const wrap = ({ children }: { children: React.ReactNode }) => (
-        <ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>
+        withChatStoreApi(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>)
       );
       const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
 
@@ -328,7 +329,7 @@ describe("ChatStoreContext", () => {
   describe("split state/actions contexts", () => {
     it("useChatStoreActions returns a reference-stable object across state changes", () => {
       const wrap = ({ children }: { children: React.ReactNode }) => (
-        <ChatStoreProvider>{children}</ChatStoreProvider>
+        withChatStoreApi(<ChatStoreProvider>{children}</ChatStoreProvider>)
       );
       const { result } = renderHook(
         () => ({ actions: useChatStoreActions(), state: useChatStoreState() }),
@@ -347,7 +348,7 @@ describe("ChatStoreContext", () => {
 
     it("useChatStoreState exposes the same state object as useChatStore().state", () => {
       const wrap = ({ children }: { children: React.ReactNode }) => (
-        <ChatStoreProvider>{children}</ChatStoreProvider>
+        withChatStoreApi(<ChatStoreProvider>{children}</ChatStoreProvider>)
       );
       const { result } = renderHook(
         () => ({ legacy: useChatStore(), state: useChatStoreState() }),
@@ -376,7 +377,7 @@ describe("ChatStoreContext", () => {
   describe("growth caps", () => {
     it("caps viewerHistory at 50 entries per session (oldest drop off)", () => {
       const wrap = ({ children }: { children: React.ReactNode }) => (
-        <ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>
+        withChatStoreApi(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>)
       );
       const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
       act(() => {
@@ -399,7 +400,7 @@ describe("ChatStoreContext", () => {
 
     it("persists only the most-recent 500 messages even when in-memory has more", () => {
       const wrap = ({ children }: { children: React.ReactNode }) => (
-        <ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>
+        withChatStoreApi(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>)
       );
       const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
       act(() => {
@@ -556,7 +557,7 @@ describe("ChatStoreContext", () => {
         newId = result.current.newSession({ title: "Test session" });
       });
       await waitFor(() => {
-        const calls = vi.mocked(ensureServerChatSession).mock.calls;
+        const calls = ensureServerChatSession.mock.calls;
         const matched = calls.find((c) => c[0]?.id === newId);
         expect(matched).toBeDefined();
       });
@@ -572,9 +573,7 @@ describe("ChatStoreContext", () => {
         });
       });
       await waitFor(() => {
-        const matched = vi
-          .mocked(ensureServerChatSession)
-          .mock.calls.find((c) => c[0]?.id === onboardingId);
+        const matched = ensureServerChatSession.mock.calls.find((c) => c[0]?.id === onboardingId);
         expect(matched).toBeDefined();
         expect(matched![0]).toMatchObject({
           id: onboardingId,
@@ -586,7 +585,7 @@ describe("ChatStoreContext", () => {
 
     it("does not fire when ChatStoreProvider is mounted in ephemeral mode (tests opt out)", async () => {
       const ephemeralWrapper = ({ children }: { children: React.ReactNode }) => (
-        <ChatStoreProvider ephemeral>{children}</ChatStoreProvider>
+        withChatStoreApi(<ChatStoreProvider ephemeral>{children}</ChatStoreProvider>)
       );
       const { result } = renderHook(() => useChatStore(), { wrapper: ephemeralWrapper });
       act(() => {

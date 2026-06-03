@@ -10,7 +10,7 @@
 
 import { ApiError, type ExtractFieldResult, type TemplateFieldType } from "@groundx/shared";
 
-import { ensureServerChatSession } from "@/api/chatSessions";
+import { ensureServerChatSession, type ChatSessionEnsureClient } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
 
@@ -35,9 +35,14 @@ export class ExtractFieldApiError extends ApiError {
   }
 }
 
-export async function extractField(input: ExtractFieldInput): Promise<ExtractFieldResult> {
+type ChatSessionEnsureDependency = Pick<ChatSessionEnsureClient, "ensureServerChatSession">;
+
+export async function extractField(
+  input: ExtractFieldInput,
+  chatSessionEnsure: ChatSessionEnsureDependency = { ensureServerChatSession },
+): Promise<ExtractFieldResult> {
   // Self-trigger ensure + wait — same pattern as the other helpers.
-  await ensureServerChatSession({
+  await chatSessionEnsure.ensureServerChatSession({
     id: input.chatSessionId,
     onboardingSessionId: input.chatSessionId,
     title: "Onboarding",

@@ -23,20 +23,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 import { OnboardingShell } from "./OnboardingShell";
 
-const apiMocks = vi.hoisted(() => ({
-  issueOnboardingSession: vi.fn(),
-}));
-
-vi.mock("@/api/entities/onboardingSessionEntity", () => ({
-  issueOnboardingSession: apiMocks.issueOnboardingSession,
-}));
-
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return { ...actual, sendChatMessage: vi.fn(), listChatMessages: vi.fn() };
-});
-import { listChatMessages, sendChatMessage } from "@/api/chatSessions";
 import type { SendChatMessageResult } from "@/api/chatSessions";
+
+const ensureAnonSession = vi.fn();
+const listChatMessages = vi.fn();
+const sendChatMessage = vi.fn();
 
 /** A reply that offers the "save to account" chip beneath the assistant turn. */
 const SAVE_CHIP_REPLY: SendChatMessageResult = {
@@ -66,12 +57,12 @@ const SAVE_CHIP_REPLY: SendChatMessageResult = {
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  apiMocks.issueOnboardingSession.mockReset();
-  apiMocks.issueOnboardingSession.mockResolvedValue({ sessionId: "anon-session-1", anonymous: true });
-  vi.mocked(listChatMessages).mockReset();
-  vi.mocked(listChatMessages).mockResolvedValue([]);
-  vi.mocked(sendChatMessage).mockReset();
-  vi.mocked(sendChatMessage).mockResolvedValue(SAVE_CHIP_REPLY);
+  ensureAnonSession.mockReset();
+  ensureAnonSession.mockResolvedValue({ sessionId: "anon-session-1", anonymous: true });
+  listChatMessages.mockReset();
+  listChatMessages.mockResolvedValue([]);
+  sendChatMessage.mockReset();
+  sendChatMessage.mockResolvedValue(SAVE_CHIP_REPLY);
 });
 
 afterEach(() => {
@@ -84,6 +75,10 @@ describe("OnboardingShell — save_to_account chip opens the gate on the live f5
     renderWithOnboardingProviders(<OnboardingShell />, {
       initialFrame: "f5",
       initialScenario: "utility",
+      api: {
+        session: { ensureAnonSession },
+        chat: { listChatMessages, sendChatMessage },
+      },
     });
 
     // Pre-condition: the gate is NOT open on the live Interact canvas.

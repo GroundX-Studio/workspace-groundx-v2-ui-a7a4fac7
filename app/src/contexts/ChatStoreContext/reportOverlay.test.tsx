@@ -15,17 +15,13 @@
  */
 
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return { ...actual, ensureServerChatSession: vi.fn().mockResolvedValue(undefined) };
-});
-
+import { withApiProvider } from "@/test/withApiProvider";
 import { ChatStoreProvider, useChatStore } from "./ChatStoreContext";
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <ChatStoreProvider>{children}</ChatStoreProvider>
+  withApiProvider(<ChatStoreProvider>{children}</ChatStoreProvider>)
 );
 
 beforeEach(() => {

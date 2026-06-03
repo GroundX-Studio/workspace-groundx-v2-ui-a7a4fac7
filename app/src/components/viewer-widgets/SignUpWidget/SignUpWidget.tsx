@@ -52,8 +52,8 @@ import { useCallback, useEffect, useState, type FC, type FormEvent } from "react
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import { register } from "@/api/entities/customerEntity";
-import { claimAnonymousChat } from "@/api/claimAnonymousChat";
 import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
+import { useApi } from "@/contexts/ApiContext";
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Button } from "@/components/primitives/Button/Button";
 import { Heading } from "@/components/primitives/Heading/Heading";
@@ -88,6 +88,7 @@ export interface SignUpWidgetProps {
 // role-locked here); scope is always `{ type: "none" }`. Gate behavior is
 // sourced from gate-state below.
 export const SignUpWidget: FC<SignUpWidgetProps> = () => {
+  const api = useApi();
   const { promoteToSignedIn } = useAppMode();
   const { state: session, commitGate } = useOnboardingSession();
   // RE-SOURCED gate behavior: a gate is "awaiting commit" when it is open
@@ -148,7 +149,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
         // pre-signup chat history. Ship to Sentry so we can size the
         // failure rate in production. See CF-13.
         try {
-          await claimAnonymousChat();
+          await api.chat.claimAnonymousChat();
         } catch (claimErr) {
           captureException(claimErr, {
             route: "/api/chat-sessions/claim",
@@ -165,7 +166,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
         setSubmitting(false);
       }
     },
-    [submitting, gateAwaitingCommit, commitGate, promoteToSignedIn],
+    [api.chat, submitting, gateAwaitingCommit, commitGate, promoteToSignedIn],
   );
 
   const handleSubmit = useCallback(

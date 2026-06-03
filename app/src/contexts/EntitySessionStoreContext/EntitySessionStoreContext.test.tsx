@@ -1,10 +1,16 @@
 import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { ApiProvider } from "@/contexts/ApiContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 import { EntitySessionStoreProvider, useEntitySessionStore } from "./EntitySessionStoreContext";
 
-const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <EntitySessionStoreProvider>{children}</EntitySessionStoreProvider>
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <ApiProvider value={makeFakeApi()}>
+    <EntitySessionStoreProvider>{children}</EntitySessionStoreProvider>
+  </ApiProvider>
 );
 
 beforeEach(() => {
@@ -129,10 +135,12 @@ describe("EntitySessionStoreContext (facade over ChatStore)", () => {
       createdAt: 1,
       lastVisitedAt: 1,
     });
-    const wrap = ({ children }: { children: React.ReactNode }) => (
-      <EntitySessionStoreProvider initialEntities={seedMap as never} initialActiveKey={"sample:loan" as never}>
-        {children}
-      </EntitySessionStoreProvider>
+    const wrap = ({ children }: { children: ReactNode }) => (
+      <ApiProvider value={makeFakeApi()}>
+        <EntitySessionStoreProvider initialEntities={seedMap as never} initialActiveKey={"sample:loan" as never}>
+          {children}
+        </EntitySessionStoreProvider>
+      </ApiProvider>
     );
     const { result } = renderHook(() => useEntitySessionStore(), { wrapper: wrap });
     expect(result.current.state.activeKey).toBe("sample:loan");

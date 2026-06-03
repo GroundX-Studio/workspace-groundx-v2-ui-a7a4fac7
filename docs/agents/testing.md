@@ -92,6 +92,27 @@ All fake clients in `middleware/src/test/fakes.ts` record their
 calls (`partnerClient.calls`) so you can assert on the upstream
 request shape without hitting the network.
 
+### Frontend API fakes
+
+Frontend runtime network calls flow through `ApiProvider` + `useApi()`
+for migrated domains. Tests should use the render-harness `api` option
+or `withApiProvider(..., overrides)` to override only the method under
+assertion:
+
+```tsx
+renderWithOnboardingProviders(<OnboardingShell />, {
+  api: {
+    session: { ensureAnonSession: vi.fn().mockResolvedValue({ sessionId: "s1", anonymous: true }) },
+    chat: { ensureServerChatSession: vi.fn(async () => undefined) },
+  },
+});
+```
+
+Do not add per-file `vi.mock("@/api/...")` for migrated network
+boundaries. The pattern is the frontend equivalent of middleware
+`createApp({ ...fakeClients })`: one fake client per harness, not one
+module mock per test file.
+
 ## Timer + animation tests
 
 Many views use timers (typing indicators, scan animations,

@@ -17,7 +17,7 @@
  * preserved. Send `currentIntent: null` to explicitly clear it.
  */
 
-import { ensureServerChatSession } from "@/api/chatSessions";
+import { ensureServerChatSession, type ChatSessionEnsureClient } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
 import { captureException } from "@/lib/sentry";
 
@@ -36,7 +36,12 @@ export interface PatchChatSessionInput {
   activeEntityKey?: string | null;
 }
 
-export async function patchChatSession(input: PatchChatSessionInput): Promise<void> {
+type ChatSessionEnsureDependency = Pick<ChatSessionEnsureClient, "ensureServerChatSession">;
+
+export async function patchChatSession(
+  input: PatchChatSessionInput,
+  chatSessionEnsure: ChatSessionEnsureDependency = { ensureServerChatSession },
+): Promise<void> {
   const body: Record<string, unknown> = {};
   if (Object.prototype.hasOwnProperty.call(input, "currentIntent")) {
     body.currentIntent = input.currentIntent ?? null;
@@ -50,7 +55,7 @@ export async function patchChatSession(input: PatchChatSessionInput): Promise<vo
 
   // Self-trigger ensure-create + wait. See viewerEvents.ts for the
   // race rationale; same pattern here.
-  await ensureServerChatSession({
+  await chatSessionEnsure.ensureServerChatSession({
     id: input.chatSessionId,
     onboardingSessionId: input.chatSessionId,
     title: "Onboarding",

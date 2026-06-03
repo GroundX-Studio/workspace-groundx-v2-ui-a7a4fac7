@@ -67,6 +67,7 @@ drift guard at `app/src/test/no-hardcoded-styles.test.ts` walks every
 
 | Context | Lives in | What it owns |
 |---|---|---|
+| `ApiContext` | provider mounts at the app/test composition root | Injected frontend `Api` client. Runtime wires `realApi`; tests use `makeFakeApi` through render-harness `api` overrides. Mirrors middleware dependency injection and prevents per-file network `vi.mock` drift for migrated domains |
 | `AppModeContext` | provider mounts in `App.tsx` | App-wide mode (onboarding / steady), auth state, current scenario id |
 | `ChatStoreContext` | **root state container** | `sessions: Map<id, ChatSession>` (each carries a paired `ViewerSession`). Actions: `appendMessage`, `appendViewerEvent`, `pushStep`, `pushOverlay`/`mutateOverlay`/`popOverlay`, `gotoDocViewer`, plus the schema-overlay mutators. DB-source-of-truth for anon + authed (since 2026-05-25); localStorage is a cache |
 | `EntityRegistryContext` | thin facade | `useEntityRegistry()` reads from `ChatStore.activeSession.entities`. Mutation actions delegate to ChatStore. Provider auto-mounts ChatStoreProvider with seed-or-rehydrate |
@@ -75,7 +76,7 @@ drift guard at `app/src/test/no-hardcoded-styles.test.ts` walks every
 | `CanvasOrchestratorContext` | **live (post-mvs-cleanup)** | Generic `dispatch`/`registerAdapter` surface for `CanvasIntent` union; named convenience channels `openCitation` (push citation-peek overlay) + `docOpened` (append assistant chat message). Built-in handler for `highlightCitation` routes to `ChatStore.gotoDocViewer`. Soft-degrade when no ChatStoreProvider is in the tree |
 | `OnboardingSkillContext` | empty stub | Plugin-loaded skills; loader not yet implemented |
 
-Order in the provider tree: `AppMode` → `ChatStore` (via
+Order in the provider tree: `Api` → `AppMode` → `ChatStore` (via
 `EntityRegistryProvider`) → `OnboardingSession` → `ScenarioRegistry`
 → `CanvasOrchestrator` / `OnboardingSkill` → views.
 

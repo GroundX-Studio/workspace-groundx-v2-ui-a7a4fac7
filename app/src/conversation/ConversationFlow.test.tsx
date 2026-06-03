@@ -15,6 +15,7 @@
  */
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // jsdom has no matchMedia → framer-motion's useReducedMotion() returns true
@@ -24,12 +25,6 @@ vi.mock("framer-motion", async () => {
   const actual = await vi.importActual<typeof import("framer-motion")>("framer-motion");
   return { ...actual, useReducedMotion: () => false };
 });
-
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return { ...actual, sendChatMessage: vi.fn(), listChatMessages: vi.fn() };
-});
-import { listChatMessages, sendChatMessage } from "@/api/chatSessions";
 
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
@@ -48,11 +43,29 @@ function ActiveConversationFlow(props: { experience?: ReturnType<typeof makeOnbo
   return <ConversationFlow chatSessionId={state.activeSessionId} experience={props.experience} />;
 }
 
+const sendChatMessage = vi.fn();
+const listChatMessages = vi.fn();
+
+type RenderOptions = Parameters<typeof renderWithOnboardingProviders>[1];
+
+const renderWithConversationApi = (ui: ReactElement, options: RenderOptions = {}) =>
+  renderWithOnboardingProviders(ui, {
+    ...options,
+    api: {
+      ...options.api,
+      chat: {
+        ...options.api?.chat,
+        sendChatMessage,
+        listChatMessages,
+      },
+    },
+  });
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.mocked(sendChatMessage).mockReset();
-  vi.mocked(listChatMessages).mockReset();
-  vi.mocked(listChatMessages).mockResolvedValue([]);
+  sendChatMessage.mockReset();
+  listChatMessages.mockReset();
+  listChatMessages.mockResolvedValue([]);
   if (typeof window !== "undefined") window.sessionStorage.clear();
 });
 
@@ -62,7 +75,7 @@ afterEach(() => {
 
 describe("ConversationFlow (no experience → bare chat)", () => {
   it("renders the input and no intro/pills", () => {
-    renderWithOnboardingProviders(<ActiveConversationFlow />, {
+    renderWithConversationApi(<ActiveConversationFlow />, {
       initialFrame: "f2",
       initialScenario: "utility",
     });
@@ -73,7 +86,7 @@ describe("ConversationFlow (no experience → bare chat)", () => {
   });
 
   it("a send round-trips: optimistic user turn + assistant reply under chat-live-* testids", async () => {
-    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+    sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-1",
       assistantMessageId: "a-1",
       reply: {
@@ -90,7 +103,7 @@ describe("ConversationFlow (no experience → bare chat)", () => {
     });
 
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<ActiveConversationFlow />, {
+    renderWithConversationApi(<ActiveConversationFlow />, {
       initialFrame: "f2",
       initialScenario: "utility",
     });
@@ -118,7 +131,7 @@ describe("ConversationFlow (experience.seedTurns → one-shot opener injected on
         { id: "seed-1", role: "assistant", content: "Here is what is in this workspace." },
       ],
     };
-    renderWithOnboardingProviders(<ActiveConversationFlow experience={seedExperience} />, {
+    renderWithConversationApi(<ActiveConversationFlow experience={seedExperience} />, {
       initialFrame: "f2",
       initialScenario: "utility",
     });
@@ -137,7 +150,7 @@ describe("ConversationFlow (experience.seedTurns → one-shot opener injected on
         { id: "seed-1", role: "assistant", content: "Here is what is in this workspace." },
       ],
     };
-    renderWithOnboardingProviders(<ActiveConversationFlow experience={seedExperience} />, {
+    renderWithConversationApi(<ActiveConversationFlow experience={seedExperience} />, {
       initialFrame: "f2",
       initialScenario: "utility",
     });
@@ -160,7 +173,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
 
   it("renders the scripted intro + pick-view pills above the thread", () => {
     vi.useFakeTimers();
-    renderWithOnboardingProviders(
+    renderWithConversationApi(
       <ActiveConversationFlow experience={onboardingExperience()} />,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -177,7 +190,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
       lastFrame = state.currentFrame;
       return null;
     }
-    renderWithOnboardingProviders(
+    renderWithConversationApi(
       <>
         <ActiveConversationFlow experience={onboardingExperience()} />
         <FrameProbe />
@@ -197,7 +210,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
   });
 
   it("auto-advances to f5 on the first user send (Choreography onFirstUserSend → f5)", async () => {
-    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+    sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-f5",
       assistantMessageId: "a-f5",
       reply: {
@@ -221,7 +234,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     }
 
     const user = userEvent.setup();
-    renderWithOnboardingProviders(
+    renderWithConversationApi(
       <>
         <ActiveConversationFlow experience={onboardingExperience()} />
         <FrameProbe />
@@ -239,7 +252,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
   });
 
   it("threads the experience's scopeHint + title into sendChatMessage (grounding the onboarding prompt)", async () => {
-    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+    sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-hint",
       assistantMessageId: "a-hint",
       reply: {
@@ -256,7 +269,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     });
 
     const user = userEvent.setup();
-    renderWithOnboardingProviders(
+    renderWithConversationApi(
       <ActiveConversationFlow experience={onboardingExperience()} />,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -268,7 +281,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     await waitFor(() => {
       expect(sendChatMessage).toHaveBeenCalledTimes(1);
     });
-    const arg = vi.mocked(sendChatMessage).mock.calls[0][0];
+    const arg = sendChatMessage.mock.calls[0][0];
     // scopeHint is what lets the model answer/redirect off-topic queries when
     // GroundX returns 0 snippets (chatSessions.ts §scopeHint). Deleting the
     // forks must NOT drop it.
@@ -286,7 +299,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     // A returning user with a persisted user turn must NOT trip the
     // first-send choreography on mount — `firstUserMessageSent` is set only by
     // a real `send()`, not by RT-01 hydration.
-    vi.mocked(listChatMessages).mockResolvedValueOnce([
+    listChatMessages.mockResolvedValueOnce([
       { id: "m1", chatSessionId: "rt", turnIndex: 1, role: "user", content: "prior question", errorCode: null, citations: [] },
     ]);
 
@@ -296,7 +309,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
       lastFrame = state.currentFrame;
       return null;
     }
-    renderWithOnboardingProviders(
+    renderWithConversationApi(
       <>
         <ActiveConversationFlow experience={onboardingExperience()} />
         <FrameProbe />

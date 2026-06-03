@@ -1,10 +1,16 @@
 import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
+
+import { ApiProvider } from "@/contexts/ApiContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 import { OnboardingSessionProvider, useOnboardingSession } from "./OnboardingSessionContext";
 
-const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <OnboardingSessionProvider>{children}</OnboardingSessionProvider>
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <ApiProvider value={makeFakeApi()}>
+    <OnboardingSessionProvider>{children}</OnboardingSessionProvider>
+  </ApiProvider>
 );
 
 /**

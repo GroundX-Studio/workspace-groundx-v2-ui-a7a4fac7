@@ -1,29 +1,34 @@
 import { act, screen, waitFor } from "@testing-library/react";
-import { useEffect } from "react";
+import { useEffect, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// `useConversation` posts via `sendChatMessage` and hydrates the visible
-// thread via `listChatMessages` — both mocked here so the round-trip is
-// deterministic and never touches the network.
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return {
-    ...actual,
-    sendChatMessage: vi.fn(),
-    listChatMessages: vi.fn(),
-  };
-});
-import { sendChatMessage, listChatMessages } from "@/api/chatSessions";
 
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
 import { useConversation } from "./useConversation";
 
+const sendChatMessage = vi.fn();
+const listChatMessages = vi.fn();
+
+type RenderOptions = Parameters<typeof renderWithOnboardingProviders>[1];
+
+const renderWithConversationApi = (ui: ReactElement, options: RenderOptions = {}) =>
+  renderWithOnboardingProviders(ui, {
+    ...options,
+    api: {
+      ...options.api,
+      chat: {
+        ...options.api?.chat,
+        sendChatMessage,
+        listChatMessages,
+      },
+    },
+  });
+
 beforeEach(() => {
-  vi.mocked(sendChatMessage).mockReset();
-  vi.mocked(listChatMessages).mockReset();
-  vi.mocked(listChatMessages).mockResolvedValue([]);
+  sendChatMessage.mockReset();
+  listChatMessages.mockReset();
+  listChatMessages.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -70,7 +75,7 @@ function Probe({ onFirstUserSend }: { onFirstUserSend?: () => void }) {
 
 describe("useConversation (durable engine)", () => {
   it("round-trips a send: optimistic user turn + assistant turn with citations and suggested actions", async () => {
-    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+    sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-1",
       assistantMessageId: "a-1",
       reply: {
@@ -86,7 +91,7 @@ describe("useConversation (durable engine)", () => {
       compressionRan: false,
     });
 
-    renderWithOnboardingProviders(<Probe />, {
+    renderWithConversationApi(<Probe />, {
       initialFrame: "f2",
       initialScenario: "utility",
     });
@@ -116,7 +121,7 @@ describe("useConversation (durable engine)", () => {
   });
 
   it("reads isOnboarding from the active session (not hardcoded) and fires onFirstUserSend", async () => {
-    vi.mocked(sendChatMessage).mockResolvedValueOnce({
+    sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-1",
       assistantMessageId: "a-1",
       reply: {
@@ -133,7 +138,7 @@ describe("useConversation (durable engine)", () => {
     });
 
     const onFirstUserSend = vi.fn();
-    renderWithOnboardingProviders(<Probe onFirstUserSend={onFirstUserSend} />, {
+    renderWithConversationApi(<Probe onFirstUserSend={onFirstUserSend} />, {
       initialFrame: "f2",
       initialScenario: "utility",
     });
@@ -152,7 +157,7 @@ describe("useConversation (durable engine)", () => {
 
     // The onboarding session is flagged onboarding → the send carries
     // isOnboarding:true sourced FROM the session, not a literal.
-    expect(vi.mocked(sendChatMessage).mock.calls[0][0].sessionMeta.isOnboarding).toBe(true);
+    expect(sendChatMessage.mock.calls[0][0].sessionMeta.isOnboarding).toBe(true);
     // The lifecycle hook fired exactly once on the first user send.
     expect(onFirstUserSend).toHaveBeenCalledTimes(1);
   });
@@ -166,7 +171,7 @@ describe("useConversation (durable engine)", () => {
       return <Probe />;
     }
 
-    renderWithOnboardingProviders(<AgentEmitter />, {
+    renderWithConversationApi(<AgentEmitter />, {
       initialFrame: "f3a",
       initialScenario: "utility",
     });

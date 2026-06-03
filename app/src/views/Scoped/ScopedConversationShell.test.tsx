@@ -8,18 +8,6 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Keep the conversation engine off the network on mount (mirrors the
-// SteadyShell/ChatColumn test pattern).
-vi.mock("@/api/chatSessions", async () => {
-  const actual = await vi.importActual<typeof import("@/api/chatSessions")>("@/api/chatSessions");
-  return {
-    ...actual,
-    listChatMessages: vi.fn(async () => []),
-    sendChatMessage: vi.fn(),
-    ensureServerChatSession: vi.fn(async () => undefined),
-  };
-});
-
 import { AppModeProvider } from "@/contexts/AppModeContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
@@ -28,6 +16,7 @@ import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
 import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarContext";
 import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
 import { GxThemeProvider } from "@/ThemeProvider";
+import { withApiProvider } from "@/test/withApiProvider";
 
 import { WorkspacesView, ProjectsView } from "./ScopedConversationShell";
 
@@ -39,7 +28,7 @@ function Harness({ children }: { children: React.ReactNode }) {
   // production PdfViewerWidget can mount via <ScopedCanvas> — mirrors
   // renderWithOnboardingProviders, which is how the onboarding shell test
   // exercises the same viewer mount path.
-  return (
+  return withApiProvider(
     <GxThemeProvider>
       <LoadingProvider>
         <MessageBarProvider>
@@ -60,7 +49,7 @@ function Harness({ children }: { children: React.ReactNode }) {
           </AppModeProvider>
         </MessageBarProvider>
       </LoadingProvider>
-    </GxThemeProvider>
+    </GxThemeProvider>,
   );
 }
 

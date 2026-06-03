@@ -15,7 +15,7 @@
  * ChatApiError on other non-2xx.
  */
 
-import { ChatApiError } from "@/api/chatSessions";
+import { ChatApiError } from "@/api/chatErrors";
 import { csrfFetch } from "@/api/csrfFetch";
 
 /**

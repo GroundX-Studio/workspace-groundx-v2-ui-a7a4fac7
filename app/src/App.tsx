@@ -2,6 +2,8 @@ import { HelmetProvider } from "react-helmet-async";
 import { RouterProvider } from "react-router-dom";
 import type { FC, ReactNode } from "react";
 
+import { realApi } from "@/api/client";
+import { ApiProvider } from "@/contexts/ApiContext";
 import { AuthProvider } from "@/contexts/AuthContext/AuthProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
 import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarContext";
@@ -34,42 +36,49 @@ import { router, ROUTER_FUTURE_FLAGS } from "@/router/router";
  */
 export const AppProviders: FC<{ children: ReactNode }> = ({ children }) => (
   <AppErrorBoundary>
-    <GxThemeProvider>
-      {/* UR-03: global MotionConfig — honors OS `prefers-reduced-motion`
+    {/* ApiProvider is the OUTERMOST provider (above the consumer providers):
+        DocumentsProvider / AuthProvider / OnboardingSessionProvider et al.
+        read the injected network client via `useApi()`, so they must sit
+        inside it. Production wires the real client (`realApi`); tests inject
+        `makeFakeApi` through the render harnesses. */}
+    <ApiProvider value={realApi}>
+      <GxThemeProvider>
+        {/* UR-03: global MotionConfig — honors OS `prefers-reduced-motion`
           for every descendant `motion.X`. When reduced is on, the
           default transition floor is 80 ms (linear). Per-component
           `transition` props still override; this is the floor, not
           the ceiling. */}
-      <MotionRoot>
-        {/* Global SVG defs used by the F-series sample cards / BYO tiles to get
+        <MotionRoot>
+          {/* Global SVG defs used by the F-series sample cards / BYO tiles to get
             the slightly-rough wireframe edge — see `WireframeFilters`. */}
-        <WireframeFilters />
-        <LoadingProvider>
-          <MessageBarProvider>
-            {/* DocumentsProvider sits above AuthProvider so any
+          <WireframeFilters />
+          <LoadingProvider>
+            <MessageBarProvider>
+              {/* DocumentsProvider sits above AuthProvider so any
                 widget — sign-in modal, onboarding canvas, steady
                 shell — can read it. The widget hooks
                 (`useDocumentsContext`) throw if this is missing;
                 the AppErrorBoundary above is the last-line catch. */}
-            <DocumentsProvider>
-              <AuthProvider>
-                <AppModeProvider>
-                  <ScenarioRegistryProviderWithDemoHooks>
-                    <OnboardingSessionProvider>
-                      <CanvasOrchestratorProvider>
-                        <OnboardingSkillProvider>
-                          <HelmetProvider>{children}</HelmetProvider>
-                        </OnboardingSkillProvider>
-                      </CanvasOrchestratorProvider>
-                    </OnboardingSessionProvider>
-                  </ScenarioRegistryProviderWithDemoHooks>
-                </AppModeProvider>
-              </AuthProvider>
-            </DocumentsProvider>
-          </MessageBarProvider>
-        </LoadingProvider>
-      </MotionRoot>
-    </GxThemeProvider>
+              <DocumentsProvider>
+                <AuthProvider>
+                  <AppModeProvider>
+                    <ScenarioRegistryProviderWithDemoHooks>
+                      <OnboardingSessionProvider>
+                        <CanvasOrchestratorProvider>
+                          <OnboardingSkillProvider>
+                            <HelmetProvider>{children}</HelmetProvider>
+                          </OnboardingSkillProvider>
+                        </CanvasOrchestratorProvider>
+                      </OnboardingSessionProvider>
+                    </ScenarioRegistryProviderWithDemoHooks>
+                  </AppModeProvider>
+                </AuthProvider>
+              </DocumentsProvider>
+            </MessageBarProvider>
+          </LoadingProvider>
+        </MotionRoot>
+      </GxThemeProvider>
+    </ApiProvider>
   </AppErrorBoundary>
 );
 

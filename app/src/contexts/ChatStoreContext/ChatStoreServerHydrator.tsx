@@ -23,13 +23,14 @@
 
 import { useContext, useEffect, useRef, type FC } from "react";
 
-import { listChatSessions } from "@/api/chatSessionsList";
+import { useApi } from "@/contexts/ApiContext";
 import { AuthContext } from "@/contexts/AuthContext/AuthContext";
 import { captureException } from "@/lib/sentry";
 
 import { useChatStore } from "./ChatStoreContext";
 
 export const ChatStoreServerHydrator: FC = () => {
+  const api = useApi();
   // Read AuthContext via useContext (not useAuthContext) so tests
   // that mount EntitySessionStoreProvider without AuthProvider don't
   // crash. The hydrator is a no-op until/unless AuthProvider mounts
@@ -61,7 +62,7 @@ export const ChatStoreServerHydrator: FC = () => {
     let cancelled = false;
     (async () => {
       try {
-        const sessions = await listChatSessions();
+        const sessions = await api.chat.listChatSessions();
         if (cancelled || sessions.length === 0) return;
         hydrateFromServer(sessions);
       } catch (err) {
@@ -74,7 +75,7 @@ export const ChatStoreServerHydrator: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [auth, hydrateFromServer]);
+  }, [api.chat, auth, hydrateFromServer]);
 
   return null;
 };

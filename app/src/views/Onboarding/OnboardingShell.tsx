@@ -5,7 +5,6 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { issueOnboardingSession } from "@/api/entities/onboardingSessionEntity";
 import {
   BORDER,
   ONBOARDING_NAV_WIDTH_COLLAPSED,
@@ -15,6 +14,7 @@ import {
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
+import { useApi } from "@/contexts/ApiContext";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useWidgetRole } from "@/lib/widgetRole";
 import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
@@ -142,6 +142,7 @@ function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["subst
  * picker), NOT in the nav.
  */
 export const OnboardingShell: FC = () => {
+  const api = useApi();
   const { state: appMode } = useAppMode();
   const widgetRole = useWidgetRole();
   const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate } = useOnboardingSession();
@@ -278,7 +279,7 @@ export const OnboardingShell: FC = () => {
   useEffect(() => {
     if (session.sessionId) return;
     let cancelled = false;
-    issueOnboardingSession()
+    api.session.ensureAnonSession()
       .then((response) => {
         if (!cancelled) bootstrapSession(response.sessionId);
       })
@@ -289,7 +290,7 @@ export const OnboardingShell: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [bootstrapSession, session.sessionId]);
+  }, [api.session, bootstrapSession, session.sessionId]);
 
   const completedSteps = useMemo(() => {
     const set = new Set<StepId>();

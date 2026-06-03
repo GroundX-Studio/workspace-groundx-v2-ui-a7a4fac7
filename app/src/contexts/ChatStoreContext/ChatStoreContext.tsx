@@ -1,9 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
-import { ensureServerChatSession } from "@/api/chatSessions";
-import { upsertChatSessionEntity } from "@/api/chatSessionEntities";
-import { patchChatSession } from "@/api/chatSessionPatch";
-import { recordViewerEvent } from "@/api/viewerEvents";
+import { useApi } from "@/contexts/ApiContext";
 import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntitySessionStoreContext";
 import type { FFrame } from "@/types/onboarding";
 import { compileScopeFilter, parseCanvasIntent, type ContentScope, type NormalizedBbox } from "@groundx/shared";
@@ -437,6 +434,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
   ephemeral = false,
   autoSeedDefaultSession = false,
 }) => {
+  const api = useApi();
   const [state, setState] = useState<ChatStoreState>(() => {
     // If the caller pre-loaded sessions or an explicit active id,
     // that wins outright — tests use this to construct a known state.
@@ -517,14 +515,24 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     if (!sid) return;
     const session = state.sessions.get(sid);
     if (!session) return;
-    void ensureServerChatSession({
-      id: sid,
-      onboardingSessionId: sid,
-      title: session.title,
-      isOnboarding: session.isOnboardingSession,
-      activeEntityKey: session.activeEntityKey,
-    });
-  }, [state.activeSessionId, state.sessions, ephemeral]);
+    void (async () => {
+      try {
+        if (session.isOnboardingSession) {
+          await api.session.ensureAnonSession();
+        }
+        await api.chat.ensureServerChatSession({
+          id: sid,
+          onboardingSessionId: sid,
+          title: session.title,
+          isOnboarding: session.isOnboardingSession,
+          activeEntityKey: session.activeEntityKey,
+        });
+      } catch {
+        // Non-fatal bootstrap: the next send or state write can retry through
+        // the same injected client while the preview remains usable.
+      }
+    })();
+  }, [api.chat, api.session, state.activeSessionId, state.sessions, ephemeral]);
 
   // ----- session-level actions ---------------------------------------
 
@@ -650,9 +658,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
 
     if (patchPayload) {
-      void patchChatSession(patchPayload);
+      void api.chat.patchChatSession(patchPayload);
     }
-  }, []);
+  }, [api.chat]);
 
   const upsertEntityAndActivate = useCallback(
     (kind: EntityKind, id: string, defaults: Partial<EntitySession>): EntityKey => {
@@ -718,16 +726,16 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         // Server-side merge preserves scope refs the client doesn't
         // know about. Without this, chatHandler.ts:249 would always
         // see [] for the active-entity context axis.
-        void upsertChatSessionEntity(putPayload);
+        void api.chat.upsertChatSessionEntity(putPayload);
         // RT-04 — also update the chat_sessions row's
         // active_entity_key column so chatHandler.ts:204's
         // getChatSession read sees the live value, not a stale one
         // from the session-create moment.
-        void patchChatSession({ chatSessionId: putPayload.chatSessionId, activeEntityKey: key });
+        void api.chat.patchChatSession({ chatSessionId: putPayload.chatSessionId, activeEntityKey: key });
       }
       return key;
     },
-    [],
+    [api.chat],
   );
 
   const appendViewerEvent = useCallback((input: NewViewerEventInput) => {
@@ -790,9 +798,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       // captures on failure). The optimistic in-memory append is
       // the source of truth for the visible session; this write
       // makes the next chat turn's LLM context bundle complete.
-      void recordViewerEvent(postPayload);
+      void api.viewerEvents.recordViewerEvent(postPayload);
     }
-  }, []);
+  }, [api.viewerEvents]);
 
   const setCurrentIntent = useCallback((intent: CanvasIntent | null) => {
     // RT-04 — capture the post-mutation chatSessionId from inside
@@ -828,9 +836,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       // currentIntent every chat turn (only the creation-time
       // value, typically null) — the LLM never knows what view
       // the user is on.
-      void patchChatSession(patchPayload);
+      void api.chat.patchChatSession(patchPayload);
     }
-  }, []);
+  }, [api.chat]);
 
   const updateActiveEntity = useCallback((updater: (session: EntitySession) => EntitySession) => {
     // RT-03 — capture the post-mutation entity from inside the
@@ -867,9 +875,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
 
     if (putPayload) {
-      void upsertChatSessionEntity(putPayload);
+      void api.chat.upsertChatSessionEntity(putPayload);
     }
-  }, []);
+  }, [api.chat]);
 
   /**
    * RT-05 — merge a server-provided list of ChatSessionRecord into

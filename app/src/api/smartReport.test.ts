@@ -5,13 +5,6 @@ vi.mock("@/lib/sentry", () => ({
   initSentry: vi.fn(() => false),
 }));
 
-// `renderReport` self-triggers `ensureServerChatSession` (mirroring extractField)
-// so the render endpoint doesn't 404 before the chat-session row exists. Mock it
-// so the tests can count the render fetch alone.
-vi.mock("@/api/chatSessions", () => ({
-  ensureServerChatSession: vi.fn(async () => undefined),
-}));
-
 import type { ContentScope, RenderedSection } from "@groundx/shared";
 import { ApiError } from "@groundx/shared";
 
@@ -40,6 +33,26 @@ type SharedGeneratedCore = Pick<RenderedSection, "body" | "citations" | "confide
 type _assertRenderedSectionWire = Assert<Eq<WireGeneratedCore, SharedGeneratedCore>>;
 
 const originalFetch = global.fetch;
+const ensureServerChatSession = vi.fn(async () => undefined);
+let apiResponses: Response[] = [];
+
+const renderReportForTest = (input: Parameters<typeof renderReport>[0]) =>
+  renderReport(input, { ensureServerChatSession });
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function queueApiResponse(body: unknown, status = 200): void {
+  apiResponses.push(jsonResponse(body, status));
+}
+
+function apiFetchCalls() {
+  return (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([path]) => path !== "/api/csrf/token");
+}
 
 const UTILITY_SCOPE: ContentScope = {
   type: "bucket",
@@ -72,10 +85,16 @@ const RENDER_WIRE = {
 };
 
 beforeEach(() => {
-  global.fetch = vi.fn();
-  if (typeof document !== "undefined") {
-    document.cookie = "csrf_token=test-csrf-token; path=/";
-  }
+  apiResponses = [];
+  global.fetch = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>(async (input) => {
+    if (input === "/api/csrf/token") {
+      return jsonResponse({ token: "csrf-fixture" });
+    }
+    const next = apiResponses.shift();
+    if (!next) throw new Error(`unexpected fetch in smart-report test: ${String(input)}`);
+    return next;
+  });
+  ensureServerChatSession.mockClear();
 });
 
 afterEach(() => {
@@ -85,18 +104,15 @@ afterEach(() => {
 
 describe("renderReport (smart-report Phase 6 client caller)", () => {
   it("POSTs the snake_case render request to the render endpoint", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => RENDER_WIRE,
-    });
-    await renderReport({
+    queueApiResponse(RENDER_WIRE);
+    await renderReportForTest({
       templateId: "rt-utility-ic-brief",
       scope: UTILITY_SCOPE,
       chatSessionId: "chat-1",
     });
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [path, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const calls = apiFetchCalls();
+    expect(calls).toHaveLength(1);
+    const [path, init] = calls[0];
     expect(path).toBe("/api/widgets/smart-report/reports/render");
     expect((init as RequestInit).method).toBe("POST");
     const body = JSON.parse((init as RequestInit).body as string);
@@ -107,12 +123,8 @@ describe("renderReport (smart-report Phase 6 client caller)", () => {
   });
 
   it("maps the snake_case wire response to a RenderedReport (sectionId, renderAs, result)", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => RENDER_WIRE,
-    });
-    const result = await renderReport({
+    queueApiResponse(RENDER_WIRE);
+    const result = await renderReportForTest({
       templateId: "rt-utility-ic-brief",
       scope: UTILITY_SCOPE,
       chatSessionId: "chat-1",
@@ -135,29 +147,21 @@ describe("renderReport (smart-report Phase 6 client caller)", () => {
   });
 
   it("passes a section-id subset for a re-render", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ ...RENDER_WIRE, sections: [RENDER_WIRE.sections[0]] }),
-    });
-    await renderReport({
+    queueApiResponse({ ...RENDER_WIRE, sections: [RENDER_WIRE.sections[0]] });
+    await renderReportForTest({
       templateId: "rt-utility-ic-brief",
       scope: UTILITY_SCOPE,
       chatSessionId: "chat-1",
       sectionIds: ["billing_summary"],
     });
-    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, init] = apiFetchCalls()[0];
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.section_ids).toEqual(["billing_summary"]);
   });
 
   it("surfaces the gate envelope (#10) as a gated result instead of a report", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ gated: true, gate: "byo", reason: "Sign in." }),
-    });
-    const result = await renderReport({
+    queueApiResponse({ gated: true, gate: "byo", reason: "Sign in." });
+    const result = await renderReportForTest({
       templateId: "rt-utility-ic-brief",
       scope: { type: "bucket", bucketId: 99999 },
       chatSessionId: "chat-1",
@@ -177,24 +181,16 @@ describe("renderReport (smart-report Phase 6 client caller)", () => {
   });
 
   it("throws SmartReportApiError with status on a non-2xx response", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      json: async () => ({ error: "not_session_owner" }),
-    });
+    queueApiResponse({ error: "not_session_owner" }, 403);
     await expect(
-      renderReport({ templateId: "t", scope: UTILITY_SCOPE, chatSessionId: "chat-1" }),
+      renderReportForTest({ templateId: "t", scope: UTILITY_SCOPE, chatSessionId: "chat-1" }),
     ).rejects.toMatchObject({ name: "SmartReportApiError", status: 403 });
   });
 });
 
 describe("saveReportTemplate (smart-report Phase 6 member persist)", () => {
   it("POSTs the report template under a `template` envelope to the Save endpoint", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ id: "rt-utility-ic-brief", name: "Utility IC Brief", updatedAt: "2026-05-31T00:00:00Z" }),
-    });
+    queueApiResponse({ id: "rt-utility-ic-brief", name: "Utility IC Brief", updatedAt: "2026-05-31T00:00:00Z" });
     const result = await saveReportTemplate({
       id: "rt-utility-ic-brief",
       name: "Utility IC Brief",
@@ -209,8 +205,9 @@ describe("saveReportTemplate (smart-report Phase 6 member persist)", () => {
         },
       ],
     });
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [path, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const calls = apiFetchCalls();
+    expect(calls).toHaveLength(1);
+    const [path, init] = calls[0];
     expect(path).toBe("/api/widgets/smart-report/reports");
     expect((init as RequestInit).method).toBe("POST");
     const body = JSON.parse((init as RequestInit).body as string);
@@ -221,11 +218,7 @@ describe("saveReportTemplate (smart-report Phase 6 member persist)", () => {
   });
 
   it("throws SmartReportApiError with status 401 for an anonymous caller", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: async () => ({ error: "no_signed_in_user" }),
-    });
+    queueApiResponse({ error: "no_signed_in_user" }, 401);
     await expect(
       saveReportTemplate({ id: "x", name: "X", format: "f", sections: [] }),
     ).rejects.toMatchObject({ name: "SmartReportApiError", status: 401 });
