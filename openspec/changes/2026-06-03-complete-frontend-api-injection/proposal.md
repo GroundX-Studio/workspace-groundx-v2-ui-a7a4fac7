@@ -18,7 +18,8 @@ slice resumes from this plan rather than being treated as done.
 ## What Changes
 
 - Inventory current direct imports and mocks before implementation so final
-  guard allowlists are based on real files, not assumptions.
+  guard allowlists are based on real files, not assumptions. The inventory lives
+  inside this OpenSpec change, not in a separate tracker.
 - Expand the injected `Api` surface domain-by-domain so every remaining
   frontend runtime network dependency has an explicit grouped home: resources,
   scenarios, extract, smart-report/report templates, viewer/PDF support, canvas
@@ -43,6 +44,20 @@ slice resumes from this plan rather than being treated as done.
 - Comment and close GitHub issue #10 only after the final guard, full suites,
   build, OpenSpec validation, mandatory browser smoke, and GroundX Studio
   Harness sync/commit handling pass.
+
+## Conformance to core architectural decisions
+
+- **Composable, not forked:** each remaining domain is added as grouped behavior
+  on the existing injected `Api` client. The plan does not introduce parallel
+  service locators, forked providers, or a second fake surface.
+- **Done-able/user-visible:** each implementation slice includes a failing test
+  first, focused runtime/provider/widget assertions, and an adversarial review
+  before the next slice. Final closeout requires browser smoke for the migrated
+  runtime surfaces, not seam-only validation.
+- **One source of truth:** OpenSpec remains the in-flight execution surface and
+  GitHub #10 remains the live issue until all slices, guard cleanup, browser
+  smoke, and archive finish. Deferred/non-#10 work stays in GitHub backlog
+  issues, not inline TODOs or side trackers.
 
 ## Out Of Scope
 

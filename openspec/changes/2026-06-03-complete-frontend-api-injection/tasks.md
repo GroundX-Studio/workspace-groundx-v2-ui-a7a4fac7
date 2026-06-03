@@ -6,12 +6,15 @@ task. Each implementation slice must end with focused tests, a passing
 adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 (`sync_status` then `commit_push`) or an explicit note that MCP was unavailable.
 
-## T0 - Inventory current state and lock slice boundaries
+## T0 - Inventory current state and lock slice boundaries (SEQUENTIAL)
 
 - [ ] Run the current import/mock inventory across `app/src` and classify every
       hit as one of: migrate in this plan, type-only import, API/Sentry
       implementation file, implementation unit test, non-network mock, or
       already-migrated false positive.
+- [ ] Save the classified inventory in this OpenSpec change, either in a
+      dedicated `inventory.md` under this change or as an inventory section in
+      this task list. Do not create a rival top-level tracker.
 - [ ] Record the final per-domain migration list for resources,
       scenario/canvas/reset/sign-up/PDF, extract, smart-report, telemetry, and
       cleanup/guard. Do not start T1 while any hit is unclassified.
@@ -29,7 +32,7 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
   auth plans, and reject the task if any direct import/mock hit lacks a domain or
   allowlist reason.
 
-## T1 - Migrate resource provider domains
+## T1 - Migrate resource provider domains (SEQUENTIAL)
 
 - [ ] **Failing test first:** convert one resource-provider test to
       `renderWithAppProviders(..., { api: { resources: ... } })` or
@@ -53,7 +56,7 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
   defaults for dormant or missing methods; run focused provider tests plus
   `npm --workspace app exec vitest run src/api/client.test.ts src/test/makeFakeApi.test.ts`.
 
-## T2 - Migrate scenario, canvas intent, reset, sign-up, and PDF viewer consumers
+## T2 - Migrate scenario, canvas intent, reset, sign-up, and PDF viewer consumers (SEQUENTIAL)
 
 - [ ] **Failing test first:** retarget one scenario/canvas/widget test to the
       injected fake and prove it fails before its consumer switches to `useApi()`.
@@ -73,7 +76,7 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
   reset, sign-up, and PDF viewer tests; inspect reset coverage against
   `docs/agents/discipline.md` reset rules.
 
-## T3 - Migrate extract domain
+## T3 - Migrate extract domain (SEQUENTIAL)
 
 - [ ] **Failing test first:** convert one Extract/SchemaView/ProposeSchema test
       from module mocks to the injected fake and confirm it fails until the
@@ -95,7 +98,7 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
   module mocks; inspect type-only conversions; run focused Extract, SchemaView,
   ProposeSchemaFieldCard, useLiveExtract, and useLiveExtractionSchema tests.
 
-## T4 - Migrate smart-report domain
+## T4 - Migrate smart-report domain (SEQUENTIAL)
 
 - [ ] **Failing test first:** retarget one `SmartReportBuilder` or
       `SmartReportRender` test to injected `api.report` overrides and confirm it
@@ -113,7 +116,7 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
   affected onboarding shell tests; inspect that report follows the shared
   template/scope/results model rather than a forked surface.
 
-## T5 - Migrate telemetry/Sentry runtime capture
+## T5 - Migrate telemetry/Sentry runtime capture (SEQUENTIAL)
 
 - [ ] **Failing test first:** convert one component/context Sentry test from
       `vi.mock("@/lib/sentry")` to an injected `api.telemetry` fake and confirm
@@ -131,7 +134,7 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
   focused telemetry/error-branch tests; inspect the final shape for exactly one
   rendered-runtime fake surface.
 
-## T6 - Tighten the guard and retire the app-facing legacy aggregate
+## T6 - Tighten the guard and retire the app-facing legacy aggregate (SEQUENTIAL)
 
 - [ ] **Failing test first:** temporarily introduce a direct app-facing
       `@/api` value import, a direct standalone API value import, a per-file
@@ -157,7 +160,7 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
   scenario, canvas, widget, or telemetry files; verify the legacy aggregate is
   not an app-facing import path.
 
-## T7 - Final validation, browser smoke, issue close, and archive
+## T7 - Final validation, browser smoke, issue close, and archive (SEQUENTIAL)
 
 - [ ] Verify no per-file app-facing network/Sentry mocks remain outside explicit
       low-level implementation tests.
@@ -174,6 +177,12 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 - [ ] Comment on GitHub issue #10 with commit hashes, focused test commands,
       full-suite/build/secret/OpenSpec validation, browser-smoke evidence, and
       guard red/green proof.
+- [ ] Include a human-readable completed-task summary in the #10 closeout
+      comment: what each slice changed, what user-visible/runtime behavior was
+      verified, and which mocks/direct imports were removed.
+- [ ] Include the final open-work inventory in the #10 closeout comment and the
+      final response: active OpenSpec plans/tasks and open GitHub issues without
+      `backlog`. Ignore backlogged issues unless they block #10 closure.
 - [ ] Close GitHub issue #10 only after the evidence above passes.
 - [ ] Archive this OpenSpec change only after validation, #10 closure, and final
       harness sync/commit handling succeed.
