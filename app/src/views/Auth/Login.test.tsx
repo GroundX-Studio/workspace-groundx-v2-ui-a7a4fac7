@@ -65,6 +65,7 @@ describe("Login screen", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Email")).toHaveValue(""));
     expect(screen.getByLabelText("Password")).toHaveValue("");
+    expect(screen.getByRole("alert")).toHaveTextContent("Login data is not valid");
     consoleError.mockRestore();
   });
 

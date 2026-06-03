@@ -32,7 +32,7 @@ import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { useCallback, useMemo, useState, type FC } from "react";
+import { useCallback, useMemo, useState, type ChangeEvent, type FC } from "react";
 
 import { useLiveExtract } from "@/hooks/useLiveExtract";
 import {
@@ -963,6 +963,25 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
   const [format, setFormat] = useState(field.format ?? "");
   const [identifiers, setIdentifiers] = useState<string[]>(field.identifiers ?? []);
   const [identifierDraft, setIdentifierDraft] = useState<string | null>(null);
+  const textareaSx = {
+    width: "100%",
+    boxSizing: "border-box",
+    resize: "vertical",
+    border: `1px solid ${BORDER}`,
+    borderRadius: BORDER_RADIUS_SM,
+    backgroundColor: WHITE,
+    color: NAVY,
+    fontFamily: "inherit",
+    fontSize: FONT_SIZE_CAPTION,
+    lineHeight: 1.5,
+    px: 1.5,
+    py: 1,
+    "&:focus": {
+      borderColor: CYAN,
+      outline: `2px solid ${CYAN}55`,
+      outlineOffset: 1,
+    },
+  } as const;
 
   const handleSave = useCallback(() => {
     const edit: SchemaFieldEdit = {
@@ -1012,6 +1031,8 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
         <TextField
           data-testid={`schema-field-editor-name-${field.id}`}
+          id={`schema-field-editor-name-input-${field.id}`}
+          name={`schemaFieldName-${field.id}`}
           label="Name"
           size="small"
           value={name}
@@ -1021,11 +1042,16 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
         />
         <Select
           data-testid={`schema-field-editor-type-${field.id}`}
+          id={`schema-field-editor-type-input-${field.id}`}
           size="small"
           value={type}
           onChange={(e) => setType(e.target.value as SchemaFieldDef["type"])}
           sx={{ minWidth: 130 }}
-          inputProps={{ "aria-label": "Field type" }}
+          inputProps={{
+            id: `schema-field-editor-type-native-${field.id}`,
+            name: `schemaFieldType-${field.id}`,
+            "aria-label": "Field type",
+          }}
         >
           {FIELD_TYPES.map((t) => (
             <MenuItem key={t} value={t}>
@@ -1037,6 +1063,8 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
             e.g. `float · kW`, `ISO 8601`, `XX-XXXXXXX`. Optional. */}
         <TextField
           data-testid={`schema-field-editor-format-${field.id}`}
+          id={`schema-field-editor-format-input-${field.id}`}
+          name={`schemaFieldFormat-${field.id}`}
           label="Format (opt)"
           size="small"
           value={format}
@@ -1049,7 +1077,11 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
             data-testid={`schema-field-editor-required-${field.id}`}
             checked={required}
             onChange={(e) => setRequired(e.target.checked)}
-            inputProps={{ "aria-label": "Required" }}
+            inputProps={{
+              id: `schema-field-editor-required-input-${field.id}`,
+              name: `schemaFieldRequired-${field.id}`,
+              "aria-label": "Required",
+            }}
             size="small"
           />
           <Typography variant="caption" sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_LABEL }}>
@@ -1091,17 +1123,18 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
             ✨ rewrite with agent
           </Box>
         </Box>
-        <TextField
-          data-testid={`schema-field-editor-prompt-${field.id}`}
-          multiline
-          minRows={2}
-          maxRows={6}
-          size="small"
-          fullWidth
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          inputProps={{ "aria-label": "Extraction prompt" }}
-        />
+        <Box data-testid={`schema-field-editor-prompt-${field.id}`}>
+          <Box
+            component="textarea"
+            id={`schema-field-editor-prompt-input-${field.id}`}
+            name={`schemaFieldPrompt-${field.id}`}
+            rows={2}
+            value={prompt}
+            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value)}
+            aria-label="Extraction prompt"
+            sx={textareaSx}
+          />
+        </Box>
       </Box>
 
       {/* `expand-inline-editor-fields`: editable identifiers — short
@@ -1175,6 +1208,8 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
               // the `<input>` directly with `as HTMLInputElement` +
               // `user.type(...)`.
               inputProps={{
+                id: `schema-field-editor-identifier-input-${field.id}`,
+                name: `schemaFieldIdentifier-${field.id}`,
                 "aria-label": "New identifier",
                 "data-testid": `schema-field-editor-identifier-input-${field.id}`,
               }}
@@ -1211,17 +1246,18 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
         <Typography variant="caption" sx={{ display: "block", color: MUTED_ON_LIGHT, fontSize: FONT_SIZE_LABEL, letterSpacing: 0.4, mb: 0.5 }}>
           INSTRUCTIONS (one per line)
         </Typography>
-        <TextField
-          data-testid={`schema-field-editor-instructions-${field.id}`}
-          multiline
-          minRows={2}
-          maxRows={6}
-          size="small"
-          fullWidth
-          value={instructions}
-          onChange={(e) => setInstructions(e.target.value)}
-          inputProps={{ "aria-label": "Per-line instructions" }}
-        />
+        <Box data-testid={`schema-field-editor-instructions-${field.id}`}>
+          <Box
+            component="textarea"
+            id={`schema-field-editor-instructions-input-${field.id}`}
+            name={`schemaFieldInstructions-${field.id}`}
+            rows={3}
+            value={instructions}
+            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInstructions(e.target.value)}
+            aria-label="Per-line instructions"
+            sx={textareaSx}
+          />
+        </Box>
       </Box>
 
       {/* Preview chip + rerun. When previousConfidence is set on the

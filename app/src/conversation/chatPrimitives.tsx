@@ -271,7 +271,7 @@ export const LiveChatInputBar: FC<LiveChatInputBarProps> = ({ onSend, disabled }
         placeholder="Ask about your documents…"
         disabled={disabled}
         sx={{ flex: 1, color: NAVY, fontSize: FONT_SIZE_CAPTION }}
-        inputProps={{ "aria-label": "Chat input" }}
+        inputProps={{ id: "chat-live-input-field", name: "chatInput", "aria-label": "Chat input" }}
       />
       <IconButton
         type="submit"

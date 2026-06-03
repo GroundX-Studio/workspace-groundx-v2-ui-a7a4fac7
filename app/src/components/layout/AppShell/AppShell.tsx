@@ -273,6 +273,17 @@ export function AppShell({
   // Compact-mode nav drawer state. Starts closed; the hamburger opens it.
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
 
+  useEffect(() => {
+    if (!navDrawerOpen) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setNavDrawerOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [navDrawerOpen]);
+
   // ────────────────────────────────────────────────────────────────────
   // Compact layout (mobile + tablet portrait)
   // ────────────────────────────────────────────────────────────────────

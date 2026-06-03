@@ -1,4 +1,4 @@
-import { FC } from "react";
+import { FC, useState } from "react";
 import { FormikHelpers } from "formik";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
@@ -9,7 +9,7 @@ import Link from "@mui/material/Link";
 import Typography from "@mui/material/Typography";
 
 import type { LoginI } from "@/api/entities/customerEntity";
-import { BODY_TEXT, FONT_WEIGHT_LABEL, NAVY } from "@/constants";
+import { BODY_TEXT, BORDER_RADIUS_SM, ERROR_RED, FONT_WEIGHT_LABEL, NAVY, WHITE } from "@/constants";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useIsLoading } from "@/contexts/LoadingContext";
 import { useMessageContext } from "@/contexts/MessageBarContext";
@@ -27,8 +27,10 @@ export const Login: FC = () => {
   const { setErrorMessage } = useMessageContext();
   const { login } = useAuthContext();
   const navigate = useNavigate();
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const handleSubmit = async (data: LoginI, formikBag: FormikHelpers<LoginI>) => {
+    setLoginError(null);
     setIsLoading(true);
     const result = await login(data);
 
@@ -41,8 +43,10 @@ export const Login: FC = () => {
     if (result.kind === "success") {
       navigate(ROUTER_PATHS.HOME);
     } else {
+      const message = "Login data is not valid";
       formikBag.resetForm();
-      setErrorMessage("Login data is not valid");
+      setLoginError(message);
+      setErrorMessage(message);
     }
 
     setIsLoading(false);
@@ -58,6 +62,24 @@ export const Login: FC = () => {
         <Typography fontWeight={FONT_WEIGHT_LABEL} variant="h6" sx={{ color: NAVY }}>
           LOGIN
         </Typography>
+        {loginError ? (
+          <Typography
+            role="alert"
+            sx={{
+              mt: 2,
+              width: "100%",
+              border: `1px solid ${ERROR_RED}`,
+              borderRadius: BORDER_RADIUS_SM,
+              backgroundColor: WHITE,
+              color: BODY_TEXT,
+              px: 1.5,
+              py: 1,
+              fontWeight: FONT_WEIGHT_LABEL,
+            }}
+          >
+            {loginError}
+          </Typography>
+        ) : null}
         <LoginForm
           values={{ email: "", password: "" }}
           onSubmit={handleSubmit}

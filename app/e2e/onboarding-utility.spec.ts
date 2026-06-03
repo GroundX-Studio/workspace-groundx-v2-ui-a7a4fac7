@@ -170,12 +170,9 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // Committed card replaces the offer on success — the gate is now signed in.
     await expect(page.getByTestId("gate-rail-committed")).toBeVisible();
     await expect(page.getByText(/WELCOME/i)).toBeVisible();
-    // The register-method committed card invites continuing to Integrate.
-    await expect(page.getByText(/Continue to Integrate/i)).toBeVisible();
-    // NOTE: the `gate-rail-continue-integrate` button (→ F7) renders only when
-    // the gate is opened ON the gate frame (`onGateFrame = currentFrame ===
-    // GATE_FRAME`). This anon save-gate opens over F3, so the commit is the
-    // testable invariant here; the gate-frame → F7 advance is a separate path.
+    // The register-method committed card invites continuing to Integrate. The
+    // body copy also names the action, so assert the real CTA by stable testid.
+    await expect(page.getByTestId("gate-rail-continue-integrate")).toBeVisible();
   });
 
   test("F6 gate: Send with an empty email is a no-op (gate stays open)", async ({ page }) => {

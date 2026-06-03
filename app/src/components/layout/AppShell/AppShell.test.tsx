@@ -331,6 +331,15 @@ describe("AppShell", () => {
       expect(screen.queryByTestId("appshell-compact-nav-drawer")).not.toBeInTheDocument();
     });
 
+    it("pressing Escape closes the nav drawer", async () => {
+      const user = userEvent.setup();
+      renderShell({ compact: true });
+      await user.click(screen.getByTestId("appshell-compact-nav-toggle"));
+      expect(screen.getByTestId("appshell-compact-nav-drawer")).toBeInTheDocument();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId("appshell-compact-nav-drawer")).not.toBeInTheDocument();
+    });
+
     it("resets focus mode when the viewport crosses the compact boundary", async () => {
       // Transition compact -> desktop: if the user had toggled to
       // focus-canvas at mobile, that state would otherwise persist

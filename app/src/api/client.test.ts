@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
 
 const apiMocks = vi.hoisted(() => ({
@@ -9,15 +9,29 @@ vi.mock("@/api/entities/onboardingSessionEntity", () => ({
   issueOnboardingSession: apiMocks.issueOnboardingSession,
 }));
 
-import { realApi } from "@/api/client";
+import { __resetRealApiSessionStateForTests, realApi } from "@/api/client";
+
+const originalFetch = global.fetch;
+
+beforeEach(() => {
+  __resetRealApiSessionStateForTests();
+  apiMocks.issueOnboardingSession.mockReset();
+  apiMocks.issueOnboardingSession.mockResolvedValue({
+    sessionId: "anon-session-1",
+    anonymous: true,
+  });
+  global.fetch = originalFetch;
+  if (typeof document !== "undefined") {
+    document.cookie = "csrf_token=; Max-Age=0; path=/";
+  }
+});
+
+afterEach(() => {
+  global.fetch = originalFetch;
+});
 
 describe("realApi session client", () => {
   it("single-flights concurrent anon-session establishment", async () => {
-    apiMocks.issueOnboardingSession.mockResolvedValue({
-      sessionId: "anon-session-1",
-      anonymous: true,
-    });
-
     const ensureAnonSession = (realApi.session as {
       ensureAnonSession: () => Promise<{ sessionId: string; anonymous: boolean }>;
     }).ensureAnonSession;
@@ -69,8 +83,42 @@ describe("realApi scenario and telemetry clients", () => {
 });
 
 describe("realApi chat client", () => {
+  it("establishes the anon onboarding session before ensuring an onboarding chat row", async () => {
+    const order: string[] = [];
+    apiMocks.issueOnboardingSession.mockImplementationOnce(async () => {
+      order.push("anon-session");
+      return {
+        sessionId: "anon-session-order",
+        anonymous: true,
+      };
+    });
+    const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>(async (input) => {
+      if (input === "/api/csrf/token") {
+        return Response.json({ token: "csrf-fixture" });
+      }
+      if (input === "/api/chat-sessions") {
+        order.push("chat-session");
+        return Response.json({
+          chatSessionId: "chat-order-1",
+          ownerUserId: null,
+          ownerAnonId: "anon-session-order",
+        });
+      }
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    global.fetch = fetchMock;
+
+    await realApi.chat.ensureServerChatSession({
+      id: "chat-order-1",
+      onboardingSessionId: "chat-order-1",
+      title: "Onboarding",
+      isOnboarding: true,
+    });
+
+    expect(order).toEqual(["anon-session", "chat-session"]);
+  });
+
   it("keeps chat-row ensure state on the injected client, not the legacy module cache", async () => {
-    const originalFetch = global.fetch;
     const fetchMock = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>(async (input) => {
       const body =
         input === "/api/csrf/token"
@@ -83,27 +131,23 @@ describe("realApi chat client", () => {
     });
     global.fetch = fetchMock;
 
-    try {
-      await realApi.chat.ensureServerChatSession({
-        id: "chat-client-1",
-        onboardingSessionId: "anon-session-1",
-        title: "Onboarding",
-        isOnboarding: true,
-      });
+    await realApi.chat.ensureServerChatSession({
+      id: "chat-client-1",
+      onboardingSessionId: "anon-session-1",
+      title: "Onboarding",
+      isOnboarding: true,
+    });
 
-      __resetEnsuredChatSessions();
+    __resetEnsuredChatSessions();
 
-      await realApi.chat.patchChatSession({
-        chatSessionId: "chat-client-1",
-        activeEntityKey: "sample:utility",
-      });
+    await realApi.chat.patchChatSession({
+      chatSessionId: "chat-client-1",
+      activeEntityKey: "sample:utility",
+    });
 
-      const createCalls = fetchMock.mock.calls.filter(([path, init]) => {
-        return path === "/api/chat-sessions" && init?.method === "POST";
-      });
-      expect(createCalls).toHaveLength(1);
-    } finally {
-      global.fetch = originalFetch;
-    }
+    const createCalls = fetchMock.mock.calls.filter(([path, init]) => {
+      return path === "/api/chat-sessions" && init?.method === "POST";
+    });
+    expect(createCalls).toHaveLength(1);
   });
 });

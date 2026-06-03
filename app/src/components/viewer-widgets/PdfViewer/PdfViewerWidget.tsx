@@ -212,6 +212,10 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
     pages.find((p) => p.pageNumber === activePage)?.pageUrl ?? pages[0]?.pageUrl ?? null;
   const fileName = xray?.fileName ?? "";
   const loading = !xray && !error;
+  const highlightPage =
+    highlightBbox && typeof targetPage === "number" ? targetPage : activePage;
+  const shouldRenderHighlight =
+    Boolean(highlightBbox) && highlightTier !== "ambient" && activePage === highlightPage;
 
   return (
     <Box
@@ -222,7 +226,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
       // data attrs on the root so consumers + tests can assert the
       // prop wiring without waiting on the async xray fetch to resolve.
       data-target-page={typeof targetPage === "number" ? String(targetPage) : undefined}
-      data-highlight-page={highlightBbox ? String(targetPage ?? activePage) : undefined}
+      data-highlight-page={highlightBbox ? String(highlightPage) : undefined}
       data-highlight-bbox={highlightBbox ? JSON.stringify(highlightBbox) : undefined}
       // WF-01 C5 — surface the reading-scan prop so consumers + tests can
       // assert the wiring without waiting on the async xray fetch the visible
@@ -320,7 +324,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                 backgroundColor: WHITE,
               }}
             />
-            {highlightBbox && highlightTier !== "ambient" && (
+            {shouldRenderHighlight && highlightBbox && (
               // Cite overlay — absolute-positioned tint atop the page
               // image at the bbox-percent coords. Rendered via inline
               // `style` (not `sx`) so the test can assert the four

@@ -230,11 +230,11 @@ const CompactStrip: FC<{ steps: StepDescriptor[] }> = ({ steps }) => {
       >
         <Box component="span">
           Step {found?.n ?? 1} of {total}{" "}
-          <Box component="span" sx={{ color: alpha(NAVY, 0.55), fontWeight: FONT_WEIGHT_MEDIUM, ml: 0.5 }}>
+          <Box component="span" sx={{ color: alpha(NAVY, 0.75), fontWeight: FONT_WEIGHT_MEDIUM, ml: 0.5 }}>
             · {found?.current.label.replace(/^\d+\s*/, "") ?? steps[0].label.replace(/^\d+\s*/, "")}
           </Box>
         </Box>
-        <Box component="span" sx={{ fontSize: ONBOARDING_BADGE_FONT_SIZE, color: alpha(NAVY, 0.55), fontWeight: FONT_WEIGHT_MEDIUM }}>
+        <Box component="span" sx={{ fontSize: ONBOARDING_BADGE_FONT_SIZE, color: alpha(NAVY, 0.75), fontWeight: FONT_WEIGHT_MEDIUM }}>
           {completed}/{total} done
         </Box>
       </Box>

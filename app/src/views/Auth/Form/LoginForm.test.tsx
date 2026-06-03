@@ -48,6 +48,13 @@ describe("LoginForm (TS-11)", () => {
     expect(submitted).toEqual({ email: "user@example.com", password: "hunter2!!" });
   });
 
+  it("marks login fields with browser autocomplete hints", () => {
+    const onSubmit = vi.fn();
+    render(<LoginForm values={baseValues} onSubmit={onSubmit} />);
+    expect(screen.getByLabelText(/email/i)).toHaveAttribute("autocomplete", "email");
+    expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "current-password");
+  });
+
   it("surfaces the yup email-shape error for malformed email after blur", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

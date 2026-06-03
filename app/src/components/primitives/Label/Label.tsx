@@ -32,7 +32,7 @@ export type LabelVariant = "form" | "eyebrow";
 
 export interface LabelProps extends Omit<MuiTypographyProps, "variant" | "component"> {
   variant?: LabelVariant;
-  /** HTML element override. Defaults to `<span>` (eyebrow) or `<label>` (form). */
+  /** HTML element override. Defaults to `<label>` only when htmlFor is present. */
   component?: ElementType;
   /** When variant="form", what input this label is for. */
   htmlFor?: string;
@@ -48,7 +48,7 @@ export const Label: FC<LabelProps> = ({
   ...rest
 }) => {
   const isEyebrow = variant === "eyebrow";
-  const defaultElement: ElementType = isEyebrow ? "span" : "label";
+  const defaultElement: ElementType = !isEyebrow && htmlFor ? "label" : "span";
   return (
     <MuiTypography
       {...rest}

@@ -124,6 +124,31 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     expect(editor.queryByLabelText(/scope/i)).not.toBeInTheDocument();
   });
 
+  it("gives the inline editor form controls stable labels and submit names", async () => {
+    const user = userEvent.setup();
+    renderWithReportApi(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+      initialScenario: "utility",
+      initialFrame: "f4a",
+      initialAuthState: "signed-in",
+    });
+
+    await user.click(screen.getByTestId("report-builder-edit-billing_summary"));
+    const editor = screen.getByTestId("report-builder-editor-billing_summary");
+    const controls = Array.from(editor.querySelectorAll("input, textarea, select"));
+
+    expect(controls.length).toBeGreaterThan(0);
+    for (const control of controls) {
+      expect(control).toHaveAttribute("id");
+      expect(control).toHaveAttribute("name");
+      expect(control.getAttribute("id")).not.toBe("");
+      expect(control.getAttribute("name")).not.toBe("");
+    }
+    expect(within(editor).getByLabelText(/variable name/i)).toHaveAttribute(
+      "name",
+      "reportBuilderVariableName-billing_summary",
+    );
+  });
+
   it("pre-opens the inline editor for `selectedSectionId` (the render→builder + show_smart_report_edit hand-off)", () => {
     renderWithReportApi(
       <SmartReportBuilder role="member" scope={UTILITY_SCOPE} selectedSectionId="charge_breakdown" />,

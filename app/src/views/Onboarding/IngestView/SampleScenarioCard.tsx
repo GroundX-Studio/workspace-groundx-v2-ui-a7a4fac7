@@ -22,9 +22,9 @@ import { alpha } from "@mui/material/styles";
 import type { FC, ReactNode } from "react";
 
 import {
+  BODY_TEXT,
   BORDER_RADIUS,
   BORDER_RADIUS_PILL,
-  CORAL,
   CYAN,
   FONT_FAMILY_MARKETING,
   FONT_SIZE_H5,
@@ -157,7 +157,7 @@ export const SampleScenarioCard: FC<SampleScenarioCardProps> = ({
           >
             {hero.title}
           </Typography>
-          <Typography sx={{ color: alpha(NAVY, 0.65), fontSize: FONT_SIZE_LABEL, lineHeight: 1.35 }}>
+          <Typography sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_LABEL, lineHeight: 1.35 }}>
             {hero.shortDesc}
           </Typography>
         </Stack>
@@ -166,7 +166,7 @@ export const SampleScenarioCard: FC<SampleScenarioCardProps> = ({
         <Typography
           sx={{
             flex: 1,
-            color: CORAL,
+            color: BODY_TEXT,
             fontWeight: FONT_WEIGHT_HEADLINE,
             fontSize: ONBOARDING_SMALL_TEXT_FONT_SIZE,
             lineHeight: 1.3,

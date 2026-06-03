@@ -58,10 +58,19 @@ const ensureAnonSession = async (): Promise<OnboardingSessionResponse> => {
   return pendingAnonSession;
 };
 
-const chatSessionEnsure = createChatSessionEnsureClient(createChatSessionDirect);
+const createChatSessionWithSession = async (
+  input: Parameters<typeof createChatSessionDirect>[0],
+) => {
+  if (input.isOnboarding) {
+    await ensureAnonSession();
+  }
+  return createChatSessionDirect(input);
+};
+
+const chatSessionEnsure = createChatSessionEnsureClient(createChatSessionWithSession);
 
 const createChatSession = async (input: Parameters<typeof createChatSessionDirect>[0]) => {
-  const result = await createChatSessionDirect(input);
+  const result = await createChatSessionWithSession(input);
   chatSessionEnsure.markChatSessionEnsured(input.id);
   return result;
 };
@@ -73,6 +82,12 @@ const listChatMessages: typeof listChatMessagesDirect = (chatSessionId) =>
   listChatMessagesDirect(chatSessionId, chatSessionEnsure);
 
 const ensureServerChatSession = chatSessionEnsure.ensureServerChatSession;
+
+export const __resetRealApiSessionStateForTests = (): void => {
+  pendingAnonSession = null;
+  resolvedAnonSession = null;
+  chatSessionEnsure.resetEnsuredChatSessions();
+};
 
 const patchChatSessionWithClientEnsure: typeof patchChatSession = (input) =>
   patchChatSession(input, chatSessionEnsure);

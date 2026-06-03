@@ -25,6 +25,11 @@ describe("Label primitive", () => {
     expect(styles.textTransform).toBe("none");
   });
 
+  it("form variant without htmlFor renders as text, not an orphan label", () => {
+    render(<Label>Name</Label>);
+    expect(screen.getByText(/name/i).tagName.toLowerCase()).toBe("span");
+  });
+
   it("respects an explicit component override", () => {
     render(
       <Label variant="eyebrow" component="div">Custom</Label>,

@@ -256,7 +256,7 @@ export const IngestView: FC = () => {
             <Typography sx={{ fontSize: "inherit" }}>{cap.name}</Typography>
           </Stack>
         ))}
-        <Typography sx={{ fontStyle: "italic", color: alpha(NAVY, 0.5), fontSize: "inherit" }}>
+        <Typography sx={{ fontStyle: "italic", color: BODY_TEXT, fontSize: "inherit" }}>
           hollow = not in this sample
         </Typography>
       </Stack>
@@ -279,7 +279,7 @@ export const IngestView: FC = () => {
         sx={{
           mt: 4,
           mb: 1,
-          color: alpha(NAVY, 0.5),
+          color: BODY_TEXT,
           cursor: "pointer",
           width: "fit-content",
           borderRadius: BORDER_RADIUS_SM,

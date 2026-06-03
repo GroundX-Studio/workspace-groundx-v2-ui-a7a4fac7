@@ -27,6 +27,31 @@ const baseSteps: StepDescriptor[] = [
   { id: "integrate", label: "4 Integrate", state: "disabled" },
 ];
 
+const contrastAgainstWhite = (color: string) => {
+  if (color.startsWith("#") && color.length === 7) {
+    const channels = [color.slice(1, 3), color.slice(3, 5), color.slice(5, 7)].map((hex) => parseInt(hex, 16));
+    const luminance = (values: number[]) =>
+      values
+        .map((channel) => channel / 255)
+        .map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4))
+        .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+    return 1.05 / (luminance(channels) + 0.05);
+  }
+  const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+  if (!match) return 0;
+  const alpha = match[4] == null ? 1 : Number(match[4]);
+  const rgb = [Number(match[1]), Number(match[2]), Number(match[3])].map((channel) =>
+    Math.round(channel * alpha + 255 * (1 - alpha)),
+  );
+  const luminance = (channels: number[]) =>
+    channels
+      .map((channel) => channel / 255)
+      .map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4))
+      .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+  const fg = luminance(rgb);
+  return (1.05) / (fg + 0.05);
+};
+
 /**
  * The wireframe rewrite (spec-nav-v2.jsx) renders the step number as a
  * standalone circular badge inside the pill, with the label as plain text
@@ -69,6 +94,12 @@ describe("StepStrip", () => {
     // The compact "Step X of Y" copy must NOT appear when the strip
     // is in full mode.
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
+  });
+
+  it("compact progress metadata meets contrast on white", () => {
+    render(<StepStrip steps={baseSteps} compact />);
+    expect(contrastAgainstWhite(getComputedStyle(screen.getByText("· Analyze")).color)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastAgainstWhite(getComputedStyle(screen.getByText("2/4 done")).color)).toBeGreaterThanOrEqual(4.5);
   });
 
   it("never wraps to a second row — flex-wrap pinned to nowrap (bug fix: at 1305px in Chrome the strip dropped Integrate to a second line)", () => {

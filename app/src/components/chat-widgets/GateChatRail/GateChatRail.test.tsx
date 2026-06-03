@@ -79,6 +79,13 @@ describe("GateChatRail", () => {
     expect(screen.getByTestId("gate-rail-sso")).toBeInTheDocument();
   });
 
+  it("gives the magic-link email field a stable label and submit identity", () => {
+    renderWidget();
+    const email = screen.getByLabelText("Email for magic link");
+    expect(email).toHaveAttribute("id", "gate-rail-email-input");
+    expect(email).toHaveAttribute("name", "gateRailEmail");
+  });
+
   it("SSO door commits the gate via the sso method", () => {
     renderWidget();
     fireEvent.click(screen.getByTestId("gate-rail-sso"));
@@ -146,6 +153,13 @@ describe("GateChatRail", () => {
     renderWidget();
     fireEvent.click(screen.getByTestId("gate-rail-continue-integrate"));
     expect(advanceFrame).toHaveBeenCalledWith("f7");
+  });
+
+  it("still offers Continue-to-Integrate when the gate committed from Extract", () => {
+    mockGate = { status: "committed", method: "register" };
+    mockCurrentFrame = "f3";
+    renderWidget();
+    expect(screen.getByTestId("gate-rail-continue-integrate")).toBeInTheDocument();
   });
 
   it("renders the engineer-call-committed thanks card", () => {

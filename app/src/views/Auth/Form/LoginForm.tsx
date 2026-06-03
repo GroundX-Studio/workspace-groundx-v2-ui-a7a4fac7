@@ -49,6 +49,7 @@ export const LoginForm: FC<LoginFormProps> = ({ values, forgotPassword, onSubmit
         fullWidth
         id="email"
         name="email"
+        autoComplete="email"
         label="Email"
         value={formik.values.email}
         onChange={(event) => {
@@ -67,6 +68,7 @@ export const LoginForm: FC<LoginFormProps> = ({ values, forgotPassword, onSubmit
         fullWidth
         id="password"
         name="password"
+        autoComplete="current-password"
         label="Password"
         noTool="pre-app auth (not agent-driven)"
         value={formik.values.password}

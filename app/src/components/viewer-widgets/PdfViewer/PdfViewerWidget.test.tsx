@@ -365,6 +365,32 @@ describe("PdfViewerWidget", () => {
         expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[2]?.pageUrl),
       );
     });
+
+    it("hides a target-page highlight when the user browses to another page", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      const user = (await import("@testing-library/user-event")).default.setup();
+
+      render(
+        <PdfViewerWidget
+          scope={docScope("doc-1")}
+          role="member"
+          targetPage={1}
+          highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
+        />,
+        { wrapper },
+      );
+
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[0]?.pageUrl),
+      );
+      expect(screen.getByTestId("pdf-viewer-highlight")).toBeInTheDocument();
+
+      await user.click(await screen.findByTestId("pdf-viewer-thumb-3"));
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-page-image").getAttribute("src")).toBe(fakeXray.documentPages[2]?.pageUrl),
+      );
+      expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
+    });
   });
 
   // WF-01 C5 (2026-05-28). Scan animation overlay appears over the

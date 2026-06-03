@@ -164,14 +164,13 @@ const PREAMBLE_BY_CAUSE: Record<"save-schema", string> = {
 };
 
 /**
- * The onboarding-flow frame at which the gate appears. When the session is
- * on this frame, the committed-state card offers the "Continue to Integrate"
- * nav CTA that advances the flow to F7. This is FLOW chrome, re-sourced from
- * session/gate-state (`currentFrame`) — NOT a widget `role`/`mode` prop
- * (2026-05-30-widget-role-access). A steady re-encounter of the gate is not
- * on this frame, so the nav CTA is absent.
+ * Frames before the user has already reached Integrate. When the gate commits
+ * from any of these onboarding frames, the committed-state card offers the
+ * "Continue to Integrate" nav CTA that advances the flow to F7. This is FLOW
+ * chrome, re-sourced from session/gate-state (`currentFrame`) — NOT a widget
+ * `role`/`mode` prop (2026-05-30-widget-role-access).
  */
-const GATE_FRAME = "f6";
+const PRE_INTEGRATE_FRAMES = new Set(["f1", "f2", "f3", "f3a", "f4", "f4a", "f5", "f6"]);
 
 export interface GateChatRailProps {
   /**
@@ -193,9 +192,11 @@ export interface GateChatRailProps {
 export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope }) => {
   const { state, dismissGate, advanceFrame, commitGate } = useOnboardingSession();
   // FLOW chrome, re-sourced from gate-state — not from a widget prop. The
-  // committed "Continue to Integrate" nav CTA shows only while the onboarding
-  // flow is on the gate frame.
-  const onGateFrame = state.currentFrame === GATE_FRAME;
+  // committed "Continue to Integrate" nav CTA shows while the onboarding flow
+  // has not already reached the Integrate frame. Live Extract unlocks can open
+  // and commit the gate from F3 without first moving through the historical F6
+  // wrapper, so key this to pre-F7 flow state rather than only `f6`.
+  const canContinueToIntegrate = PRE_INTEGRATE_FRAMES.has(state.currentFrame);
   const navigate = useNavigate();
   const location = useLocation();
   const [email, setEmail] = useState("");
@@ -287,7 +288,7 @@ export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope
         <MuiStack spacing={1}>
           <Label sx={{ color: EYEBROW_ON_LIGHT }}>{eyebrow}</Label>
           <BodyText>{body}</BodyText>
-          {onGateFrame ? (
+          {canContinueToIntegrate ? (
             <Button noTool="onboarding-flow nav chrome (not agent-driven)"
               type="button"
               variant="primary"
@@ -338,10 +339,12 @@ export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope
             <TextField
               noTool="value collected by send-magic-link"
               data-testid="gate-rail-email"
+              id="gate-rail-email-input"
+              name="gateRailEmail"
+              label="Email for magic link"
               type="email"
               fullWidth
               placeholder="name@company.com"
-              aria-label="Email for magic link"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               onKeyDown={(event) => {

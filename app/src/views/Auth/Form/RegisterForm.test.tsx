@@ -57,6 +57,18 @@ describe("RegisterForm (TS-11)", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("gives browser autofill stable autocomplete hints", () => {
+    const onSubmit = vi.fn();
+    render(<RegisterForm values={baseValues} onSubmit={onSubmit} />);
+
+    expect(screen.getByLabelText(/first name/i)).toHaveAttribute("autocomplete", "given-name");
+    expect(screen.getByLabelText(/last name/i)).toHaveAttribute("autocomplete", "family-name");
+    expect(screen.getByLabelText(/^email/i)).toHaveAttribute("autocomplete", "email");
+    expect(screen.getByLabelText(/^password/i)).toHaveAttribute("autocomplete", "new-password");
+    expect(screen.getByLabelText(/confirm password/i)).toHaveAttribute("autocomplete", "new-password");
+    expect(screen.getByLabelText(/company name/i)).toHaveAttribute("autocomplete", "organization");
+  });
+
   it("calls onSubmit with the filled values when the entire schema passes", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

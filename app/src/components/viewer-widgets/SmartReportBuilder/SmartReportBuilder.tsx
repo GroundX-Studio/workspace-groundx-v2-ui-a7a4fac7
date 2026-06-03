@@ -41,7 +41,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
-import { type FC, useCallback, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type FC, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 import { widgetRoleCanEdit } from "@groundx/shared";
@@ -533,6 +533,25 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
   const [variableName, setVariableName] = useState("");
   // The `⋮` menu open state (reused from the F3a row menu).
   const [menuOpen, setMenuOpen] = useState(false);
+  const textareaSx = {
+    width: "100%",
+    boxSizing: "border-box",
+    resize: "vertical",
+    border: `1px solid ${BORDER}`,
+    borderRadius: BORDER_RADIUS_SM,
+    backgroundColor: WHITE,
+    color: NAVY,
+    fontFamily: "inherit",
+    fontSize: FONT_SIZE_CAPTION,
+    lineHeight: 1.5,
+    px: 1.5,
+    py: 1,
+    "&:focus": {
+      borderColor: NAVY,
+      outline: `2px solid ${NAVY}55`,
+      outlineOffset: 1,
+    },
+  } as const;
 
   const handleSave = useCallback(() => {
     onSave({
@@ -652,6 +671,8 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
           sx={{ display: "flex", flexDirection: "column", gap: 1.25, pt: 0.5 }}
         >
           <TextField
+            id={`report-builder-section-name-input-${row.id}`}
+            name={`reportBuilderSectionName-${row.id}`}
             label="Section name"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -661,6 +682,7 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
           <Box>
             <Box
               component="label"
+              htmlFor={`report-builder-render-as-input-${row.id}`}
               id={`renderAs-label-${row.id}`}
               sx={{ display: "block", color: BODY_TEXT, fontSize: FONT_SIZE_LABEL, mb: 0.5 }}
             >
@@ -671,7 +693,11 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
               onChange={(e) => setRenderAs(e.target.value as ReportSectionRenderAs)}
               size="small"
               fullWidth
-              inputProps={{ "aria-labelledby": `renderAs-label-${row.id}` }}
+              inputProps={{
+                id: `report-builder-render-as-input-${row.id}`,
+                name: `reportBuilderRenderAs-${row.id}`,
+                "aria-labelledby": `renderAs-label-${row.id}`,
+              }}
             >
               {RENDER_AS_OPTIONS.map((o) => (
                 <MenuItem key={o.value} value={o.value}>
@@ -680,37 +706,59 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
               ))}
             </Select>
           </Box>
-          <TextField
-            label="Question"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            size="small"
-            multiline
-            minRows={2}
-            inputProps={{ "aria-label": "Question" }}
-          />
-          <TextField
-            label="Instructions"
-            placeholder="One rule per line"
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            size="small"
-            multiline
-            minRows={2}
-            inputProps={{ "aria-label": "Instructions" }}
-          />
+          <Box>
+            <Box
+              component="label"
+              htmlFor={`report-builder-question-input-${row.id}`}
+              sx={{ display: "block", color: BODY_TEXT, fontSize: FONT_SIZE_LABEL, mb: 0.5 }}
+            >
+              Question
+            </Box>
+            <Box
+              component="textarea"
+              id={`report-builder-question-input-${row.id}`}
+              name={`reportBuilderQuestion-${row.id}`}
+              aria-label="Question"
+              rows={2}
+              value={question}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setQuestion(e.target.value)}
+              sx={textareaSx}
+            />
+          </Box>
+          <Box>
+            <Box
+              component="label"
+              htmlFor={`report-builder-instructions-input-${row.id}`}
+              sx={{ display: "block", color: BODY_TEXT, fontSize: FONT_SIZE_LABEL, mb: 0.5 }}
+            >
+              Instructions
+            </Box>
+            <Box
+              component="textarea"
+              id={`report-builder-instructions-input-${row.id}`}
+              name={`reportBuilderInstructions-${row.id}`}
+              aria-label="Instructions"
+              placeholder="One rule per line"
+              rows={2}
+              value={instructions}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInstructions(e.target.value)}
+              sx={textareaSx}
+            />
+          </Box>
           {/* NO per-section scope field — the template is scope-independent. */}
 
           {/* Manual "make variable" (#12 — no auto-inference). The user NAMES
               the token (step-16 follow-up — no hardcoded literal). */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
             <TextField
+              id={`report-builder-variable-name-input-${row.id}`}
+              name={`reportBuilderVariableName-${row.id}`}
+              label="Variable name"
               size="small"
               placeholder="variable name"
               value={variableName}
               onChange={(e) => setVariableName(e.target.value)}
               inputProps={{
-                "aria-label": "Variable name",
                 "data-testid": `report-builder-variable-name-${row.id}`,
               }}
             />
