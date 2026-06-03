@@ -162,29 +162,29 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 
 ## T7 - Final validation, browser smoke, issue close, and archive (SEQUENTIAL)
 
-- [ ] Verify no per-file app-facing network/Sentry mocks remain outside explicit
+- [x] Verify no per-file app-facing network/Sentry mocks remain outside explicit
       low-level implementation tests.
-- [ ] Run `npm test`, `npm run build`, `npm run scan:secrets`, and
+- [x] Run `npm test`, `npm run build`, `npm run scan:secrets`, and
       `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`.
-- [ ] Run mandatory Chrome DevTools MCP browser smoke for: one resource
+- [x] Run mandatory Chrome DevTools MCP browser smoke for: one resource
       operation, one scenario/canvas or reset/sign-up path, one extract path, one
       smart-report path, and one telemetry/error branch. Measure console errors,
       failed network requests, and relevant DOM/user-visible state rather than
       relying on screenshots alone.
-- [ ] Run GroundX Studio Harness `sync_status` before the final push and
+- [x] Run GroundX Studio Harness `sync_status` before the final push and
       `commit_push` for the final saved change. If the MCP server is not
       attached, diagnose attachment first and document the fallback used.
-- [ ] Comment on GitHub issue #10 with commit hashes, focused test commands,
+- [x] Comment on GitHub issue #10 with commit hashes, focused test commands,
       full-suite/build/secret/OpenSpec validation, browser-smoke evidence, and
       guard red/green proof.
-- [ ] Include a human-readable completed-task summary in the #10 closeout
+- [x] Include a human-readable completed-task summary in the #10 closeout
       comment: what each slice changed, what user-visible/runtime behavior was
       verified, and which mocks/direct imports were removed.
-- [ ] Include the final open-work inventory in the #10 closeout comment and the
+- [x] Include the final open-work inventory in the #10 closeout comment and the
       final response: active OpenSpec plans/tasks and open GitHub issues without
       `backlog`. Ignore backlogged issues unless they block #10 closure.
-- [ ] Close GitHub issue #10 only after the evidence above passes.
-- [ ] Archive this OpenSpec change only after validation, #10 closure, and final
+- [x] Close GitHub issue #10 only after the evidence above passes.
+- [x] Archive this OpenSpec change only after validation, #10 closure, and final
       harness sync/commit handling succeed.
 - **Adversarial review:** confirm the injected surface is the only app-facing
   runtime path, the final guard fails regressions, #10 is closed, no active
