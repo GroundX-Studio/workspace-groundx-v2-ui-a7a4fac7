@@ -46,17 +46,23 @@ frontend, done completely (no per-file-mock band-aids). Tracked by issue #10.
 - **Proof slice — the session/chat domain.** Migrate `OnboardingShell`,
   `OnboardingSessionContext`, the ChatStore write paths, and `chatSessions` /
   `onboardingSessionEntity` consumers to `useApi()`. **Land #8's single-flight on
-  the anon-session establish:** today `issueOnboardingSession` is a bare
-  `axios.post` with NO dedup, called from two places (`OnboardingShell` + the
-  401-retry in `common.ts`) → the ownership race. The new `session.ensureAnonSession()`
-  on the injected client is single-flight (one in-flight promise, one
-  `POST /api/onboarding/session`); the chat-session create awaits it. (Distinct
-  from the EXISTING chat-ensure module-state `awaitChatSessionEnsured` /
-  `__markChatSessionEnsured` in `chatSessions.ts`, which moves onto the client as
-  part of the migration.) Delete the per-file `@/api` / `@/api/chatSessions` /
+  the anon-session establish.** The real race (verified in current code): the anon
+  session is established by ONE caller — `OnboardingShell.tsx:281` calling
+  `issueOnboardingSession` (a bare `axios.post`, NO dedup) — while a SECOND,
+  independent flow, `ChatStoreContext`'s bootstrap `useEffect` (line ~514) calls
+  `ensureServerChatSession` and can fire BEFORE the establish completes → chat
+  create with no session cookie (401) or a PATCH against a not-yet-persisted row
+  (404). Fix: a single-flight `session.ensureAnonSession()` on the injected client
+  (one in-flight promise → one `POST /api/onboarding/session`, deduped across the
+  shell AND React-StrictMode double-invoke); the ChatStore bootstrap awaits it
+  before `ensureServerChatSession`. (Distinct from the EXISTING chat-ensure
+  module-state `awaitChatSessionEnsured` / `__markChatSessionEnsured` in
+  `chatSessions.ts`, which moves onto the client as part of the migration — note
+  that state is reset by 7 test files incl. extract/schema, so T3's blast radius
+  exceeds the named files.) Delete the per-file `@/api` / `@/api/chatSessions` /
   `@/api/entities/onboardingSessionEntity` mocks in that domain's tests (they use
   the harness fake). This proves the seam end to end AND closes #8 correctly (no
-  401/403/404), with no test ripple.
+  401/404), with no test ripple.
 - **Drift guard.** A test that FAILS if (a) a migrated component/context imports a
   network module directly instead of `useApi()`, or (b) a test re-`vi.mock`s a
   migrated network boundary. Scoped to migrated domains; widened per phase.

@@ -23,8 +23,11 @@ remaining domains are follow-on changes (see proposal roadmap).
       `createContextHook` — exported `createEntityContext.tsx:63`).
 - [ ] Wire the REAL client at the composition root (`App` / `AppInitialization`):
       the `api` aggregate + the standalone module fns bound into the grouped shape,
-      so production behavior is unchanged. Legacy `import { api }` + direct module
-      imports still work (coexist during migration).
+      so production behavior is unchanged. The client value MUST be a STABLE
+      reference (module singleton, or root `useMemo` with stable deps) — consumers
+      will put api methods in `useEffect` deps, so a fresh object per render would
+      loop. Legacy `import { api }` + direct module imports still work (coexist
+      during migration).
 - **Gate:** test RED→GREEN; `useApi()` returns the injected client; no consumer
   migrated yet; full app suite still green (additive only); tsc clean.
 
@@ -35,9 +38,12 @@ remaining domains are follow-on changes (see proposal roadmap).
       success envelope / resolved void). Type-checked against `Api` so it can
       never drift from the real surface.
 - [ ] Inject it by default in the render harnesses (`renderWithOnboardingProviders`
-      + the steady/scoped harnesses): wrap children in `<ApiProvider value={
-      makeFakeApi(opts.api)}>`. Tests pass `{ api: { session: { ... } } }` to
-      override only what they assert.
+      + `renderWithAppProviders`): `<ApiProvider>` must be the OUTERMOST provider —
+      above `OnboardingSessionProvider` / `ScenarioRegistryProvider` /
+      `DocumentsProvider` / `CanvasOrchestratorProvider`, because those providers
+      THEMSELVES become `useApi()` consumers after migration and must receive the
+      fake. (Wrapping only the leaf children would starve them.) Tests pass
+      `{ api: { session: { ... } } }` to override only what they assert.
 - **Gate:** harness mounts a component using `useApi()` with zero per-test
   `vi.mock`; the fake type-checks against `Api`; app suite green.
 
@@ -45,16 +51,27 @@ remaining domains are follow-on changes (see proposal roadmap).
 
 - [ ] Migrate `OnboardingShell`, `OnboardingSessionContext`, the ChatStore write
       paths, `chatSessions` + `onboardingSessionEntity` consumers from direct
-      imports to `useApi()`.
-- [ ] Land #8 — single-flight on the ANON-SESSION ESTABLISH (the actual race):
-      today `issueOnboardingSession` is a bare `axios.post` with NO dedup, called
-      from BOTH `OnboardingShell` and the 401-retry in `common.ts`. Add
+      imports to `useApi()`. NOTE scope: moving the chat-ensure module-state onto
+      the client touches the 7 test files that reset it via
+      `__resetEnsuredChatSessions` (incl. `extractField`/`viewerEvents`/
+      `chatSessionEntities`/`chatSessionPatch`/`ProposeSchemaFieldCard`/`SchemaView`)
+      — budget for them in this task.
+- [ ] Land #8 — single-flight on the ANON-SESSION ESTABLISH (the verified race):
+      the establish has ONE caller today (`OnboardingShell.tsx:281` →
+      `issueOnboardingSession`, a bare `axios.post`, NO dedup); the SECOND flow is
+      `ChatStoreContext`'s bootstrap `useEffect` (~line 514) calling
+      `ensureServerChatSession`, which can fire before the establish completes →
+      401 (no cookie) / 404 (PATCH on not-yet-persisted row). Add
       `session.ensureAnonSession()` on the injected client = one in-flight promise,
-      one `POST /api/onboarding/session`; both callers share it. The chat-session
-      create awaits it before firing. (The existing chat-ensure module-state
-      `awaitChatSessionEnsured`/`__markChatSessionEnsured` in `chatSessions.ts`
-      moves onto the client too — distinct mechanism, don't conflate.) No second
-      establish, no 401/403/404.
+      one `POST /api/onboarding/session`, deduped across the shell AND React
+      StrictMode double-invoke; the ChatStore bootstrap awaits it before
+      `ensureServerChatSession`. (The existing chat-ensure module-state
+      `awaitChatSessionEnsured`/`__markChatSessionEnsured` moves onto the client
+      too — distinct mechanism, don't conflate.) No 401/404.
+- [ ] Write the ordering unit test FRESH (TDD failing-first) — the prior attempt
+      was fully reverted (no `ensureAnonSession` exists today), so there is nothing
+      to "move." Assert: bootstrap awaits a single establish; concurrent callers +
+      a StrictMode double-invoke yield exactly ONE `POST /api/onboarding/session`.
 - [ ] Delete the per-file `@/api` / `@/api/chatSessions` /
       `@/api/entities/onboardingSessionEntity` mocks in this domain's tests;
       replace with harness-fake overrides. Re-ground assertions onto the fake.
