@@ -7,7 +7,7 @@ import Grid from "@mui/material/Grid";
 import Link from "@mui/material/Link";
 import Typography from "@mui/material/Typography";
 
-import { RegisterI } from "@/api/entities/customerEntity";
+import type { RegisterI } from "@/api/entities/customerEntity";
 import { BODY_TEXT, FONT_WEIGHT_LABEL, NAVY } from "@/constants";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { ROUTER_PATHS } from "@/router/routerPaths";

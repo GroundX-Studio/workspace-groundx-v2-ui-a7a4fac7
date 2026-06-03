@@ -3,7 +3,7 @@ import { FormikHelpers, useFormik } from "formik";
 import { object as yupObject, ObjectSchema, string as yupString } from "yup";
 import TextField from "@mui/material/TextField";
 
-import { LoginI } from "@/api/entities/customerEntity";
+import type { LoginI } from "@/api/entities/customerEntity";
 import { WHITE } from "@/constants";
 import { Button } from "@/components/primitives/Button/Button";
 import { PasswordField } from "@/components/primitives/PasswordField/PasswordField";

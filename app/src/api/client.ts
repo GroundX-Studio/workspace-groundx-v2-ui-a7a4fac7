@@ -80,6 +80,15 @@ const extractFieldWithClientEnsure: typeof extractField = (input) =>
  */
 export const realApi = {
   ...api,
+  auth: {
+    login: api.login,
+    register: api.register,
+    logout: api.logout,
+    getUserData: api.getUserData,
+    updateAppMetadata: api.updateAppMetadata,
+    resetUserPassword: api.resetUserPassword,
+    confirmUserChangingPassword: api.confirmUserChangingPassword,
+  },
   session: {
     issueOnboardingSession,
     ensureAnonSession,

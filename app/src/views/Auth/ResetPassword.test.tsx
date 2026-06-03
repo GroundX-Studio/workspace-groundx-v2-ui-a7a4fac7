@@ -2,31 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 
-import { api } from "@/api";
 import { ResetPassword } from "@/views/Auth/ResetPassword";
 import { renderWithAppProviders } from "@/test/renderWithAppProviders";
+import type { ApiOverrides } from "@/test/makeFakeApi";
 
-vi.mock("@/api", () => ({
-  api: {
-    confirmUserChangingPassword: vi.fn(),
-    getUserData: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-    register: vi.fn(),
-    resetUserPassword: vi.fn(),
-    updateAppMetadata: vi.fn(),
-  },
-}));
-
-const mockedApi = vi.mocked(api);
-
-const renderResetPasswordRoute = () =>
+const renderResetPasswordRoute = (api?: ApiOverrides) =>
   renderWithAppProviders(
     <Routes>
       <Route path="/auth/reset-password" element={<ResetPassword />} />
       <Route path="/auth/login" element={<div>Login route</div>} />
     </Routes>,
-    { initialRoute: "/auth/reset-password" }
+    { initialRoute: "/auth/reset-password", api }
   );
 
 describe("ResetPassword screen", () => {
@@ -36,10 +22,10 @@ describe("ResetPassword screen", () => {
   });
 
   it("sends a reset code, resends it, and confirms a new password", async () => {
-    mockedApi.resetUserPassword.mockResolvedValue({ message: "OK" });
-    mockedApi.confirmUserChangingPassword.mockResolvedValueOnce({ message: "OK" });
+    const resetUserPassword = vi.fn().mockResolvedValue({ message: "OK" });
+    const confirmUserChangingPassword = vi.fn().mockResolvedValueOnce({ message: "OK" });
 
-    renderResetPasswordRoute();
+    renderResetPasswordRoute({ auth: { resetUserPassword, confirmUserChangingPassword } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "pat@example.com" } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /submit/i }));
@@ -56,10 +42,10 @@ describe("ResetPassword screen", () => {
       fireEvent.click(screen.getByRole("button", { name: /submit/i }));
     });
 
-    expect(mockedApi.resetUserPassword).toHaveBeenCalledWith("pat@example.com");
-    expect(mockedApi.resetUserPassword).toHaveBeenCalledTimes(2);
+    expect(resetUserPassword).toHaveBeenCalledWith("pat@example.com");
+    expect(resetUserPassword).toHaveBeenCalledTimes(2);
     await waitFor(() =>
-      expect(mockedApi.confirmUserChangingPassword).toHaveBeenCalledWith("123456", "pat@example.com", "password1")
+      expect(confirmUserChangingPassword).toHaveBeenCalledWith("123456", "pat@example.com", "password1")
     );
   });
 });

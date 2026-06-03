@@ -29,6 +29,43 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 
 const defaultApiResult = (path: string[], args: unknown[]): unknown => {
   const name = path.at(-1) ?? "";
+  if (name === "login") {
+    return {
+      username: "acct-1",
+      token: "",
+      xJwtToken: "",
+      customer: {
+        username: "acct-1",
+        email: "pat@example.com",
+        first: "Pat",
+        last: "Lee",
+      },
+    };
+  }
+  if (name === "register") {
+    return {
+      username: "acct-1",
+      token: "",
+      xJwtToken: "",
+      apiKeys: [],
+    };
+  }
+  if (name === "getUserData") {
+    const username = typeof args[0] === "string" && args[0].length > 0 ? args[0] : "acct-1";
+    return {
+      username,
+      customer: {
+        username,
+        email: "pat@example.com",
+        first: "Pat",
+        last: "Lee",
+        appMetadata: null,
+      },
+    };
+  }
+  if (name === "updateAppMetadata") {
+    return args[0] ?? {};
+  }
   if (name === "issueOnboardingSession" || name === "ensureAnonSession") {
     return { sessionId: "test-anon-session", anonymous: true };
   }

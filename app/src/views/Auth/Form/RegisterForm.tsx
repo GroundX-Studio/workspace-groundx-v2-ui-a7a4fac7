@@ -9,7 +9,7 @@ import Link from "@mui/material/Link";
 import TextField from "@mui/material/TextField";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 
-import { RegisterI } from "@/api/entities/customerEntity";
+import type { RegisterI } from "@/api/entities/customerEntity";
 import { APP_CONFIG } from "@/appConfig";
 import { BODY_TEXT, NAVY, WHITE } from "@/constants";
 import { Button } from "@/components/primitives/Button/Button";

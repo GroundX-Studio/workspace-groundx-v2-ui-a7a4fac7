@@ -2,33 +2,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 
-import { api } from "@/api";
 import { Login } from "@/views/Auth/Login";
 import { renderWithAppProviders } from "@/test/renderWithAppProviders";
+import type { ApiOverrides } from "@/test/makeFakeApi";
 
-vi.mock("@/api", () => ({
-  api: {
-    confirmUserChangingPassword: vi.fn(),
-    getUserData: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-    register: vi.fn(),
-    resetUserPassword: vi.fn(),
-    updateAppMetadata: vi.fn(),
-  },
-}));
-
-const mockedApi = vi.mocked(api);
 const user = { username: "acct-1", email: "pat@example.com", first: "Pat", last: "Lee" };
 
-const renderLoginRoute = () =>
+const renderLoginRoute = (api?: ApiOverrides) =>
   renderWithAppProviders(
     <Routes>
       <Route path="/auth/login" element={<Login />} />
       <Route path="/home" element={<div>Home route</div>} />
       <Route path="/auth/reset-password" element={<div>Reset route</div>} />
     </Routes>,
-    { initialRoute: "/auth/login" }
+    { initialRoute: "/auth/login", api }
   );
 
 describe("Login screen", () => {
@@ -38,25 +25,25 @@ describe("Login screen", () => {
   });
 
   it("submits credentials, receives the cookie session, and navigates to the protected home route", async () => {
-    mockedApi.login.mockResolvedValueOnce({ username: "acct-1", token: "token-1", xJwtToken: "jwt-1", customer: user });
-    mockedApi.getUserData.mockResolvedValueOnce({ customer: user });
+    const login = vi.fn().mockResolvedValueOnce({ username: "acct-1", token: "token-1", xJwtToken: "jwt-1", customer: user });
+    const getUserData = vi.fn().mockResolvedValueOnce({ customer: user });
 
-    renderLoginRoute();
+    renderLoginRoute({ auth: { login, getUserData } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "pat@example.com" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
     await expect(screen.findByText("Home route")).resolves.toBeInTheDocument();
-    expect(mockedApi.login).toHaveBeenCalledWith({ email: "pat@example.com", password: "secret" });
+    expect(login).toHaveBeenCalledWith({ email: "pat@example.com", password: "secret" });
     expect(sessionStorage.getItem("n")).toBeNull();
     expect(sessionStorage.getItem("t")).toBeNull();
     expect(sessionStorage.getItem("j")).toBeNull();
   });
 
   it("disables submit during login so duplicate clicks do not send duplicate requests", async () => {
-    mockedApi.login.mockReturnValueOnce(new Promise(() => undefined) as any);
+    const login = vi.fn().mockReturnValueOnce(new Promise(() => undefined));
 
-    renderLoginRoute();
+    renderLoginRoute({ auth: { login } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "pat@example.com" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
     const submit = screen.getByRole("button", { name: /continue/i });
@@ -64,14 +51,14 @@ describe("Login screen", () => {
 
     await waitFor(() => expect(submit).toBeDisabled());
     fireEvent.click(submit);
-    expect(mockedApi.login).toHaveBeenCalledTimes(1);
+    expect(login).toHaveBeenCalledTimes(1);
   });
 
   it("shows a message and resets fields when login fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    mockedApi.login.mockRejectedValueOnce(new Error("Unauthorized"));
+    const login = vi.fn().mockRejectedValueOnce(new Error("Unauthorized"));
 
-    renderLoginRoute();
+    renderLoginRoute({ auth: { login } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "pat@example.com" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "bad-password" } });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));

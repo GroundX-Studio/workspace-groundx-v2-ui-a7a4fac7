@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, "..");
 
-const MIGRATED_NETWORK_BOUNDARIES = [
+const SESSION_CHAT_NETWORK_BOUNDARIES = [
   "@/api/chatSessionEntities",
   "@/api/chatSessionPatch",
   "@/api/chatSessions",
@@ -16,6 +16,13 @@ const MIGRATED_NETWORK_BOUNDARIES = [
   "@/api/entities/onboardingSessionEntity",
   "@/api/viewerEvents",
 ] as const;
+
+const AUTH_NETWORK_BOUNDARIES = [
+  "@/api",
+  "@/api/entities/customerEntity",
+] as const;
+
+type NetworkBoundary = (typeof SESSION_CHAT_NETWORK_BOUNDARIES)[number] | (typeof AUTH_NETWORK_BOUNDARIES)[number];
 
 const PRODUCTION_ALLOWLIST = new Set([
   // Composition root for the injected real client.
@@ -31,6 +38,11 @@ const PRODUCTION_ALLOWLIST = new Set([
   "api/entities/onboardingSessionEntity.ts",
   "api/viewerEvents.ts",
 ]);
+
+const AUTH_DOMAIN_PREFIXES = [
+  "contexts/AuthContext/",
+  "views/Auth/",
+] as const;
 
 const TEST_MOCK_ALLOWLIST = new Set([
   // Tests the real client wrapper by mocking the underlying establish transport.
@@ -55,16 +67,27 @@ const toRel = (file: string) => relative(SRC, file).replace(/\\/g, "/");
 
 const isTestFile = (rel: string) => /\.test\.tsx?$/.test(rel);
 
+const isAuthDomainFile = (rel: string) =>
+  AUTH_DOMAIN_PREFIXES.some((prefix) => rel.startsWith(prefix));
+
 function stripComments(src: string): string {
   return src
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
+function migratedNetworkBoundariesFor(rel: string): NetworkBoundary[] {
+  return [
+    ...SESSION_CHAT_NETWORK_BOUNDARIES,
+    ...(isAuthDomainFile(rel) ? AUTH_NETWORK_BOUNDARIES : []),
+  ];
+}
+
 function findDirectBoundaryImports(rel: string, src: string): string[] {
   const stripped = stripComments(src);
   const offenders: string[] = [];
-  const boundarySet = new Set<string>(MIGRATED_NETWORK_BOUNDARIES);
+  const boundaries = migratedNetworkBoundariesFor(rel);
+  const boundarySet = new Set<string>(boundaries);
   const importFrom = /\bimport\s+([^;]*?)\s+from\s+["']([^"']+)["']/g;
   let match: RegExpExecArray | null;
   while ((match = importFrom.exec(stripped)) !== null) {
@@ -74,7 +97,7 @@ function findDirectBoundaryImports(rel: string, src: string): string[] {
     if (specifier.startsWith("type ")) continue;
     offenders.push(`${rel} imports ${source}`);
   }
-  for (const boundary of MIGRATED_NETWORK_BOUNDARIES) {
+  for (const boundary of boundaries) {
     const escaped = boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const sideEffectImport = new RegExp(`\\bimport\\s+["']${escaped}["']`, "m");
     if (sideEffectImport.test(stripped)) offenders.push(`${rel} imports ${boundary}`);
@@ -85,7 +108,7 @@ function findDirectBoundaryImports(rel: string, src: string): string[] {
 function findBoundaryMocks(rel: string, src: string): string[] {
   const stripped = stripComments(src);
   const offenders: string[] = [];
-  for (const boundary of MIGRATED_NETWORK_BOUNDARIES) {
+  for (const boundary of migratedNetworkBoundariesFor(rel)) {
     const escaped = boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const mockCall = new RegExp(`\\bvi\\.mock\\(\\s*["']${escaped}["']`, "m");
     if (mockCall.test(stripped)) offenders.push(`${rel} mocks ${boundary}`);
@@ -107,7 +130,7 @@ describe("frontend API injection guard", () => {
 
     expect(
       offenders,
-      `Migrated frontend consumers must use useApi()/ApiProvider for session-chat network calls:\n${offenders.join("\n")}`,
+      `Migrated frontend consumers must use useApi()/ApiProvider for migrated network calls:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 

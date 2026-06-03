@@ -12,7 +12,8 @@ describe("makeFakeApi", () => {
     expect(vi.isMockFunction(api.report.renderReport)).toBe(true);
     // a heavy spread namespace from the @/api aggregate — proves no enumeration
     expect(vi.isMockFunction(api.groundxBuckets.listGroundXBuckets)).toBe(true);
-    // top-level auth fn
+    // grouped auth + legacy top-level auth fn
+    expect(vi.isMockFunction(api.auth.login)).toBe(true);
     expect(vi.isMockFunction(api.login)).toBe(true);
 
     // defaults resolve to useful empty/success shapes so unguarded mount-path calls are safe
@@ -32,6 +33,9 @@ describe("makeFakeApi", () => {
       ownerAnonId: "test-anon-owner",
     });
     await expect(api.chat.listChatMessages("chat-1")).resolves.toEqual([]);
+    await expect(api.auth.getUserData("acct-1")).resolves.toMatchObject({
+      customer: { username: "acct-1" },
+    });
   });
 
   it("applies overrides while leaving sibling methods as fakes", () => {
@@ -43,5 +47,17 @@ describe("makeFakeApi", () => {
     expect(vi.isMockFunction(api.chat.createChatSession)).toBe(true);
     // unrelated group untouched
     expect(vi.isMockFunction(api.session.issueOnboardingSession)).toBe(true);
+  });
+
+  it("applies grouped auth overrides while leaving sibling auth methods as fakes", async () => {
+    const login = vi.fn().mockResolvedValue({ username: "acct-1", token: "", xJwtToken: "" });
+    const api = makeFakeApi({ auth: { login } });
+
+    expect(api.auth.login).toBe(login);
+    expect(vi.isMockFunction(api.auth.register)).toBe(true);
+    expect(vi.isMockFunction(api.auth.getUserData)).toBe(true);
+    await expect(api.auth.getUserData("acct-1")).resolves.toMatchObject({
+      customer: { username: "acct-1" },
+    });
   });
 });

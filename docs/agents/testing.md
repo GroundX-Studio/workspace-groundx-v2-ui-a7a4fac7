@@ -106,6 +106,12 @@ renderWithOnboardingProviders(<OnboardingShell />, {
     chat: { ensureServerChatSession: vi.fn(async () => undefined) },
   },
 });
+
+renderWithAppProviders(<LoginRoute />, {
+  api: {
+    auth: { login: vi.fn().mockResolvedValue({ username: "acct-1", token: "", xJwtToken: "" }) },
+  },
+});
 ```
 
 Do not add per-file `vi.mock("@/api/...")` for migrated network

@@ -32,6 +32,20 @@ describe("realApi session client", () => {
   });
 });
 
+describe("realApi auth client", () => {
+  it("exposes customer auth operations under a grouped auth member", () => {
+    expect(realApi.auth).toMatchObject({
+      login: expect.any(Function),
+      register: expect.any(Function),
+      logout: expect.any(Function),
+      getUserData: expect.any(Function),
+      updateAppMetadata: expect.any(Function),
+      resetUserPassword: expect.any(Function),
+      confirmUserChangingPassword: expect.any(Function),
+    });
+  });
+});
+
 describe("realApi chat client", () => {
   it("keeps chat-row ensure state on the injected client, not the legacy module cache", async () => {
     const originalFetch = global.fetch;

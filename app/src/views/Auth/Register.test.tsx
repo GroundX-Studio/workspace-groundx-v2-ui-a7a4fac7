@@ -2,34 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 
-import { api } from "@/api";
 import { Register } from "@/views/Auth/Register";
 import { renderWithAppProviders } from "@/test/renderWithAppProviders";
+import type { ApiOverrides } from "@/test/makeFakeApi";
 
-vi.mock("@/api", () => ({
-  api: {
-    confirmUserChangingPassword: vi.fn(),
-    getUserData: vi.fn(),
-    login: vi.fn(),
-    logout: vi.fn(),
-    register: vi.fn(),
-    resetUserPassword: vi.fn(),
-    updateAppMetadata: vi.fn(),
-  },
-}));
-
-const mockedApi = vi.mocked(api);
 const user = { username: "acct-1", email: "pat@company.com", first: "Pat", last: "Lee" };
 
 const encoded = (value: string) => btoa(value);
 
-const renderRegisterRoute = (route = "/auth/register") =>
+const renderRegisterRoute = (route = "/auth/register", api?: ApiOverrides) =>
   renderWithAppProviders(
     <Routes>
       <Route path="/auth/register" element={<Register />} />
       <Route path="/home" element={<div>Home route</div>} />
     </Routes>,
-    { initialRoute: route }
+    { initialRoute: route, api }
   );
 
 const inviteRoute = (email: string) =>
@@ -45,15 +32,15 @@ describe("Register screen", () => {
   });
 
   it("registers a business email, receives the cookie session, and navigates to home", async () => {
-    mockedApi.register.mockResolvedValueOnce({ username: "acct-1", token: "token-1", xJwtToken: "jwt-1", apiKeys: [] });
-    mockedApi.getUserData.mockResolvedValueOnce({ customer: user });
+    const register = vi.fn().mockResolvedValueOnce({ username: "acct-1", token: "token-1", xJwtToken: "jwt-1", apiKeys: [] });
+    const getUserData = vi.fn().mockResolvedValueOnce({ customer: user });
 
-    renderRegisterRoute(inviteRoute("pat@company.com"));
+    renderRegisterRoute(inviteRoute("pat@company.com"), { auth: { register, getUserData } });
     await screen.findByDisplayValue("pat@company.com");
     fireEvent.click(screen.getByRole("button", { name: /register/i }));
 
     await expect(screen.findByText("Home route", undefined, { timeout: 10000 })).resolves.toBeInTheDocument();
-    expect(mockedApi.register).toHaveBeenCalledWith(
+    expect(register).toHaveBeenCalledWith(
       expect.objectContaining({
         companyName: "Example Co",
         email: "pat@company.com",
@@ -64,25 +51,27 @@ describe("Register screen", () => {
   });
 
   it("disables submit during registration so duplicate clicks do not send duplicate requests", async () => {
-    mockedApi.register.mockReturnValueOnce(new Promise(() => undefined) as any);
+    const register = vi.fn().mockReturnValueOnce(new Promise(() => undefined));
 
-    renderRegisterRoute(inviteRoute("pat@company.com"));
+    renderRegisterRoute(inviteRoute("pat@company.com"), { auth: { register } });
     await screen.findByDisplayValue("pat@company.com");
     const submit = screen.getByRole("button", { name: /register/i });
     fireEvent.click(submit);
 
     await waitFor(() => expect(submit).toBeDisabled());
     fireEvent.click(submit);
-    expect(mockedApi.register).toHaveBeenCalledTimes(1);
+    expect(register).toHaveBeenCalledTimes(1);
   });
 
   it("blocks personal email domains before calling the registration API", async () => {
-    renderRegisterRoute(inviteRoute("pat@gmail.com"));
+    const register = vi.fn();
+
+    renderRegisterRoute(inviteRoute("pat@gmail.com"), { auth: { register } });
     await screen.findByDisplayValue("pat@gmail.com");
     fireEvent.click(screen.getByRole("button", { name: /register/i }));
 
     await expect(screen.findByText("Please enter a business email address.")).resolves.toBeInTheDocument();
-    expect(mockedApi.register).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
   });
 
   it("pre-fills invite query params and x-ray demo email", async () => {

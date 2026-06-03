@@ -1,6 +1,6 @@
 import { createContext } from "react";
 
-import { LoginI, RegisterI, UpdateAppMetadataInput, User } from "@/api/entities/customerEntity";
+import type { LoginI, RegisterI, UpdateAppMetadataInput, User } from "@/api/entities/customerEntity";
 import { SdkActionResult } from "@/contexts/sdkContextTypes";
 
 export interface Auth {
