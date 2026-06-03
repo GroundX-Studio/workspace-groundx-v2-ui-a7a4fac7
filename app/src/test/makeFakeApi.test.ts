@@ -57,6 +57,30 @@ describe("makeFakeApi", () => {
       id: "t-1",
       name: "Extract",
     });
+    await expect(
+      api.report.renderReport({
+        templateId: "rt-utility-ic-brief",
+        scope: { type: "bucket", bucketId: 28454, filter: { project: "utility" } },
+        chatSessionId: "chat-1",
+      }),
+    ).resolves.toMatchObject({
+      gated: false,
+      report: {
+        templateId: "rt-utility-ic-brief",
+        sections: expect.arrayContaining([expect.objectContaining({ sectionId: "billing_summary" })]),
+      },
+    });
+    await expect(
+      api.report.saveReportTemplate({
+        id: "rt-1",
+        name: "Report",
+        format: "ic-brief",
+        sections: [],
+      }),
+    ).resolves.toMatchObject({
+      id: "rt-1",
+      name: "Report",
+    });
     await expect(api.auth.getUserData("acct-1")).resolves.toMatchObject({
       customer: { username: "acct-1" },
     });

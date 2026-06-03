@@ -1,6 +1,8 @@
 import { vi } from "vitest";
 
+import type { ContentScope } from "@groundx/shared";
 import { realApi, type Api } from "@/api/client";
+import { getReportFixture } from "@/widgets/reportFixtures";
 
 /**
  * One injected test fake for the whole `Api` surface.
@@ -113,6 +115,32 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
     return {
       id: input?.id ?? "template-test",
       name: input?.name ?? "Test template",
+      updatedAt: "2026-06-03T00:00:00Z",
+    };
+  }
+  if (name === "renderReport") {
+    const input = args[0] as { templateId?: string; scope?: ContentScope } | undefined;
+    const scope = input?.scope ?? { type: "documents", documentIds: [] };
+    const report = getReportFixture(scope);
+    return {
+      gated: false,
+      report: report ?? {
+        reportId: "rr-test-empty",
+        templateId: input?.templateId ?? "rt-test-empty",
+        scope,
+        status: "complete",
+        sections: [],
+        resolvedVariables: {},
+        exportFormats: [],
+        previewOnly: false,
+      },
+    };
+  }
+  if (name === "saveReportTemplate") {
+    const input = args[0] as { id?: string; name?: string } | undefined;
+    return {
+      id: input?.id ?? "rt-test",
+      name: input?.name ?? "Test report",
       updatedAt: "2026-06-03T00:00:00Z",
     };
   }

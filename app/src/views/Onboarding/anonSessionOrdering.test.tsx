@@ -34,34 +34,6 @@ const apiMocks = vi.hoisted(() => ({
   recordIntent: vi.fn(async () => {}),
 }));
 
-vi.mock("@/api/smartReport", async () => {
-  const { getReportFixture } = await import("@/widgets/reportFixtures");
-  return {
-    renderReport: vi.fn(async (input: { scope: import("@groundx/shared").ContentScope }) => {
-      const report = getReportFixture(input.scope);
-      return {
-        gated: false as const,
-        report: report ?? {
-          reportId: "rr-empty",
-          templateId: "rt-empty",
-          scope: input.scope,
-          status: "complete" as const,
-          resolvedVariables: {},
-          exportFormats: [],
-          previewOnly: false,
-          sections: [],
-        },
-      };
-    }),
-    saveReportTemplate: vi.fn(async () => ({
-      id: "rt-test",
-      name: "Test report",
-      updatedAt: "2026-06-02T00:00:00Z",
-    })),
-    SmartReportApiError: class SmartReportApiError extends Error {},
-  };
-});
-
 describe("anon session ordering (#8)", () => {
   it("waits for anon-session establishment before ensuring the chat row", async () => {
     const order: string[] = [];

@@ -1,26 +1,10 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, useState, type FC } from "react";
+import { useEffect, useState, type FC, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
-
-// 2026-05-31-smart-report-followups: the INITIAL f4 paint (not just the ↻
-// re-render) now routes through the render endpoint client (`renderReport`).
-// Mock the client so the test can assert it is the first-paint data source and
-// that its RESPONSE is what the surface renders — no synchronous fixture read
-// survives as the first-paint source.
-vi.mock("@/api/smartReport", () => ({
-  renderReport: vi.fn(),
-  saveReportTemplate: vi.fn(async () => ({
-    id: "rt-test",
-    name: "Test report",
-    updatedAt: "2026-06-02T00:00:00Z",
-  })),
-  SmartReportApiError: class SmartReportApiError extends Error {},
-}));
-import { renderReport } from "@/api/smartReport";
-import type { RenderReportResult } from "@/api/smartReport";
+import type { RenderReportInput, RenderReportResult } from "@/api/smartReport";
 import type { RenderedReport } from "@/types/report";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
@@ -34,6 +18,21 @@ const UTILITY_SCOPE: ContentScope = {
   bucketId: 28454,
   filter: { project: "utility" },
 };
+
+const renderReport = vi.fn<[RenderReportInput], Promise<RenderReportResult>>();
+
+type RenderOptions = NonNullable<Parameters<typeof renderWithOnboardingProviders>[1]>;
+const renderWithReportApi = (ui: ReactElement, options: RenderOptions = {}) =>
+  renderWithOnboardingProviders(ui, {
+    ...options,
+    api: {
+      ...options.api,
+      report: {
+        ...options.api?.report,
+        renderReport,
+      },
+    },
+  });
 
 /**
  * The Utility IC-brief report the endpoint returns — the four sections + the
@@ -136,7 +135,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
   it.each<WidgetRole>(["anonymous", "member"])(
     "mounts for role %s and reflects it on data-role",
     async (role) => {
-      renderWithOnboardingProviders(<SmartReportRender role={role} scope={UTILITY_SCOPE} />);
+      renderWithReportApi(<SmartReportRender role={role} scope={UTILITY_SCOPE} />);
       const root = screen.getByTestId("smart-report-render");
       expect(root).toBeInTheDocument();
       expect(root).toHaveAttribute("data-role", role);
@@ -146,7 +145,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
   );
 
   it("FIRST paint calls the render endpoint client (not a synchronous fixture read)", async () => {
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
     expect(vi.mocked(renderReport).mock.calls[0][0]).toMatchObject({
       templateId: "rt-utility-ic-brief",
@@ -155,7 +154,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
   });
 
   it("renders the endpoint response's four IC-brief sections over a bucket+project scope", async () => {
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     const surface = within(await screen.findByTestId("report-section-billing_summary"));
     expect(surface.getByText(/billing summary/i)).toBeInTheDocument();
     const root = within(screen.getByTestId("smart-report-render"));
@@ -165,13 +164,13 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
   });
 
   it("renders a CiteChip in a section footer (reuses the shipped clickable-citation path)", async () => {
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     const chip = await screen.findByTestId("cite-chip-1");
     expect(chip).toHaveAttribute("data-citation-doc", "utility-bill-2026-04");
   });
 
   it("locks export/Save for an anonymous viewer (preview-only sample)", async () => {
-    renderWithOnboardingProviders(<SmartReportRender role="anonymous" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="anonymous" scope={UTILITY_SCOPE} />);
     expect(await screen.findByTestId("smart-report-preview-badge")).toBeInTheDocument();
     const exportControl = screen.getByTestId("smart-report-export");
     expect(exportControl).toHaveAttribute("aria-disabled", "true");
@@ -196,7 +195,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       snapshot = { frame: state.currentFrame, selectedSectionId: state.selectedReportSectionId };
       return null;
     };
-    renderWithOnboardingProviders(
+    renderWithReportApi(
       <>
         <SmartReportRender role="member" scope={UTILITY_SCOPE} />
         <SessionProbe />
@@ -232,7 +231,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       }, [state.activeSessionId, pinToReport]);
       return null;
     };
-    renderWithOnboardingProviders(
+    renderWithReportApi(
       <>
         <DraftSeeder />
         <SmartReportRender role="member" scope={NO_FIXTURE_SCOPE} />
@@ -253,7 +252,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
   it("DL-4: empty state shows NO draft affordance when there is no pinned draft", async () => {
     // Same no-fixture empty scope, but no draft seeded → the affordance must
     // be absent (the conditional is load-bearing, not always-on).
-    renderWithOnboardingProviders(
+    renderWithReportApi(
       <SmartReportRender role="member" scope={{ type: "documents", documentIds: ["no-draft-doc"] }} />,
       { initialFrame: "f4", initialScenario: "utility" },
     );
@@ -284,7 +283,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
         </>
       );
     };
-    renderWithOnboardingProviders(<Harness />);
+    renderWithReportApi(<Harness />);
     // First paint resolves to the empty state for the no-fixture scope. The
     // no-template scope short-circuits synchronously (no endpoint call), so
     // this empty MUST belong to the current mount — assert no call has fired.
@@ -311,7 +310,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
   it("shows a loading affordance while the FIRST render call is in flight", async () => {
     const d = deferred<RenderReportResult>();
     vi.mocked(renderReport).mockReturnValueOnce(d.promise);
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     // Before the call resolves the surface shows a loading state, not a blank
     // surface and not the (now-gone) synchronous fixture.
     expect(await screen.findByTestId("smart-report-loading")).toBeInTheDocument();
@@ -327,14 +326,14 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       gated: false,
       report: { ...UTILITY_REPORT, sections: [] },
     });
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     expect(await screen.findByTestId("smart-report-empty")).toBeInTheDocument();
   });
 
   it("shows a retryable error banner when the FIRST render call rejects", async () => {
     const user = userEvent.setup();
     vi.mocked(renderReport).mockRejectedValueOnce(new Error("boom"));
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     // First paint failed → a retryable error affordance, not a blank surface
     // and not a thrown render.
     expect(await screen.findByTestId("smart-report-error")).toBeInTheDocument();
@@ -379,7 +378,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       .mockResolvedValueOnce(utilityResult)
       .mockResolvedValueOnce(responseReport);
 
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     // First paint is the endpoint response (the four IC-brief sections).
     expect(await screen.findByText(/billing summary/i)).toBeInTheDocument();
     await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
@@ -403,7 +402,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     vi.mocked(renderReport)
       .mockResolvedValueOnce(utilityResult)
       .mockRejectedValueOnce(new Error("boom"));
-    renderWithOnboardingProviders(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    renderWithReportApi(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     await screen.findByText(/billing summary/i);
     await user.click(screen.getByTestId("smart-report-rerender"));
     await waitFor(() =>

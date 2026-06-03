@@ -100,16 +100,16 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 
 ## T4 - Migrate smart-report domain (SEQUENTIAL)
 
-- [ ] **Failing test first:** retarget one `SmartReportBuilder` or
+- [x] **Failing test first:** retarget one `SmartReportBuilder` or
       `SmartReportRender` test to injected `api.report` overrides and confirm it
       fails until the component consumes `useApi()`.
-- [ ] Add only the smart-report/report-template grouped members needed by this
+- [x] Add only the smart-report/report-template grouped members needed by this
       slice to `realApi` and `makeFakeApi`.
-- [ ] Migrate `SmartReportBuilder`, `SmartReportRender`, and onboarding shell
+- [x] Migrate `SmartReportBuilder`, `SmartReportRender`, and onboarding shell
       report call sites to injected report/template groups.
-- [ ] Replace per-file mocks for `@/api/smartReport` with harness fake
+- [x] Replace per-file mocks for `@/api/smartReport` with harness fake
       overrides.
-- [ ] Keep visible behavior assertions: render, rerender, save template, section
+- [x] Keep visible behavior assertions: render, rerender, save template, section
       edit/accept/reject, and navigation between render/builder frames.
 - **Adversarial review:** grep smart-report surfaces/tests for direct
   `@/api/smartReport` imports and mocks; run focused smart-report tests plus

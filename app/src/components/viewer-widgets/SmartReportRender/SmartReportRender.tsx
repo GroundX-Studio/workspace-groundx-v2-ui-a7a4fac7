@@ -53,7 +53,6 @@ import { type FC, useCallback, useState } from "react";
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 import { widgetRoleCanEdit } from "@groundx/shared";
 
-import { renderReport } from "@/api/smartReport";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { Markdown } from "@/components/primitives/Markdown/Markdown";
 import {
@@ -72,6 +71,7 @@ import {
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
+import { useApi } from "@/contexts/ApiContext";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
 import { reportTemplateIdForScope } from "@/widgets/reportFixtures";
 import type { RenderedReport, RenderedReportSection } from "@/types/report";
@@ -112,6 +112,9 @@ function humanizeName(name: string): string {
 }
 
 export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) => {
+  const {
+    report: { renderReport },
+  } = useApi();
   const { state: chatState } = useChatStore();
   // 2026-05-31-shared-canvas-affordance-restoration — the `✎ edit §N` control
   // drives the render→builder hand-off through the orchestrator (the SAME
@@ -209,7 +212,7 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
         setFirstPaintState("error");
       }
     },
-    [chatState.activeSessionId, rerenderState, report],
+    [chatState.activeSessionId, rerenderState, report, renderReport],
   );
 
   // ScopedViewerWidget adaptation: route the FIRST paint — and any re-scope —

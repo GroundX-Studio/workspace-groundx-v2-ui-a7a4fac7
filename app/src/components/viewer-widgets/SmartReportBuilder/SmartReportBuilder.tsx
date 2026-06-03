@@ -63,8 +63,8 @@ import {
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
-import { SmartReportApiError, renderReport, saveReportTemplate } from "@/api/smartReport";
 import type { SaveReportTemplateInput } from "@/api/smartReport";
+import { useApi } from "@/contexts/ApiContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import type { ReportSectionEdit, ReportSectionItem, ReportSectionRenderAs } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
@@ -149,6 +149,9 @@ function templateIdentityForScope(scope: ContentScope): { id: string; name: stri
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, selectedSectionId }) => {
+  const {
+    report: { renderReport, saveReportTemplate },
+  } = useApi();
   const { addReportSection, editReportSection, removeReportSection, state: chatState } = useChatStore();
   const { state: session, openGate, advanceFrame } = useOnboardingSession();
 
@@ -254,14 +257,15 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
     } catch (err) {
       // A 401 (auth state flipped to anon mid-edit) routes to the sign-in gate;
       // any other failure surfaces an error the user can retry from.
-      if (err instanceof SmartReportApiError && err.status === 401) {
+      const status = typeof err === "object" && err !== null && "status" in err ? err.status : undefined;
+      if (status === 401) {
         setSaveStatus("idle");
         openGate("save");
       } else {
         setSaveStatus("error");
       }
     }
-  }, [canEdit, openGate, saveStatus, templateIdentity, rows]);
+  }, [canEdit, openGate, saveStatus, templateIdentity, rows, saveReportTemplate]);
 
   // ↻ render — re-run the template over the current scope through the render
   // endpoint (`renderReport`), then advance to the render surface (f4) to show
@@ -279,7 +283,7 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
       /* the render surface owns the visible error state; advance regardless */
     }
     advanceFrame("f4");
-  }, [chatState.activeSessionId, templateIdentity.id, scope, advanceFrame]);
+  }, [chatState.activeSessionId, templateIdentity.id, scope, advanceFrame, renderReport]);
 
   const handleAddSection = useCallback(() => {
     const id = `sec-${Date.now()}`;

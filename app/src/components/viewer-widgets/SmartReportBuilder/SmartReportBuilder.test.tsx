@@ -1,47 +1,16 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { FC } from "react";
+import type { FC, ReactElement } from "react";
 import { useEffect, useRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
-
-// FIX #1: a member Save must PERSIST the report-kind template (not the
-// no-op the closeout review found). Mock the persist client so the test can
-// assert it is called with the report template, distinct from the anon gate.
-vi.mock("@/api/smartReport", () => ({
-  saveReportTemplate: vi.fn(async () => ({
-    id: "rt-utility-ic-brief",
-    name: "Utility IC Brief (report)",
-    updatedAt: "2026-05-31T00:00:00Z",
-  })),
-  // FIX #2: the builder ↻ render control is a real caller of the render
-  // endpoint client too.
-  renderReport: vi.fn(async () => ({
-    gated: false as const,
-    report: {
-      reportId: "rr-rt-utility-ic-brief",
-      templateId: "rt-utility-ic-brief",
-      scope: { type: "bucket" as const, bucketId: 28454, filter: { project: "utility" } },
-      status: "complete" as const,
-      resolvedVariables: {},
-      exportFormats: ["pdf" as const, "md" as const, "link" as const],
-      previewOnly: true,
-      sections: [],
-    },
-  })),
-  SmartReportApiError: class SmartReportApiError extends Error {
-    status: number;
-    detail: unknown;
-    constructor(message: string, status: number, detail: unknown) {
-      super(message);
-      this.name = "SmartReportApiError";
-      this.status = status;
-      this.detail = detail;
-    }
-  },
-}));
-import { renderReport, saveReportTemplate } from "@/api/smartReport";
+import type {
+  RenderReportInput,
+  RenderReportResult,
+  SaveReportTemplateInput,
+  SaveReportTemplateResult,
+} from "@/api/smartReport";
 
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
@@ -60,11 +29,47 @@ const UTILITY_SCOPE: ContentScope = {
   filter: { project: "utility" },
 };
 
+const saveReportTemplate =
+  vi.fn<[SaveReportTemplateInput], Promise<SaveReportTemplateResult>>();
+const renderReport = vi.fn<[RenderReportInput], Promise<RenderReportResult>>();
+
+type RenderOptions = NonNullable<Parameters<typeof renderWithOnboardingProviders>[1]>;
+const renderWithReportApi = (ui: ReactElement, options: RenderOptions = {}) =>
+  renderWithOnboardingProviders(ui, {
+    ...options,
+    api: {
+      ...options.api,
+      report: {
+        ...options.api?.report,
+        renderReport,
+        saveReportTemplate,
+      },
+    },
+  });
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   window.localStorage.clear();
-  vi.mocked(saveReportTemplate).mockClear();
-  vi.mocked(renderReport).mockClear();
+  saveReportTemplate.mockReset();
+  saveReportTemplate.mockResolvedValue({
+    id: "rt-utility-ic-brief",
+    name: "Utility IC Brief (report)",
+    updatedAt: "2026-05-31T00:00:00Z",
+  });
+  renderReport.mockReset();
+  renderReport.mockResolvedValue({
+    gated: false,
+    report: {
+      reportId: "rr-rt-utility-ic-brief",
+      templateId: "rt-utility-ic-brief",
+      scope: UTILITY_SCOPE,
+      status: "complete",
+      resolvedVariables: {},
+      exportFormats: ["pdf", "md", "link"],
+      previewOnly: true,
+      sections: [],
+    },
+  });
 });
 
 describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => {
@@ -72,7 +77,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
   it.each<WidgetRole>(["anonymous", "member"])(
     "mounts for role %s and reflects it on data-role",
     (role) => {
-      renderWithOnboardingProviders(<SmartReportBuilder role={role} scope={UTILITY_SCOPE} />, {
+      renderWithReportApi(<SmartReportBuilder role={role} scope={UTILITY_SCOPE} />, {
         initialScenario: "utility",
         initialFrame: "f4a",
         initialAuthState: role === "member" ? "signed-in" : "anonymous",
@@ -84,7 +89,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
   );
 
   it("renders the F3a-style chrome: pinned-samples row, Sections/Render sub-tabs, control row", () => {
-    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+    renderWithReportApi(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
       initialScenario: "utility",
       initialFrame: "f4a",
       initialAuthState: "signed-in",
@@ -98,7 +103,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
 
   it("renders a row list of the fixture sections and opens the inline section editor on Edit", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+    renderWithReportApi(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
       initialScenario: "utility",
       initialFrame: "f4a",
       initialAuthState: "signed-in",
@@ -120,7 +125,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
   });
 
   it("pre-opens the inline editor for `selectedSectionId` (the render→builder + show_smart_report_edit hand-off)", () => {
-    renderWithOnboardingProviders(
+    renderWithReportApi(
       <SmartReportBuilder role="member" scope={UTILITY_SCOPE} selectedSectionId="charge_breakdown" />,
       {
         initialScenario: "utility",
@@ -150,7 +155,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
       }, [advanceFrame]);
       return null;
     };
-    renderWithOnboardingProviders(
+    renderWithReportApi(
       <>
         <SmartReportBuilder role="member" scope={UTILITY_SCOPE} />
         <SelectProbe />
@@ -163,7 +168,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
 
   it("offers a manual `make variable` affordance (no auto-inference, #12) and no version-history UI (#13)", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+    renderWithReportApi(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
       initialScenario: "utility",
       initialFrame: "f4a",
       initialAuthState: "signed-in",
@@ -176,7 +181,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
 
   it("make variable records the USER-CHOSEN token (step-16 follow-up), not a hardcoded literal", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+    renderWithReportApi(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
       initialScenario: "utility",
       initialFrame: "f4a",
       initialAuthState: "signed-in",
@@ -199,7 +204,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
 
   it("locks Save for an anonymous viewer (sign-in gate) — clicking opens the gate, does not persist", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(
+    renderWithReportApi(
       <>
         <GateProbe />
         <SmartReportBuilder role="anonymous" scope={UTILITY_SCOPE} />
@@ -217,7 +222,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
   });
 
   it("does not lock Save for a member (no padlock)", () => {
-    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+    renderWithReportApi(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
       initialScenario: "utility",
       initialFrame: "f4a",
       initialAuthState: "signed-in",
@@ -228,7 +233,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
 
   it("FIX #2: the ↻ render control calls the render endpoint client", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+    renderWithReportApi(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
       initialScenario: "utility",
       initialFrame: "f4a",
       initialAuthState: "signed-in",
@@ -243,7 +248,7 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
 
   it("FIX #1: a member Save PERSISTS the report-kind template (not a no-op)", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+    renderWithReportApi(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
       initialScenario: "utility",
       initialFrame: "f4a",
       initialAuthState: "signed-in",
