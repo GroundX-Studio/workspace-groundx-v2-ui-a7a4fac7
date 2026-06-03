@@ -236,6 +236,13 @@ function useSessionFacade(): OnboardingSessionApi {
       if (!activeKeyRef.current) {
         return;
       }
+      if (frame === "f7") {
+        setSignupOpen(false);
+        setGate((prev) =>
+          prev.status === "open" || prev.status === "committed" ? { status: "idle" } : prev,
+        );
+        popOverlay("sign-up");
+      }
       const entityKeyAtAdvance = activeKeyRef.current;
       updateActive((session) => {
         // Diagnostic — log the actual from→to transition.
@@ -274,7 +281,7 @@ function useSessionFacade(): OnboardingSessionApi {
         track("understand.completed", { fromFrame: "f2", toFrame: frame });
       }
     },
-    [activate, updateActive, appendViewerEvent, pushStep],
+    [activate, updateActive, appendViewerEvent, pushStep, popOverlay],
   );
 
   const openGate = useCallback(

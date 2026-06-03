@@ -266,3 +266,9 @@ evidence from Chrome DevTools MCP.
     surfaces were still unexercised. The gate is now unchecked and a follow-up
     execution plan (`2026-06-03-required-e2e-gap-closure`) owns the remaining
     required-surface blockers.
+  - **Follow-up low-refactor closeout (2026-06-03):**
+    `2026-06-03-required-e2e-gap-closure` fixed the F7 post-gate Integrate
+    handoff and the Workspace/Project duplicate same-scope session defect. This
+    audit still remains active/blocked until SmartReport rendered-section
+    coverage (`#11`) and the broader steady-mode wireframe-fidelity audit (`#5`)
+    are resolved or explicitly deferred from required sign-off.

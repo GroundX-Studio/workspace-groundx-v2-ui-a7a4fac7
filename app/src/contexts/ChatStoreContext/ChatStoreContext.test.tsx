@@ -638,6 +638,22 @@ describe("ChatStoreContext", () => {
       });
       expect(result.current.state.activeSessionId).toBe(workspaceId);
     });
+
+    it("does not duplicate a scoped session when the same scope is resolved twice in one effect tick", () => {
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      let firstId = "";
+      let secondId = "";
+      act(() => {
+        firstId = result.current.resolveSessionForScope(WORKSPACE_SCOPE, { title: "Workspace" });
+        secondId = result.current.resolveSessionForScope(WORKSPACE_SCOPE, { title: "Workspace" });
+      });
+
+      expect(firstId).toBe(secondId);
+      const scopedSessions = [...result.current.state.sessions.values()].filter(
+        (session) => session.scopeKey === "scope:bucket:28454",
+      );
+      expect(scopedSessions).toHaveLength(1);
+    });
   });
 
   // WF-01 C5 — a citation jump is definitionally NOT the F2 "reading" beat.

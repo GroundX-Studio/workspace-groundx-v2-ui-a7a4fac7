@@ -221,6 +221,36 @@ describe("OnboardingShell", () => {
     expect(screen.getByTestId("onboarding-frame-f6")).toBeInTheDocument();
   });
 
+  it("post-gate Continue to Integrate clears the sign-up overlay and mounts the F7 widget", async () => {
+    const user = userEvent.setup();
+    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
+
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SessionActionsProbe onReady={(api) => (actions = api)} />
+      </>,
+      { initialFrame: "f5", initialScenario: "utility" },
+    );
+
+    act(() => {
+      actions!.advanceFrame("f6");
+      actions!.openGate("save");
+    });
+
+    expect(await screen.findByTestId("gate-value-prop")).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/email for magic link/i), "verify@example.com");
+    await user.click(screen.getByTestId("gate-rail-send-magic-link"));
+    await user.click(await screen.findByTestId("gate-rail-continue-integrate"));
+
+    expect(await screen.findByTestId("integrate")).toBeInTheDocument();
+    expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
+      "data-canvas-kind",
+      "integrate",
+    );
+    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
+  });
+
   // 2026-05-30-widget-role-access: the access matrix marks SignUpWidget /
   // GateChatRail / GateValueProp as ANONYMOUS-ONLY. Availability is enforced
   // at the mount site (the gate surface only opens for an uncommitted /

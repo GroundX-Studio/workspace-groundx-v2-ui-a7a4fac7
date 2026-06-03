@@ -494,6 +494,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
   // during render — committed before any event handler that calls an action.
   const stateRef = useRef(state);
   stateRef.current = state;
+  const scopeSessionIdsRef = useRef<Map<string, string>>(new Map());
 
   // Persist on every commit (except in ephemeral mode).
   useEffect(() => {
@@ -588,12 +589,20 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       // in the same tick (the caller routes to it immediately).
       const match = [...stateRef.current.sessions.values()].find((s) => s.scopeKey === key);
       if (match) {
+        scopeSessionIdsRef.current.set(key, match.id);
         switchTo(match.id);
         return match.id;
       }
+      const pendingId = scopeSessionIdsRef.current.get(key);
+      if (pendingId) {
+        switchTo(pendingId);
+        return pendingId;
+      }
       // Ensure-create via the shared newSession path (no forked creation),
       // tagging the new row with the scope key so re-resolve is idempotent.
-      return newSession({ title: options?.title, scopeKey: key });
+      const id = newSession({ title: options?.title, scopeKey: key });
+      scopeSessionIdsRef.current.set(key, id);
+      return id;
     },
     [newSession, switchTo],
   );
