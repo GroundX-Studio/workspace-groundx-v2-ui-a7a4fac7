@@ -1,63 +1,85 @@
 # Tasks - complete frontend API injection (#10)
 
-Sequential. TDD failing-test-first. Every task has an adversarial review gate
-before marking it done and before starting the next task.
+Sequential. TDD failing-test-first where code changes are made. Every task has
+an adversarial review gate before marking it done and before starting the next
+task. Each implementation slice must end with focused tests, a passing
+adversarial review, and a saved commit/push via GroundX Studio Harness MCP
+(`sync_status` then `commit_push`) or an explicit note that MCP was unavailable.
 
-## T1 - Complete the injected Api surface for remaining domains
+## T0 - Inventory current state and lock slice boundaries
 
-- [ ] **Failing test first:** extend `api/client.test.ts` and
-      `makeFakeApi.test.ts` to assert grouped members exist for resources,
-      scenarios, extract, smart-report/report templates, viewer/PDF support,
-      canvas intent, reset/sign-up auth helpers, and telemetry/error capture.
-- [ ] Add the grouped members to `realApi`, preserving current runtime function
-      behavior and stable references.
-- [ ] Add fake defaults and deep overrides for each new group so render harnesses
-      can override one method without replacing sibling methods.
-- [ ] Keep low-level API implementation tests able to import and mock transport
-      modules directly; this task is about the injected app-facing surface.
-- **Adversarial review:** inspect the grouped real client and fake for dormant
-  or missing members; run `npm --workspace app exec vitest run src/api/client.test.ts
-  src/test/makeFakeApi.test.ts`; run `npm run build`.
+- [ ] Run the current import/mock inventory across `app/src` and classify every
+      hit as one of: migrate in this plan, type-only import, API/Sentry
+      implementation file, implementation unit test, non-network mock, or
+      already-migrated false positive.
+- [ ] Record the final per-domain migration list for resources,
+      scenario/canvas/reset/sign-up/PDF, extract, smart-report, telemetry, and
+      cleanup/guard. Do not start T1 while any hit is unclassified.
+- [ ] Lock the telemetry architecture decision for this plan:
+      rendered runtime error capture uses `Api.telemetry.captureException`;
+      production composition forwards that method to the existing Sentry
+      wrapper; production Sentry initialization remains outside the injected
+      runtime capture seam.
+- [ ] Lock mandatory browser smoke coverage for final closeout: one resource
+      operation, one scenario/canvas or reset/sign-up path, one extract path, one
+      smart-report path, and one telemetry/error branch with console/network
+      checks.
+- **Adversarial review:** rerun the inventory with an independent grep, compare
+  the classified list against GitHub issue #10 and the archived session/chat and
+  auth plans, and reject the task if any direct import/mock hit lacks a domain or
+  allowlist reason.
 
-## T2 - Migrate resource provider domains
+## T1 - Migrate resource provider domains
 
 - [ ] **Failing test first:** convert one resource-provider test to
       `renderWithAppProviders(..., { api: { resources: ... } })` or
       `withApiProvider(..., { resources: ... })` and confirm it fails until the
       provider reads `useApi()`.
+- [ ] Add only the resource grouped members needed by migrated resource
+      providers to `realApi`, preserving current runtime function behavior and
+      stable references.
+- [ ] Add matching resource fake defaults and deep overrides so tests can
+      override one resource method without replacing sibling methods.
 - [ ] Migrate `BucketsProvider`, `DocumentsProvider`, `GroupsProvider`,
       `ProjectsProvider`, `WorkflowsProvider`, `ApiKeysProvider`,
-      `HealthProvider`, and `SearchProvider` from `import { api } from "@/api"`
-      to the relevant injected resource groups.
+      `HealthProvider`, and `SearchProvider` from value imports of `@/api` to
+      injected resource groups.
 - [ ] Convert resource-context wire-shape imports to `import type` where they are
       type-only.
 - [ ] Replace the provider tests' per-file `vi.mock("@/api")` with one injected
       fake and visible/provider-state assertions.
 - **Adversarial review:** grep resource contexts/tests for direct `@/api` value
-  imports and `vi.mock("@/api")`; inspect hook dependency arrays; run focused
-  provider tests for all migrated resource contexts.
+  imports and `vi.mock("@/api")`; inspect hook dependency arrays and fake
+  defaults for dormant or missing methods; run focused provider tests plus
+  `npm --workspace app exec vitest run src/api/client.test.ts src/test/makeFakeApi.test.ts`.
 
-## T3 - Migrate scenario registry, canvas intent, reset, sign-up, and PDF viewer consumers
+## T2 - Migrate scenario, canvas intent, reset, sign-up, and PDF viewer consumers
 
 - [ ] **Failing test first:** retarget one scenario/canvas/widget test to the
       injected fake and prove it fails before its consumer switches to `useApi()`.
+- [ ] Add only the scenario, canvas intent, reset/sign-up helper, and PDF/viewer
+      grouped members needed by this slice to `realApi` and `makeFakeApi`.
 - [ ] Migrate `ScenarioRegistryContext` to the injected scenario group.
-- [ ] Migrate `CanvasOrchestratorContext` and related intent tests to the
-      injected intent/telemetry group instead of direct `recordIntent` /
+- [ ] Migrate `CanvasOrchestratorContext` and related intent tests to injected
+      canvas/intent and telemetry groups instead of direct `recordIntent` /
       `captureException` imports.
 - [ ] Migrate `resetExperience` and `SignUpWidget` customer-auth/reset calls to
-      injected auth/reset helpers while preserving session-reset behavior.
+      injected auth/reset helpers while preserving exhaustive debug-reset
+      behavior.
 - [ ] Migrate `PdfViewerWidget` tests and any PDF-viewer app-facing network calls
       to the injected viewer/document group.
 - **Adversarial review:** grep these domains for direct app-facing network
   imports and Sentry mocks; run focused scenario registry, canvas orchestrator,
-  reset, sign-up, and PDF viewer tests.
+  reset, sign-up, and PDF viewer tests; inspect reset coverage against
+  `docs/agents/discipline.md` reset rules.
 
-## T4 - Migrate extract domain
+## T3 - Migrate extract domain
 
 - [ ] **Failing test first:** convert one Extract/SchemaView/ProposeSchema test
       from module mocks to the injected fake and confirm it fails until the
       consumer uses the injected group.
+- [ ] Add only the extract/template/workflow/document grouped members needed by
+      this slice to `realApi` and `makeFakeApi`.
 - [ ] Migrate `Extract` widget, `SchemaView`, `ProposeSchemaFieldCard`,
       `useLiveExtract`, `useLiveExtractionSchema`, field-geometry, template-save,
       workflow-schema, and extract-field call sites to injected extract/template
@@ -70,14 +92,16 @@ before marking it done and before starting the next task.
       `@/api/useLiveExtract`, and `@/api/useLiveExtractionSchema` with harness
       fake overrides.
 - **Adversarial review:** grep extract surfaces/tests for direct API imports and
-  module mocks; run focused Extract, SchemaView, ProposeSchemaFieldCard,
-  useLiveExtract, and useLiveExtractionSchema tests.
+  module mocks; inspect type-only conversions; run focused Extract, SchemaView,
+  ProposeSchemaFieldCard, useLiveExtract, and useLiveExtractionSchema tests.
 
-## T5 - Migrate smart-report domain
+## T4 - Migrate smart-report domain
 
 - [ ] **Failing test first:** retarget one `SmartReportBuilder` or
       `SmartReportRender` test to injected `api.report` overrides and confirm it
       fails until the component consumes `useApi()`.
+- [ ] Add only the smart-report/report-template grouped members needed by this
+      slice to `realApi` and `makeFakeApi`.
 - [ ] Migrate `SmartReportBuilder`, `SmartReportRender`, and onboarding shell
       report call sites to injected report/template groups.
 - [ ] Replace per-file mocks for `@/api/smartReport` with harness fake
@@ -86,26 +110,28 @@ before marking it done and before starting the next task.
       edit/accept/reject, and navigation between render/builder frames.
 - **Adversarial review:** grep smart-report surfaces/tests for direct
   `@/api/smartReport` imports and mocks; run focused smart-report tests plus
-  affected onboarding shell tests.
+  affected onboarding shell tests; inspect that report follows the shared
+  template/scope/results model rather than a forked surface.
 
-## T6 - Migrate telemetry/Sentry test seams
+## T5 - Migrate telemetry/Sentry runtime capture
 
 - [ ] **Failing test first:** convert one component/context Sentry test from
-      `vi.mock("@/lib/sentry")` to an injected telemetry fake and confirm it
-      fails until the consumer uses the injected telemetry surface.
-- [ ] Add a telemetry/error-capture group to the injected app-facing surface (or
-      a sibling provider if implementation proves that is cleaner), wired to the
-      existing Sentry wrapper in production.
+      `vi.mock("@/lib/sentry")` to an injected `api.telemetry` fake and confirm
+      it fails until the consumer uses the injected telemetry surface.
+- [ ] Add `Api.telemetry.captureException` to the injected app-facing surface,
+      wired in production to the existing Sentry wrapper.
 - [ ] Migrate app-facing components, contexts, hooks, and widgets that assert
       `captureException` behavior away from direct `@/lib/sentry` imports.
-- [ ] Leave low-level Sentry wrapper tests and API implementation tests allowed to
-      mock the wrapper when they are testing the wrapper or API module behavior
-      directly.
+- [ ] Leave production Sentry initialization and low-level Sentry wrapper tests
+      allowed to use the wrapper directly.
+- [ ] Leave API implementation tests allowed to mock wrapper/transport behavior
+      only when they are testing the wrapper or API module directly.
 - **Adversarial review:** grep for remaining `vi.mock("@/lib/sentry")` and direct
   `captureException` imports outside allowlisted implementation tests; run
-  focused telemetry/error-branch tests.
+  focused telemetry/error-branch tests; inspect the final shape for exactly one
+  rendered-runtime fake surface.
 
-## T7 - Tighten the frontend API injection guard repo-wide
+## T6 - Tighten the guard and retire the app-facing legacy aggregate
 
 - [ ] **Failing test first:** temporarily introduce a direct app-facing
       `@/api` value import, a direct standalone API value import, a per-file
@@ -115,37 +141,43 @@ before marking it done and before starting the next task.
 - [ ] Expand `frontend-api-injection-guard.test.ts` so all migrated runtime
       consumers are covered, not only session/chat/auth.
 - [ ] Keep allowlists explicit and narrow: composition root, `api/client.ts`, API
-      implementation modules, API module unit tests that mock transport, and
-      Sentry wrapper unit tests.
-- [ ] Add guard output that groups offenders by domain so future regressions are
-      obvious.
-- **Adversarial review:** run the red/green proof; run
-  `npm --workspace app exec vitest run src/test/frontend-api-injection-guard.test.ts`;
-  inspect allowlists for accidental masking of resource, extract, report,
-  scenario, canvas, widget, or telemetry files.
-
-## T8 - Remove the legacy direct-import path and close #10
-
-- [ ] **Failing test first:** add/extend cleanup guard coverage proving no
-      runtime component/context/widget can value-import the legacy `@/api`
-      aggregate.
+      implementation modules, API module unit tests that mock transport, Sentry
+      wrapper initialization/tests, and type-only imports.
 - [ ] Remove or quarantine `app/src/api/index.ts` as an app-facing aggregate once
       no runtime consumers import it. If implementation modules still need shared
       composition, move that composition behind `api/client.ts`.
-- [ ] Verify no per-file app-facing network mocks remain outside explicit
-      low-level API implementation tests.
-- [ ] Update `docs/agents/` and OpenSpec durable specs with the final rule:
-      frontend runtime network/telemetry behavior flows through the injected
-      surface; tests use one fake.
+- [ ] Add guard output that groups offenders by domain so future regressions are
+      obvious.
+- [ ] Update `docs/agents/data-model.md` and related agent references in the same
+      slice so they no longer describe session/chat/auth as the only guarded
+      frontend Api domains.
+- **Adversarial review:** run the red/green proof; run
+  `npm --workspace app exec vitest run src/test/frontend-api-injection-guard.test.ts`;
+  inspect allowlists for accidental masking of resource, extract, report,
+  scenario, canvas, widget, or telemetry files; verify the legacy aggregate is
+  not an app-facing import path.
+
+## T7 - Final validation, browser smoke, issue close, and archive
+
+- [ ] Verify no per-file app-facing network/Sentry mocks remain outside explicit
+      low-level implementation tests.
 - [ ] Run `npm test`, `npm run build`, `npm run scan:secrets`, and
       `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`.
-- [ ] Run focused browser smoke only for domains where runtime behavior changed
-      beyond dependency routing; at minimum verify one resource operation, one
-      extract/report path, and one telemetry/error path if their behavior changed.
-- [ ] Comment on issue #10 with final evidence and close it.
-- [ ] Archive this OpenSpec change only after all validation and #10 closure
-      succeed.
+- [ ] Run mandatory Chrome DevTools MCP browser smoke for: one resource
+      operation, one scenario/canvas or reset/sign-up path, one extract path, one
+      smart-report path, and one telemetry/error branch. Measure console errors,
+      failed network requests, and relevant DOM/user-visible state rather than
+      relying on screenshots alone.
+- [ ] Run GroundX Studio Harness `sync_status` before the final push and
+      `commit_push` for the final saved change. If the MCP server is not
+      attached, diagnose attachment first and document the fallback used.
+- [ ] Comment on GitHub issue #10 with commit hashes, focused test commands,
+      full-suite/build/secret/OpenSpec validation, browser-smoke evidence, and
+      guard red/green proof.
+- [ ] Close GitHub issue #10 only after the evidence above passes.
+- [ ] Archive this OpenSpec change only after validation, #10 closure, and final
+      harness sync/commit handling succeed.
 - **Adversarial review:** confirm the injected surface is the only app-facing
   runtime path, the final guard fails regressions, #10 is closed, no active
-  OpenSpec change remains for this epic, and no suite/build/spec/secret-scan
-  regression remains.
+  OpenSpec change remains for this epic, no browser-smoke defect remains, and no
+  suite/build/spec/secret-scan regression remains.

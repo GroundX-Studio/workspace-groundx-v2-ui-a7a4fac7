@@ -1,19 +1,36 @@
 # testing-suite Specification (delta)
 
-## ADDED Requirements
+## MODIFIED Requirements
 
-### Requirement: Repo-wide frontend tests SHALL use one injected fake for app-facing API behavior
+### Requirement: Tests SHALL inject one fake Api, not per-file network mocks
 
-For every migrated app-facing frontend runtime consumer, tests SHALL provide
-network and telemetry behavior through one injected fake surface
-(`makeFakeApi(overrides?)` via `ApiProvider` / render harness, or a sibling
-provider if telemetry is separated). Tests SHALL NOT per-file mock `@/api`,
-standalone API modules, API hooks, or `@/lib/sentry` for rendered
-component/context/widget behavior.
+Tests SHALL exercise frontend network and rendered-runtime telemetry behavior by
+injecting a single fake `Api` through the render harness
+(`makeFakeApi(overrides?)` provided via `ApiProvider`), overriding only the
+methods a test asserts. For boundaries owned by the injected `Api`, tests SHALL
+NOT declare per-file `vi.mock` of the network module or Sentry wrapper. The fake
+SHALL be type-checked against the `Api` interface so it cannot drift from the
+real surface. A drift guard SHALL fail the build if a migrated network or
+runtime telemetry boundary is imported directly outside the composition
+root/client implementation, or re-mocked per-file.
 
 Low-level API implementation tests MAY continue mocking transport modules such
 as `@/api/axios` or `@/api/csrfFetch` when they are testing the API module
-itself rather than a rendered runtime consumer.
+itself rather than a rendered runtime consumer. Low-level Sentry wrapper tests
+MAY continue testing or mocking the wrapper directly.
+
+#### Scenario: A component test uses the harness fake, no module mock
+
+- **WHEN** a test renders a component that performs network operations
+- **THEN** it provides behavior via `makeFakeApi({ ... })` through the harness
+- **AND** it declares NO `vi.mock` for the injected network module
+- **AND** the fake type-checks against `Api`
+
+#### Scenario: The drift guard catches a regression
+
+- **WHEN** a migrated component imports a network module directly, OR a test re-mocks a migrated network boundary
+- **THEN** the drift-guard test fails
+- **AND** the allowlist is limited to the composition root + the `Api` implementation
 
 #### Scenario: Resource, extract, report, and scenario tests inject overrides
 
@@ -25,16 +42,9 @@ itself rather than a rendered runtime consumer.
 #### Scenario: Error-branch tests inject telemetry capture
 
 - **WHEN** a rendered component/context/widget test asserts error capture
-- **THEN** it observes the injected telemetry fake
+- **THEN** it observes the injected `api.telemetry` fake
 - **AND** it does not `vi.mock("@/lib/sentry")` unless it is a low-level Sentry
   wrapper or API implementation test
-
-### Requirement: Final frontend API injection guard SHALL enforce the completed #10 scope
-
-`frontend-api-injection-guard.test.ts` SHALL fail the build if any app-facing
-runtime consumer value-imports the legacy aggregate or standalone network
-modules, or if any rendered consumer test reintroduces per-file API/Sentry mocks.
-Allowlists SHALL be explicit, narrow, and implementation-focused.
 
 #### Scenario: Guard catches direct runtime import regression
 
@@ -47,4 +57,5 @@ Allowlists SHALL be explicit, narrow, and implementation-focused.
 - **WHEN** a rendered consumer test reintroduces `vi.mock("@/api...")` or
   `vi.mock("@/lib/sentry")` for app-facing behavior
 - **THEN** the guard fails and reports the offending file and boundary
-- **AND** API transport unit tests remain allowed only by explicit allowlist
+- **AND** API transport and Sentry wrapper unit tests remain allowed only by
+  explicit allowlist

@@ -1,19 +1,43 @@
 # app-architecture Specification (delta)
 
-## ADDED Requirements
+## MODIFIED Requirements
 
-### Requirement: Frontend Api injection SHALL cover every runtime network consumer domain
+### Requirement: Frontend network access SHALL be through an injected Api client
 
-The injected frontend `Api` surface SHALL cover every app-facing runtime network
-consumer domain remaining after the session/chat and auth slices: resource
+Frontend components, contexts, hooks, widgets, and views SHALL obtain network
+operations from an injected `Api` client via `useApi()` (provided by
+`ApiProvider`), NOT by importing the `src/api` singleton or its entity modules
+directly. Exactly one composition root SHALL wire the real `Api`; the legacy
+direct-import path MAY coexist only while a domain is mid-migration and SHALL be
+removed or quarantined by the cleanup phase. This mirrors the middleware's
+dependency-injection (`createApp({ ...deps })`) and exists so a single fake can
+be substituted in tests instead of per-file module mocks.
+
+The completed #10 scope includes the remaining app-facing runtime network
+consumer domains after the archived session/chat and auth slices: resource
 providers, scenario registry, canvas intent, extract, smart-report/report
 templates, viewer/PDF support, reset/sign-up auth helpers, and telemetry/error
-capture. Production components, contexts, hooks, and widgets SHALL use `useApi()`
-or an equivalent injected app-facing provider, not direct value imports from the
-legacy `@/api` aggregate or standalone network modules.
+capture. Type-only imports of API wire shapes MAY remain until a dedicated
+type-surface cleanup moves them.
 
-Type-only imports of API wire shapes MAY remain until a dedicated type-surface
-cleanup moves them.
+Telemetry capture for rendered runtime consumers SHALL live on
+`Api.telemetry.captureException`. Production composition SHALL forward that
+method to the existing Sentry wrapper, while production Sentry initialization MAY
+remain outside the injected runtime capture seam.
+
+#### Scenario: A consumer receives the injected client
+
+- **WHEN** a component or context needs a network operation
+- **THEN** it calls `useApi()` and uses the returned client
+- **AND** it does NOT `import { api }` / `import { <fn> } from "@/api/..."` directly
+- **AND** `useApi()` outside an `ApiProvider` throws the not-found error
+
+#### Scenario: The session establish is single-flight on the client
+
+- **GIVEN** the onboarding shell and the chat-session bootstrap both need the anon session
+- **WHEN** either runs
+- **THEN** both await one single-flight `session.ensureAnonSession()` on the injected client (one `POST /api/onboarding/session`)
+- **AND** the chat-session create never fires before the session is established (no 401 / no PATCH 404 / no ownership 403)
 
 #### Scenario: Resource providers use injected resource groups
 
@@ -32,19 +56,12 @@ cleanup moves them.
 - **AND** it does not value-import standalone API modules such as
   `@/api/extractField`, `@/api/smartReport`, or API entity modules
 
-#### Scenario: Scenario and canvas runtime use injected app-facing groups
+#### Scenario: Scenario, canvas, and telemetry runtime use injected app-facing groups
 
-- **WHEN** scenario registry, canvas intent, sign-up/reset, or PDF-viewer runtime
-  code performs network or telemetry work
-- **THEN** it reads the injected app-facing surface
+- **WHEN** scenario registry, canvas intent, sign-up/reset, PDF-viewer runtime
+  code, or rendered error-capture code performs network or telemetry work
+- **THEN** it reads the injected app-facing `Api` surface
 - **AND** direct app-facing imports from `@/api/...` or `@/lib/sentry` are absent
-
-### Requirement: Legacy frontend API aggregate SHALL be removed or quarantined after migration
-
-After all runtime consumers migrate, the legacy `@/api` aggregate SHALL no longer
-be an app-facing import path. It SHALL either be deleted or quarantined behind the
-real injected client implementation so components, contexts, hooks, widgets, and
-their tests cannot depend on it.
 
 #### Scenario: Runtime consumers cannot import the legacy aggregate
 

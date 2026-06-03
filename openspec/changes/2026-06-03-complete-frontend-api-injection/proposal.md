@@ -3,34 +3,46 @@
 ## Why
 
 Issue #10 is still open because the archived session/chat and auth slices only
-migrated two domains. The remaining frontend runtime still has direct `@/api`
-imports and per-file network / telemetry mocks across resource providers,
-scenario/canvas, extract, smart-report, and Sentry-driven error paths. This
-change finishes #10 completely: one injected frontend client, one harness fake,
-repo-wide drift protection for migrated runtime consumers, then close #10.
+migrated two domains. The remaining frontend runtime still has direct
+app-facing `@/api` imports and per-file network / telemetry mocks across
+resource providers, scenario/canvas, extract, smart-report, and Sentry-driven
+error paths.
+
+This change is the single OpenSpec planning surface for completing #10, but the
+work MUST execute as serialized domain slices. Each slice adds only the injected
+surface it immediately consumes, migrates that domain's runtime and tests,
+passes focused validation, then receives an adversarial review before the next
+slice starts. If execution pauses after any slice, #10 remains open and the next
+slice resumes from this plan rather than being treated as done.
 
 ## What Changes
 
-- Expand the injected `Api` surface so every remaining frontend runtime network
-  dependency has an explicit grouped home: resources, scenarios, extract,
-  smart-report/report templates, viewer/PDF support, canvas intent, reset/sign-up
-  auth helpers, and telemetry/error capture.
+- Inventory current direct imports and mocks before implementation so final
+  guard allowlists are based on real files, not assumptions.
+- Expand the injected `Api` surface domain-by-domain so every remaining
+  frontend runtime network dependency has an explicit grouped home: resources,
+  scenarios, extract, smart-report/report templates, viewer/PDF support, canvas
+  intent, reset/sign-up auth helpers, and telemetry/error capture.
 - Migrate remaining production consumers from direct `@/api` / standalone module
   imports to `useApi()` groups. Type-only imports may remain only where the
   imported symbol is a pure shape; value imports for network behavior move to the
   injected client.
 - Retarget tests from per-file `vi.mock("@/api...")` and `vi.mock("@/lib/sentry")`
-  to `makeFakeApi(...)` / render-harness overrides, except low-level API module
-  unit tests that deliberately mock transport (`axios`, `csrfFetch`) to test the
-  API implementation itself.
+  to `makeFakeApi(...)` / render-harness overrides, except low-level API or
+  Sentry wrapper tests that deliberately mock transport/wrapper behavior to test
+  those implementation modules directly.
+- Route rendered runtime telemetry through `Api.telemetry.captureException`.
+  Production composition still forwards to the existing Sentry wrapper; app
+  components, contexts, hooks, and widgets stop importing the wrapper directly.
 - Tighten `frontend-api-injection-guard.test.ts` from scoped session/chat/auth
   enforcement to a repo-wide migrated-consumer guard. The final guard forbids
   direct network imports and per-file API/Sentry mocks outside explicit
   implementation/test allowlists.
-- Remove or quarantine the legacy `@/api` aggregate direct-import path once no
-  runtime consumer needs it.
+- Remove or quarantine the legacy `@/api` aggregate direct-import path once the
+  real injected client no longer needs it as an app-facing import path.
 - Comment and close GitHub issue #10 only after the final guard, full suites,
-  build, OpenSpec validation, and any required browser smoke pass.
+  build, OpenSpec validation, mandatory browser smoke, and GroundX Studio
+  Harness sync/commit handling pass.
 
 ## Out Of Scope
 
@@ -40,6 +52,8 @@ repo-wide drift protection for migrated runtime consumers, then close #10.
 - Non-network UI library mocks such as animation, router, or browser APIs unless
   they block the API/Sentry mock cleanup.
 - Fixing deploy environment configuration such as missing EKS/AWS variables.
+- Reopening the already archived session/chat or auth slices except where their
+  files still participate in telemetry cleanup.
 
 ## Impact
 
