@@ -8,22 +8,22 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 
 ## T0 - Inventory current state and lock slice boundaries (SEQUENTIAL)
 
-- [ ] Run the current import/mock inventory across `app/src` and classify every
+- [x] Run the current import/mock inventory across `app/src` and classify every
       hit as one of: migrate in this plan, type-only import, API/Sentry
       implementation file, implementation unit test, non-network mock, or
       already-migrated false positive.
-- [ ] Save the classified inventory in this OpenSpec change, either in a
+- [x] Save the classified inventory in this OpenSpec change, either in a
       dedicated `inventory.md` under this change or as an inventory section in
       this task list. Do not create a rival top-level tracker.
-- [ ] Record the final per-domain migration list for resources,
+- [x] Record the final per-domain migration list for resources,
       scenario/canvas/reset/sign-up/PDF, extract, smart-report, telemetry, and
       cleanup/guard. Do not start T1 while any hit is unclassified.
-- [ ] Lock the telemetry architecture decision for this plan:
+- [x] Lock the telemetry architecture decision for this plan:
       rendered runtime error capture uses `Api.telemetry.captureException`;
       production composition forwards that method to the existing Sentry
       wrapper; production Sentry initialization remains outside the injected
       runtime capture seam.
-- [ ] Lock mandatory browser smoke coverage for final closeout: one resource
+- [x] Lock mandatory browser smoke coverage for final closeout: one resource
       operation, one scenario/canvas or reset/sign-up path, one extract path, one
       smart-report path, and one telemetry/error branch with console/network
       checks.
