@@ -241,7 +241,7 @@ evidence from Chrome DevTools MCP.
       the clean-flow evidence has no unexplained console or network failures.
 - [x] Commit and push the completed work through the GroundX Studio Harness
       lifecycle when available, or document the fallback used.
-- [x] Archive this OpenSpec change only after execution evidence, fixes/issues,
+- [ ] **Blocked:** Archive this OpenSpec change only after execution evidence, fixes/issues,
       validation, and review gates are complete. If any required surface remains
       blocked or unexercised, leave the change active/blocked and report the
       blocker instead of archiving.
@@ -260,3 +260,9 @@ evidence from Chrome DevTools MCP.
     left active rather than archived because F7, steady non-document widget
     parity, and SmartReport rendered-section coverage remain blocked by backlog
     issues.
+  - **Post-close adversarial review cleanup (2026-06-03):** the archive gate was
+    previously checked even though the review verdict says blocked-active. That
+    made `openspec list` report this change as complete while its required
+    surfaces were still unexercised. The gate is now unchecked and a follow-up
+    execution plan (`2026-06-03-required-e2e-gap-closure`) owns the remaining
+    required-surface blockers.
