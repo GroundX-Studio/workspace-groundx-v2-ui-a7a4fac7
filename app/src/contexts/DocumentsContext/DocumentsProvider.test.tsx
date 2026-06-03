@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/api";
+import { ApiProvider } from "@/contexts/ApiContext";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
 import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
@@ -9,44 +9,29 @@ import {
   MessageBarProvider,
   useMessageContext,
 } from "@/contexts/MessageBarContext/MessageBarContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 /**
- * TS-02 — DocumentsProvider coverage. Wraps `api.groundxDocuments.*`
+ * TS-02 — DocumentsProvider coverage. Wraps injected `api.groundxDocuments.*`
  * calls in `run()`. Three contracts: list populates state,
  * ingestRemoteDocuments emits the "Ingest started." success, error
  * path surfaces the "Document operation failed." copy.
  */
-vi.mock("@/api", () => ({
-  api: {
-    groundxDocuments: {
-      listGroundXDocuments: vi.fn(),
-      getGroundXDocument: vi.fn(),
-      ingestGroundXRemoteDocuments: vi.fn(),
-      crawlGroundXWebsite: vi.fn(),
-      copyGroundXDocuments: vi.fn(),
-      updateGroundXDocuments: vi.fn(),
-      deleteGroundXDocument: vi.fn(),
-      deleteGroundXDocuments: vi.fn(),
-      lookupGroundXDocument: vi.fn(),
-      listGroundXProcesses: vi.fn(),
-      getGroundXProcessingStatus: vi.fn(),
-      cancelGroundXProcess: vi.fn(),
-      getGroundXDocumentXray: vi.fn(),
-    },
-  },
-}));
+let api: ReturnType<typeof makeFakeApi>;
 
 beforeEach(() => {
-  for (const fn of Object.values(api.groundxDocuments)) (fn as Mock).mockReset();
+  api = makeFakeApi();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <LoadingProvider>
-    <MessageBarProvider>
-      <DocumentsProvider>{children}</DocumentsProvider>
-    </MessageBarProvider>
-  </LoadingProvider>
+  <ApiProvider value={api}>
+    <LoadingProvider>
+      <MessageBarProvider>
+        <DocumentsProvider>{children}</DocumentsProvider>
+      </MessageBarProvider>
+    </LoadingProvider>
+  </ApiProvider>
 );
 
 describe("DocumentsProvider (TS-02)", () => {
@@ -55,7 +40,7 @@ describe("DocumentsProvider (TS-02)", () => {
       { documentId: "d-1", fileName: "alpha.pdf" },
       { documentId: "d-2", fileName: "beta.pdf" },
     ];
-    (api.groundxDocuments.listGroundXDocuments as Mock).mockResolvedValue({ documents: fake });
+    vi.mocked(api.groundxDocuments.listGroundXDocuments).mockResolvedValue({ documents: fake });
 
     const { result } = renderHook(() => useDocumentsContext(), { wrapper });
     let actionResult: unknown;
@@ -69,7 +54,7 @@ describe("DocumentsProvider (TS-02)", () => {
   });
 
   it("ingestRemoteDocuments emits 'Ingest started.' on success", async () => {
-    (api.groundxDocuments.ingestGroundXRemoteDocuments as Mock).mockResolvedValue({
+    vi.mocked(api.groundxDocuments.ingestGroundXRemoteDocuments).mockResolvedValue({
       ingest: { processId: "p-9", status: "queued" },
     });
 
@@ -103,7 +88,7 @@ describe("DocumentsProvider (TS-02)", () => {
     };
 
     it("returns the parsed X-Ray response for a valid SDK payload (behavior-preserving)", async () => {
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue(validXray);
+      vi.mocked(api.groundxDocuments.getGroundXDocumentXray).mockResolvedValue(validXray);
 
       const { result } = renderHook(() => useDocumentsContext(), { wrapper });
       let actionResult: { isSuccess: boolean; response?: unknown } | undefined;
@@ -118,10 +103,10 @@ describe("DocumentsProvider (TS-02)", () => {
     it("rejects a malformed SDK response (does not blind-cast it through)", async () => {
       // Missing required `documentPages`/`chunks`/`sourceUrl` — today's
       // `as unknown as DocumentXrayResponse` would pass this straight through.
-      (api.groundxDocuments.getGroundXDocumentXray as Mock).mockResolvedValue({
+      vi.mocked(api.groundxDocuments.getGroundXDocumentXray).mockResolvedValue({
         fileName: "broken.pdf",
         fileType: "pdf",
-      });
+      } as Awaited<ReturnType<typeof api.groundxDocuments.getGroundXDocumentXray>>);
 
       const { result } = renderHook(() => useDocumentsContext(), { wrapper });
       let actionResult: { isSuccess: boolean; error?: unknown } | undefined;
@@ -135,7 +120,7 @@ describe("DocumentsProvider (TS-02)", () => {
   });
 
   it("a thrown API error surfaces 'Document operation failed.' and isSuccess=false", async () => {
-    (api.groundxDocuments.listGroundXDocuments as Mock).mockRejectedValue(new Error("boom"));
+    vi.mocked(api.groundxDocuments.listGroundXDocuments).mockRejectedValue(new Error("boom"));
 
     const { result } = renderHook(
       () => ({ docs: useDocumentsContext(), msg: useMessageContext() }),

@@ -1,14 +1,15 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { RequestOptions } from "@/api/common";
-import { WorkflowInput, WorkflowRelationshipInput } from "@/api/entities/groundxWorkflowsEntity";
-import { Workflow } from "@/api/entities/sdkTypes";
+import type { RequestOptions } from "@/api/common";
+import type { WorkflowInput, WorkflowRelationshipInput } from "@/api/entities/groundxWorkflowsEntity";
+import type { Workflow } from "@/api/entities/sdkTypes";
+import { useApi } from "@/contexts/ApiContext";
 import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { WorkflowsContext } from "./WorkflowsContext";
 
 export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  const api = useApi();
   const run = useSdkRunner("Workflow operation failed.");
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
@@ -21,7 +22,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         setWorkflows(response.workflows);
         return response.workflows;
       }),
-    [run]
+    [api, run]
   );
 
   const createWorkflow = useCallback(
@@ -31,7 +32,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         setWorkflows((items) => [response.workflow, ...items]);
         return response.workflow;
       }, "Workflow created."),
-    [run]
+    [api, run]
   );
 
   const getWorkflow = useCallback(
@@ -41,7 +42,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedWorkflow(response.workflow);
         return response.workflow;
       }),
-    [run]
+    [api, run]
   );
 
   const updateWorkflow = useCallback(
@@ -52,7 +53,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedWorkflow(response.workflow);
         return response.workflow;
       }, "Workflow updated."),
-    [run]
+    [api, run]
   );
 
   const deleteWorkflow = useCallback(
@@ -62,7 +63,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         setWorkflows((items) => items.filter((item) => item.workflowId !== String(id)));
         setSelectedWorkflow((workflow) => (workflow?.workflowId === String(id) ? null : workflow));
       }, "Workflow deleted."),
-    [run]
+    [api, run]
   );
 
   const getAccountWorkflow = useCallback(
@@ -72,7 +73,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         setAccountWorkflow(response.workflow);
         return response.workflow;
       }),
-    [run]
+    [api, run]
   );
 
   const assignAccountWorkflow = useCallback(
@@ -82,7 +83,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         setAccountWorkflow(response.workflow);
         return response.workflow;
       }, "Workflow assigned."),
-    [run]
+    [api, run]
   );
 
   const removeAccountWorkflow = useCallback(
@@ -91,13 +92,13 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         await api.groundxWorkflows.removeGroundXAccountWorkflow(options);
         setAccountWorkflow(null);
       }, "Workflow removed."),
-    [run]
+    [api, run]
   );
 
   const assignWorkflowToResource = useCallback(
     (id: string | number, input: WorkflowRelationshipInput, options?: RequestOptions) =>
       run(async () => (await api.groundxWorkflows.assignGroundXWorkflowToResource(id, input, options)).workflow, "Workflow assigned."),
-    [run]
+    [api, run]
   );
 
   const removeWorkflowFromResource = useCallback(
@@ -105,7 +106,7 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
       run(async () => {
         await api.groundxWorkflows.removeGroundXWorkflowFromResource(id, options);
       }, "Workflow removed."),
-    [run]
+    [api, run]
   );
 
   return (
@@ -130,4 +131,3 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
     </WorkflowsContext.Provider>
   );
 };
-

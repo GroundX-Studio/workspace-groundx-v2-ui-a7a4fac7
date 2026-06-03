@@ -1,14 +1,15 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { RequestOptions, PaginationParams } from "@/api/common";
-import { PartnerBucketInput } from "@/api/entities/partnerBucketsEntity";
-import { Bucket } from "@/api/entities/sdkTypes";
+import type { RequestOptions, PaginationParams } from "@/api/common";
+import type { PartnerBucketInput } from "@/api/entities/partnerBucketsEntity";
+import type { Bucket } from "@/api/entities/sdkTypes";
+import { useApi } from "@/contexts/ApiContext";
 import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { BucketsContext } from "./BucketsContext";
 
 export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  const api = useApi();
   const run = useSdkRunner("Bucket operation failed.");
   const [groundxBuckets, setGroundXBuckets] = useState<Bucket[]>([]);
   const [partnerBuckets, setPartnerBuckets] = useState<Bucket[]>([]);
@@ -21,7 +22,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setGroundXBuckets(response.buckets);
         return response.buckets;
       }),
-    [run]
+    [api, run]
   );
 
   const getGroundXBucket = useCallback(
@@ -31,7 +32,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setSelectedBucket(response.bucket);
         return response.bucket;
       }),
-    [run]
+    [api, run]
   );
 
   const createGroundXBucket = useCallback(
@@ -41,7 +42,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setGroundXBuckets((buckets) => [response.bucket, ...buckets]);
         return response.bucket;
       }, "Bucket created."),
-    [run]
+    [api, run]
   );
 
   const updateGroundXBucket = useCallback(
@@ -52,7 +53,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setSelectedBucket(response.bucket);
         return response.bucket;
       }, "Bucket updated."),
-    [run]
+    [api, run]
   );
 
   const deleteGroundXBucket = useCallback(
@@ -62,7 +63,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setGroundXBuckets((buckets) => buckets.filter((bucket) => bucket.bucketId !== bucketId));
         setSelectedBucket((bucket) => (bucket?.bucketId === bucketId ? null : bucket));
       }, "Bucket deleted."),
-    [run]
+    [api, run]
   );
 
   const listPartnerBuckets = useCallback(
@@ -72,7 +73,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setPartnerBuckets(response.buckets);
         return response.buckets;
       }),
-    [run]
+    [api, run]
   );
 
   const getPartnerBucket = useCallback(
@@ -82,7 +83,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setSelectedBucket(response.bucket);
         return response.bucket;
       }),
-    [run]
+    [api, run]
   );
 
   const createPartnerBucket = useCallback(
@@ -92,7 +93,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setPartnerBuckets((buckets) => [response.bucket, ...buckets]);
         return response.bucket;
       }, "Bucket created."),
-    [run]
+    [api, run]
   );
 
   const updatePartnerBucket = useCallback(
@@ -101,7 +102,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         await api.partnerBuckets.updatePartnerBucket(bucketId, bucket, options);
         setPartnerBuckets((buckets) => buckets.map((item) => (item.bucketId === bucketId ? { ...item, ...bucket } : item)));
       }, "Bucket updated."),
-    [run]
+    [api, run]
   );
 
   const deletePartnerBucket = useCallback(
@@ -110,7 +111,7 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         await api.partnerBuckets.deletePartnerBucket(bucketId, options);
         setPartnerBuckets((buckets) => buckets.filter((bucket) => bucket.bucketId !== bucketId));
       }, "Bucket deleted."),
-    [run]
+    [api, run]
   );
 
   return (
@@ -135,4 +136,3 @@ export const BucketsProvider: FC<{ children: ReactNode }> = ({ children }) => {
     </BucketsContext.Provider>
   );
 };
-

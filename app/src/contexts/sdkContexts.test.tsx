@@ -2,6 +2,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiProvider } from "@/contexts/ApiContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
+
 const contextMocks = vi.hoisted(() => ({
   setIsLoading: vi.fn(),
   setErrorMessage: vi.fn(),
@@ -93,7 +96,6 @@ const contextMocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/api", () => ({ api: contextMocks.api }));
 vi.mock("@/contexts/LoadingContext", () => ({
   useIsLoading: () => ({ setIsLoading: contextMocks.setIsLoading }),
 }));
@@ -115,7 +117,11 @@ import { WorkflowsProvider, useWorkflowsContext } from "./WorkflowsContext";
 
 const wrapper = (Provider: React.FC<{ children: ReactNode }>) =>
   function Wrapper({ children }: { children: ReactNode }) {
-    return <Provider>{children}</Provider>;
+    return (
+      <ApiProvider value={makeFakeApi(contextMocks.api)}>
+        <Provider>{children}</Provider>
+      </ApiProvider>
+    );
   };
 
 describe("SDK contexts", () => {

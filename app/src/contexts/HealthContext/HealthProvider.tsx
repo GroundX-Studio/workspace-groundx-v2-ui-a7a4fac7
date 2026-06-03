@@ -1,13 +1,14 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { RequestOptions } from "@/api/common";
-import { ServiceHealth } from "@/api/entities/groundxHealthEntity";
+import type { RequestOptions } from "@/api/common";
+import type { ServiceHealth } from "@/api/entities/groundxHealthEntity";
+import { useApi } from "@/contexts/ApiContext";
 import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { HealthContext } from "./HealthContext";
 
 export const HealthProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  const api = useApi();
   const run = useSdkRunner("Could not load service health.");
   const [services, setServices] = useState<ServiceHealth[]>([]);
   const [selectedService, setSelectedService] = useState<ServiceHealth | null>(null);
@@ -19,7 +20,7 @@ export const HealthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setServices(response.health);
         return response.health;
       }),
-    [run]
+    [api, run]
   );
 
   const getServiceHealth = useCallback(
@@ -29,9 +30,8 @@ export const HealthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setSelectedService(response.health);
         return response.health;
       }),
-    [run]
+    [api, run]
   );
 
   return <HealthContext.Provider value={{ services, selectedService, listHealth, getServiceHealth }}>{children}</HealthContext.Provider>;
 };
-

@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/api";
+import { ApiProvider } from "@/contexts/ApiContext";
 import { useHealthContext } from "@/contexts/HealthContext";
 import { HealthProvider } from "@/contexts/HealthContext/HealthProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
@@ -9,34 +9,30 @@ import {
   MessageBarProvider,
   useMessageContext,
 } from "@/contexts/MessageBarContext/MessageBarContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 /**
- * TS-02 — HealthProvider coverage. Wraps `api.groundxHealth.*` calls.
+ * TS-02 — HealthProvider coverage. Wraps injected `api.groundxHealth.*` calls.
  * Unlike the other providers there's no success message — just a
  * single error string ("Could not load service health."). Three
  * contracts: listHealth populates state, getServiceHealth populates
  * selectedService, error path surfaces the failure copy.
  */
-vi.mock("@/api", () => ({
-  api: {
-    groundxHealth: {
-      listGroundXHealth: vi.fn(),
-      getGroundXServiceHealth: vi.fn(),
-    },
-  },
-}));
+let api: ReturnType<typeof makeFakeApi>;
 
 beforeEach(() => {
-  for (const fn of Object.values(api.groundxHealth)) (fn as Mock).mockReset();
+  api = makeFakeApi();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <LoadingProvider>
-    <MessageBarProvider>
-      <HealthProvider>{children}</HealthProvider>
-    </MessageBarProvider>
-  </LoadingProvider>
+  <ApiProvider value={api}>
+    <LoadingProvider>
+      <MessageBarProvider>
+        <HealthProvider>{children}</HealthProvider>
+      </MessageBarProvider>
+    </LoadingProvider>
+  </ApiProvider>
 );
 
 describe("HealthProvider (TS-02)", () => {
@@ -45,7 +41,7 @@ describe("HealthProvider (TS-02)", () => {
       { name: "groundx-api", status: "ok" },
       { name: "ingest", status: "degraded" },
     ];
-    (api.groundxHealth.listGroundXHealth as Mock).mockResolvedValue({ health: fake });
+    vi.mocked(api.groundxHealth.listGroundXHealth).mockResolvedValue({ health: fake });
 
     const { result } = renderHook(() => useHealthContext(), { wrapper });
     let actionResult: unknown;
@@ -60,7 +56,7 @@ describe("HealthProvider (TS-02)", () => {
 
   it("getServiceHealth populates `selectedService` state on success", async () => {
     const fake = { name: "ingest", status: "ok" };
-    (api.groundxHealth.getGroundXServiceHealth as Mock).mockResolvedValue({ health: fake });
+    vi.mocked(api.groundxHealth.getGroundXServiceHealth).mockResolvedValue({ health: fake });
 
     const { result } = renderHook(() => useHealthContext(), { wrapper });
     await act(async () => {
@@ -72,7 +68,7 @@ describe("HealthProvider (TS-02)", () => {
   });
 
   it("a thrown API error surfaces 'Could not load service health.' and isSuccess=false", async () => {
-    (api.groundxHealth.listGroundXHealth as Mock).mockRejectedValue(new Error("net down"));
+    vi.mocked(api.groundxHealth.listGroundXHealth).mockRejectedValue(new Error("net down"));
 
     const { result } = renderHook(
       () => ({ health: useHealthContext(), msg: useMessageContext() }),

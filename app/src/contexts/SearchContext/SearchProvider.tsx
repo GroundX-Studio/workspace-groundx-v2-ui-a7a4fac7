@@ -1,14 +1,15 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { RequestOptions } from "@/api/common";
-import { SearchContentInput, SearchDocumentsInput } from "@/api/entities/groundxSearchEntity";
-import { SearchResponseBody } from "@/api/entities/sdkTypes";
+import type { RequestOptions } from "@/api/common";
+import type { SearchContentInput, SearchDocumentsInput } from "@/api/entities/groundxSearchEntity";
+import type { SearchResponseBody } from "@/api/entities/sdkTypes";
+import { useApi } from "@/contexts/ApiContext";
 import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { SearchContext } from "./SearchContext";
 
 export const SearchProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  const api = useApi();
   const run = useSdkRunner("Search failed.");
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchResponseBody | null>(null);
@@ -27,13 +28,13 @@ export const SearchProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const searchContent = useCallback(
     (input: SearchContentInput, options?: RequestOptions) =>
       runSearch(async () => (await api.groundxSearch.searchGroundXContent(input, options)).search, input.query),
-    [runSearch]
+    [api, runSearch]
   );
 
   const searchDocuments = useCallback(
     (input: SearchDocumentsInput, options?: RequestOptions) =>
       runSearch(async () => (await api.groundxSearch.searchGroundXDocuments(input, options)).search, input.query),
-    [runSearch]
+    [api, runSearch]
   );
 
   const clearSearch = useCallback(() => {
@@ -43,4 +44,3 @@ export const SearchProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   return <SearchContext.Provider value={{ query, search, searchContent, searchDocuments, clearSearch }}>{children}</SearchContext.Provider>;
 };
-

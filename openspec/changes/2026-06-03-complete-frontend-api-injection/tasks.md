@@ -34,22 +34,22 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 
 ## T1 - Migrate resource provider domains (SEQUENTIAL)
 
-- [ ] **Failing test first:** convert one resource-provider test to
+- [x] **Failing test first:** convert one resource-provider test to
       `renderWithAppProviders(..., { api: { resources: ... } })` or
       `withApiProvider(..., { resources: ... })` and confirm it fails until the
       provider reads `useApi()`.
-- [ ] Add only the resource grouped members needed by migrated resource
+- [x] Add only the resource grouped members needed by migrated resource
       providers to `realApi`, preserving current runtime function behavior and
       stable references.
-- [ ] Add matching resource fake defaults and deep overrides so tests can
+- [x] Add matching resource fake defaults and deep overrides so tests can
       override one resource method without replacing sibling methods.
-- [ ] Migrate `BucketsProvider`, `DocumentsProvider`, `GroupsProvider`,
+- [x] Migrate `BucketsProvider`, `DocumentsProvider`, `GroupsProvider`,
       `ProjectsProvider`, `WorkflowsProvider`, `ApiKeysProvider`,
       `HealthProvider`, and `SearchProvider` from value imports of `@/api` to
       injected resource groups.
-- [ ] Convert resource-context wire-shape imports to `import type` where they are
+- [x] Convert resource-context wire-shape imports to `import type` where they are
       type-only.
-- [ ] Replace the provider tests' per-file `vi.mock("@/api")` with one injected
+- [x] Replace the provider tests' per-file `vi.mock("@/api")` with one injected
       fake and visible/provider-state assertions.
 - **Adversarial review:** grep resource contexts/tests for direct `@/api` value
   imports and `vi.mock("@/api")`; inspect hook dependency arrays and fake

@@ -1,13 +1,14 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { RequestOptions } from "@/api/common";
-import { GroundXApiKey } from "@/api/entities/sdkTypes";
+import type { RequestOptions } from "@/api/common";
+import type { GroundXApiKey } from "@/api/entities/sdkTypes";
+import { useApi } from "@/contexts/ApiContext";
 import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { ApiKeysContext } from "./ApiKeysContext";
 
 export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  const api = useApi();
   const run = useSdkRunner("API key operation failed.");
   const [groundxApiKeys, setGroundXApiKeys] = useState<GroundXApiKey[]>([]);
   const [partnerApiKeys, setPartnerApiKeys] = useState<GroundXApiKey[]>([]);
@@ -19,7 +20,7 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setGroundXApiKeys(response.apiKeys);
         return response.apiKeys;
       }),
-    [run]
+    [api, run]
   );
 
   const createGroundXApiKey = useCallback(
@@ -29,7 +30,7 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setGroundXApiKeys(response.apiKeys);
         return response.apiKeys;
       }, "API key created."),
-    [run]
+    [api, run]
   );
 
   const renameGroundXApiKey = useCallback(
@@ -39,7 +40,7 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setGroundXApiKeys(response.apiKeys);
         return response.apiKeys;
       }, "API key renamed."),
-    [run]
+    [api, run]
   );
 
   const deleteGroundXApiKey = useCallback(
@@ -48,7 +49,7 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
         await api.groundxApiKeys.deleteGroundXApiKey(apiKey, options);
         setGroundXApiKeys((keys) => keys.filter((key) => key.apiKey !== apiKey));
       }, "API key deleted."),
-    [run]
+    [api, run]
   );
 
   const listPartnerApiKeys = useCallback(
@@ -58,7 +59,7 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setPartnerApiKeys(response.apiKeys);
         return response.apiKeys;
       }),
-    [run]
+    [api, run]
   );
 
   const createPartnerApiKey = useCallback(
@@ -68,7 +69,7 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setPartnerApiKeys(response.apiKeys);
         return response.apiKeys;
       }, "API key created."),
-    [run]
+    [api, run]
   );
 
   const renamePartnerApiKey = useCallback(
@@ -78,7 +79,7 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setPartnerApiKeys(response.apiKeys);
         return response.apiKeys;
       }, "API key renamed."),
-    [run]
+    [api, run]
   );
 
   const deletePartnerApiKey = useCallback(
@@ -87,7 +88,7 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
         await api.partnerApiKeys.deletePartnerApiKey(apiKey, options);
         setPartnerApiKeys((keys) => keys.filter((key) => key.apiKey !== apiKey));
       }, "API key deleted."),
-    [run]
+    [api, run]
   );
 
   return (
@@ -109,4 +110,3 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
     </ApiKeysContext.Provider>
   );
 };
-

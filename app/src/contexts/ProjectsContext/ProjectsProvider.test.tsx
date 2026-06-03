@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/api";
+import { ApiProvider } from "@/contexts/ApiContext";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
 import {
   MessageBarProvider,
@@ -9,50 +9,45 @@ import {
 } from "@/contexts/MessageBarContext/MessageBarContext";
 import { useProjectsContext } from "@/contexts/ProjectsContext";
 import { ProjectsProvider } from "@/contexts/ProjectsContext/ProjectsProvider";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 /**
- * TS-02 — ProjectsProvider coverage. Wraps `api.partnerProjects.*`
+ * TS-02 — ProjectsProvider coverage. Wraps injected `api.partnerProjects.*`
  * calls in the shared `run()` helper. Three contracts: list
  * populates state, create prepends + emits success, error path
  * surfaces the failure copy.
  */
-vi.mock("@/api", () => ({
-  api: {
-    partnerProjects: {
-      listPartnerProjects: vi.fn(),
-      createPartnerProject: vi.fn(),
-      updatePartnerProject: vi.fn(),
-      attachBucketToPartnerProject: vi.fn(),
-      detachBucketFromPartnerProject: vi.fn(),
-    },
-  },
-}));
+let api: ReturnType<typeof makeFakeApi>;
 
 beforeEach(() => {
-  for (const fn of Object.values(api.partnerProjects)) (fn as Mock).mockReset();
+  api = makeFakeApi();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <LoadingProvider>
-    <MessageBarProvider>
-      <ProjectsProvider>{children}</ProjectsProvider>
-    </MessageBarProvider>
-  </LoadingProvider>
+  <ApiProvider value={api}>
+    <LoadingProvider>
+      <MessageBarProvider>
+        <ProjectsProvider>{children}</ProjectsProvider>
+      </MessageBarProvider>
+    </LoadingProvider>
+  </ApiProvider>
 );
 
 const combinedWrapper = (children: React.ReactNode) => (
-  <LoadingProvider>
-    <MessageBarProvider>
-      <ProjectsProvider>{children}</ProjectsProvider>
-    </MessageBarProvider>
-  </LoadingProvider>
+  <ApiProvider value={api}>
+    <LoadingProvider>
+      <MessageBarProvider>
+        <ProjectsProvider>{children}</ProjectsProvider>
+      </MessageBarProvider>
+    </LoadingProvider>
+  </ApiProvider>
 );
 
 describe("ProjectsProvider (TS-02)", () => {
   it("listProjects populates `projects` state on success", async () => {
     const fake = [{ projectId: 1, name: "p-one" }, { projectId: 2, name: "p-two" }];
-    (api.partnerProjects.listPartnerProjects as Mock).mockResolvedValue({ projects: fake });
+    vi.mocked(api.partnerProjects.listPartnerProjects).mockResolvedValue({ projects: fake });
 
     const { result } = renderHook(() => useProjectsContext(), { wrapper });
     let actionResult: unknown;
@@ -66,10 +61,10 @@ describe("ProjectsProvider (TS-02)", () => {
   });
 
   it("createProject prepends + emits the 'Project created.' success message", async () => {
-    (api.partnerProjects.listPartnerProjects as Mock).mockResolvedValue({
+    vi.mocked(api.partnerProjects.listPartnerProjects).mockResolvedValue({
       projects: [{ projectId: 1, name: "old" }],
     });
-    (api.partnerProjects.createPartnerProject as Mock).mockResolvedValue({
+    vi.mocked(api.partnerProjects.createPartnerProject).mockResolvedValue({
       project: { projectId: 9, name: "fresh" },
     });
 
@@ -91,7 +86,7 @@ describe("ProjectsProvider (TS-02)", () => {
   });
 
   it("a thrown API error surfaces 'Project operation failed.' and isSuccess=false", async () => {
-    (api.partnerProjects.listPartnerProjects as Mock).mockRejectedValue(new Error("upstream 500"));
+    vi.mocked(api.partnerProjects.listPartnerProjects).mockRejectedValue(new Error("upstream 500"));
 
     const { result } = renderHook(
       () => ({ projects: useProjectsContext(), msg: useMessageContext() }),

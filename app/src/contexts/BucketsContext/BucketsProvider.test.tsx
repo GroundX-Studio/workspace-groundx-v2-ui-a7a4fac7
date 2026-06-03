@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/api";
+import { ApiProvider } from "@/contexts/ApiContext";
 import { useBucketsContext } from "@/contexts/BucketsContext";
 import { BucketsProvider } from "@/contexts/BucketsContext/BucketsProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
@@ -9,52 +9,35 @@ import {
   MessageBarProvider,
   useMessageContext,
 } from "@/contexts/MessageBarContext/MessageBarContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 /**
  * TS-02 — BucketsProvider coverage.
  *
- * The provider wraps `api.groundxBuckets.*` and `api.partnerBuckets.*`
+ * The provider wraps injected `api.groundxBuckets.*` and `api.partnerBuckets.*`
  * calls in a shared `run()` helper that funnels into LoadingContext
- * + MessageBarContext. We mock the API surface and assert three
+ * + MessageBarContext. We inject one fake API surface and assert three
  * contracts: list populates state, create updates state + emits a
  * success message, and a thrown error surfaces the failure message
  * (no crash, isSuccess=false).
  */
-vi.mock("@/api", () => ({
-  api: {
-    groundxBuckets: {
-      listGroundXBuckets: vi.fn(),
-      getGroundXBucket: vi.fn(),
-      createGroundXBucket: vi.fn(),
-      updateGroundXBucket: vi.fn(),
-      deleteGroundXBucket: vi.fn(),
-    },
-    partnerBuckets: {
-      listPartnerBuckets: vi.fn(),
-      getPartnerBucket: vi.fn(),
-      createPartnerBucket: vi.fn(),
-      updatePartnerBucket: vi.fn(),
-      deletePartnerBucket: vi.fn(),
-    },
-  },
-}));
+let api: ReturnType<typeof makeFakeApi>;
 
 beforeEach(() => {
-  // Reset only the methods we touch — vi.mocked is enough since the
-  // module is mocked above.
-  for (const fn of Object.values(api.groundxBuckets)) (fn as Mock).mockReset();
-  for (const fn of Object.values(api.partnerBuckets)) (fn as Mock).mockReset();
+  api = makeFakeApi();
   // Formik-style state churn isn't relevant here, but the global
   // throw-on-console.error spy still fires if a provider warns.
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <LoadingProvider>
-    <MessageBarProvider>
-      <BucketsProvider>{children}</BucketsProvider>
-    </MessageBarProvider>
-  </LoadingProvider>
+  <ApiProvider value={api}>
+    <LoadingProvider>
+      <MessageBarProvider>
+        <BucketsProvider>{children}</BucketsProvider>
+      </MessageBarProvider>
+    </LoadingProvider>
+  </ApiProvider>
 );
 
 describe("BucketsProvider (TS-02)", () => {
@@ -63,7 +46,7 @@ describe("BucketsProvider (TS-02)", () => {
       { bucketId: 1, name: "alpha" },
       { bucketId: 2, name: "beta" },
     ];
-    (api.groundxBuckets.listGroundXBuckets as Mock).mockResolvedValue({ buckets: fakeBuckets });
+    vi.mocked(api.groundxBuckets.listGroundXBuckets).mockResolvedValue({ buckets: fakeBuckets });
 
     const { result } = renderHook(() => useBucketsContext(), { wrapper });
     let actionResult: unknown;
@@ -78,10 +61,10 @@ describe("BucketsProvider (TS-02)", () => {
 
   it("createGroundXBucket prepends the new bucket and emits the success message", async () => {
     const newBucket = { bucketId: 9, name: "fresh" };
-    (api.groundxBuckets.createGroundXBucket as Mock).mockResolvedValue({ bucket: newBucket });
+    vi.mocked(api.groundxBuckets.createGroundXBucket).mockResolvedValue({ bucket: newBucket });
 
     // Seed initial state with one bucket so we can assert the prepend.
-    (api.groundxBuckets.listGroundXBuckets as Mock).mockResolvedValue({
+    vi.mocked(api.groundxBuckets.listGroundXBuckets).mockResolvedValue({
       buckets: [{ bucketId: 1, name: "alpha" }],
     });
 
@@ -108,7 +91,7 @@ describe("BucketsProvider (TS-02)", () => {
   });
 
   it("a thrown API error surfaces the failure message and isSuccess=false", async () => {
-    (api.groundxBuckets.listGroundXBuckets as Mock).mockRejectedValue(new Error("network down"));
+    vi.mocked(api.groundxBuckets.listGroundXBuckets).mockRejectedValue(new Error("network down"));
 
     const combined = renderHook(
       () => ({

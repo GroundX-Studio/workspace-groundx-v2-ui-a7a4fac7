@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/api";
+import { ApiProvider } from "@/contexts/ApiContext";
 import { useApiKeysContext } from "@/contexts/ApiKeysContext";
 import { ApiKeysProvider } from "@/contexts/ApiKeysContext/ApiKeysProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
@@ -9,9 +9,10 @@ import {
   MessageBarProvider,
   useMessageContext,
 } from "@/contexts/MessageBarContext/MessageBarContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 /**
- * TS-02 — ApiKeysProvider coverage. Wraps `api.groundxApiKeys.*` +
+ * TS-02 — ApiKeysProvider coverage. Wraps injected `api.groundxApiKeys.*` +
  * `api.partnerApiKeys.*` calls. Critical: real key values must never
  * appear in test fixtures — the API key field is the bearer secret.
  * Use stub values that obviously aren't real keys ("test-key-stub").
@@ -19,35 +20,21 @@ import {
  * Three contracts: list populates state, create emits success,
  * error path surfaces "API key operation failed."
  */
-vi.mock("@/api", () => ({
-  api: {
-    groundxApiKeys: {
-      listGroundXApiKeys: vi.fn(),
-      createGroundXApiKey: vi.fn(),
-      renameGroundXApiKey: vi.fn(),
-      deleteGroundXApiKey: vi.fn(),
-    },
-    partnerApiKeys: {
-      listPartnerApiKeys: vi.fn(),
-      createPartnerApiKey: vi.fn(),
-      renamePartnerApiKey: vi.fn(),
-      deletePartnerApiKey: vi.fn(),
-    },
-  },
-}));
+let api: ReturnType<typeof makeFakeApi>;
 
 beforeEach(() => {
-  for (const fn of Object.values(api.groundxApiKeys)) (fn as Mock).mockReset();
-  for (const fn of Object.values(api.partnerApiKeys)) (fn as Mock).mockReset();
+  api = makeFakeApi();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <LoadingProvider>
-    <MessageBarProvider>
-      <ApiKeysProvider>{children}</ApiKeysProvider>
-    </MessageBarProvider>
-  </LoadingProvider>
+  <ApiProvider value={api}>
+    <LoadingProvider>
+      <MessageBarProvider>
+        <ApiKeysProvider>{children}</ApiKeysProvider>
+      </MessageBarProvider>
+    </LoadingProvider>
+  </ApiProvider>
 );
 
 describe("ApiKeysProvider (TS-02)", () => {
@@ -56,7 +43,7 @@ describe("ApiKeysProvider (TS-02)", () => {
       { apiKey: "test-key-stub-1", name: "alpha" },
       { apiKey: "test-key-stub-2", name: "beta" },
     ];
-    (api.groundxApiKeys.listGroundXApiKeys as Mock).mockResolvedValue({ apiKeys: fake });
+    vi.mocked(api.groundxApiKeys.listGroundXApiKeys).mockResolvedValue({ apiKeys: fake });
 
     const { result } = renderHook(() => useApiKeysContext(), { wrapper });
     let actionResult: unknown;
@@ -76,7 +63,7 @@ describe("ApiKeysProvider (TS-02)", () => {
       { apiKey: "test-key-stub-old", name: "old" },
       { apiKey: "test-key-stub-new", name: "fresh" },
     ];
-    (api.groundxApiKeys.createGroundXApiKey as Mock).mockResolvedValue({ apiKeys: after });
+    vi.mocked(api.groundxApiKeys.createGroundXApiKey).mockResolvedValue({ apiKeys: after });
 
     const { result } = renderHook(
       () => ({ keys: useApiKeysContext(), msg: useMessageContext() }),
@@ -93,7 +80,7 @@ describe("ApiKeysProvider (TS-02)", () => {
   });
 
   it("a thrown API error surfaces 'API key operation failed.' and isSuccess=false", async () => {
-    (api.groundxApiKeys.listGroundXApiKeys as Mock).mockRejectedValue(new Error("forbidden"));
+    vi.mocked(api.groundxApiKeys.listGroundXApiKeys).mockRejectedValue(new Error("forbidden"));
 
     const { result } = renderHook(
       () => ({ keys: useApiKeysContext(), msg: useMessageContext() }),

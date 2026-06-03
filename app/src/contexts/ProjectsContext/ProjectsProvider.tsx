@@ -1,14 +1,15 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { RequestOptions } from "@/api/common";
-import { PartnerProjectCreateInput, PartnerProjectInput } from "@/api/entities/partnerProjectsEntity";
-import { Project } from "@/api/entities/sdkTypes";
+import type { RequestOptions } from "@/api/common";
+import type { PartnerProjectCreateInput, PartnerProjectInput } from "@/api/entities/partnerProjectsEntity";
+import type { Project } from "@/api/entities/sdkTypes";
+import { useApi } from "@/contexts/ApiContext";
 import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { ProjectsContext } from "./ProjectsContext";
 
 export const ProjectsProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  const api = useApi();
   const run = useSdkRunner("Project operation failed.");
   const [projects, setProjects] = useState<Project[]>([]);
 
@@ -19,7 +20,7 @@ export const ProjectsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setProjects(response.projects);
         return response.projects;
       }),
-    [run]
+    [api, run]
   );
 
   const createProject = useCallback(
@@ -29,7 +30,7 @@ export const ProjectsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         setProjects((items) => [response.project, ...items]);
         return response.project;
       }, "Project created."),
-    [run]
+    [api, run]
   );
 
   const updateProject = useCallback(
@@ -38,7 +39,7 @@ export const ProjectsProvider: FC<{ children: ReactNode }> = ({ children }) => {
         await api.partnerProjects.updatePartnerProject(projectId, project, options);
         setProjects((items) => items.map((item) => (item.projectId === projectId ? { ...item, ...project } : item)));
       }, "Project updated."),
-    [run]
+    [api, run]
   );
 
   const attachBucket = useCallback(
@@ -46,7 +47,7 @@ export const ProjectsProvider: FC<{ children: ReactNode }> = ({ children }) => {
       run(async () => {
         await api.partnerProjects.attachBucketToPartnerProject(projectId, bucketId, options);
       }, "Bucket attached."),
-    [run]
+    [api, run]
   );
 
   const detachBucket = useCallback(
@@ -54,7 +55,7 @@ export const ProjectsProvider: FC<{ children: ReactNode }> = ({ children }) => {
       run(async () => {
         await api.partnerProjects.detachBucketFromPartnerProject(projectId, bucketId, options);
       }, "Bucket detached."),
-    [run]
+    [api, run]
   );
 
   return (
@@ -63,4 +64,3 @@ export const ProjectsProvider: FC<{ children: ReactNode }> = ({ children }) => {
     </ProjectsContext.Provider>
   );
 };
-

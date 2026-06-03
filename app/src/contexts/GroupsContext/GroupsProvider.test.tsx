@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/api";
+import { ApiProvider } from "@/contexts/ApiContext";
 import { useGroupsContext } from "@/contexts/GroupsContext";
 import { GroupsProvider } from "@/contexts/GroupsContext/GroupsProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
@@ -9,52 +9,35 @@ import {
   MessageBarProvider,
   useMessageContext,
 } from "@/contexts/MessageBarContext/MessageBarContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
 
 /**
- * TS-02 — GroupsProvider coverage. Wraps `api.groundxGroups.*` +
+ * TS-02 — GroupsProvider coverage. Wraps injected `api.groundxGroups.*` +
  * `api.partnerGroups.*` calls in `run()`. Three contracts: list
  * populates state, create prepends + emits success, error path
  * surfaces "Group operation failed."
  */
-vi.mock("@/api", () => ({
-  api: {
-    groundxGroups: {
-      listGroundXGroups: vi.fn(),
-      getGroundXGroup: vi.fn(),
-      createGroundXGroup: vi.fn(),
-      updateGroundXGroup: vi.fn(),
-      deleteGroundXGroup: vi.fn(),
-      addBucketToGroundXGroup: vi.fn(),
-      removeBucketFromGroundXGroup: vi.fn(),
-    },
-    partnerGroups: {
-      listPartnerGroups: vi.fn(),
-      getPartnerGroup: vi.fn(),
-      createPartnerGroup: vi.fn(),
-      updatePartnerGroup: vi.fn(),
-      deletePartnerGroup: vi.fn(),
-    },
-  },
-}));
+let api: ReturnType<typeof makeFakeApi>;
 
 beforeEach(() => {
-  for (const fn of Object.values(api.groundxGroups)) (fn as Mock).mockReset();
-  for (const fn of Object.values(api.partnerGroups)) (fn as Mock).mockReset();
+  api = makeFakeApi();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <LoadingProvider>
-    <MessageBarProvider>
-      <GroupsProvider>{children}</GroupsProvider>
-    </MessageBarProvider>
-  </LoadingProvider>
+  <ApiProvider value={api}>
+    <LoadingProvider>
+      <MessageBarProvider>
+        <GroupsProvider>{children}</GroupsProvider>
+      </MessageBarProvider>
+    </LoadingProvider>
+  </ApiProvider>
 );
 
 describe("GroupsProvider (TS-02)", () => {
   it("listGroundXGroups populates `groundxGroups` state on success", async () => {
     const fake = [{ groupId: 1, name: "g-one" }, { groupId: 2, name: "g-two" }];
-    (api.groundxGroups.listGroundXGroups as Mock).mockResolvedValue({ groups: fake });
+    vi.mocked(api.groundxGroups.listGroundXGroups).mockResolvedValue({ groups: fake });
 
     const { result } = renderHook(() => useGroupsContext(), { wrapper });
     let actionResult: unknown;
@@ -68,10 +51,10 @@ describe("GroupsProvider (TS-02)", () => {
   });
 
   it("createGroundXGroup prepends + emits 'Group created.'", async () => {
-    (api.groundxGroups.listGroundXGroups as Mock).mockResolvedValue({
+    vi.mocked(api.groundxGroups.listGroundXGroups).mockResolvedValue({
       groups: [{ groupId: 1, name: "old" }],
     });
-    (api.groundxGroups.createGroundXGroup as Mock).mockResolvedValue({
+    vi.mocked(api.groundxGroups.createGroundXGroup).mockResolvedValue({
       group: { groupId: 9, name: "new" },
     });
 
@@ -93,7 +76,7 @@ describe("GroupsProvider (TS-02)", () => {
   });
 
   it("a thrown API error surfaces 'Group operation failed.' and isSuccess=false", async () => {
-    (api.groundxGroups.listGroundXGroups as Mock).mockRejectedValue(new Error("kaboom"));
+    vi.mocked(api.groundxGroups.listGroundXGroups).mockRejectedValue(new Error("kaboom"));
 
     const { result } = renderHook(
       () => ({ groups: useGroupsContext(), msg: useMessageContext() }),
