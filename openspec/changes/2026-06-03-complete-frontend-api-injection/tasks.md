@@ -118,16 +118,16 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 
 ## T5 - Migrate telemetry/Sentry runtime capture (SEQUENTIAL)
 
-- [ ] **Failing test first:** convert one component/context Sentry test from
+- [x] **Failing test first:** convert one component/context Sentry test from
       `vi.mock("@/lib/sentry")` to an injected `api.telemetry` fake and confirm
       it fails until the consumer uses the injected telemetry surface.
-- [ ] Add `Api.telemetry.captureException` to the injected app-facing surface,
+- [x] Add `Api.telemetry.captureException` to the injected app-facing surface,
       wired in production to the existing Sentry wrapper.
-- [ ] Migrate app-facing components, contexts, hooks, and widgets that assert
+- [x] Migrate app-facing components, contexts, hooks, and widgets that assert
       `captureException` behavior away from direct `@/lib/sentry` imports.
-- [ ] Leave production Sentry initialization and low-level Sentry wrapper tests
+- [x] Leave production Sentry initialization and low-level Sentry wrapper tests
       allowed to use the wrapper directly.
-- [ ] Leave API implementation tests allowed to mock wrapper/transport behavior
+- [x] Leave API implementation tests allowed to mock wrapper/transport behavior
       only when they are testing the wrapper or API module directly.
 - **Adversarial review:** grep for remaining `vi.mock("@/lib/sentry")` and direct
   `captureException` imports outside allowlisted implementation tests; run

@@ -38,13 +38,13 @@ export const AppProviders: FC<{ children: ReactNode; apiClient?: Api }> = ({
   children,
   apiClient = realApi,
 }) => (
-  <AppErrorBoundary>
+  <ApiProvider value={apiClient}>
     {/* ApiProvider is the OUTERMOST provider (above the consumer providers):
         DocumentsProvider / AuthProvider / OnboardingSessionProvider et al.
         read the injected network client via `useApi()`, so they must sit
         inside it. Production wires the real client (`realApi`); tests inject
         `makeFakeApi` through the render harnesses. */}
-    <ApiProvider value={apiClient}>
+    <AppErrorBoundary captureException={apiClient.telemetry.captureException}>
       <GxThemeProvider>
         {/* UR-03: global MotionConfig — honors OS `prefers-reduced-motion`
           for every descendant `motion.X`. When reduced is on, the
@@ -81,8 +81,8 @@ export const AppProviders: FC<{ children: ReactNode; apiClient?: Api }> = ({
           </LoadingProvider>
         </MotionRoot>
       </GxThemeProvider>
-    </ApiProvider>
-  </AppErrorBoundary>
+    </AppErrorBoundary>
+  </ApiProvider>
 );
 
 export default function App() {

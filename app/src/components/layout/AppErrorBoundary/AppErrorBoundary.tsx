@@ -12,17 +12,16 @@
  * is what motivated wrapping the app this way after the missing
  * DocumentsProvider crash on 2026-05-25.
  *
- * Sentry capture is wired through the project's wrapper
- * (`@/lib/sentry.captureException`), which is a no-op when
- * `VITE_SENTRY_DSN` is unset.
+ * Sentry capture is wired through the injected API telemetry surface. The
+ * production client forwards it to the project's Sentry wrapper, which is a
+ * no-op when `VITE_SENTRY_DSN` is unset.
  */
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
-import { captureException } from "@/lib/sentry";
-
 interface AppErrorBoundaryProps {
   children: ReactNode;
+  captureException: (error: unknown, extras?: Record<string, unknown>) => void;
   /** Optional override for the fallback UI; defaults to the built-in. */
   fallback?: (error: Error, reset: () => void) => ReactNode;
 }
@@ -43,7 +42,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     // The OB-08 drift guard (`src/lib/sentryMigration.test.ts`) forbids
     // the raw console error call in production code; React's own
     // error handler already writes to the dev console for us.
-    captureException(error, {
+    this.props.captureException(error, {
       extra: { componentStack: info.componentStack },
     });
   }

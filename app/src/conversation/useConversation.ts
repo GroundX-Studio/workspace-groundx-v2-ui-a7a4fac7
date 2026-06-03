@@ -31,7 +31,6 @@ import { useApi } from "@/contexts/ApiContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
-import { captureException } from "@/lib/sentry";
 
 /**
  * One live ad-hoc conversation turn. ONE definition shared by the engine,
@@ -243,7 +242,7 @@ export function useConversation(
           }));
         setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
       } catch (err) {
-        captureException(err, {
+        api.telemetry.captureException(err, {
           route: "/api/chat-sessions/:id/messages",
           chatSessionId,
         });
@@ -252,7 +251,7 @@ export function useConversation(
     return () => {
       cancelled = true;
     };
-  }, [api.chat, chatSessionId]);
+  }, [api.chat, api.telemetry, chatSessionId]);
 
   // `schema-agent-chat-affordances` — project ChatStore-emitted agent
   // messages (id prefix `agent-`) into the rendered live-turns list. The

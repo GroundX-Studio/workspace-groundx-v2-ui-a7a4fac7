@@ -2,14 +2,6 @@ import { act, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock the Sentry wrapper so error-branch tests can assert captureException.
-vi.mock("@/lib/sentry", () => ({
-  captureException: vi.fn(),
-  initSentry: vi.fn(() => false),
-}));
-
-import { captureException } from "@/lib/sentry";
-
 import { AuthContext } from "@/contexts/AuthContext/AuthContext";
 import { makeApiWrapper } from "@/test/withApiProvider";
 
@@ -20,11 +12,13 @@ import { ChatStoreServerHydrator } from "./ChatStoreServerHydrator";
 import type { FC, ReactNode } from "react";
 
 const listChatSessions = vi.fn();
+const captureException = vi.fn();
 
 const renderWithHydratorApi = (ui: ReactElement) =>
   render(ui, {
     wrapper: makeApiWrapper({
       chat: { listChatSessions },
+      telemetry: { captureException },
     }),
   });
 
@@ -57,7 +51,7 @@ const StoreProbe: FC<{ onSessions: (count: number) => void }> = ({ onSessions })
 
 beforeEach(() => {
   listChatSessions.mockReset();
-  vi.mocked(captureException).mockReset();
+  captureException.mockReset();
 });
 
 afterEach(() => {

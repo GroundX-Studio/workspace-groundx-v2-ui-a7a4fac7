@@ -5,7 +5,6 @@ import { useApi } from "@/contexts/ApiContext";
 import { useIsLoading } from "@/contexts/LoadingContext";
 import { useMessageContext } from "@/contexts/MessageBarContext";
 import { SdkActionResult, sdkFailure, sdkSuccess } from "@/contexts/sdkContextTypes";
-import { captureException } from "@/lib/sentry";
 
 import { Auth, AuthContext, LoginReqCallback } from "./AuthContext";
 
@@ -19,6 +18,7 @@ const emptyAuth: Auth = {
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Element => {
   const api = useApi();
   const authApi = api.auth;
+  const telemetryApi = api.telemetry;
   const { setIsLoading } = useIsLoading();
   const { setErrorMessage } = useMessageContext();
   const [auth, setAuth] = useState<Auth>(emptyAuth);
@@ -47,14 +47,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
         // failure so the caller (AppInitialization) routes to the login screen.
         return sdkFailure<User>(new Error("No user data"));
       } catch (error) {
-        captureException(error, { context: "AuthProvider.getUserData", userName });
+        telemetryApi.captureException(error, { context: "AuthProvider.getUserData", userName });
         setErrorMessage("Could not get user data");
         return sdkFailure<User>(error);
       } finally {
         setIsLoading(false);
       }
     },
-    [authApi, setErrorMessage, setIsLoading]
+    [authApi, telemetryApi, setErrorMessage, setIsLoading]
   );
 
   const login = useCallback(
@@ -74,13 +74,13 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
           return { kind: "success" };
         }
       } catch (error) {
-        captureException(error, { context: "AuthProvider.login" });
+        telemetryApi.captureException(error, { context: "AuthProvider.login" });
         return { kind: "error", error };
       }
 
       return { kind: "failed" };
     },
-    [authApi, getUserData]
+    [authApi, getUserData, telemetryApi]
   );
 
   const register = useCallback(
@@ -152,12 +152,12 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
     try {
       await authApi.logout();
     } catch (error) {
-      captureException(error, { context: "AuthProvider.logout" });
+      telemetryApi.captureException(error, { context: "AuthProvider.logout" });
     } finally {
       setUser(null);
       setAuth(emptyAuth);
     }
-  }, [authApi]);
+  }, [authApi, telemetryApi]);
 
   const updateAppMetadata = useCallback(
     async (metadata: UpdateAppMetadataInput): Promise<SdkActionResult<void>> => {
@@ -176,14 +176,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
         });
         return sdkSuccess(undefined);
       } catch (error: unknown) {
-        captureException(error, { context: "AuthProvider.updateAppMetadata" });
+        telemetryApi.captureException(error, { context: "AuthProvider.updateAppMetadata" });
         setErrorMessage("Could not update app metadata.");
         return sdkFailure<void>(error);
       } finally {
         setIsLoading(false);
       }
     },
-    [authApi, setErrorMessage, setIsLoading]
+    [authApi, telemetryApi, setErrorMessage, setIsLoading]
   );
 
   return (

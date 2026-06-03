@@ -25,7 +25,6 @@ import { useContext, useEffect, useRef, type FC } from "react";
 
 import { useApi } from "@/contexts/ApiContext";
 import { AuthContext } from "@/contexts/AuthContext/AuthContext";
-import { captureException } from "@/lib/sentry";
 
 import { useChatStore } from "./ChatStoreContext";
 
@@ -69,13 +68,13 @@ export const ChatStoreServerHydrator: FC = () => {
         // Non-fatal — localStorage cache remains visible; user can
         // start a fresh session. Sentry catches the failure for
         // ops, but the UI never blocks on hydrate.
-        captureException(err, { route: "/api/chat-sessions" });
+        api.telemetry.captureException(err, { route: "/api/chat-sessions" });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [api.chat, auth, hydrateFromServer]);
+  }, [api.chat, api.telemetry, auth, hydrateFromServer]);
 
   return null;
 };
