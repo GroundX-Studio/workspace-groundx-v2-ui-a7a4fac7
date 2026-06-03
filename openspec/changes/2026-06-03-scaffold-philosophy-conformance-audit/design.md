@@ -107,6 +107,11 @@ Every finding row MUST include:
   `evidence/adversarial-reviews.md` has a `passed` verdict.
 - Do not treat unimplemented future philosophy as a product defect unless the
   current docs/specs say the behavior is shipped.
+- If the audit completes successfully, do not leave this OpenSpec change active:
+  all confirmed gaps MUST be represented in GitHub Issues, the audit artifacts
+  MUST be committed, the change MUST be archived, and the durable spec delta
+  MUST be validated. If any confirmed gap lacks issue handoff, leave the change
+  active and mark the closeout blocked.
 
 ## Superpowers Planning Shape
 

@@ -57,3 +57,13 @@ wireframes when present.
   console, or persisted/read state
 - **AND** screenshots, if present, are corroborating evidence rather than the
   sole proof.
+
+#### Scenario: Successful audit archives its OpenSpec change
+
+- **GIVEN** the audit has completed all tasks and every confirmed gap has GitHub
+  issue handoff or an explicit no-action rationale
+- **WHEN** final validation passes
+- **THEN** the audit artifacts are committed
+- **AND** the OpenSpec change is archived
+- **AND** post-archive OpenSpec validation passes
+- **AND** `openspec list` no longer shows the audit change as active.

@@ -17,6 +17,8 @@ review before starting the next task.
 8. Audit test and verification posture.
 9. Produce GitHub issue handoff.
 10. Final review, validation, commit, and closeout.
+11. If successful, archive the OpenSpec change and validate the post-archive
+    state.
 
 ## Between-Task Adversarial Review Protocol
 
@@ -193,6 +195,19 @@ review entry is `passed`.
 - [ ] Run `git diff --check`.
 - [ ] Commit only the audit artifacts, OpenSpec updates, and any issue-handoff
       notes. Do not commit product fixes.
+- [ ] If every confirmed gap has GitHub issue handoff and no closeout blocker
+      remains, archive this OpenSpec change with
+      `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 archive 2026-06-03-scaffold-philosophy-conformance-audit --yes`.
+- [ ] After archive, run
+      `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`,
+      `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list`, and
+      `git diff --check`.
+- [ ] Commit the archive cleanup separately with a message that states the audit
+      was archived after issue handoff.
+- [ ] If any confirmed gap lacks issue handoff or validation fails, leave the
+      OpenSpec change active and record the blocker in `evidence/issue-handoff.md`
+      instead of archiving.
 - [ ] Final adversarial review: confirm this change remained review-only, no
       product files were modified, deferred work is in GitHub Issues, and the
-      summary states what conforms, what does not, and what remains open.
+      summary states what conforms, what does not, what was archived, and what
+      remains open.
