@@ -67,6 +67,8 @@ is read-only for this change.
   - `evidence/conformance-report.md`
   - `evidence/finding-register.md`
   - `evidence/issue-handoff.md`
+  - `evidence/adversarial-reviews.md`
+  - `evidence/tool-availability.md`
 
 ## Conformance to Core Architectural Decisions
 

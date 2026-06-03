@@ -38,6 +38,17 @@ wireframes when present.
 - **AND** the audit change does not modify product code, generated runtime
   surfaces, or tests to fix the defect in place.
 
+#### Scenario: Audit tasks execute sequentially with adversarial review gates
+
+- **GIVEN** a scaffold philosophy conformance audit task is completed
+- **WHEN** the executor attempts to start the next task
+- **THEN** `evidence/adversarial-reviews.md` contains a passed review entry for
+  the completed task
+- **AND** that entry records the claims challenged, counterevidence searched,
+  checked files or commands, verdict, and any required correction
+- **AND** a failed review blocks the next task until the audit artifact or issue
+  handoff is corrected and the review passes.
+
 #### Scenario: Runtime claims use measured evidence
 
 - **GIVEN** the audit makes a runtime claim about a visible surface

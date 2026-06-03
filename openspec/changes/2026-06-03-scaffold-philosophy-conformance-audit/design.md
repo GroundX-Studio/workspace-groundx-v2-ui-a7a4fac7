@@ -67,10 +67,34 @@ The executing agent creates:
 - `evidence/finding-register.md` — finding-by-finding evidence table.
 - `evidence/issue-handoff.md` — GitHub issue mapping for every confirmed finding
   that is not fixed because this change is review-only.
+- `evidence/adversarial-reviews.md` — one review entry after every task,
+  recording claims challenged, counterevidence searched, verdict, and required
+  follow-up before the next task starts.
+- `evidence/tool-availability.md` — availability and use/fallback decision for
+  `codegraphcontext`, Chrome DevTools MCP, GitHub, and GroundX Studio tools.
 
 If a confirmed issue is already tracked, the handoff links the existing issue.
-If it is not tracked, the executing agent creates or proposes a GitHub Issue
-according to `docs/agents/discipline.md` Rule 8.
+If it is not tracked, the executing agent creates a GitHub Issue in
+`GroundX-Studio/workspace-groundx-v2-ui-a7a4fac7` according to
+`docs/agents/discipline.md` Rule 8. If permissions prevent issue creation, the
+handoff MUST include the exact issue title/body/labels and mark the audit blocked
+for user action before archive.
+
+## Finding Register Schema
+
+Every finding row MUST include:
+
+- stable id (`SCF-###`)
+- severity (`critical`, `high`, `medium`, `low`)
+- axis from the review-axis table
+- status (`confirmed`, `needs-runtime-check`, `not-a-defect`)
+- evidence type (`source`, `test`, `browser-measured`, `network`, `a11y`,
+  `persistence`, or `issue/backlog`)
+- exact source references or runtime evidence path
+- user-visible impact
+- expected model
+- handoff state (`existing-issue`, `new-issue`, `blocked-draft`, `no-action`)
+- GitHub issue URL or no-action rationale
 
 ## Review-Only Guardrails
 
@@ -79,6 +103,8 @@ according to `docs/agents/discipline.md` Rule 8.
 - Do not fix confirmed defects in place.
 - Do not close an audit task until its adversarial review gate has challenged
   the evidence against the real code and the scaffold philosophy.
+- Do not start a task until the previous task's entry in
+  `evidence/adversarial-reviews.md` has a `passed` verdict.
 - Do not treat unimplemented future philosophy as a product defect unless the
   current docs/specs say the behavior is shipped.
 

@@ -5,6 +5,34 @@ This is a review-only plan. Product code fixes are out of scope. Use
 executing. Every task is SEQUENTIAL and MUST be followed by its adversarial
 review before starting the next task.
 
+## Execution Plan
+
+1. Create acceptance artifacts and record tool availability.
+2. Reconstruct the scaffold philosophy baseline.
+3. Audit OpenSpec and GitHub backlog hygiene.
+4. Audit composition versus onboarding/steady forks.
+5. Audit real-data paths and round-trip done.
+6. Audit Template + Scope + Results, widget contracts, and tool contracts.
+7. Audit wireframe and runtime evidence.
+8. Audit test and verification posture.
+9. Produce GitHub issue handoff.
+10. Final review, validation, commit, and closeout.
+
+## Between-Task Adversarial Review Protocol
+
+After each task, append an entry to `evidence/adversarial-reviews.md` with:
+
+- task number and title
+- claims made by the completed task
+- counterevidence searched
+- files, commands, or browser evidence checked
+- verdict: `passed` or `failed`
+- required correction before the next task
+
+If the verdict is `failed`, fix the audit artifact or issue handoff and rerun
+the adversarial review before advancing. Do not mark a task complete until its
+review entry is `passed`.
+
 ## Task 1 — SEQUENTIAL: Create Audit Acceptance Artifacts
 
 - [ ] Failing user-visible check: run
@@ -17,8 +45,14 @@ review before starting the next task.
       axis, evidence, impact, status, and handoff.
 - [ ] Create `evidence/issue-handoff.md` with sections for existing issue
       matches, new issues to create, and no-action findings.
+- [ ] Create `evidence/adversarial-reviews.md` with the between-task review
+      template from this file.
+- [ ] Create `evidence/tool-availability.md` and record whether
+      `codegraphcontext`, Chrome DevTools MCP, GitHub, and GroundX Studio tools
+      are exposed in the current session; include fallback commands for any
+      unavailable tool.
 - [ ] Re-run the file-existence check and confirm all three audit artifacts now
-      exist.
+      exist, plus `adversarial-reviews.md` and `tool-availability.md`.
 - [ ] Adversarial review: verify the artifacts are review deliverables, not
       product fixes; scan for placeholders; confirm every later task has a
       location to record evidence.
@@ -140,11 +174,14 @@ review before starting the next task.
 - [ ] For untracked confirmed findings, create or draft GitHub Issues with:
       severity, area label, reproduction/evidence, expected model, and proposed
       OpenSpec follow-up boundary.
+- [ ] If a confirmed finding cannot be filed because GitHub permissions are
+      unavailable, record the exact issue title/body/labels and mark the audit
+      blocked for user action before archive.
 - [ ] Mark findings with no action when they are acceptable context differences
       or already tracked future work.
-- [ ] Adversarial review: verify every confirmed gap is either linked to an
-      issue, explicitly no-action, or marked needs-runtime-check; no finding may
-      live only in the report.
+- [ ] Adversarial review: verify every confirmed gap has an issue URL, a
+      blocked-draft entry caused by permission failure, or an explicit no-action
+      rationale; no confirmed finding may live only in the report.
 
 ## Task 10 — SEQUENTIAL: Final Review, Validation, And Closeout
 
