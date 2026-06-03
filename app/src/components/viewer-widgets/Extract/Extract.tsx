@@ -13,15 +13,13 @@ import { useSearchParams } from "react-router-dom";
 
 import type { ContentScope, ExtractBody, WidgetRole } from "@groundx/shared";
 
-import { TemplateApiError, saveTemplate } from "@/api/templates";
-import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
 import {
   citationsForJson,
   extractToValues,
   liveValuesToFieldValues,
   workflowToSchema,
 } from "@/api/extractLiveData";
-import { fetchFieldGeometry, type ResolvedFieldGeometry } from "@/api/fieldGeometry";
+import type { ResolvedFieldGeometry } from "@/api/fieldGeometry";
 import { isResolvedDocumentId } from "@/api/documentId";
 import {
   BODY_TEXT,
@@ -44,6 +42,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useApi } from "@/contexts/ApiContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
@@ -175,6 +174,7 @@ const detailLabelSx = {
 } as const;
 
 export const Extract: FC<ExtractProps> = ({ scope, role }) => {
+  const api = useApi();
   const { state: appMode } = useAppMode();
   const {
     state: session,
@@ -229,7 +229,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
         if (isStale()) return;
         const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
         if (typeof workflowId !== "string") return;
-        const wf = await getGroundXWorkflow(workflowId);
+        const wf = await api.workflow.getGroundXWorkflow(workflowId);
         const live = workflowToSchema(wf.workflow);
         if (isStale() || !live) return;
         setLiveSchema(live);
@@ -242,7 +242,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
             .filter((f) => f.id in values)
             .map((f) => ({ fieldId: f.id, value: values[f.id], label: f.name })),
         );
-        const geos = await fetchFieldGeometry(
+        const geos = await api.extract.fetchFieldGeometry(
           docId,
           queries.map(({ value, label }) => ({ value, label })),
         );
@@ -285,7 +285,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
     setSaveStatus("saving");
     try {
       const merged = mergeOverlayForSave(schema, overlay ?? null);
-      await saveTemplate({
+      await api.template.saveTemplate({
         id: templateIdRef.current,
         kind: "extract",
         name: `${schema.name} (custom)`,
@@ -301,14 +301,15 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
         appendAgentMessage(`Schema attached: ${schemaName}`);
       }
     } catch (err) {
-      if (err instanceof TemplateApiError && err.status === 401) {
+      const status = typeof err === "object" && err !== null && "status" in err ? err.status : null;
+      if (status === 401) {
         setSaveStatus("idle");
         openGate("save", { cause: "save-schema" });
       } else {
         setSaveStatus("error");
       }
     }
-  }, [hasUnsavedChanges, saveStatus, schema, overlay, openGate, pushStep, appendAgentMessage]);
+  }, [api.template, hasUnsavedChanges, saveStatus, schema, overlay, openGate, pushStep, appendAgentMessage]);
 
   const postCommitConsumedRef = useRef(false);
   useEffect(() => {
@@ -328,7 +329,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
     (async () => {
       try {
         const merged = mergeOverlayForSave(schema!, overlay ?? null);
-        await saveTemplate({
+        await api.template.saveTemplate({
           id: templateIdRef.current!,
           kind: "extract",
           name: `${schema!.name} (custom)`,
@@ -346,7 +347,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
         setSaveStatus("error");
       }
     })();
-  }, [session.gate, schema, overlay, advanceFrame, pushStep, appendAgentMessage]);
+  }, [api.template, session.gate, schema, overlay, advanceFrame, pushStep, appendAgentMessage]);
 
   const valuesByFieldId = useMemo(() => {
     if (liveSchema) {

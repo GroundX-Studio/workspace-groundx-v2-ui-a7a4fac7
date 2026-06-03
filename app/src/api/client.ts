@@ -13,8 +13,10 @@ import { resetSession } from "@/api/entities/customerEntity";
 import { issueOnboardingSession, type OnboardingSessionResponse } from "@/api/entities/onboardingSessionEntity";
 import { listScenarios } from "@/api/entities/scenarioRegistryEntity";
 import { extractField } from "@/api/extractField";
+import { fetchFieldGeometry } from "@/api/fieldGeometry";
 import { recordIntent } from "@/api/intentLog";
 import { renderReport, saveReportTemplate } from "@/api/smartReport";
+import { saveTemplate } from "@/api/templates";
 import { recordViewerEvent } from "@/api/viewerEvents";
 import { captureException } from "@/lib/sentry";
 
@@ -116,6 +118,12 @@ export const realApi = {
   scenario: {
     listScenarios,
   },
+  workflow: {
+    getGroundXWorkflow: api.groundxWorkflows.getGroundXWorkflow,
+  },
+  template: {
+    saveTemplate,
+  },
   telemetry: {
     captureException,
   },
@@ -125,6 +133,7 @@ export const realApi = {
   },
   extract: {
     extractField: extractFieldWithClientEnsure,
+    fetchFieldGeometry,
   },
 };
 

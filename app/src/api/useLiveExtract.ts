@@ -18,17 +18,14 @@
  * fetch failures so the caller renders its real empty/error state — never the
  * manifest.
  */
-import { useEffect, useState } from "react";
-
-import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
-import { isResolvedDocumentId } from "@/api/documentId";
 import { extractToValues, workflowToSchema } from "@/api/extractLiveData";
-import { useDocumentsContext } from "@/contexts/DocumentsContext";
+import type { useDocumentsContext } from "@/contexts/DocumentsContext";
 import type { ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
 
 type DocumentsApi = ReturnType<typeof useDocumentsContext>;
 type GetDocument = DocumentsApi["getDocument"];
 type GetDocumentExtract = DocumentsApi["getDocumentExtract"];
+type GetWorkflow = (workflowId: string) => Promise<{ workflow: Parameters<typeof workflowToSchema>[0] }>;
 
 export interface LiveExtract {
   schema: ExtractionSchemaDef | null;
@@ -47,11 +44,12 @@ export async function fetchLiveExtract(
   documentId: string,
   getDocument: GetDocument,
   getDocumentExtract: GetDocumentExtract,
+  getWorkflow: GetWorkflow,
 ): Promise<LiveExtract> {
   const doc = await getDocument(documentId);
   const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
   if (typeof workflowId !== "string") return EMPTY;
-  const wf = await getGroundXWorkflow(workflowId);
+  const wf = await getWorkflow(workflowId);
   const schema = workflowToSchema(wf.workflow);
   if (!schema) return EMPTY;
   const ex = await getDocumentExtract(documentId);
@@ -63,32 +61,4 @@ export async function fetchLiveExtract(
     citations: [],
   }));
   return { schema, values };
-}
-
-/**
- * Hook form: resolves the live extract for `documentId`, re-running when the
- * id changes. Placeholder ids / fetch failures resolve to the empty extract so
- * the caller never reads the manifest.
- */
-export function useLiveExtract(documentId: string | undefined): LiveExtract {
-  const { getDocument, getDocumentExtract } = useDocumentsContext();
-  const [live, setLive] = useState<LiveExtract>(EMPTY);
-
-  useEffect(() => {
-    if (!documentId || !isResolvedDocumentId(documentId)) {
-      setLive(EMPTY);
-      return;
-    }
-    let cancelled = false;
-    void fetchLiveExtract(documentId, getDocument, getDocumentExtract)
-      .catch(() => EMPTY)
-      .then((result) => {
-        if (!cancelled) setLive(result);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [documentId, getDocument, getDocumentExtract]);
-
-  return live;
 }

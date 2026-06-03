@@ -10,22 +10,12 @@
  *
  * The cache dedupes the (278KB) workflow blob across re-renders / surfaces.
  */
-import { useEffect, useState } from "react";
-
-import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
-import { isResolvedDocumentId } from "@/api/documentId";
 import { workflowToSchema } from "@/api/extractLiveData";
-import { useDocumentsContext } from "@/contexts/DocumentsContext";
+import type { useDocumentsContext } from "@/contexts/DocumentsContext";
 import type { ExtractionSchemaDef } from "@/types/scenarios";
 
 type GetDocument = ReturnType<typeof useDocumentsContext>["getDocument"];
-
-const cache = new Map<string, Promise<ExtractionSchemaDef | null>>();
-
-/** Test seam — clears the per-doc schema cache. */
-export function __clearLiveSchemaCache(): void {
-  cache.clear();
-}
+type GetWorkflow = (workflowId: string) => Promise<{ workflow: Parameters<typeof workflowToSchema>[0] }>;
 
 /**
  * Resolve `documentId → filter.workflow_id → getGroundXWorkflow →
@@ -35,36 +25,11 @@ export function __clearLiveSchemaCache(): void {
 export async function fetchLiveSchema(
   documentId: string,
   getDocument: GetDocument,
+  getWorkflow: GetWorkflow,
 ): Promise<ExtractionSchemaDef | null> {
   const doc = await getDocument(documentId);
   const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
   if (typeof workflowId !== "string") return null;
-  const wf = await getGroundXWorkflow(workflowId);
+  const wf = await getWorkflow(workflowId);
   return workflowToSchema(wf.workflow);
-}
-
-export function useLiveExtractionSchema(documentId: string | undefined): ExtractionSchemaDef | null {
-  const { getDocument } = useDocumentsContext();
-  const [schema, setSchema] = useState<ExtractionSchemaDef | null>(null);
-
-  useEffect(() => {
-    if (!documentId || !isResolvedDocumentId(documentId)) {
-      setSchema(null);
-      return;
-    }
-    let cancelled = false;
-    let promise = cache.get(documentId);
-    if (!promise) {
-      promise = fetchLiveSchema(documentId, getDocument).catch(() => null);
-      cache.set(documentId, promise);
-    }
-    void promise.then((s) => {
-      if (!cancelled) setSchema(s);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [documentId, getDocument]);
-
-  return schema;
 }

@@ -48,9 +48,19 @@ describe("realApi auth client", () => {
 });
 
 describe("realApi scenario and telemetry clients", () => {
-  it("exposes scenario catalog and runtime telemetry under grouped members", () => {
+  it("exposes scenario, workflow, template, extract, and telemetry grouped members", () => {
     expect(realApi.scenario).toMatchObject({
       listScenarios: expect.any(Function),
+    });
+    expect(realApi.workflow).toMatchObject({
+      getGroundXWorkflow: expect.any(Function),
+    });
+    expect(realApi.template).toMatchObject({
+      saveTemplate: expect.any(Function),
+    });
+    expect(realApi.extract).toMatchObject({
+      extractField: expect.any(Function),
+      fetchFieldGeometry: expect.any(Function),
     });
     expect(realApi.telemetry).toMatchObject({
       captureException: expect.any(Function),

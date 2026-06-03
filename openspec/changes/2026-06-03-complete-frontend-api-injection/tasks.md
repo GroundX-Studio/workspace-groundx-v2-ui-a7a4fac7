@@ -78,18 +78,18 @@ adversarial review, and a saved commit/push via GroundX Studio Harness MCP
 
 ## T3 - Migrate extract domain (SEQUENTIAL)
 
-- [ ] **Failing test first:** convert one Extract/SchemaView/ProposeSchema test
+- [x] **Failing test first:** convert one Extract/SchemaView/ProposeSchema test
       from module mocks to the injected fake and confirm it fails until the
       consumer uses the injected group.
-- [ ] Add only the extract/template/workflow/document grouped members needed by
+- [x] Add only the extract/template/workflow/document grouped members needed by
       this slice to `realApi` and `makeFakeApi`.
-- [ ] Migrate `Extract` widget, `SchemaView`, `ProposeSchemaFieldCard`,
+- [x] Migrate `Extract` widget, `SchemaView`, `ProposeSchemaFieldCard`,
       `useLiveExtract`, `useLiveExtractionSchema`, field-geometry, template-save,
       workflow-schema, and extract-field call sites to injected extract/template
       groups where they are consumed by React runtime surfaces.
-- [ ] Move app-facing hooks out of `app/src/api/` or wrap them so components do
+- [x] Move app-facing hooks out of `app/src/api/` or wrap them so components do
       not import a network hook from an API implementation path.
-- [ ] Replace per-file mocks for `@/api/extractField`,
+- [x] Replace per-file mocks for `@/api/extractField`,
       `@/api/entities/groundxWorkflowsEntity`,
       `@/api/entities/groundxDocumentsEntity`,
       `@/api/useLiveExtract`, and `@/api/useLiveExtractionSchema` with harness

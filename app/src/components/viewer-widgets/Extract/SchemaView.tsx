@@ -34,8 +34,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useCallback, useMemo, useState, type FC } from "react";
 
-import { extractField } from "@/api/extractField";
-import { useLiveExtract } from "@/api/useLiveExtract";
+import { useLiveExtract } from "@/hooks/useLiveExtract";
 import {
   BODY_TEXT,
   BORDER,
@@ -57,6 +56,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useApi } from "@/contexts/ApiContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import type {
   SchemaFieldEdit,
@@ -148,6 +148,7 @@ export interface SchemaViewProps {
 }
 
 export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: liveValues }) => {
+  const api = useApi();
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
   const { byId } = useScenarioRegistry();
@@ -233,7 +234,7 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
         priorAddition?.extraction?.status === "done" ? priorAddition.extraction.confidence : undefined;
       setSchemaFieldExtraction(fieldId, { status: "pending" });
       try {
-        const result = await extractField({
+        const result = await api.extract.extractField({
           chatSessionId,
           field: { name: payload.name, type: payload.type, description: payload.description },
         });
@@ -268,7 +269,7 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
         setSchemaFieldExtraction(fieldId, { status: "error" });
       }
     },
-    [chatState.activeSessionId, chatState.sessions, setSchemaFieldExtraction, appendAgentMessage],
+    [api.extract, chatState.activeSessionId, chatState.sessions, setSchemaFieldExtraction, appendAgentMessage],
   );
 
   if (!effectiveSchema) {

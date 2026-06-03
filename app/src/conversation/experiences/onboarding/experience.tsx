@@ -29,7 +29,7 @@ import { z } from "zod";
 
 import type { ChatExperienceEntry } from "@/conversation/chatExperienceRegistry";
 
-import { useLiveExtractionSchema } from "@/api/useLiveExtractionSchema";
+import { useLiveExtractionSchema } from "@/hooks/useLiveExtractionSchema";
 import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
 import type { ChatExperience, ChatExperienceComponentProps } from "@/conversation/ChatExperience";
 import { BotBubble, PickViewPill, UserBubble } from "@/conversation/chatPrimitives";

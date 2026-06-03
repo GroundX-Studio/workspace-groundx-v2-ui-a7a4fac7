@@ -11,6 +11,10 @@ describe("makeFakeApi", () => {
     expect(vi.isMockFunction(api.session.issueOnboardingSession)).toBe(true);
     expect(vi.isMockFunction(api.scenario.listScenarios)).toBe(true);
     expect(vi.isMockFunction(api.intent.recordIntent)).toBe(true);
+    expect(vi.isMockFunction(api.workflow.getGroundXWorkflow)).toBe(true);
+    expect(vi.isMockFunction(api.template.saveTemplate)).toBe(true);
+    expect(vi.isMockFunction(api.extract.extractField)).toBe(true);
+    expect(vi.isMockFunction(api.extract.fetchFieldGeometry)).toBe(true);
     expect(vi.isMockFunction(api.telemetry.captureException)).toBe(true);
     expect(vi.isMockFunction(api.report.renderReport)).toBe(true);
     // a heavy spread namespace from the @/api aggregate — proves no enumeration
@@ -38,6 +42,21 @@ describe("makeFakeApi", () => {
     await expect(api.chat.listChatMessages("chat-1")).resolves.toEqual([]);
     await expect(api.scenario.listScenarios()).resolves.toEqual({ bucketId: null, scenarios: [] });
     await expect(api.auth.resetSession()).resolves.toEqual({ success: true });
+    await expect(api.extract.extractField({ chatSessionId: "chat-1", field: { name: "x", type: "STRING", description: "x" } })).resolves.toMatchObject({
+      value: null,
+      confidence: 0,
+    });
+    await expect(
+      api.template.saveTemplate({
+        id: "t-1",
+        kind: "extract",
+        name: "Extract",
+        body: { categories: [] },
+      }),
+    ).resolves.toMatchObject({
+      id: "t-1",
+      name: "Extract",
+    });
     await expect(api.auth.getUserData("acct-1")).resolves.toMatchObject({
       customer: { username: "acct-1" },
     });

@@ -2,53 +2,27 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// `schema-agent-chat-affordances`: the rerun-narration test triggers a
-// real call to `extractField`. Mock the module so we can control the
-// returned confidence + value used in the bubble text assertion.
-vi.mock("@/api/extractField", async () => {
-  const actual = await vi.importActual<typeof import("@/api/extractField")>("@/api/extractField");
-  return { ...actual, extractField: vi.fn() };
-});
-import { extractField } from "@/api/extractField";
-
 // 2026-05-31-schemaview-live-only-extract — SchemaView reads the LIVE extract
 // as its sole source. Standalone `<SchemaView />` mounts (no live props)
 // self-resolve the live extract from the same load path the Extract widget
 // uses (getDocument → filter.workflow_id → getGroundXWorkflow → extract). Tests
 // inject a real-shaped live extract at the seam (the runtime has no MOCK_MODE
-// path); here we stub the
-// workflow + document/extract loaders so the standalone surfaces have a genuine
+// path); here we inject the workflow + document/extract loaders so the standalone surfaces have a genuine
 // live source keyed by the scenario's primary document. The fixture's field ids
 // mirror the manifest (account_number / amount_due / meter_kwh) — same shape,
 // LIVE provenance — but the VALUES differ so a test can prove the data flows
 // through the live prop path, not the manifest's sampleExtractionValues.
-vi.mock("@/api/entities/groundxWorkflowsEntity", async () => {
-  const actual = await vi.importActual<typeof import("@/api/entities/groundxWorkflowsEntity")>(
-    "@/api/entities/groundxWorkflowsEntity",
-  );
-  return { ...actual, getGroundXWorkflow: vi.fn() };
-});
-vi.mock("@/api/entities/groundxDocumentsEntity", async () => {
-  const actual = await vi.importActual<typeof import("@/api/entities/groundxDocumentsEntity")>(
-    "@/api/entities/groundxDocumentsEntity",
-  );
-  return {
-    ...actual,
-    getGroundXDocument: vi.fn(),
-    getGroundXDocumentExtract: vi.fn(),
-  };
-});
-import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
-import {
-  getGroundXDocument,
-  getGroundXDocumentExtract,
-} from "@/api/entities/groundxDocumentsEntity";
 
 // Resolved (UUID-shaped, colon-free) doc id so `isResolvedDocumentId` accepts
 // it and SchemaView runs the live load. Placeholder ids (`utility-bill-2026-04`)
 // would skip the load — which is exactly why the manifest arm used to be needed.
 const LIVE_UTILITY_DOC_ID = "c3bfff49-6640-4213-822b-e81c3a771e45";
 const LIVE_WORKFLOW_ID = "9910308e-3100-473e-9da6-3ac29f5958a6";
+const getGroundXWorkflow = vi.fn();
+const getGroundXDocument = vi.fn();
+const getGroundXDocumentExtract = vi.fn();
+const extractField = vi.fn();
+const saveTemplate = vi.fn();
 
 // Injected live workflow (test seam) — same field ids as the manifest schema so
 // existing row assertions stay valid, but sourced live (workflow → extract), not
@@ -95,11 +69,11 @@ const LIVE_EXTRACT = {
  * `initialScenarios` so the scenario's primary document is the resolved id.
  */
 function installLiveExtract() {
-  vi.mocked(getGroundXWorkflow).mockResolvedValue(LIVE_WORKFLOW as never);
-  vi.mocked(getGroundXDocument).mockResolvedValue({
+  getGroundXWorkflow.mockResolvedValue(LIVE_WORKFLOW as never);
+  getGroundXDocument.mockResolvedValue({
     document: { documentId: LIVE_UTILITY_DOC_ID, filter: { workflow_id: LIVE_WORKFLOW_ID } },
   } as never);
-  vi.mocked(getGroundXDocumentExtract).mockResolvedValue(LIVE_EXTRACT as never);
+  getGroundXDocumentExtract.mockResolvedValue(LIVE_EXTRACT as never);
 }
 
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
@@ -129,6 +103,11 @@ const liveUtilityScenario: ScenarioConfig = {
 };
 const LIVE_SCENARIOS: ScenarioConfig[] = [liveUtilityScenario];
 
+const liveExtractApi = () => ({
+  workflow: { getGroundXWorkflow },
+  groundxDocuments: { getGroundXDocument, getGroundXDocumentExtract },
+});
+
 /**
  * 2026-05-31-schemaview-live-only-extract — render a standalone `<SchemaView />`
  * over the injected live extract (the manifest arm is retired, so a bare mount
@@ -143,6 +122,7 @@ async function renderLiveSchemaView(ui: ReactElement) {
     initialFrame: "f3a",
     initialScenario: "utility",
     initialScenarios: LIVE_SCENARIOS,
+    api: liveExtractApi(),
   });
   await screen.findByTestId("schema-field-account_number");
   // The schema card appears as soon as the live SCHEMA resolves, but the live
@@ -289,6 +269,13 @@ const originalFetch = global.fetch;
 
 beforeEach(() => {
   __resetEnsuredChatSessions();
+  getGroundXWorkflow.mockReset();
+  getGroundXDocument.mockReset();
+  getGroundXDocumentExtract.mockReset();
+  extractField.mockReset();
+  extractField.mockResolvedValue({ value: null, confidence: 0, citation: null });
+  saveTemplate.mockReset();
+  saveTemplate.mockResolvedValue({ id: "es-stub", name: "Utility (custom)", updatedAt: "2026-05-27T00:00:00Z" });
   // Replace the global setup.ts throw-on-error spy with a silent one for
   // this suite. The ChatStoreProvider's eager-ensure useEffect fires
   // async fetch chains whose continuations may resolve outside the
@@ -330,6 +317,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
       initialFrame: "f3a",
       initialScenario: "utility",
       initialScenarios: LIVE_SCENARIOS,
+      api: liveExtractApi(),
     });
     // Field card resolves from the live workflow schema. Value is the LIVE
     // extract's amount_due (20,100.5), NOT the manifest's sampleExtractionValues
@@ -354,14 +342,15 @@ describe("SchemaView (UI-01 Phase 1)", () => {
   // manifest's fields (account_number / amount_due / meter_kwh) must NOT render.
   it("no live extract → real empty state, NO manifest fallback", async () => {
     // Doc resolves but carries no workflow_id → live schema is null.
-    vi.mocked(getGroundXDocument).mockResolvedValue({
+    getGroundXDocument.mockResolvedValue({
       document: { documentId: LIVE_UTILITY_DOC_ID },
     } as never);
-    vi.mocked(getGroundXDocumentExtract).mockResolvedValue({} as never);
+    getGroundXDocumentExtract.mockResolvedValue({} as never);
     renderWithOnboardingProviders(<SchemaView />, {
       initialFrame: "f3a",
       initialScenario: "utility",
       initialScenarios: LIVE_SCENARIOS,
+      api: liveExtractApi(),
     });
     // Empty / "live extract unavailable" state is shown.
     expect(await screen.findByTestId("schema-view-empty")).toBeInTheDocument();
@@ -379,6 +368,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
       initialFrame: "f3a",
       initialScenario: "utility",
       initialScenarios: LIVE_SCENARIOS,
+      api: liveExtractApi(),
     });
     const amountValue = await screen.findByTestId("schema-field-value-amount_due");
     const statusEl = amountValue.querySelector("[data-extraction-status]");
@@ -460,31 +450,23 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     });
   });
 
-  it("clicking topbar Save POSTs to /api/templates + flips status to Saved", async () => {
+  it("clicking topbar Save calls the injected template client + flips status to Saved", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ExtractView />, {
+      initialFrame: "f3a",
+      initialScenario: "utility",
+      api: { template: { saveTemplate } },
+    });
     // Make a change so the button enables.
     await user.click(screen.getByTestId("schema-remove-field-amount_due"));
     await waitFor(() => {
       expect(screen.getByTestId("extract-topbar-save")).not.toBeDisabled();
     });
-    // The fetch stub in beforeEach already returns ok=200; switch its
-    // resolved payload to the saved-template shape for this call.
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ id: "es-stub", name: "Utility (custom)", updatedAt: "2026-05-27T00:00:00Z" }),
-    });
     await user.click(screen.getByTestId("extract-topbar-save"));
     await waitFor(() => {
       expect(screen.getByTestId("extract-topbar-status")).toHaveTextContent(/Saved/);
     });
-    // Confirm the request body is the merged schema, not just the
-    // overlay — the server stores the full pinned snapshot.
-    const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
-    const saveCall = calls.find(([url]) => String(url).endsWith("/api/templates"));
-    expect(saveCall).toBeDefined();
-    const body = JSON.parse(String((saveCall![1] as RequestInit).body));
+    const body = saveTemplate.mock.calls[0][0];
     expect(body.name).toBeTruthy();
     expect(body.kind).toBe("extract");
     expect(body.body.categories).toBeInstanceOf(Array);
@@ -620,12 +602,18 @@ describe("SchemaView (UI-01 Phase 1)", () => {
   // ── ProposalCard above the list (wireframe fix) ──────────────────
 
   it("renders a ProposalCard above the field list when the chat enqueues a proposal", async () => {
+    installLiveExtract();
     renderWithOnboardingProviders(
       <>
         <ProposalSeeder name="total_tax" />
         <SchemaView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      {
+        initialFrame: "f3a",
+        initialScenario: "utility",
+        initialScenarios: LIVE_SCENARIOS,
+        api: liveExtractApi(),
+      },
     );
     await waitFor(() => {
       expect(screen.getByTestId("schema-view-proposals")).toBeInTheDocument();
@@ -675,7 +663,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
   });
 
   it("clicking ↻ rerun on a field with a prior confidence appends an assistant bubble narrating the delta", async () => {
-    vi.mocked(extractField).mockResolvedValueOnce({
+    extractField.mockResolvedValueOnce({
       value: 16.2,
       confidence: 0.98,
       citation: null,
@@ -690,7 +678,12 @@ describe("SchemaView (UI-01 Phase 1)", () => {
       // `?focus=meters` so ExtractView's initial-focus effect lands on
       // the same category our seeder pre-pins, avoiding the race with
       // ExtractView's default-to-first-category effect.
-      { initialFrame: "f3a", initialScenario: "utility", initialUrl: "/onboarding/28454/utility?focus=meters" },
+      {
+        initialFrame: "f3a",
+        initialScenario: "utility",
+        initialUrl: "/onboarding/28454/utility?focus=meters",
+        api: { extract: { extractField } },
+      },
     );
     // Field appears via the seeder.
     const editBtn = await screen.findByTestId("schema-edit-field-peak_demand_kw");
@@ -709,24 +702,36 @@ describe("SchemaView (UI-01 Phase 1)", () => {
   // ── proposal-envelope-provenance ────────────────────────────────
 
   it("F3a ProposalCard renders `proposal_v1 · envelope verified` when provenance is verified", async () => {
+    installLiveExtract();
     renderWithOnboardingProviders(
       <>
         <ProposalSeeder name="total_tax" provenance={{ version: "v1", verified: true }} />
         <SchemaView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      {
+        initialFrame: "f3a",
+        initialScenario: "utility",
+        initialScenarios: LIVE_SCENARIOS,
+        api: liveExtractApi(),
+      },
     );
     const label = await screen.findByTestId(/^schema-proposal-provenance-/);
     expect(label).toHaveTextContent("proposal_v1 · envelope verified");
   });
 
   it("F3a ProposalCard omits the provenance label when provenance is absent", async () => {
+    installLiveExtract();
     renderWithOnboardingProviders(
       <>
         <ProposalSeeder name="total_tax" />
         <SchemaView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      {
+        initialFrame: "f3a",
+        initialScenario: "utility",
+        initialScenarios: LIVE_SCENARIOS,
+        api: liveExtractApi(),
+      },
     );
     await waitFor(() => {
       expect(screen.getByTestId("schema-view-proposals")).toBeInTheDocument();
@@ -736,12 +741,18 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("Dismiss on the canvas ProposalCard clears the proposal without adding the field", async () => {
     const user = userEvent.setup();
+    installLiveExtract();
     renderWithOnboardingProviders(
       <>
         <ProposalSeeder name="total_tax" />
         <SchemaView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      {
+        initialFrame: "f3a",
+        initialScenario: "utility",
+        initialScenarios: LIVE_SCENARIOS,
+        api: liveExtractApi(),
+      },
     );
     const dismissBtn = await screen.findByTestId(/^schema-proposal-dismiss-/);
     await user.click(dismissBtn);
@@ -756,21 +767,17 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("anonymous Save → 401 opens the F6 gate inline with the save-schema preamble", async () => {
     const user = userEvent.setup();
+    saveTemplate.mockRejectedValueOnce(Object.assign(new Error("unauthenticated"), { status: 401 }));
     renderWithOnboardingProviders(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <ExtractView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      { initialFrame: "f3a", initialScenario: "utility", api: { template: { saveTemplate } } },
     );
     await user.click(screen.getByTestId("schema-remove-field-amount_due"));
     await waitFor(() => {
       expect(screen.getByTestId("extract-topbar-save")).not.toBeDisabled();
-    });
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: async () => ({ error: "unauthenticated" }),
     });
     await user.click(screen.getByTestId("extract-topbar-save"));
     // The legacy `extract-topbar-status` no longer carries the "sign in"
@@ -782,21 +789,18 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("anonymous Save → gate → commit retries the save and lands on F1 with the schema pre-attached", async () => {
     const user = userEvent.setup();
+    saveTemplate
+      .mockRejectedValueOnce(Object.assign(new Error("unauthenticated"), { status: 401 }))
+      .mockResolvedValueOnce({ id: "es-stub", name: "Utility (custom)", updatedAt: "2026-05-27T00:00:00Z" });
 
     // GateCommitter — simulates the gate's sign-up form submitting.
     // Listens for the gate to open with cause "save-schema" and then
-    // calls commitGate("register"); also seeds a SUCCESS response for
-    // the post-commit POST /api/templates retry.
+    // calls commitGate("register"); the injected saveTemplate mock is
+    // staged as 401 then success so the post-commit retry can complete.
     function GateCommitter() {
       const { state, commitGate } = useOnboardingSession();
       useEffect(() => {
         if (state.gate.status === "open" && state.gate.cause === "save-schema") {
-          // Stage the next fetch (the retry save) to succeed.
-          (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-            ok: true,
-            status: 200,
-            json: async () => ({ ok: true }),
-          });
           commitGate("register");
         }
       }, [state.gate, commitGate]);
@@ -813,17 +817,11 @@ describe("SchemaView (UI-01 Phase 1)", () => {
             wrapper doesn't simulate OnboardingShell's frame routing. */}
         <IngestView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      { initialFrame: "f3a", initialScenario: "utility", api: { template: { saveTemplate } } },
     );
     await user.click(screen.getByTestId("schema-remove-field-amount_due"));
     await waitFor(() => {
       expect(screen.getByTestId("extract-topbar-save")).not.toBeDisabled();
-    });
-    // Stage the initial Save POST as a 401.
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: async () => ({ error: "unauthenticated" }),
     });
     await user.click(screen.getByTestId("extract-topbar-save"));
     // GateCommitter sees the gate open + commits → ExtractView's

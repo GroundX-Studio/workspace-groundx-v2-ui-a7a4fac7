@@ -8,27 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // extract via getDocument → getGroundXWorkflow → getDocumentExtract. Stub those
 // loaders so the standalone SchemaView has a genuine live source — a real-shaped
 // live extract injected at the seam (the runtime has no MOCK_MODE path).
-vi.mock("@/api/entities/groundxWorkflowsEntity", async () => {
-  const actual = await vi.importActual<typeof import("@/api/entities/groundxWorkflowsEntity")>(
-    "@/api/entities/groundxWorkflowsEntity",
-  );
-  return { ...actual, getGroundXWorkflow: vi.fn() };
-});
-vi.mock("@/api/entities/groundxDocumentsEntity", async () => {
-  const actual = await vi.importActual<typeof import("@/api/entities/groundxDocumentsEntity")>(
-    "@/api/entities/groundxDocumentsEntity",
-  );
-  return {
-    ...actual,
-    getGroundXDocument: vi.fn(),
-    getGroundXDocumentExtract: vi.fn(),
-  };
-});
-import { getGroundXWorkflow } from "@/api/entities/groundxWorkflowsEntity";
-import {
-  getGroundXDocument,
-  getGroundXDocumentExtract,
-} from "@/api/entities/groundxDocumentsEntity";
 
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
 import type { ProposedSchemaField } from "@/api/chatSessions";
@@ -41,6 +20,9 @@ import { ProposeSchemaFieldCard } from "./ProposeSchemaFieldCard";
 
 const LIVE_UTILITY_DOC_ID = "c3bfff49-6640-4213-822b-e81c3a771e45";
 const LIVE_WORKFLOW_ID = "9910308e-3100-473e-9da6-3ac29f5958a6";
+const getGroundXWorkflow = vi.fn();
+const getGroundXDocument = vi.fn();
+const getGroundXDocumentExtract = vi.fn();
 
 // Utility scenario whose primary document is the resolved live id so SchemaView
 // runs the live load off the injected seam (placeholder ids would skip it).
@@ -53,7 +35,7 @@ const liveUtilityScenario: ScenarioConfig = {
 // field the proposal lands beside (categoryId "statement"), so the category
 // exists to host the accepted field.
 function installLiveExtract() {
-  vi.mocked(getGroundXWorkflow).mockResolvedValue({
+  getGroundXWorkflow.mockResolvedValue({
     workflow: {
       workflowId: LIVE_WORKFLOW_ID,
       name: "Utility Bill",
@@ -64,16 +46,19 @@ function installLiveExtract() {
       },
     },
   } as never);
-  vi.mocked(getGroundXDocument).mockResolvedValue({
+  getGroundXDocument.mockResolvedValue({
     document: { documentId: LIVE_UTILITY_DOC_ID, filter: { workflow_id: LIVE_WORKFLOW_ID } },
   } as never);
-  vi.mocked(getGroundXDocumentExtract).mockResolvedValue({ account_number: "9988776" } as never);
+  getGroundXDocumentExtract.mockResolvedValue({ account_number: "9988776" } as never);
 }
 
 const originalFetch = global.fetch;
 
 beforeEach(() => {
   __resetEnsuredChatSessions();
+  getGroundXWorkflow.mockReset();
+  getGroundXDocument.mockReset();
+  getGroundXDocumentExtract.mockReset();
   // ChatStoreProvider's eager-ensure useEffect + the propose-card
   // Accept handler may fire async fetch chains. Silencing the
   // global throw-on-error spy keeps act() noise from this widget's
@@ -184,6 +169,28 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
     expect(screen.getByTestId("propose-schema-field-accepted")).toBeInTheDocument();
   });
 
+  it("Accept starts focused extraction through the injected extract client", async () => {
+    const user = userEvent.setup();
+    const extractField = vi.fn(async () => ({ value: 14.07, confidence: 0.92, citation: null }));
+    renderWithOnboardingProviders(
+      <ProposeSchemaFieldCard proposedField={sampleField} role="anonymous" scope={{ type: "none" }} />,
+      {
+        initialFrame: "f3a",
+        initialScenario: "utility",
+        api: { extract: { extractField } },
+      },
+    );
+
+    await user.click(screen.getByTestId("propose-schema-field-accept"));
+
+    await waitFor(() => expect(extractField).toHaveBeenCalledTimes(1));
+    expect(extractField).toHaveBeenCalledWith(
+      expect.objectContaining({
+        field: expect.objectContaining({ name: "total_tax" }),
+      }),
+    );
+  });
+
   it("Reject swaps the card to a dismissed state without mutating the schema overlay", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(
@@ -202,6 +209,7 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
     // extract; install it so the standalone mount renders the statement
     // category that hosts the accepted field.
     installLiveExtract();
+    const extractField = vi.fn(async () => ({ value: 14.07, confidence: 0.92, citation: null }));
     // Mount BOTH the propose-card AND SchemaView under the same
     // provider tree so the ChatStore mutation lands in shared state.
     // SchemaView reads `pendingSchemaOverlay.addedFields[].extraction`
@@ -211,20 +219,19 @@ describe("ProposeSchemaFieldCard (UI-01 Phase 2a)", () => {
         <ProposeSchemaFieldCard proposedField={sampleField} role="anonymous" scope={{ type: "none" }} />
         <SchemaView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility", initialScenarios: [liveUtilityScenario] },
+      {
+        initialFrame: "f3a",
+        initialScenario: "utility",
+        initialScenarios: [liveUtilityScenario],
+        api: {
+          workflow: { getGroundXWorkflow },
+          groundxDocuments: { getGroundXDocument, getGroundXDocumentExtract },
+          extract: { extractField },
+        },
+      },
     );
     // Wait for the live schema to resolve so the statement category is mounted.
     await screen.findByTestId("schema-field-account_number");
-
-    // Pre-stage the /api/extract-field response — beforeEach already
-    // installed a default ensure-create mock; mockResolvedValueOnce
-    // wins for the NEXT call (which is extract-field, since ensure is
-    // already in cache from the eager useEffect on mount).
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ value: 14.07, confidence: 0.92, citation: null }),
-    });
 
     await user.click(screen.getByTestId("propose-schema-field-accept"));
 

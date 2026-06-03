@@ -18,10 +18,10 @@ import { ChatApiError } from "@/api/chatErrors";
 // WF-17: the onboarding pick-view pills read the live workflow schema via
 // this hook. Mock it so tests are deterministic. Default null → the
 // experience's `derivePickViews` falls back to the manifest.
-vi.mock("@/api/useLiveExtractionSchema", () => ({
+vi.mock("@/hooks/useLiveExtractionSchema", () => ({
   useLiveExtractionSchema: vi.fn(() => null),
 }));
-import { useLiveExtractionSchema } from "@/api/useLiveExtractionSchema";
+import { useLiveExtractionSchema } from "@/hooks/useLiveExtractionSchema";
 
 import type { WidgetRole } from "@groundx/shared";
 

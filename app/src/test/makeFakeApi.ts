@@ -98,6 +98,24 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
     };
   }
   if (name === "listChatMessages" || name === "listChatSessions") return [];
+  if (name === "getGroundXWorkflow") {
+    return { workflow: { workflowId: "test-workflow", name: "Test workflow", extract: {} } };
+  }
+  if (name === "extractField") {
+    return { value: null, confidence: 0, citation: null };
+  }
+  if (name === "fetchFieldGeometry") {
+    const fields = Array.isArray(args[1]) ? args[1] : [];
+    return fields.map(() => null);
+  }
+  if (name === "saveTemplate") {
+    const input = args[0] as { id?: string; name?: string } | undefined;
+    return {
+      id: input?.id ?? "template-test",
+      name: input?.name ?? "Test template",
+      updatedAt: "2026-06-03T00:00:00Z",
+    };
+  }
   if (name.startsWith("list") || name.startsWith("search")) {
     if (path.includes("groundxBuckets") || path.includes("partnerBuckets")) return { buckets: [] };
     if (path.includes("groundxDocuments")) return { documents: [] };

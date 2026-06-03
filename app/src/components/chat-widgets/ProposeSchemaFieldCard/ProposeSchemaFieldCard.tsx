@@ -27,11 +27,9 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useState, type FC } from "react";
 
-import type { WidgetRole, WidgetScope } from "@groundx/shared";
+import { ApiError, type WidgetRole, type WidgetScope } from "@groundx/shared";
 
 import type { ProposedSchemaField } from "@/api/chatSessions";
-import { ExtractFieldApiError, extractField } from "@/api/extractField";
-import { captureException } from "@/lib/sentry";
 import {
   BODY_TEXT,
   BORDER,
@@ -51,6 +49,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { useApi } from "@/contexts/ApiContext";
 
 export interface ProposeSchemaFieldCardProps {
   /**
@@ -92,6 +91,7 @@ export const ProposeSchemaFieldCard: FC<ProposeSchemaFieldCardProps> = ({
   // no render effect because the card operates on the draft template.
   scope: _scope,
 }) => {
+  const api = useApi();
   const { state: chatState, addSchemaField, setSchemaFieldExtraction } = useChatStore();
   // Local UI state: "pending" → user hasn't decided; "accepted" /
   // "rejected" → controls collapse to a confirmation/dismissal surface
@@ -121,7 +121,7 @@ export const ProposeSchemaFieldCard: FC<ProposeSchemaFieldCardProps> = ({
     setSchemaFieldExtraction(fieldId, { status: "pending" });
     (async () => {
       try {
-        const result = await extractField({
+        const result = await api.extract.extractField({
           chatSessionId,
           field: {
             name: proposedField.name,
@@ -136,13 +136,13 @@ export const ProposeSchemaFieldCard: FC<ProposeSchemaFieldCardProps> = ({
           citation: result.citation ?? null,
         });
       } catch (err) {
-        if (!(err instanceof ExtractFieldApiError)) {
-          captureException(err, { route: "/api/extract-field" });
+        if (!(err instanceof ApiError)) {
+          api.telemetry.captureException(err, { route: "/api/extract-field" });
         }
         setSchemaFieldExtraction(fieldId, { status: "error" });
       }
     })();
-  }, [addSchemaField, chatState.activeSessionId, proposedField, setSchemaFieldExtraction]);
+  }, [addSchemaField, api.extract, api.telemetry, chatState.activeSessionId, proposedField, setSchemaFieldExtraction]);
 
   const handleReject = useCallback(() => {
     setStatus("rejected");
