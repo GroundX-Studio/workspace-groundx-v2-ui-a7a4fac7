@@ -6,12 +6,14 @@ Repository: `GroundX-Studio/workspace-groundx-v2-ui-a7a4fac7`
 
 ## Executive Summary
 
-Task 9 handoff is complete. The scaffold mostly conforms to the project
+Closeout is complete. The scaffold mostly conforms to the project
 philosophy: shared chat/canvas/shell composition, real-data middleware paths,
 shared Template/Scope/Result contracts, and broad automated validation are in
 place. The audit found no critical or high-severity gaps. Confirmed residual
 work is either already in backlog issues (`#5`, `#11`) or newly filed as
-backlog issues (`#13`-`#17`). Final validation and archive are Task 10.
+backlog issues (`#13`-`#17`). The OpenSpec change was archived as
+`2026-06-03-2026-06-03-scaffold-philosophy-conformance-audit`; post-archive
+OpenSpec validation passed and `openspec list` reports no active changes.
 
 ## Axis Scores
 
@@ -23,7 +25,7 @@ backlog issues (`#13`-`#17`). Final validation and archive are Task 10.
 | Round-trip done | Mostly conforming; two narrow exceptions | Chat sessions/messages, entity activation, viewer events, intent, templates, report render, and live extraction have write/read/render or service-consumer coverage. Page-usage counts have no reader yet; multi-bucket/group scope has no producer yet. |
 | Template/scope/results | Mostly conforming; scope-key caveats | Shared `Template`, `ContentScope`, `WidgetScope`, `GeneratedResult`, Extract values, and rendered report sections live in `@groundx/shared`. SmartReport uses the shared save/render route, but its Utility demo routing still uses `filter.project` while the data-tier contract says seeded documents match `filter.projectId` (`SCF-006`, mapped to `#11`). The scoped `/projects` route also carries `filter.project` (`SCF-008`). |
 | Widget/tool contracts | Mostly conforming; one tracked cleanup gap | Widget contract, tool quality, app/server catalog parity, scoped viewer registry, and SmartReport tool surfaces have focused passing tests. The app-side `toolRegistry` remains an acknowledged non-production orphan while `SERVER_TOOL_CATALOG` is the live LLM surface (`SCF-007`). |
-| Source of truth | Mostly conforming; handoff complete | Active OpenSpec has only this audit; open GitHub issues are all backlog-labeled. Archived checked/unchecked historical items mostly map to closed issues or open backlog issues. Inline/doc backlog markers `CF-04`, `CF-19`, global `OnboardingWizard`, app-side `toolRegistry` cleanup, and scoped-project scope-key drift now have GitHub handoff in `#13`-`#17`. |
+| Source of truth | Mostly conforming; handoff complete | Post-archive OpenSpec has no active changes; open GitHub issues are all backlog-labeled. Archived checked/unchecked historical items mostly map to closed issues or open backlog issues. Inline/doc backlog markers `CF-04`, `CF-19`, global `OnboardingWizard`, app-side `toolRegistry` cleanup, and scoped-project scope-key drift now have GitHub handoff in `#13`-`#17`. |
 | Wireframe fidelity | Mostly conforming; tracked steady/scoped caveats | Chrome DevTools confirms F1 is a canvas-only public entry in the accessibility tree, F2+ uses the shared AppShell with chat/canvas, and mobile F1 has no horizontal overflow. Steady/workspace/project routes use the shared shell, but steady canvas parity remains `#5` and scoped project/filter vocabulary remains `SCF-008`. |
 | Test evidence | Strong; residual skipped backlog and stale-contract tests | Root `npm test`, `npm run test:e2e`, `npm run scan:secrets`, and OpenSpec strict validation passed. E2E reported 48 passed and 60 skipped, with skipped Loan/Solar/backlog-oriented cases not counted as shipped conformance. Some passing project-scope tests currently codify `filter.project`, so passing tests alone do not close `SCF-008`. |
 
@@ -53,10 +55,9 @@ alignment findings only when GitHub handoff is missing (`docs/agents/data-model.
 
 ## Confirmed Strengths
 
-- Source-of-truth hygiene: `openspec list` reports only
-  `2026-06-03-scaffold-philosophy-conformance-audit` active; GitHub has no open
-  non-backlog issues; open backlog issues are `#1`, `#2`, `#3`, `#5`, `#11`,
-  and new audit handoff issues `#13`-`#17`.
+- Source-of-truth hygiene: post-archive `openspec list` reports no active
+  changes; GitHub has no open non-backlog issues; open backlog issues are `#1`,
+  `#2`, `#3`, `#5`, `#11`, and new audit handoff issues `#13`-`#17`.
 - Composition strength: `ChatColumn` selects one `ConversationFlow` with an
   optional `ChatExperience`; steady chat is the same flow with no experience,
   not a separate flow component.
@@ -132,10 +133,9 @@ alignment findings only when GitHub handoff is missing (`docs/agents/data-model.
 
 ## Next Decisions
 
-Proceed to final validation. If OpenSpec strict validation and diff checks pass,
-commit the review-only audit artifacts, archive the change, validate the
-post-archive state, and commit the archive cleanup. If validation fails, leave
-the change active and record the blocker in `issue-handoff.md`.
+No active OpenSpec work remains from this audit. Future implementation work
+should begin from the backlog issues rather than this archived review:
+`#1`, `#2`, `#3`, `#5`, `#11`, and `#13`-`#17`.
 
 ## Validation Evidence
 
@@ -235,3 +235,23 @@ the change active and record the blocker in `issue-handoff.md`.
   - Residual risk: `ScopedConversationShell.test.tsx` emits React Router
     future-flag warnings from its test-only `MemoryRouter` harness; the
     production router future-flag guard remains in place.
+- Task 10 closeout validation:
+  - Passed before archive:
+    `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`
+  - Result before archive: 18 OpenSpec items passed, 0 failed.
+  - Passed before archive: `git diff --check`.
+  - Audit artifact commit: `e18e15c` (`docs: complete scaffold philosophy
+    conformance audit`).
+  - Archive command passed:
+    `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 archive 2026-06-03-scaffold-philosophy-conformance-audit --yes`
+  - Archive path:
+    `openspec/changes/archive/2026-06-03-2026-06-03-scaffold-philosophy-conformance-audit`.
+  - Passed after archive:
+    `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`
+  - Result after archive: 17 OpenSpec specs passed, 0 failed.
+  - Passed after archive:
+    `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list`
+  - Result after archive: no active changes found.
+  - Passed after archive:
+    `gh issue list --state open --search '-label:backlog' --json number,title,labels,url`
+  - Result after archive: `[]`.
