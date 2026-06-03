@@ -83,17 +83,26 @@ evidence. Every code-changing task starts with a failing user-visible regression
 
 ## T4 - Lighthouse metadata cleanup (`#12`)
 
-- [ ] Write the smallest structural regression or executable check for the
+- [x] Write the smallest structural regression or executable check for the
       metadata failures: meta description, valid `robots.txt`, and `llms.txt`
       recommendation compliance.
-- [ ] Implement metadata changes without introducing browser-visible secrets or
+- [x] Implement metadata changes without introducing browser-visible secrets or
       deploy-specific hardcoding.
-- [ ] Run the focused metadata check and a Chrome DevTools Lighthouse snapshot or
+- [x] Run the focused metadata check and a Chrome DevTools Lighthouse snapshot or
       navigation audit proving the failures are gone.
-- [ ] Update or close GitHub `#12`.
+- [x] Update or close GitHub `#12`.
 - **Adversarial review:** Reject T4 if the check is snapshot-only, if metadata is
   hardcoded to a deployment host that is not true locally, if Lighthouse still
   reports the same failures, or if the fix changes product flow behavior.
+
+**T4 execution note (2026-06-03):** User requested a small fix that could be
+completed without the larger required-surface work, so T4 was executed early as a
+standalone cleanup. Evidence: `app/src/test/static-metadata.test.ts` red -> green;
+`npm --workspace app test` 191 files / 1553 tests passed; `npm --workspace app run
+build` passed; `npm run scan:secrets` passed; Chrome DevTools Lighthouse on the
+canonical dev path `http://localhost:5173/auth/login` scored Accessibility 100,
+Best Practices 100, SEO 100, Agentic Browsing 100, with 50 passed and 0 failed
+in the DevTools MCP navigation audit. Remaining T0-T3 and T5 work stays open.
 
 ## T5 - Final required-surface replay and cleanup
 
