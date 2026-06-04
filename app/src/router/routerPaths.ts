@@ -6,4 +6,5 @@ export const ROUTER_PATHS = {
   BANNED: "/banned",
   HEALTH: "/health",
   HOME: "/home",
+  ONBOARDING: "/start",
 };
