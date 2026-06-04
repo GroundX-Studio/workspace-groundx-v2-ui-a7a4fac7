@@ -93,7 +93,11 @@ describe("OnboardingProvider", () => {
     renderProvider();
 
     expect(await screen.findByRole("dialog", { name: /welcome to groundx studio/i })).toBeInTheDocument();
-    expect(screen.getByText("Start with the app shell")).toBeInTheDocument();
+    expect(screen.getByText("Start from a source")).toBeInTheDocument();
+    expect(screen.getByText(/Pick a sample, upload a PDF, or connect a source/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open onboarding sandbox/i })).toHaveAttribute("href", "/onboarding");
+    expect(screen.queryByText("Start with the app shell")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Replace the starter Home page/i)).not.toBeInTheDocument();
   });
 
   it("does not open after onboarding is complete", () => {
@@ -119,7 +123,7 @@ describe("OnboardingProvider", () => {
     const { updateAppMetadata } = renderProvider();
 
     await screen.findByRole("dialog", { name: /welcome to groundx studio/i });
-    for (const label of ["Explore navigation", "Next", "Next", "Next"]) {
+    for (const label of ["Next: Understand", "Next: Extract", "Next: Interact", "Next: Integrate"]) {
       await act(async () => {
         await user.click(screen.getByRole("button", { name: label }));
       });

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { OnboardingContext, OnboardingContextI } from "@/contexts/OnboardingContext/OnboardingContext";
 import { GxThemeProvider } from "@/ThemeProvider";
+import type { AppOnboardingStepConfig } from "@/appConfig";
 
 import OnboardingWizard from "./OnboardingWizard";
 
@@ -16,26 +17,29 @@ const renderWizard = (context: Partial<OnboardingContextI> = {}) => {
     closeWithoutCompleting: vi.fn(),
     ...context,
   };
+  const steps = [
+    {
+      id: "intro",
+      title: "Learn the console",
+      body: "This custom onboarding copy comes from app config.",
+      primaryActionLabel: "Show me around",
+      routeHint: "Start on Home.",
+      educationLabel: "About onboarding",
+      sourceFrame: "F1 Ingest",
+      launchHref: "/onboarding",
+      launchLabel: "Open onboarding sandbox",
+    },
+    {
+      id: "finish",
+      title: "You are ready",
+      body: "Finish stores app-owned onboarding metadata.",
+    },
+  ] as AppOnboardingStepConfig[];
+
   render(
     <GxThemeProvider>
       <OnboardingContext.Provider value={contextValue}>
-        <OnboardingWizard
-          steps={[
-            {
-              id: "intro",
-              title: "Learn the console",
-              body: "This custom onboarding copy comes from app config.",
-              primaryActionLabel: "Show me around",
-              routeHint: "Start on Home.",
-              educationLabel: "About onboarding",
-            },
-            {
-              id: "finish",
-              title: "You are ready",
-              body: "Finish stores app-owned onboarding metadata.",
-            },
-          ]}
-        />
+        <OnboardingWizard steps={steps} />
       </OnboardingContext.Provider>
     </GxThemeProvider>
   );
@@ -51,6 +55,8 @@ describe("OnboardingWizard", () => {
     expect(screen.getByText("This custom onboarding copy comes from app config.")).toBeInTheDocument();
     expect(screen.getByText("Start on Home.")).toBeInTheDocument();
     expect(screen.getByText("About onboarding")).toBeInTheDocument();
+    expect(screen.getByText("F1 Ingest")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open onboarding sandbox" })).toHaveAttribute("href", "/onboarding");
   });
 
   it("supports reachable wizard actions", () => {

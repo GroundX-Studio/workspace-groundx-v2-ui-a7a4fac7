@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { APP_LOGOS, APP_NAME, createAppConfig, DEFAULT_APP_CONFIG, getPageTitle } from "@/appConfig";
 
 describe("appConfig", () => {
-  it("uses the default scaffold identity when no config overrides are supplied", () => {
+  it("uses the default GroundX identity when no config overrides are supplied", () => {
     expect(createAppConfig()).toEqual(DEFAULT_APP_CONFIG);
     expect(APP_NAME).toBe(DEFAULT_APP_CONFIG.appName);
     expect(APP_LOGOS).toEqual(DEFAULT_APP_CONFIG.logos);
@@ -26,12 +26,18 @@ describe("appConfig", () => {
     });
     expect(DEFAULT_APP_CONFIG.onboarding.enabled).toBe(true);
     expect(DEFAULT_APP_CONFIG.onboarding.steps.map((step) => step.id)).toEqual([
-      "app-shell",
-      "navigation",
-      "account-menu",
-      "education",
-      "first-widget",
+      "ingest",
+      "understand",
+      "extract",
+      "interact-report",
+      "integrate",
     ]);
+    expect(DEFAULT_APP_CONFIG.onboarding.steps[0]).toMatchObject({
+      title: "Start from a source",
+      sourceFrame: "F1 Ingest",
+      launchHref: "/onboarding",
+      launchLabel: "Open onboarding sandbox",
+    });
     expect(DEFAULT_APP_CONFIG.design).toEqual({});
   });
 

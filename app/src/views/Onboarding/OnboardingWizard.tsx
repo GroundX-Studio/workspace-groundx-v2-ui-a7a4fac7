@@ -3,6 +3,7 @@ import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
+import Link from "@mui/material/Link";
 import MobileStepper from "@mui/material/MobileStepper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
@@ -67,6 +68,11 @@ export function OnboardingWizard({ steps = APP_CONFIG.onboarding.steps }: Onboar
             <Typography variant="overline" sx={{ color: BODY_TEXT, fontWeight: FONT_WEIGHT_LABEL }}>
               Step {safeStepIndex + 1} of {steps.length}
             </Typography>
+            {step.sourceFrame && (
+              <Typography variant="caption" sx={{ display: "block", color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
+                {step.sourceFrame}
+              </Typography>
+            )}
             <Typography variant="h5" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL, mt: 0.5 }}>
               {step.title}
             </Typography>
@@ -82,6 +88,21 @@ export function OnboardingWizard({ steps = APP_CONFIG.onboarding.steps }: Onboar
               <Typography variant="caption" sx={{ display: "block", color: BODY_TEXT, mt: 1.5 }}>
                 {step.educationLabel}
               </Typography>
+            )}
+            {step.launchHref && step.launchLabel && (
+              <Link
+                href={step.launchHref}
+                underline="hover"
+                data-no-tool="user-driven onboarding sandbox navigation"
+                sx={{
+                  color: NAVY,
+                  display: "inline-flex",
+                  fontWeight: FONT_WEIGHT_LABEL,
+                  mt: 1.5,
+                }}
+              >
+                {step.launchLabel}
+              </Link>
             )}
           </Box>
           <MobileStepper

@@ -68,6 +68,9 @@ export interface AppOnboardingStepConfig {
   primaryActionLabel?: string;
   routeHint?: string;
   educationLabel?: string;
+  sourceFrame?: string;
+  launchHref?: string;
+  launchLabel?: string;
 }
 
 export interface AppOnboardingConfig {
@@ -137,37 +140,50 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     enabled: true,
     steps: [
       {
-        id: "app-shell",
-        title: "Start with the app shell",
-        body: "The header, side rail, page title, and protected content area give every product workflow the same foundation.",
-        primaryActionLabel: "Explore navigation",
-        educationLabel: "About the app shell",
+        id: "ingest",
+        title: "Start from a source",
+        body: "Pick a sample, upload a PDF, or connect a source so GroundX can build a grounded workspace around real content.",
+        primaryActionLabel: "Next: Understand",
+        routeHint: "The sandbox starts at /onboarding with the F1 Ingest picker.",
+        educationLabel: "Source frame",
+        sourceFrame: "F1 Ingest",
+        launchHref: "/onboarding",
+        launchLabel: "Open onboarding sandbox",
       },
       {
-        id: "navigation",
-        title: "Use navigation from any screen",
-        body: "Desktop users get a side rail. Tablet and phone users get the same menu through the hamburger button.",
-        routeHint: "Home is the first protected route.",
-        educationLabel: "About responsive navigation",
+        id: "understand",
+        title: "Understand what GroundX read",
+        body: "Watch the processing view pair the document with chat context, reading progress, citations, and why-matched evidence.",
+        primaryActionLabel: "Next: Extract",
+        routeHint: "F2 keeps the source document and conversation side by side.",
+        educationLabel: "Source frame",
+        sourceFrame: "F2 Understand",
       },
       {
-        id: "account-menu",
-        title: "Manage the account from the header",
-        body: "The profile menu shows account details and keeps logout in one predictable place.",
-        educationLabel: "About the account menu",
+        id: "extract",
+        title: "Extract structured fields",
+        body: "Review schema-backed fields, confidence, and source citations before saving or adjusting the extraction design.",
+        primaryActionLabel: "Next: Interact",
+        routeHint: "The utility path exposes statement, meter, and charge fields with citation evidence.",
+        educationLabel: "Source frames",
+        sourceFrame: "F3/F3a Extract",
       },
       {
-        id: "education",
-        title: "Look for info bubbles",
-        body: "Educational tooltips explain widgets, metrics, empty states, and unfamiliar actions without turning the page into documentation.",
-        educationLabel: "About info bubbles",
+        id: "interact-report",
+        title: "Ask, verify, and report",
+        body: "Use grounded chat to explain results, inspect citation evidence, and promote useful answers into reports when the workflow calls for it.",
+        primaryActionLabel: "Next: Integrate",
+        routeHint: "F5 is the grounded answer path; F6 keeps sign-in as an inline gate when saving or exporting.",
+        educationLabel: "Source frames",
+        sourceFrame: "F5 Interact / F6 Gate",
       },
       {
-        id: "first-widget",
-        title: "Add the first product widget",
-        body: "Replace the starter Home page with the first dashboard, workflow, or product widget for this app.",
-        routeHint: "Agents should add new product routes through the scaffold router and navigation config.",
-        educationLabel: "About the starter page",
+        id: "integrate",
+        title: "Wire GroundX into your stack",
+        body: "Finish the walkthrough, then use Integrate for API snippets, agent plugins, and the next handoff from demo to production.",
+        routeHint: "F7 is where signed-in users move from proof to implementation.",
+        educationLabel: "Source frame",
+        sourceFrame: "F7 Integrate",
       },
     ],
   },
