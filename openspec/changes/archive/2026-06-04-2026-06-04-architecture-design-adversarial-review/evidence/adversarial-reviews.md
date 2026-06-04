@@ -337,3 +337,31 @@ Each task must pass this gate before the next task starts.
 - Verdict: passed.
 - Required correction: none. Task 12 must re-validate that all four findings
   still have issue URLs and that all open GitHub issues are backlog-labelled.
+
+## Task 12: Final Review, Validation, Commit, Archive, Summary
+
+- Claims made:
+  - The review stayed review-only; no product source files were modified.
+  - Every confirmed finding has GitHub issue handoff, and every no-action item
+    has a rationale.
+  - OpenSpec is clean after archiving this review-only change.
+  - All open GitHub issues are backlog-labelled.
+- Counterevidence searched:
+  - Active and archived OpenSpec state after archive.
+  - Git status and changed-path inventory.
+  - Fresh OpenSpec validation, diff check, and open GitHub issue list.
+  - Evidence artifacts for stale placeholder, pending handoff, or untracked
+    confirmed-finding language.
+- Checks performed:
+  - `rg -n "Status: in progress|will record|needs issue handoff|Four items need Task 11|no matching open issue exists" openspec/changes/2026-06-04-architecture-design-adversarial-review` found no stale handoff text before archive.
+  - `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate 2026-06-04-architecture-design-adversarial-review --strict` passed before archive.
+  - `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict` passed before archive with 18 items.
+  - `git diff --check` passed before the review commit.
+  - `git commit -m "docs: complete architecture design review"` created commit `833b649`.
+  - `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 archive 2026-06-04-architecture-design-adversarial-review --yes --skip-specs` archived the change as `2026-06-04-2026-06-04-architecture-design-adversarial-review`.
+  - `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict` passed after archive with 17 specs.
+  - `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list` reported no active changes.
+  - `gh issue list --repo GroundX-Studio/workspace-groundx-v2-ui-a7a4fac7 --state open --limit 200 --json number,title,labels,url` showed `#1`, `#2`, `#3`, `#5`, `#11`, `#13`, `#14`, `#18`, `#19`, `#20`, and `#21`, all with the `backlog` label.
+- Verdict: passed.
+- Required correction: none. Commit the archive cleanup separately, then report
+  the remaining open backlog items and verification evidence.

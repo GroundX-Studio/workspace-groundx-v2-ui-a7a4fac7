@@ -242,15 +242,15 @@ rerun the adversarial review before advancing.
 - [x] Run:
       `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`.
 - [x] Run `git diff --check`.
-- [ ] Commit only this review's OpenSpec files and evidence artifacts.
-- [ ] If successful and no handoff blocker remains, archive the change:
-      `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 archive 2026-06-04-architecture-design-adversarial-review --yes`.
-- [ ] Run post-archive validation:
+- [x] Commit only this review's OpenSpec files and evidence artifacts.
+- [x] If successful and no handoff blocker remains, archive the change:
+      `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 archive 2026-06-04-architecture-design-adversarial-review --yes --skip-specs`.
+- [x] Run post-archive validation:
       `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`
       and
       `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list`.
-- [ ] Commit the archive cleanup separately.
-- [ ] Final adversarial review: confirm this stayed review-only, all findings
+- [x] Commit the archive cleanup separately.
+- [x] Final adversarial review: confirm this stayed review-only, all findings
       have issue handoff/no-action rationale, OpenSpec is clean, and the final
       summary states what conforms, what does not, what was archived, and what
       remains open.
