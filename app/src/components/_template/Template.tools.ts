@@ -17,8 +17,7 @@
  *      carries a non-empty `.describe(...)` call.
  *   4. **Category.** `read` for navigation / focus / highlight (auto-
  *      execute). `mutate` for any persisted change (renders as a chip /
- *      card; user must confirm). Mutate handlers return `null` from
- *      `handler` to signal "raise a chip, don't dispatch now."
+ *      card; user must confirm). Middleware intent builders own execution.
  *
  * Alternative: opt out by deleting this file and creating a sibling
  * `no-llm.md` with a `## Why` section. The drift guard (Phase 6)
@@ -44,10 +43,6 @@ const editTemplate: WidgetTool = {
       .max(120)
       .describe("New label text the user wants to show on the template widget"),
   }),
-  // Mutate tools return null — the chat router emits them onto
-  // suggestedActions[] instead of dispatching directly. Phase 1's
-  // SuggestedActionChips widget renders them as Accept chips.
-  handler: () => null,
   availableIn: ["steady"], // edit is locked in onboarding
   availableSteps: ["doc-viewer", "extract-workbench"],
 };
@@ -61,10 +56,6 @@ const openTemplate: WidgetTool = {
     "Bring the template widget into focus. Use when the user asks to see or open the template panel.",
   category: "read",
   input: z.object({}),
-  // Read tools return a CanvasIntent for immediate dispatch. The
-  // example below is illustrative — replace `switchFrame` with the
-  // real intent the widget needs.
-  handler: () => ({ kind: "switchFrame", frame: "f3" }),
 };
 
 export const tools: WidgetTool[] = [openTemplate, editTemplate];

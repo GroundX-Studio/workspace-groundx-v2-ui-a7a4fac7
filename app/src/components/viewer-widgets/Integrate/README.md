@@ -83,10 +83,11 @@ registry (`scopedViewerWidgetRegistryProduction.ts`).
 
 `Integrate.tools.ts` declares `show_integrate({ scope })` — the canvas-dispatch
 tool for the surface. `show_` is the canonical canvas-dispatch verb for every
-ScopedViewerWidget (allowlisted in `check-tool-quality`). The handler returns a
-`showIntegrate` `CanvasIntent`; the orchestrator's built-in handler routes it
-to `advanceFrame("f7")` — the SAME canvas move the Integrate step-strip pill
-performs. Mirrored on the middleware `SERVER_TOOL_CATALOG`.
+ScopedViewerWidget (allowlisted in `check-tool-quality`). The middleware
+`SERVER_TOOL_CATALOG` intentBuilder returns a `showIntegrate` `CanvasIntent`;
+the orchestrator's built-in handler routes it to `advanceFrame("f7")` — the
+SAME canvas move the Integrate step-strip pill performs. The app declaration is
+metadata only.
 
 ## Tests
 

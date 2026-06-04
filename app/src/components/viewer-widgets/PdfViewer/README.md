@@ -127,9 +127,9 @@ available to all roles; scoped to the
   for the active viewer (no bbox highlight). Use when the user
   references a page number directly.
 
-Round-trip: LLM emits a tool call → middleware (Phase 5) validates
-the Zod input + invokes the handler → resulting `CanvasIntent` ships
-on `ChatReply.intents[]` → frontend orchestrator's built-in handler
+Round-trip: LLM emits a tool call → middleware validates
+the Zod input + runs the `SERVER_TOOL_CATALOG` intentBuilder → resulting
+`CanvasIntent` ships on `ChatReply.intents[]` → frontend orchestrator's built-in handler
 routes to `ChatStore.gotoDocViewer` → viewer pane re-mounts with the
 new page (and bbox, when present).
 
@@ -147,7 +147,7 @@ still work after a controlled-page mount.
 
 `PdfViewerWidget.tools.test.ts`. Covers: tool catalog completeness
 (both tools present), Zod schema accept/reject for valid + invalid
-input, handler-produced `CanvasIntent` shape for each tool, plus the
+input, app/server metadata parity, plus the
 Phase-5b quality-rule preconditions (every Zod field carries
 `.describe()`; every description has a `Use when` clause and meets
 the 40-char floor).

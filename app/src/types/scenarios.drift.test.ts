@@ -70,6 +70,7 @@ describe("scenario fixture contract — single-sourced on @groundx/shared", () =
     const fixture: SharedScenarioConfig = {
       id: "utility",
       order: 0,
+      projectId: "proj_utility",
       supportsJsonRender: false,
       documents: [{ documentId: "doc-1", fileName: "bill.pdf", order: 0, pageCount: 2 }],
       manifest: {

@@ -48,13 +48,6 @@ const proposeSchemaField: WidgetTool = {
       .max(200)
       .describe("One-sentence description of what the field captures, in plain English."),
   }),
-  handler: (input) => ({
-    kind: "proposeSchemaField",
-    categoryId: input.categoryId,
-    name: input.name,
-    type: input.type,
-    description: input.description,
-  }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
   // §5 reachability — this tool's result renders as the inline ProposeSchemaFieldCard
   // (mounted by `conversation/chatPrimitives.tsx` under the assistant bubble).
@@ -75,10 +68,6 @@ const acceptProposal: WidgetTool = {
       .min(1)
       .describe("Proposal id (from the pending overlay queue) to accept."),
   }),
-  handler: (input) => ({
-    kind: "acceptSchemaField",
-    proposalId: input.proposalId,
-  }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
 };
 
@@ -94,10 +83,6 @@ const rejectProposal: WidgetTool = {
       .string()
       .min(1)
       .describe("Proposal id (from the pending overlay queue) to reject."),
-  }),
-  handler: (input) => ({
-    kind: "rejectSchemaField",
-    proposalId: input.proposalId,
   }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
 };

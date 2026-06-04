@@ -1,10 +1,8 @@
 /**
  * 2026-05-31-tool-system-completion (wf04 §2) — OnboardingWizard nav tools.
  *
- * Four read-style navigation tools. Each handler dispatches the corresponding
- * CanvasIntent; the OnboardingWizard view registers matching adapters that call
- * the OnboardingContext `next` / `back` / `finish` / `closeWithoutCompleting`
- * (the SAME action the wizard's nav Buttons invoke).
+ * Four read-style navigation tool metadata declarations. Executable intent
+ * construction lives in the middleware `SERVER_TOOL_CATALOG`.
  *
  * This file lives in the view glob-home (`views/**`) opened this change, so the
  * registry + quality scanner discover it in place.
@@ -24,20 +22,12 @@ describe("OnboardingWizard tools", () => {
     expect(tools.every((t) => t.category === "read")).toBe(true);
   });
 
-  it("each tool dispatches the matching CanvasIntent", () => {
+  it("each tool takes no arguments", () => {
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
-    expect(byName.wizard_next.handler(byName.wizard_next.input.parse({}))).toEqual({
-      kind: "wizardNext",
-    });
-    expect(byName.wizard_back.handler(byName.wizard_back.input.parse({}))).toEqual({
-      kind: "wizardBack",
-    });
-    expect(byName.wizard_finish.handler(byName.wizard_finish.input.parse({}))).toEqual({
-      kind: "wizardFinish",
-    });
-    expect(byName.dismiss_wizard.handler(byName.dismiss_wizard.input.parse({}))).toEqual({
-      kind: "dismissWizard",
-    });
+    expect(byName.wizard_next.input.parse({})).toEqual({});
+    expect(byName.wizard_back.input.parse({})).toEqual({});
+    expect(byName.wizard_finish.input.parse({})).toEqual({});
+    expect(byName.dismiss_wizard.input.parse({})).toEqual({});
   });
 
   it("each description meets the Phase 5b quality bar", () => {

@@ -6,7 +6,7 @@
  * Composition, not dispatch: this surface looks the experience up by id in
  * `chatExperienceRegistry` (lookup-only catalog), builds the entry's
  * `ContentScope` (the INPUT-NEEDED decision: Workspace → its workspace bucket;
- * Project → bucket + project filter), selects the per-scope chat session
+ * Project → bucket + projectId filter), selects the per-scope chat session
  * (`resolveSessionForScope`), and hands the constructed experience to
  * `<ConversationFlow>`. There is NO new flow component and NO flow `mode` —
  * the same `ConversationFlow` the steady + onboarding surfaces mount.
@@ -28,8 +28,11 @@ import {
 } from "@/components/layout/OnboardingNav/OnboardingNav";
 import { ScopedCanvas } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 import {
+  FONT_SIZE_CAPTION,
+  FONT_WEIGHT_LABEL,
   ONBOARDING_NAV_WIDTH_COLLAPSED,
   ONBOARDING_NAV_WIDTH_FULL,
+  NAVY,
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
@@ -48,11 +51,10 @@ export interface ScopedConversationShellProps {
   /** The experience id to look up + compose (`workspace` | `project`). */
   experienceId: "workspace" | "project";
   /**
-   * The project filter-field value for the `project` experience (the demos
-   * key projects off a `project` filter whose value is the scenario id).
-   * Ignored for `workspace`. Defaults to the first ready scenario / "utility".
+   * The GroundX document filter.projectId value for the `project` experience.
+   * Ignored for `workspace`. Defaults to the first ready scenario's projectId.
    */
-  projectValue?: string;
+  projectId?: string;
   /** Which nav entry is active (highlights the rail row). */
   navActiveKey: OnboardingNavItemKey;
   /** Human title for the ensure-created chat session. */
@@ -61,7 +63,7 @@ export interface ScopedConversationShellProps {
 
 export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
   experienceId,
-  projectValue,
+  projectId,
   navActiveKey,
   sessionTitle,
 }) => {
@@ -74,31 +76,34 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
     ? registryState.bucketId
     : FALLBACK_DEMO_BUCKET;
 
-  const resolvedProjectValue =
-    projectValue ??
-    (registryState.status === "ready" ? registryState.scenarios[0]?.id : undefined) ??
-    "utility";
+  const resolvedProjectId =
+    projectId ??
+    (registryState.status === "ready" ? registryState.scenarios[0]?.projectId : undefined);
 
   // The scope each entry opens on (the INPUT-NEEDED decision):
   //   workspace → its workspace bucket id
-  //   project   → bucket + the project filter field/value
-  const scope: ContentScope = useMemo(() => {
+  //   project   → bucket + the projectId filter field/value
+  const scope: ContentScope | null = useMemo(() => {
     if (experienceId === "project") {
-      return { type: "bucket", bucketId, filter: { project: resolvedProjectValue } };
+      return resolvedProjectId
+        ? { type: "bucket", bucketId, filter: { projectId: resolvedProjectId } }
+        : null;
     }
     return { type: "bucket", bucketId };
-  }, [experienceId, bucketId, resolvedProjectValue]);
+  }, [experienceId, bucketId, resolvedProjectId]);
 
   // Look the experience up (lookup-only catalog) and construct it over the scope.
   const experience = useMemo(() => {
+    if (!scope) return undefined;
     const entry = chatExperienceRegistry.byId(experienceId);
     return entry ? entry.create({ scope }) : undefined;
   }, [experienceId, scope]);
 
   // Select the per-scope chat session (ensure-created if absent). Re-opening
   // the same entry returns to its own conversation.
-  const scopeSig = JSON.stringify(scope);
+  const scopeSig = scope ? JSON.stringify(scope) : null;
   useEffect(() => {
+    if (!scope) return;
     resolveSessionForScope(scope, { title: sessionTitle });
     // scopeSig is the stable scope identity; resolveSessionForScope is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -120,7 +125,8 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
   // base scope (bucket / bucket+project-filter), the correct scope for
   // report / integrate / extract over the workspace or project.
   const canvasStep: ViewerStep = latestViewerStep ?? { kind: "ingest-picker" };
-  const canvasScope: ContentScope = useMemo(() => {
+  const canvasScope: ContentScope | null = useMemo(() => {
+    if (!scope) return null;
     if (canvasStep.kind === "doc-viewer" && isResolvedDocumentId(canvasStep.documentId)) {
       return { type: "documents", documentIds: [canvasStep.documentId] };
     }
@@ -149,7 +155,13 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
       }}
       aria-label="Chat column"
     >
-      <ConversationFlow chatSessionId={activeSessionId} experience={experience} />
+      {scope ? (
+        <ConversationFlow chatSessionId={activeSessionId} experience={experience} />
+      ) : (
+        <Box data-testid="scoped-project-loading" sx={{ color: NAVY, fontSize: FONT_SIZE_CAPTION, fontWeight: FONT_WEIGHT_LABEL }}>
+          Loading project
+        </Box>
+      )}
     </Box>
   );
 
@@ -159,7 +171,13 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
       sx={{ width: "100%", flex: 1, height: "100%", backgroundColor: WHITE, overflow: "hidden" }}
       aria-label="Canvas"
     >
-      <ScopedCanvas scope={canvasScope} step={canvasStep} role={widgetRole} reportSurface="render" />
+      {canvasScope ? (
+        <ScopedCanvas scope={canvasScope} step={canvasStep} role={widgetRole} reportSurface="render" />
+      ) : (
+        <Box data-testid="scoped-project-canvas-loading" sx={{ color: NAVY, fontSize: FONT_SIZE_CAPTION, fontWeight: FONT_WEIGHT_LABEL }}>
+          Loading project
+        </Box>
+      )}
     </Box>
   );
 

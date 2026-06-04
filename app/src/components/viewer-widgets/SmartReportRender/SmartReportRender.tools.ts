@@ -11,9 +11,9 @@
  * `_edit` sibling (`show_smart_report_edit`, opens the builder) lives on
  * `SmartReportBuilder.tools.ts`.
  *
- * Interim AgentToolBus bridge: the handler returns the SAME `showReport`
- * `CanvasIntent` the step-strip pill / "make me a report" path dispatches, so
- * the tool drives the identical canvas move as the on-screen control.
+ * Middleware `intentBuilder` emits the SAME `showReport` `CanvasIntent` the
+ * step-strip pill / "make me a report" path dispatches, so the mirrored tool
+ * drives the identical canvas move as the on-screen control.
  */
 import { z } from "zod";
 
@@ -38,11 +38,6 @@ const showSmartReportRender: WidgetTool = {
       .min(1)
       .optional()
       .describe("Optional report template id; defaults to the active draft template when omitted."),
-  }),
-  handler: (input) => ({
-    kind: "showReport",
-    templateId: input.template_id ?? "draft",
-    scope: input.scope,
   }),
   availableSteps: ["report", "extract-workbench", "interact-chat", "doc-viewer"],
 };

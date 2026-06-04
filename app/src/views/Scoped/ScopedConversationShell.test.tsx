@@ -15,15 +15,35 @@ import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
 import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarContext";
 import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
+import type { ScenarioRegistryState } from "@/contexts/ScenarioRegistryContext/types";
 import { GxThemeProvider } from "@/ThemeProvider";
+import type { ApiOverrides } from "@/test/makeFakeApi";
+import { utilityTestScenario } from "@/test/scenarioFixtures";
 import { withApiProvider } from "@/test/withApiProvider";
+import type { ScenarioConfig } from "@/types/scenarios";
 
 import { WorkspacesView, ProjectsView } from "./ScopedConversationShell";
 
 // A resolved (UUID) GroundX document id — the seeded utility sample.
 const SAMPLE_DOC_ID = "c3bfff49-6640-4213-822b-e81c3a771e45";
 
-function Harness({ children }: { children: React.ReactNode }) {
+const utilityScenario = utilityTestScenario;
+
+function Harness({
+  children,
+  api,
+  forcedDemoState,
+  initialScenarios,
+}: {
+  children: React.ReactNode;
+  api?: ApiOverrides;
+  forcedDemoState?: ScenarioRegistryState | null;
+  initialScenarios?: ScenarioConfig[] | null;
+}) {
+  const resolvedInitialScenarios = initialScenarios === null
+    ? undefined
+    : initialScenarios ?? [utilityScenario];
+
   // DocumentsProvider (+ Loading/MessageBar deps) is required so the shared
   // production PdfViewerWidget can mount via <ScopedCanvas> — mirrors
   // renderWithOnboardingProviders, which is how the onboarding shell test
@@ -34,9 +54,8 @@ function Harness({ children }: { children: React.ReactNode }) {
         <MessageBarProvider>
           <AppModeProvider initialAuthState="signed-in">
             <ScenarioRegistryProvider
-              initialScenarios={[
-                { id: "utility", manifest: { hero: { title: "Utility" } }, documents: [] } as never,
-              ]}
+              initialScenarios={resolvedInitialScenarios}
+              forcedDemoState={forcedDemoState}
             >
               <DocumentsProvider>
                 <ChatStoreProvider initialOwnerKey="anon-test">
@@ -50,6 +69,7 @@ function Harness({ children }: { children: React.ReactNode }) {
         </MessageBarProvider>
       </LoadingProvider>
     </GxThemeProvider>,
+    api,
   );
 }
 
@@ -134,7 +154,7 @@ describe("ProjectsView (/projects)", () => {
     expect(screen.getByTestId("scoped-shell")).toHaveAttribute("data-experience", "project");
   });
 
-  it("the project surface's scope carries the project filter (distinct session from workspace)", () => {
+  it("builds the project scope with filter.projectId from the ready scenario", async () => {
     let api: ReturnType<typeof useChatStore> | null = null;
     function Probe() {
       api = useChatStore();
@@ -146,8 +166,40 @@ describe("ProjectsView (/projects)", () => {
         <ProjectsView />
       </Harness>,
     );
+    await waitFor(() => expect(api!.state.activeSessionId).toBeTruthy());
     const active = api!.state.sessions.get(api!.state.activeSessionId!);
-    // The project filter is part of the scope key.
-    expect(active?.scopeKey).toContain("project");
+    expect(active?.scopeKey).toContain("\"projectId\":\"proj_utility\"");
+    expect(active?.scopeKey).not.toContain("\"project\":\"utility\"");
+  });
+
+  it("does not create a slug-fallback project session before the registry is ready", async () => {
+    let api: ReturnType<typeof useChatStore> | null = null;
+    function Probe() {
+      api = useChatStore();
+      return null;
+    }
+    const listScenarios = vi.fn(async () => ({
+      bucketId: 28454,
+      scenarios: [utilityScenario],
+    }));
+    render(
+      <Harness api={{ scenario: { listScenarios } }} initialScenarios={null}>
+        <Probe />
+        <ProjectsView />
+      </Harness>,
+    );
+
+    expect(screen.getByTestId("scoped-project-loading")).toBeInTheDocument();
+    expect(api!.state.activeSessionId).toBeNull();
+    const preReadyScopeKeys = [...api!.state.sessions.values()].map((session) => session.scopeKey ?? "");
+    expect(preReadyScopeKeys.some((key) => key.includes("\"projectId\":\"utility\""))).toBe(false);
+    expect(preReadyScopeKeys.some((key) => key.includes("\"project\":\"utility\""))).toBe(false);
+
+    await waitFor(() => expect(screen.getByTestId("conversation-flow")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("scoped-chat-intro-project")).toBeInTheDocument());
+    const projectSessions = [...api!.state.sessions.values()].filter((session) =>
+      session.scopeKey?.includes("\"projectId\":\"proj_utility\""),
+    );
+    expect(projectSessions).toHaveLength(1);
   });
 });

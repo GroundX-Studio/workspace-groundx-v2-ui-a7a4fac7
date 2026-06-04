@@ -11,10 +11,9 @@ describe("BookingStatusCard tools", () => {
     expect(tools[0].category).toBe("mutate");
   });
 
-  it("book_call takes no arguments and produces openBookCall intent", () => {
-    expect(tools[0].handler(tools[0].input.parse({}))).toEqual({
-      kind: "openBookCall",
-    });
+  it("book_call takes no arguments and declares its rendered chat card", () => {
+    expect(tools[0].input.parse({})).toEqual({});
+    expect(tools[0].rendersWidget).toBe("chat-widgets/BookingStatusCard");
   });
 
   it("description meets Phase 5b quality bar", () => {

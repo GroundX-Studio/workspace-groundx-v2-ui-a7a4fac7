@@ -37,10 +37,6 @@ function mkTool(name: string): WidgetTool {
     input: z.object({
       documentId: z.string().min(1).describe("GroundX document UUID"),
     }),
-    handler: (input) => {
-      const parsed = input as { documentId: string };
-      return { kind: "openDocument", documentId: parsed.documentId };
-    },
     availableSteps: ["doc-viewer"],
   };
 }

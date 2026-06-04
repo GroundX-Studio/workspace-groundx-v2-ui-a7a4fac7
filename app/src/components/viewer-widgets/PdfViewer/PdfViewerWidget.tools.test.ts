@@ -3,15 +3,11 @@
  *
  * Pins the LLM tool surface for the PDF viewer:
  *
- *   • `open_document` (read) — produces a `highlightCitation` intent
- *     pointing at page 1 (or the explicit page, when supplied)
- *   • `jump_to_page` (read) — produces a `jumpToPage` intent (the
- *     lighter-weight cousin of `highlightCitation`, no bbox)
+ *   • `open_document` (read) — opens/highlights a cited document
+ *   • `jump_to_page` (read) — jumps the active viewer to a page
  *
- * The tests exercise both the Zod schemas (valid + invalid input) and
- * the handlers' produced `CanvasIntent` shape. Round-trip dispatch
- * through the orchestrator is exercised in the Phase 5 middleware
- * suite; this file is the unit-level contract.
+ * The tests exercise the app-side metadata and Zod schemas. Executable
+ * CanvasIntent construction lives in the middleware `SERVER_TOOL_CATALOG`.
  */
 import { describe, expect, it } from "vitest";
 
@@ -34,7 +30,7 @@ describe("PdfViewer tools", () => {
       expect(tool.availableIn).toBeUndefined();
     });
 
-    it("Zod schema accepts a documentId-only payload (page defaults inside handler)", () => {
+    it("Zod schema accepts a documentId-only payload", () => {
       const ok = tool.input.safeParse({ documentId: "doc-1" });
       expect(ok.success).toBe(true);
     });
@@ -54,14 +50,10 @@ describe("PdfViewer tools", () => {
       expect(bad.success).toBe(false);
     });
 
-    it("handler produces a highlightCitation intent with the requested page", () => {
-      const intent = tool.handler({ documentId: "doc-abc", page: 7 });
-      expect(intent).toEqual({ kind: "highlightCitation", documentId: "doc-abc", page: 7 });
-    });
-
-    it("handler defaults page to 1 when omitted", () => {
-      const intent = tool.handler({ documentId: "doc-abc" });
-      expect(intent).toEqual({ kind: "highlightCitation", documentId: "doc-abc", page: 1 });
+    it("is exposed where a doc-viewer surface is mountable", () => {
+      expect(tool.availableSteps).toEqual(
+        expect.arrayContaining(["doc-viewer", "interact-chat", "extract-workbench"]),
+      );
     });
   });
 
@@ -84,10 +76,6 @@ describe("PdfViewer tools", () => {
       expect(tool.input.safeParse({ documentId: "doc-1", page: 1.5 }).success).toBe(false);
     });
 
-    it("handler produces a jumpToPage intent (no bbox)", () => {
-      const intent = tool.handler({ documentId: "doc-xyz", page: 12 });
-      expect(intent).toEqual({ kind: "jumpToPage", documentId: "doc-xyz", page: 12 });
-    });
   });
 
   it("every Zod field carries a .describe() (Phase 5b quality rule)", () => {

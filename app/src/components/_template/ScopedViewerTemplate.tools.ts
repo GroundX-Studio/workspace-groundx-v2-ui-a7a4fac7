@@ -49,8 +49,6 @@ const showTemplateSurface: WidgetTool = {
       "The ContentScope (documents / bucket+filter / group) the surface renders over.",
     ),
   }),
-  // A real widget returns its canvas-dispatch CanvasIntent (e.g. showExtract).
-  handler: () => null,
   availableSteps: ["doc-viewer", "extract-workbench", "interact-chat", "report"],
 };
 

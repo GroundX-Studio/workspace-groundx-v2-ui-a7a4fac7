@@ -3,7 +3,8 @@
  *
  * Same shape as the Workspace experience (steady: Intro + NO Choreography),
  * id `project`, closing over a `ContentScope` whose `filter` carries the
- * project field/value (project == doc-filter value within a workspace bucket).
+ * projectId field/value (the GroundX doc-filter value within a workspace
+ * bucket).
  */
 import { describe, expect, it } from "vitest";
 import type { ContentScope } from "@groundx/shared";
@@ -14,7 +15,7 @@ import { chatExperienceRegistry } from "@/conversation/chatExperienceRegistry";
 const PROJECT_SCOPE: ContentScope = {
   type: "bucket",
   bucketId: 28454,
-  filter: { project: "utility" },
+  filter: { projectId: "proj_utility" },
 };
 
 describe("makeProjectExperience", () => {
@@ -24,10 +25,11 @@ describe("makeProjectExperience", () => {
     expect(exp.Choreography).toBeUndefined();
   });
 
-  it("threads the closed-over scope's project filter into the grounding scopeHint", () => {
+  it("threads the closed-over scope's projectId filter into the grounding scopeHint", () => {
     const exp = makeProjectExperience({ scope: PROJECT_SCOPE });
-    // The project filter field/value must round-trip onto the grounding hint.
-    expect(exp.scopeHint?.scenarioTitle).toContain("utility");
+    // The projectId filter field/value must round-trip onto the grounding hint.
+    expect(exp.scopeHint?.scenarioTitle).toContain('"projectId":"proj_utility"');
+    expect(exp.scopeHint?.scenarioTitle).not.toContain('"project":"utility"');
   });
 });
 

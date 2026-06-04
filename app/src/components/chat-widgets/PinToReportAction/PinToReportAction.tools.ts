@@ -8,10 +8,9 @@
  * supplied the surface prompts the existing-or-new UX (NO silent auto-create);
  * an explicit `template_id` targets that template.
  *
- * Interim AgentToolBus bridge: the handler returns the SAME `pinToReport`
- * `CanvasIntent` the button dispatches → the orchestrator routes to
- * `ChatStore.pinToReport`, so the tool performs the identical mutation as the
- * on-screen control.
+ * Middleware `intentBuilder` emits the SAME `pinToReport` `CanvasIntent` the
+ * button dispatches → the orchestrator routes to `ChatStore.pinToReport`, so
+ * the mirrored tool performs the identical mutation as the on-screen control.
  */
 import { z } from "zod";
 
@@ -38,12 +37,6 @@ const pinToReport: WidgetTool = {
       .min(1)
       .optional()
       .describe("Explicit target template id; omit to prompt the user existing-or-new (no auto-create)."),
-  }),
-  handler: (input) => ({
-    kind: "pinToReport",
-    turnId: input.turn_id,
-    text: input.text,
-    ...(input.template_id !== undefined ? { templateId: input.template_id } : {}),
   }),
   availableSteps: ["interact-chat", "doc-viewer", "extract-workbench", "report"],
 };

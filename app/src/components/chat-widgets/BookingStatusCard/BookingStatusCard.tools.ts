@@ -27,7 +27,6 @@ const bookCall: WidgetTool = {
     "clicking the chip; the iframe is not opened automatically.",
   category: "mutate",
   input: z.object({}),
-  handler: () => ({ kind: "openBookCall" }),
   // §5 reachability — confirming this tool's chip opens the BookingStatusCard
   // (mounted by the OnboardingShell + CanvasOrchestrator when the book-call
   // surface activates).

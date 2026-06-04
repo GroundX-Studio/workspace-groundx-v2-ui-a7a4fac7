@@ -1,6 +1,6 @@
 /**
  * 2026-05-30-unified-conversation-flow Phase 2 — the `chatExperienceRegistry`
- * data catalog. Mirrors `toolRegistry`'s glob assembly + `ScenarioRegistry`'s
+ * data catalog. Mirrors Vite glob assembly + `ScenarioRegistry`'s
  * `byId` API; implements the shared `Catalog<T>` contract (lookup/enumerate
  * ONLY — no `resolve(context)` dispatcher). Unique-id invariant via the shared
  * `assertUniqueIds`.
@@ -36,7 +36,7 @@ describe("chatExperienceRegistry (production singleton)", () => {
   // ── RCC Phase 4: declare + assert it satisfies the shared Catalog<T> contract ──
   // (the declaration `ChatExperienceRegistry = Catalog<ChatExperienceEntry>` landed
   // with the registry in unified Phase 2; this is the explicit conformance check,
-  // mirroring toolRegistry + ScenarioRegistry.)
+  // mirroring the glob-built catalogs + ScenarioRegistry.)
   it("satisfies the shared Catalog<ChatExperienceEntry> read contract (RCC Phase 4)", () => {
     // Compile-time conformance: the registry IS assignable to Catalog<T>.
     const catalog: Catalog<ChatExperienceEntry> = chatExperienceRegistry;

@@ -120,7 +120,8 @@ export class ScenarioRegistry {
 
     const scenarios: ScenarioConfig[] = [];
     for (const config of this.configs) {
-      const matched = byProjectId.get(projectIdForScenario(config.id)) ?? [];
+      const projectId = projectIdForScenario(config.id);
+      const matched = byProjectId.get(projectId) ?? [];
       if (matched.length === 0) continue; // not seeded yet → omit from the picker
       const documents: ScenarioDocument[] = matched
         .slice()
@@ -129,6 +130,7 @@ export class ScenarioRegistry {
       scenarios.push({
         id: config.id,
         order: config.order,
+        projectId,
         manifest: config.manifest,
         documents,
         supportsJsonRender: config.manifest.supportsJsonRender ?? false,

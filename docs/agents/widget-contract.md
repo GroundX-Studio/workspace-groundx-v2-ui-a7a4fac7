@@ -648,12 +648,9 @@ const pickChip: WidgetTool = {
   input: z.object({
     chipId: z.string().min(1).describe("The id of the chip the user wants to activate"),
   }),
-  // ChipsBar's onPick is the host's job — the tool's handler just
-  // signals "the user picked X" and the orchestrator routes it via
-  // the host's selection state. v1: dispatch a switchFrame as a
-  // placeholder; Phase 4+ replaces it with the right CanvasIntent
-  // once `pick_chip` is wired into a real host.
-  handler: () => null,
+  // ChipsBar's onPick is the host's job. The app declaration is
+  // metadata only; the middleware SERVER_TOOL_CATALOG owns any
+  // executable intentBuilder once `pick_chip` is wired into a real host.
 };
 
 export const tools: WidgetTool[] = [pickChip];

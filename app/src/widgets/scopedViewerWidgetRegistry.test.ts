@@ -25,7 +25,6 @@ function mkTool(name: string): WidgetTool {
     description: `${name} — show a scoped viewer surface. Use when the user asks to view it.`,
     category: "read",
     input: z.object({}),
-    handler: () => null,
   };
 }
 

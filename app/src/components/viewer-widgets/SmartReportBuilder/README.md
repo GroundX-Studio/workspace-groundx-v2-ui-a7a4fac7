@@ -120,11 +120,11 @@ the SAME shared family as the Extract schema-builder's field-mutation tools:
 - `delete_report_section({ section_id })` — the chat twin of `⋮ → Remove` →
   `removeReportSection`.
 
-Each handler returns the SAME `CanvasIntent` the on-screen control dispatches;
-the orchestrator routes both to the identical ChatStore action (the interim
-AgentToolBus bridge), so a chat tool performs the same mutation as its UI
-control. Every tool is mirrored on the middleware `SERVER_TOOL_CATALOG`. The
-`show_` verb is allowlisted in `check-tool-quality` (once, by this phase).
+Each middleware `SERVER_TOOL_CATALOG` intentBuilder returns the SAME
+`CanvasIntent` the on-screen control dispatches; the orchestrator routes both to
+the identical ChatStore action, so a chat tool performs the same mutation as its
+UI control. The app declarations are metadata only. The `show_` verb is
+allowlisted in `check-tool-quality` (once, by this phase).
 
 ## Tests
 

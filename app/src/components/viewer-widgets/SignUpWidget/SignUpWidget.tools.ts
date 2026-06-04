@@ -6,9 +6,9 @@
  *
  *   • `submit_signup(...)` — submit the F6 sign-up form. Mutate-category, so
  *     the LLM surfaces a confirmable chip rather than auto-running an identity
- *     action. The handler dispatches a `submitSignup` CanvasIntent carrying the
- *     collected fields; the SignUpWidget registers a matching adapter that runs
- *     its REAL submit sequence (register → claimAnonymousChat →
+ *     action. The mirrored middleware tool emits a `submitSignup` CanvasIntent
+ *     carrying the collected fields; the SignUpWidget registers a matching
+ *     adapter that runs its REAL submit sequence (register → claimAnonymousChat →
  *     promoteToSignedIn → commitGate) — the SAME action the on-screen submit
  *     Button invokes. There is no dormant plumbing: tool → intent → adapter →
  *     the widget's existing submit handler.
@@ -42,14 +42,6 @@ const submitSignup: WidgetTool = {
       .string()
       .min(1)
       .describe("Password confirmation — must match `password` (the widget re-checks)."),
-  }),
-  handler: (input) => ({
-    kind: "submitSignup",
-    first: input.first,
-    last: input.last,
-    email: input.email,
-    password: input.password,
-    confirmPassword: input.confirmPassword,
   }),
   // No `availableSteps` — the sign-up surface is a gate modal over any
   // ViewerStep (there is no `sign-up` ViewerStepKind); reachable in every step.

@@ -34,10 +34,6 @@ const showIntegrate: WidgetTool = {
       "The ContentScope (documents / bucket+filter / group) the user is shipping — inherited from the surface the user transitioned from. The connectors list is scope-independent today, but the scope threads through for context.",
     ),
   }),
-  handler: (input) => ({
-    kind: "showIntegrate",
-    scope: input.scope,
-  }),
   availableSteps: ["integrate", "doc-viewer", "extract-workbench", "interact-chat", "report"],
 };
 

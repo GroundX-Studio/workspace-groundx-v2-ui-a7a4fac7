@@ -74,9 +74,10 @@ tool, which dispatches the same `pinToReport` `CanvasIntent`.
 ## LLM tools
 
 `PinToReportAction.tools.ts` declares `pin_to_report({ turn_id, text,
-template_id? })` — the chat twin of the button. The handler returns the same
-`pinToReport` `CanvasIntent` the button dispatches; the orchestrator routes both
-to `ChatStore.pinToReport`. Mirrored on the middleware `SERVER_TOOL_CATALOG`.
+template_id? })` — the chat twin of the button. The middleware
+`SERVER_TOOL_CATALOG` intentBuilder emits the same `pinToReport` `CanvasIntent`
+the button dispatches; the orchestrator routes both to `ChatStore.pinToReport`.
+The app declaration is metadata only.
 
 ## Tests
 

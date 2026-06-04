@@ -39,11 +39,6 @@ const showExtraction: WidgetTool = {
       .optional()
       .describe("Optional extraction template id; defaults to the active draft template when omitted."),
   }),
-  handler: (input) => ({
-    kind: "showExtract",
-    scope: input.scope,
-    schemaId: input.schema_id ?? "draft",
-  }),
   availableSteps: ["extract-workbench", "doc-viewer", "interact-chat", "report"],
 };
 

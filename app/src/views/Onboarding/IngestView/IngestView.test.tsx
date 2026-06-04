@@ -24,6 +24,7 @@ const fixtureScenarios: ScenarioConfig[] = [
   {
     id: "utility",
     order: 1,
+    projectId: "proj_utility",
     manifest: {
       id: "utility",
       hero: {
@@ -43,6 +44,7 @@ const fixtureScenarios: ScenarioConfig[] = [
   {
     id: "loan",
     order: 2,
+    projectId: "proj_loan",
     manifest: {
       id: "loan",
       hero: {
@@ -62,6 +64,7 @@ const fixtureScenarios: ScenarioConfig[] = [
   {
     id: "solar",
     order: 3,
+    projectId: "proj_solar",
     manifest: {
       id: "solar",
       hero: {

@@ -2,7 +2,7 @@
  * 2026-05-30-unified-conversation-flow Phase 2 — the `chatExperienceRegistry`
  * data catalog.
  *
- * A DATA CATALOG (consistent with `toolRegistry`'s glob assembly +
+ * A DATA CATALOG (consistent with Vite glob assembly +
  * `ScenarioRegistry`'s `byId` API), NOT a dispatcher: you `all()` / `byId(id)`,
  * the CALLER composes (picks the id, supplies config, passes the result to
  * `<ConversationFlow>`). There is deliberately NO `resolve(context)` — that

@@ -891,8 +891,8 @@ export function parseCanvasIntent(input: unknown): CanvasIntent | null {
 
 /**
  * The read API shared by every data catalog (`ScenarioRegistry`,
- * `toolRegistry`, `chatExperienceRegistry`): enumerate the set, or look one up
- * by its id.
+ * `chatExperienceRegistry`, scoped viewer widgets): enumerate the set, or look
+ * one up by its id.
  */
 export interface Catalog<T> {
   /** All entries in the catalog (stable order; read-only). */
@@ -1086,6 +1086,8 @@ export type ScenarioDocument = z.infer<typeof scenarioDocumentSchema>;
 export const scenarioConfigSchema = z.object({
   id: z.string(),
   order: z.number(),
+  /** GroundX document filter.projectId value for this scenario. */
+  projectId: z.string(),
   manifest: scenarioManifestSchema,
   documents: z.array(scenarioDocumentSchema),
   /** Capability flag lifted from the manifest: Extract offers table→JSON render. */

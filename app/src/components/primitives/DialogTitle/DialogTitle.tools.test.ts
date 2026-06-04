@@ -1,11 +1,10 @@
 /**
  * 2026-05-31-tool-system-completion (wf04 §4) — DialogTitle tools.
  *
- * `close_dialog` is a mutate-category tool whose handler dispatches a
- * `closeDialog` CanvasIntent. The DialogTitle primitive registers a matching
- * adapter that calls its `onClose` (the SAME action the close IconButton
- * invokes). Lives in the primitive glob-home (`components/primitives/**`)
- * opened by this change.
+ * `close_dialog` is a mutate-category metadata declaration mirrored by the
+ * middleware `SERVER_TOOL_CATALOG`, where the executable intent builder lives.
+ * Lives in the primitive glob-home (`components/primitives/**`) opened by this
+ * change.
  */
 import { describe, expect, it } from "vitest";
 
@@ -17,8 +16,8 @@ describe("DialogTitle tools", () => {
     expect(tools[0].category).toBe("mutate");
   });
 
-  it("close_dialog produces a closeDialog intent", () => {
-    expect(tools[0].handler(tools[0].input.parse({}))).toEqual({ kind: "closeDialog" });
+  it("close_dialog takes no arguments", () => {
+    expect(tools[0].input.parse({})).toEqual({});
   });
 
   it("description meets the Phase 5b quality bar", () => {

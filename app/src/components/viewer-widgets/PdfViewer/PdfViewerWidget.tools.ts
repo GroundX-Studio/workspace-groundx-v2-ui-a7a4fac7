@@ -14,7 +14,7 @@
  *     mountable
  *
  * Round-trip: the LLM emits `open_document` → middleware validates +
- * invokes `handler` → result is a `CanvasIntent` → orchestrator
+ * invokes its `intentBuilder` → result is a `CanvasIntent` → orchestrator
  * dispatches → built-in handler in `CanvasOrchestratorContext`
  * routes to `ChatStore.gotoDocViewer` → viewer pane re-renders. The
  * orchestrator handler for `jumpToPage` was added in Phase 4
@@ -44,11 +44,6 @@ const openDocument: WidgetTool = {
       .optional()
       .describe("Optional 1-indexed page to open at; defaults to page 1 when omitted"),
   }),
-  handler: (input) => ({
-    kind: "highlightCitation",
-    documentId: input.documentId,
-    page: input.page ?? 1,
-  }),
   // The viewer can mount in onboarding F2 + steady; reachable from
   // any step that renders into the canonical doc-viewer surface.
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
@@ -72,11 +67,6 @@ const jumpToPage: WidgetTool = {
       .int()
       .positive()
       .describe("1-indexed page to scroll to; the viewer renders this page as active"),
-  }),
-  handler: (input) => ({
-    kind: "jumpToPage",
-    documentId: input.documentId,
-    page: input.page,
   }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
 };

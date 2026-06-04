@@ -68,7 +68,6 @@ const t: WidgetTool = {
   description: "Open a document. Use when the user wants the doc.",
   category: "read",
   input: z.object({ id: z.string().describe("doc id") }),
-  handler: () => null,
 };
 export const tools = [t];
 `, () => {
@@ -86,7 +85,6 @@ const t: WidgetTool = {
   description: "Frobnicate a thing. Use when frobnication is needed.",
   category: "read",
   input: z.object({ id: z.string().describe("doc id") }),
-  handler: () => null,
 };
 export const tools = [t];
 `, () => {
@@ -104,7 +102,6 @@ const t: WidgetTool = {
   description: "open the thing.",
   category: "read",
   input: z.object({ id: z.string().describe("doc id") }),
-  handler: () => null,
 };
 export const tools = [t];
 `, () => {
@@ -122,7 +119,6 @@ const t: WidgetTool = {
   description: "Opens the thing in the viewer with a generic narrative description that has plenty of words.",
   category: "read",
   input: z.object({ id: z.string().describe("doc id") }),
-  handler: () => null,
 };
 export const tools = [t];
 `, () => {
@@ -140,7 +136,6 @@ const t: WidgetTool = {
   description: "Open the thing. Use when the user references it by name.",
   category: "read",
   input: z.object({ id: z.string() }),
-  handler: () => null,
 };
 export const tools = [t];
 `, () => {
@@ -158,7 +153,6 @@ const t: WidgetTool = {
   description: "Open the quality fixture surface. Use when the test runs.",
   category: "read",
   input: z.object({ id: z.string().describe("identifier") }),
-  handler: () => null,
 };
 export const tools = [t];
 `, () => {
@@ -177,7 +171,6 @@ const t: WidgetTool = {
   description: "Move the canvas to the quality fixture surface. Use when the test exercises the show_ verb.",
   category: "read",
   input: z.object({ scopeKey: z.string().describe("scope identity key") }),
-  handler: () => null,
 };
 export const tools = [t];
 `, () => {
@@ -202,7 +195,6 @@ const t: WidgetTool = {
   description: "Exercises the ${verb} verb prefix. Use when the test asserts the new verb taxonomy passes.",
   category: "read",
   input: z.object({ id: z.string().describe("identifier") }),
-  handler: () => null,
 };
 export const tools = [t];
 `, () => {
@@ -237,7 +229,6 @@ const t: WidgetTool = {
   description: "Frobnicate the glob-home fixture. Use when the scanner checks a non-widget home.",
   category: "read",
   input: z.object({ id: z.string().describe("identifier") }),
-  handler: () => null,
 };
 export const tools = [t];
 `;

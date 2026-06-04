@@ -11,6 +11,7 @@ import type { ScenarioConfig } from "@/types/scenarios";
 export const utilityTestScenario: ScenarioConfig = {
   id: "utility",
   order: 1,
+  projectId: "proj_utility",
   documents: [
     { documentId: "utility-bill-2026-04", fileName: "April 2026 Statement.pdf", order: 1 },
   ],
@@ -90,6 +91,7 @@ export const utilityTestScenario: ScenarioConfig = {
 export const loanTestScenario: ScenarioConfig = {
   id: "loan",
   order: 2,
+  projectId: "proj_loan",
   // Loan is the docs→structured-JSON sample — the only scenario that offers
   // the table→JSON render handoff in the Extract workbench.
   supportsJsonRender: true,
@@ -142,6 +144,7 @@ export const loanTestScenario: ScenarioConfig = {
 export const solarTestScenario: ScenarioConfig = {
   id: "solar",
   order: 3,
+  projectId: "proj_solar",
   documents: [
     { documentId: "solar-doc-1", fileName: "Solar Portfolio Summary.pdf", order: 1 },
   ],

@@ -87,16 +87,16 @@ function makeScopedIntro(
 
     // A short, real summary of the scope's docs. For a bucket scope the
     // workspace == bucket, so "ready" registry scenarios in that bucket are
-    // the docs the user can analyze; a project filter narrows to the matching
-    // scenario id (project filter-field value == scenario id in the demos).
+    // the docs the user can analyze; a projectId filter narrows to the
+    // matching GroundX document filter value returned by the scenario registry.
     const docSummary = useMemo(() => {
       if (registryState.status !== "ready") return null;
-      const projectValues =
-        scope.type === "bucket" && scope.filter?.project
-          ? (Array.isArray(scope.filter.project) ? scope.filter.project : [scope.filter.project])
+      const projectIds =
+        scope.type === "bucket" && scope.filter?.projectId
+          ? (Array.isArray(scope.filter.projectId) ? scope.filter.projectId : [scope.filter.projectId])
           : null;
-      const scenarios = projectValues
-        ? registryState.scenarios.filter((s) => projectValues.includes(s.id))
+      const scenarios = projectIds
+        ? registryState.scenarios.filter((s) => projectIds.includes(s.projectId))
         : registryState.scenarios;
       return scenarios;
     }, [registryState]);

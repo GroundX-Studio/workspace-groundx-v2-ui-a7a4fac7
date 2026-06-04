@@ -3,7 +3,7 @@
  * parity guard.
  *
  * SHAPE (gate-answered): a minimal CROSS-PACKAGE test — this app-side test
- * imports BOTH catalogs (the app `toolRegistry` and the middleware
+ * imports BOTH catalogs (the app declarative tool metadata and the middleware
  * `SERVER_TOOL_CATALOG`) and asserts they agree on tool NAME + ROLE. NOT a
  * committed manifest. It runs in the app vitest suite (the standard `npm test`
  * command), not a manual-only check.
@@ -29,7 +29,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { toolRegistry } from "./registry";
+import { collectAppToolSpecs } from "./appToolSpecs";
 // Cross-package import — the middleware server catalog (the role-bearing side).
 import { SERVER_TOOL_CATALOG } from "../../../middleware/src/services/toolCatalog";
 import type { WidgetRole } from "@groundx/shared";
@@ -47,7 +47,17 @@ const ROLE_RESTRICTED: Record<string, WidgetRole[]> = {
 };
 
 describe("app↔server tool-catalog parity (NAME + role)", () => {
-  const appNames = toolRegistry.all().map((t) => t.name).sort();
+  const appTools = collectAppToolSpecs(import.meta.glob(
+    [
+      "../components/chat-widgets/*/*.tools.ts",
+      "../components/viewer-widgets/*/*.tools.ts",
+      "../views/**/*.tools.ts",
+      "../components/primitives/**/*.tools.ts",
+    ],
+    { eager: true },
+  ));
+  const appByName = new Map(appTools.map((t) => [t.name, t]));
+  const appNames = appTools.map((t) => t.name).sort();
   const serverByName = new Map(SERVER_TOOL_CATALOG.map((t) => [t.name, t]));
   const serverNames = SERVER_TOOL_CATALOG.map((t) => t.name).sort();
 
@@ -92,7 +102,7 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
   // SERVER-ONLY tools have no app mirror by design and are skipped.
   it("every app tool's description matches its server mirror's description verbatim", () => {
     const mismatches: string[] = [];
-    for (const tool of toolRegistry.all()) {
+    for (const tool of appTools) {
       const server = serverByName.get(tool.name);
       if (server === undefined) continue; // missing-mirror covered by the name guard
       if (server.description !== tool.description) {
@@ -158,8 +168,8 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
 
     it("every enumerated card tool declares a rendersWidget binding on the APP side", () => {
       for (const [toolName, expected] of Object.entries(CARD_TOOL_BINDINGS)) {
-        const tool = toolRegistry.byName(toolName);
-        expect(tool, `${toolName} not found in the app tool registry`).toBeDefined();
+        const tool = appByName.get(toolName);
+        expect(tool, `${toolName} not found in the app tool metadata`).toBeDefined();
         expect(
           tool!.rendersWidget,
           `${toolName} (app) must declare rendersWidget: "${expected}"`,
@@ -180,7 +190,7 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
 
     it("every rendersWidget binding (either catalog) resolves to a REAL mounted chat widget", () => {
       const dangling: string[] = [];
-      for (const tool of toolRegistry.all()) {
+      for (const tool of appTools) {
         if (tool.rendersWidget && !bindingResolvesToMountedWidget(tool.rendersWidget)) {
           dangling.push(`app ${tool.name} → "${tool.rendersWidget}"`);
         }
@@ -200,8 +210,7 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
     // enumerated cards (no untracked binding sneaks in unmirrored). New
     // card-triggering tools must extend CARD_TOOL_BINDINGS in the same change.
     it("every app tool that declares a rendersWidget binding is enumerated above", () => {
-      const declared = toolRegistry
-        .all()
+      const declared = appTools
         .filter((t) => t.rendersWidget)
         .map((t) => t.name)
         .sort();

@@ -10,10 +10,11 @@
  *   • `wizard_finish` — finish + record completion
  *   • `dismiss_wizard`— skip / close without completing
  *
- * Read-category (navigation only) → auto-dispatch. Each handler returns the
- * matching CanvasIntent; the OnboardingWizard view registers adapters that call
- * the OnboardingContext `next` / `back` / `finish` / `closeWithoutCompleting`
- * — the SAME action the wizard's nav Buttons invoke. No dormant plumbing.
+ * Read-category (navigation only) → auto-dispatch. Middleware intent builders
+ * construct the matching CanvasIntent; the OnboardingWizard view registers
+ * adapters that call the OnboardingContext `next` / `back` / `finish` /
+ * `closeWithoutCompleting` — the SAME action the wizard's nav Buttons invoke.
+ * No dormant plumbing.
  *
  * Role (access matrix): all roles. The wizard is an onboarding walkthrough;
  * availability is enforced by `APP_CONFIG.onboarding.enabled` + the mount site,
@@ -30,7 +31,6 @@ const wizardNext: WidgetTool = {
     "onboarding wizard and the user asks to continue, go on, or move to the next step.",
   category: "read",
   input: z.object({}),
-  handler: () => ({ kind: "wizardNext" }),
 };
 
 const wizardBack: WidgetTool = {
@@ -40,7 +40,6 @@ const wizardBack: WidgetTool = {
     "back or review the previous onboarding step.",
   category: "read",
   input: z.object({}),
-  handler: () => ({ kind: "wizardBack" }),
 };
 
 const wizardFinish: WidgetTool = {
@@ -50,7 +49,6 @@ const wizardFinish: WidgetTool = {
     "onboarding step and asks to finish, complete, or close the walkthrough as done.",
   category: "read",
   input: z.object({}),
-  handler: () => ({ kind: "wizardFinish" }),
 };
 
 const dismissWizard: WidgetTool = {
@@ -60,7 +58,6 @@ const dismissWizard: WidgetTool = {
     "close, or come back later to the onboarding walkthrough.",
   category: "read",
   input: z.object({}),
-  handler: () => ({ kind: "dismissWizard" }),
 };
 
 export const tools: WidgetTool[] = [wizardNext, wizardBack, wizardFinish, dismissWizard];

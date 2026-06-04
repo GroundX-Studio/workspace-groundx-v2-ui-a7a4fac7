@@ -25,7 +25,7 @@ On Accept:
   schema overlay. Save the template to keep it.") with the
   Accept/Reject controls removed so the user can't double-fire.
 - **UI-01 Phase 2c**: Fires a focused extraction via `POST
-  /api/extract-field` (fire-and-forget). The handler dispatches
+  /api/extract-field` (fire-and-forget). The Accept action dispatches
   `setSchemaFieldExtraction(fieldId, { status: "pending" })` immediately
   so SchemaView's field card shows an "EXTRACTING" badge; on
   success it lands `{ status: "done", value, confidence, citation }`

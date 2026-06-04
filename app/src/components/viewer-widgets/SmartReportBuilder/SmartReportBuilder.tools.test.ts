@@ -1,8 +1,7 @@
 /**
- * SmartReportBuilder.tools — handler contract (2026-05-29-smart-report-screen
- * Phase 5, step-17 follow-up). Asserts the `show_smart_report_edit` input is
- * threaded into the `editTemplate` intent (NOT silently discarded) so the
- * builder pre-selects the named section via its `selectedSectionId` prop.
+ * SmartReportBuilder.tools — app metadata contract. Asserts the
+ * `show_smart_report_edit` input schema preserves `selected_section_id`; the
+ * executable intent builder lives in the middleware `SERVER_TOOL_CATALOG`.
  */
 import { describe, expect, it } from "vitest";
 
@@ -14,26 +13,23 @@ function toolByName(name: string) {
   return t;
 }
 
-describe("show_smart_report_edit handler", () => {
-  it("threads selected_section_id into the editTemplate intent (not discarded)", () => {
+describe("show_smart_report_edit metadata", () => {
+  it("accepts selected_section_id in the metadata schema", () => {
     const tool = toolByName("show_smart_report_edit");
     const input = tool.input.parse({
       template_id: "tpl-1",
       selected_section_id: "charge_breakdown",
     });
-    const intent = tool.handler(input);
-    expect(intent).toEqual({
-      kind: "editTemplate",
-      templateId: "tpl-1",
-      selectedSectionId: "charge_breakdown",
+    expect(input).toEqual({
+      template_id: "tpl-1",
+      selected_section_id: "charge_breakdown",
     });
   });
 
-  it("omits selectedSectionId when not supplied (open builder, no pre-selection)", () => {
+  it("omits selected_section_id when not supplied", () => {
     const tool = toolByName("show_smart_report_edit");
     const input = tool.input.parse({ template_id: "tpl-1" });
-    const intent = tool.handler(input);
-    expect(intent).toEqual({ kind: "editTemplate", templateId: "tpl-1" });
-    expect("selectedSectionId" in (intent as Record<string, unknown>)).toBe(false);
+    expect(input).toEqual({ template_id: "tpl-1" });
+    expect("selected_section_id" in (input as Record<string, unknown>)).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Catalog } from "@groundx/shared";
 
 import { withApiProvider } from "@/test/withApiProvider";
+import { utilityTestScenario } from "@/test/scenarioFixtures";
 import type { ScenarioConfig } from "@/types/scenarios";
 import type { ScenarioRegistryState } from "./types";
 import { ScenarioRegistryProvider, useScenarioRegistry } from "./ScenarioRegistryContext";
@@ -23,6 +24,17 @@ const renderWithApi = (
   ui: ReactElement,
   api?: Parameters<typeof withApiProvider>[1],
 ) => render(withApiProvider(ui, api));
+
+const scenario = (id: string, order: number): ScenarioConfig => ({
+  ...utilityTestScenario,
+  id,
+  order,
+  projectId: `proj_${id}`,
+  manifest: {
+    ...utilityTestScenario.manifest,
+    id,
+  },
+});
 
 // ── RCC Phase 2: the ready-state data view satisfies Catalog<ScenarioConfig> ──
 function CatalogProbe() {
@@ -44,7 +56,7 @@ describe("ScenarioRegistryProvider", () => {
     renderWithApi(
       <ScenarioRegistryProvider
         initialScenarios={[
-          { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
+          scenario("x", 1),
         ]}
       >
         <Probe />
@@ -64,7 +76,7 @@ describe("ScenarioRegistryProvider", () => {
     renderWithApi(
       <ScenarioRegistryProvider
         initialScenarios={[
-          { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
+          scenario("x", 1),
         ]}
         forcedDemoState={forced}
       >
@@ -101,8 +113,8 @@ describe("ScenarioRegistryProvider", () => {
     renderWithApi(
       <ScenarioRegistryProvider
         initialScenarios={[
-          { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
-          { id: "y", order: 2, manifest: { id: "y" } as any, documents: [] },
+          scenario("x", 1),
+          scenario("y", 2),
         ]}
       >
         <CatalogProbe />
@@ -117,7 +129,7 @@ describe("ScenarioRegistryProvider", () => {
     const listScenarios = vi.fn(async () => ({
       bucketId: 28454,
       scenarios: [
-        { id: "x", order: 1, manifest: { id: "x" } as any, documents: [] },
+        scenario("x", 1),
       ],
     }));
 

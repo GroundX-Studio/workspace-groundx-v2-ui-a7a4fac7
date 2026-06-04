@@ -2,10 +2,8 @@
  * 2026-05-31-tool-system-completion (wf04 §1) — SignUpWidget tools.
  *
  * `submit_signup` replaces the widget's `no-llm.md` opt-out. It is a
- * mutate-category tool whose handler dispatches a `submitSignup` CanvasIntent
- * carrying the collected identity fields; the SignUpWidget registers a matching
- * adapter that runs its real register → claim → promote → commitGate sequence
- * (the SAME action the submit Button invokes).
+ * mutate-category metadata declaration whose executable intent builder lives in
+ * the middleware `SERVER_TOOL_CATALOG`.
  */
 import { describe, expect, it } from "vitest";
 
@@ -17,7 +15,7 @@ describe("SignUpWidget tools", () => {
     expect(tools[0].category).toBe("mutate");
   });
 
-  it("submit_signup produces a submitSignup intent from validated input", () => {
+  it("submit_signup accepts the validated identity payload", () => {
     const input = {
       first: "Ada",
       last: "Lovelace",
@@ -25,10 +23,7 @@ describe("SignUpWidget tools", () => {
       password: "supersecret",
       confirmPassword: "supersecret",
     };
-    expect(tools[0].handler(tools[0].input.parse(input))).toEqual({
-      kind: "submitSignup",
-      ...input,
-    });
+    expect(tools[0].input.parse(input)).toEqual(input);
   });
 
   it("submit_signup rejects an empty email (real validation, no dormant tool)", () => {

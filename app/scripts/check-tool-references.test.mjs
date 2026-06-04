@@ -106,7 +106,6 @@ const t: WidgetTool = {
   description: "Glob-home fixture view tool. Use when the reference walker checks view homes.",
   category: "read",
   input: z.object({ id: z.string().describe("identifier") }),
-  handler: () => null,
 };
 export const tools = [t];
 `,
@@ -126,7 +125,6 @@ const t: WidgetTool = {
   description: "Glob-home fixture primitive tool. Use when the reference walker checks primitive homes.",
   category: "read",
   input: z.object({ id: z.string().describe("identifier") }),
-  handler: () => null,
 };
 export const tools = [t];
 `,

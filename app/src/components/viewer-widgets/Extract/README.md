@@ -87,9 +87,10 @@ production registry (`scopedViewerWidgetRegistryProduction.ts`).
 `Extract.tools.ts` declares `show_extraction({ scope, schema_id? })` — the
 canvas-dispatch tool for the workbench. `show_` is the canonical canvas-dispatch
 verb for every ScopedViewerWidget (allowlisted in `check-tool-quality`). The
-handler returns a `showExtract` `CanvasIntent`; the orchestrator's built-in
-handler routes it to `advanceFrame("f3")` — the SAME canvas move the Extract
-sub-pill performs. Mirrored on the middleware `SERVER_TOOL_CATALOG`.
+middleware `SERVER_TOOL_CATALOG` intentBuilder returns a `showExtract`
+`CanvasIntent`; the orchestrator's built-in handler routes it to
+`advanceFrame("f3")` — the SAME canvas move the Extract sub-pill performs. The
+app declaration is metadata only.
 
 ## Tests
 

@@ -734,8 +734,9 @@ export const UNKNOWN_VIEWER_STEP = Symbol("unknown-viewer-step");
 export type UnknownViewerStep = typeof UNKNOWN_VIEWER_STEP;
 
 /**
- * Tools exposed for the given ViewerStep + caller role. Mirrors the app-side
- * `toolRegistry.forStep`. The two filters COMPOSE: a tool is exposed IFF its
+ * Tools exposed for the given ViewerStep + caller role. `SERVER_TOOL_CATALOG`
+ * is the production source of truth; app tool metadata mirrors name/description
+ * for parity only. The two filters COMPOSE: a tool is exposed IFF its
  * `availableSteps` admits `stepKind` (absent/empty → every step) AND
  * `roleExposes(tool, role)` (absent/empty `availableIn` → every role). When
  * `role` is omitted the role filter is a no-op (back-compat — full per-step

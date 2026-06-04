@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScenarioRegistry } from "./registry.js";
 import type { SampleScenarioConfig } from "./sampleScenarios.js";
 import type { ScenarioManifest } from "./types.js";
+import { SAMPLE_PROJECT_ID } from "../db/seedSampleProject.js";
 import { testEnv } from "../test/fakes.js";
 
 /**
@@ -73,6 +74,12 @@ describe("ScenarioRegistry — app-side manifest + projectId join", () => {
     mockDocumentsList([flatDoc("solar")]);
     const scenarios = await new ScenarioRegistry(env, [config("solar")]).list();
     expect(scenarios.find((s) => s.id === "solar")!.supportsJsonRender).toBe(false);
+  });
+
+  it("returns the resolved projectId on each ScenarioConfig", async () => {
+    mockDocumentsList([flatDoc("utility", SAMPLE_PROJECT_ID)]);
+    const scenarios = await new ScenarioRegistry(env, [config("utility", true)]).list();
+    expect(scenarios[0]!.projectId).toBe(SAMPLE_PROJECT_ID);
   });
 
   it("OMITS a scenario config with no matching bucket doc (not yet seeded)", async () => {

@@ -117,8 +117,9 @@ See [`SignUpWidget.tools.ts`](./SignUpWidget.tools.ts). One mutate-category
 tool: `submit_signup`. It does NOT auto-run — mutate tools surface a
 confirmable chip, so the user still confirms before the account is created
 (the historical authentication-fraud concern that previously made this widget
-opt out). The handler dispatches a `submitSignup` CanvasIntent carrying the
-collected fields; the widget registers a matching orchestrator adapter that
+opt out). The middleware `SERVER_TOOL_CATALOG` intentBuilder emits a
+`submitSignup` CanvasIntent carrying the collected fields; the widget registers
+a matching orchestrator adapter that
 runs the SAME register → claim → promote → commitGate sequence the submit
 Button invokes. The five form inputs stay `noTool` with the reason
 "value collected by submit_signup" (their values are arguments of the tool,

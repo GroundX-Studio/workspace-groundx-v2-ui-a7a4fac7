@@ -87,10 +87,10 @@ canvas kind, which passes the active experience's scope + the auth-derived role.
 `SmartReportRender.tools.ts` declares `show_smart_report_render({ scope,
 template_id? })` — the canvas-dispatch tool for the render surface. `show_` is
 the canonical canvas-dispatch verb for every ScopedViewerWidget, allowlisted
-once in `check-tool-quality` by this phase. The handler returns the same
-`showReport` `CanvasIntent` the step-strip pill / "make me a report" path
-dispatches, so the tool drives the identical canvas move. Mirrored on the
-middleware `SERVER_TOOL_CATALOG`. Its `_edit` sibling
+once in `check-tool-quality` by this phase. The middleware `SERVER_TOOL_CATALOG`
+intentBuilder returns the same `showReport` `CanvasIntent` the step-strip pill /
+"make me a report" path dispatches, so the tool drives the identical canvas
+move. The app declaration is metadata only. Its `_edit` sibling
 (`show_smart_report_edit`) lives on `SmartReportBuilder.tools.ts`.
 
 ## Tests

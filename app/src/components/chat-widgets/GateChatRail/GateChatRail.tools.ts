@@ -34,7 +34,6 @@ const commitGate: WidgetTool = {
         "Which gate-commit path: \"register\" for email sign-up, \"sso\" for SAML / Google / Microsoft, \"engineer-call\" for the Calendly booking path.",
       ),
   }),
-  handler: (input) => ({ kind: "commitGate", method: input.method }),
 };
 
 const dismissGate: WidgetTool = {
@@ -45,7 +44,6 @@ const dismissGate: WidgetTool = {
     "(\"not now\", \"let me see the rest first\").",
   category: "mutate",
   input: z.object({}),
-  handler: () => ({ kind: "dismissGate" }),
 };
 
 /**
@@ -67,7 +65,6 @@ const saveToAccount: WidgetTool = {
     "once they have). Surfaces the gate; it does not create the account.",
   category: "mutate",
   input: z.object({}),
-  handler: () => ({ kind: "openGate", trigger: "save" }),
   availableSteps: ["doc-viewer", "interact-chat"],
   // §5 reachability — surfaces as a `tool:save_to_account` suggested-action chip
   // rendered by SuggestedActionChips (the `reply.suggestedActions[]` renderer).

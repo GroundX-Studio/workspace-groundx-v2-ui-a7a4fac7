@@ -6,9 +6,9 @@
  * glob-home (`components/primitives/**`) opened by this change. One tool:
  *
  *   • `close_dialog()` — dismiss the active dialog. Mutate-category. The
- *     handler returns a `closeDialog` CanvasIntent; the DialogTitle registers
- *     an adapter that calls its own `onClose` — the SAME action the close
- *     IconButton invokes. No dormant plumbing.
+ *     mirrored middleware tool builds the `closeDialog` CanvasIntent; the
+ *     DialogTitle registers an adapter that calls its own `onClose` — the SAME
+ *     action the close IconButton invokes. No dormant plumbing.
  *
  * Role (access matrix): all roles. Closing a dialog is open to anyone who can
  * see it. Mirrored on the server `SERVER_TOOL_CATALOG`.
@@ -24,7 +24,6 @@ const closeDialog: WidgetTool = {
     "asks to close, dismiss, or cancel the open modal / dialog.",
   category: "mutate",
   input: z.object({}),
-  handler: () => ({ kind: "closeDialog" }),
 };
 
 export const tools: WidgetTool[] = [closeDialog];

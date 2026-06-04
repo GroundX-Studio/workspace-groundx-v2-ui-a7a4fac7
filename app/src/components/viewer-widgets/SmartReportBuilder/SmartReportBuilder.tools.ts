@@ -16,11 +16,11 @@
  *   • `edit_report_section` / `delete_report_section` — the chat twins of the
  *     inline editor + `⋮ → Remove`.
  *
- * Interim AgentToolBus bridge: each handler returns the SAME `CanvasIntent` the
- * on-screen control dispatches, which the orchestrator routes to the identical
- * ChatStore action (`editReportSection`, `removeReportSection`,
- * `enqueueReportProposal`, …). The builder's mouse controls and these tools
- * therefore perform the same mutation.
+ * Middleware `intentBuilder`s emit the SAME `CanvasIntent`s the on-screen
+ * controls dispatch, which the orchestrator routes to the identical ChatStore
+ * action (`editReportSection`, `removeReportSection`, `enqueueReportProposal`,
+ * …). The builder's mouse controls and these mirrored tools therefore perform
+ * the same mutation.
  */
 import { z } from "zod";
 
@@ -45,13 +45,6 @@ const showSmartReportEdit: WidgetTool = {
       .optional()
       .describe("Optional section id to pre-select / expand in the builder's row list."),
   }),
-  handler: (input) => ({
-    kind: "editTemplate",
-    templateId: input.template_id,
-    ...(input.selected_section_id !== undefined
-      ? { selectedSectionId: input.selected_section_id }
-      : {}),
-  }),
   availableSteps: ["report", "extract-workbench"],
 };
 
@@ -75,12 +68,6 @@ const proposeReportSection: WidgetTool = {
       .max(400)
       .describe("The question this section answers at render time (the literal prompt)."),
   }),
-  handler: (input) => ({
-    kind: "proposeReportSection",
-    name: input.name,
-    renderAs: input.render_as,
-    question: input.question,
-  }),
   availableSteps: ["report", "extract-workbench"],
 };
 
@@ -96,7 +83,6 @@ const acceptReportSection: WidgetTool = {
       .min(1)
       .describe("Proposal id (from the builder's pending proposal queue) to accept."),
   }),
-  handler: (input) => ({ kind: "acceptReportSection", proposalId: input.proposal_id }),
   availableSteps: ["report", "extract-workbench"],
 };
 
@@ -112,7 +98,6 @@ const rejectReportSection: WidgetTool = {
       .min(1)
       .describe("Proposal id (from the builder's pending proposal queue) to reject."),
   }),
-  handler: (input) => ({ kind: "rejectReportSection", proposalId: input.proposal_id }),
   availableSteps: ["report", "extract-workbench"],
 };
 
@@ -133,14 +118,6 @@ const editReportSection: WidgetTool = {
       .optional()
       .describe("New instruction rules, one per array entry (optional)."),
   }),
-  handler: (input) => ({
-    kind: "editReportSection",
-    sectionId: input.section_id,
-    ...(input.name !== undefined ? { name: input.name } : {}),
-    ...(input.render_as !== undefined ? { renderAs: input.render_as } : {}),
-    ...(input.question !== undefined ? { question: input.question } : {}),
-    ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
-  }),
   availableSteps: ["report", "extract-workbench"],
 };
 
@@ -153,7 +130,6 @@ const deleteReportSection: WidgetTool = {
   input: z.object({
     section_id: z.string().min(1).describe("The section id to remove (a draft or saved section)."),
   }),
-  handler: (input) => ({ kind: "deleteReportSection", sectionId: input.section_id }),
   availableSteps: ["report", "extract-workbench"],
 };
 

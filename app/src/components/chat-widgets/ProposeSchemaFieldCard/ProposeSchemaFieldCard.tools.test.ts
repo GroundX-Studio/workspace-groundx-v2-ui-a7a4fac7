@@ -36,20 +36,20 @@ describe("ProposeSchemaFieldCard tools", () => {
   describe("propose_schema_field", () => {
     const tool = byName("propose_schema_field");
 
-    it("accepts a valid payload + builds a proposeSchemaField intent", () => {
+    it("accepts a valid payload and declares its inline card binding", () => {
       const parsed = tool.input.parse({
         categoryId: "statement",
         name: "total_tax",
         type: "NUMBER",
         description: "Total tax line item on the bill.",
       });
-      expect(tool.handler(parsed)).toEqual({
-        kind: "proposeSchemaField",
+      expect(parsed).toEqual({
         categoryId: "statement",
         name: "total_tax",
         type: "NUMBER",
         description: "Total tax line item on the bill.",
       });
+      expect(tool.rendersWidget).toBe("chat-widgets/ProposeSchemaFieldCard");
     });
 
     it("rejects an invalid type", () => {
@@ -67,12 +67,9 @@ describe("ProposeSchemaFieldCard tools", () => {
   describe("accept_proposal", () => {
     const tool = byName("accept_proposal");
 
-    it("accepts a proposalId + builds an acceptSchemaField intent", () => {
+    it("accepts a proposalId", () => {
       const parsed = tool.input.parse({ proposalId: "prop_123" });
-      expect(tool.handler(parsed)).toEqual({
-        kind: "acceptSchemaField",
-        proposalId: "prop_123",
-      });
+      expect(parsed).toEqual({ proposalId: "prop_123" });
     });
 
     it("requires a non-empty proposalId", () => {
@@ -83,12 +80,9 @@ describe("ProposeSchemaFieldCard tools", () => {
   describe("reject_proposal", () => {
     const tool = byName("reject_proposal");
 
-    it("accepts a proposalId + builds a rejectSchemaField intent", () => {
+    it("accepts a proposalId", () => {
       const parsed = tool.input.parse({ proposalId: "prop_123" });
-      expect(tool.handler(parsed)).toEqual({
-        kind: "rejectSchemaField",
-        proposalId: "prop_123",
-      });
+      expect(parsed).toEqual({ proposalId: "prop_123" });
     });
   });
 
