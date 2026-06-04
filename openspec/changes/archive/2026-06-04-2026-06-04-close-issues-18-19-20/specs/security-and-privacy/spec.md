@@ -1,13 +1,7 @@
-# security-and-privacy Specification
+# security-and-privacy Specification Delta
 
-## Purpose
+## MODIFIED Requirements
 
-Define the durable contract for CSP / headers, CSRF, PII handling,
-consent gating of analytics, and SOC2-shaped audit trails. Includes the
-hard rule that Partner-API keys and customer secrets never reach the
-browser and the credential-isolation pattern the middleware uses to
-enforce it.
-## Requirements
 ### Requirement: Consent UI SHALL gate analytics + tracking scripts and CSP allowlist
 
 The product SHALL render a consent banner on cold load when at least one
@@ -45,19 +39,3 @@ loads, or sends requests to analytics providers before consent.
 - **GIVEN** the user accepts consent
 - **WHEN** PostHog or GA env vars are unset
 - **THEN** the corresponding wrapper remains a no-op and no script is loaded.
-
-### Requirement: PII scrubbers SHALL cover the documented pattern set
-
-The `pii.ts` scrubbers (`scrubString` + `scrubValue`) SHALL cover the
-full pattern list documented in `memory/project_security.md` — email,
-phone, SSN, credit-card (Luhn), account number, and any future
-additions. Both pino + PostHog scrubbers MUST share the same pattern
-list; any patterns missing today MUST gain matching test fixtures.
-
-#### Scenario: Each documented PII shape redacts
-
-- **GIVEN** a test fixture for each PII shape (email, phone, SSN, credit card, account number)
-- **WHEN** the value is passed through `scrubValue`
-- **THEN** the returned shape redacts the sensitive substring
-- **AND** the same scrub applies on both pino and PostHog code paths
-

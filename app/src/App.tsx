@@ -12,6 +12,7 @@ import { DocumentsProvider } from "@/contexts/DocumentsContext/DocumentsProvider
 import { OnboardingSessionProvider } from "@/contexts/OnboardingSessionContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { OnboardingSkillProvider } from "@/contexts/OnboardingSkillContext";
+import { AnalyticsConsentProvider } from "@/components/privacy/AnalyticsConsent/AnalyticsConsentProvider";
 import { ScenarioRegistryProviderWithDemoHooks } from "@/contexts/ScenarioRegistryContext";
 import { AppErrorBoundary } from "@/components/layout/AppErrorBoundary/AppErrorBoundary";
 import { DebugOverlay } from "@/components/layout/DebugOverlay/DebugOverlay";
@@ -55,30 +56,32 @@ export const AppProviders: FC<{ children: ReactNode; apiClient?: Api }> = ({
           {/* Global SVG defs used by the F-series sample cards / BYO tiles to get
             the slightly-rough wireframe edge — see `WireframeFilters`. */}
           <WireframeFilters />
-          <LoadingProvider>
-            <MessageBarProvider>
-              {/* DocumentsProvider sits above AuthProvider so any
-                widget — sign-in modal, onboarding canvas, steady
-                shell — can read it. The widget hooks
-                (`useDocumentsContext`) throw if this is missing;
-                the AppErrorBoundary above is the last-line catch. */}
-              <DocumentsProvider>
-                <AuthProvider>
-                  <AppModeProvider>
-                    <ScenarioRegistryProviderWithDemoHooks>
-                      <OnboardingSessionProvider>
-                        <CanvasOrchestratorProvider>
-                          <OnboardingSkillProvider>
-                            <HelmetProvider>{children}</HelmetProvider>
-                          </OnboardingSkillProvider>
-                        </CanvasOrchestratorProvider>
-                      </OnboardingSessionProvider>
-                    </ScenarioRegistryProviderWithDemoHooks>
-                  </AppModeProvider>
-                </AuthProvider>
-              </DocumentsProvider>
-            </MessageBarProvider>
-          </LoadingProvider>
+          <AnalyticsConsentProvider>
+            <LoadingProvider>
+              <MessageBarProvider>
+                {/* DocumentsProvider sits above AuthProvider so any
+                  widget — sign-in modal, onboarding canvas, steady
+                  shell — can read it. The widget hooks
+                  (`useDocumentsContext`) throw if this is missing;
+                  the AppErrorBoundary above is the last-line catch. */}
+                <DocumentsProvider>
+                  <AuthProvider>
+                    <AppModeProvider>
+                      <ScenarioRegistryProviderWithDemoHooks>
+                        <OnboardingSessionProvider>
+                          <CanvasOrchestratorProvider>
+                            <OnboardingSkillProvider>
+                              <HelmetProvider>{children}</HelmetProvider>
+                            </OnboardingSkillProvider>
+                          </CanvasOrchestratorProvider>
+                        </OnboardingSessionProvider>
+                      </ScenarioRegistryProviderWithDemoHooks>
+                    </AppModeProvider>
+                  </AuthProvider>
+                </DocumentsProvider>
+              </MessageBarProvider>
+            </LoadingProvider>
+          </AnalyticsConsentProvider>
         </MotionRoot>
       </GxThemeProvider>
     </AppErrorBoundary>

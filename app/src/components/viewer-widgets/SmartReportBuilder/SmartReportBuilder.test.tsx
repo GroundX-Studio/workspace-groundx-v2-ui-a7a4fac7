@@ -26,7 +26,7 @@ const GateProbe: FC = () => {
 const UTILITY_SCOPE: ContentScope = {
   type: "bucket",
   bucketId: 28454,
-  filter: { project: "utility" },
+  filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
 };
 
 const saveReportTemplate =

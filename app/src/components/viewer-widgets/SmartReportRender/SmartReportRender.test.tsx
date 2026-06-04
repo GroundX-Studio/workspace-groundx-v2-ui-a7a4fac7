@@ -16,7 +16,7 @@ import { SmartReportRender } from "./SmartReportRender";
 const UTILITY_SCOPE: ContentScope = {
   type: "bucket",
   bucketId: 28454,
-  filter: { project: "utility" },
+  filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
 };
 
 const renderReport = vi.fn<[RenderReportInput], Promise<RenderReportResult>>();
@@ -267,7 +267,8 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     // the Utility report after the scope flips.
     vi.mocked(renderReport).mockImplementation(async (input) => {
       const isUtility =
-        input.scope.type === "bucket" && input.scope.filter?.project === "utility";
+        input.scope.type === "bucket" &&
+        input.scope.filter?.projectId === "proj_c7701da7-0e08-482a-a496-df9dfe991613";
       return isUtility
         ? utilityResult
         : { gated: false, report: { ...UTILITY_REPORT, sections: [] } };

@@ -10,8 +10,9 @@
  *     dropped silently rather than spamming Sentry; we don't want a
  *     PostHog outage to fill our error budget.
  *
- * Wire-up: `main.tsx` calls `initAnalytics(import.meta.env.VITE_POSTHOG_API_KEY,
- * import.meta.env.VITE_POSTHOG_HOST)` once at boot.
+ * Wire-up: `AnalyticsConsentProvider` calls
+ * `initAnalytics(import.meta.env.VITE_POSTHOG_API_KEY,
+ * import.meta.env.VITE_POSTHOG_HOST)` after consent.
  *
  * Catch-side: every funnel boundary calls `track("event.name", { extras })`.
  * Named-event durable contract: `openspec/specs/observability/spec.md`.

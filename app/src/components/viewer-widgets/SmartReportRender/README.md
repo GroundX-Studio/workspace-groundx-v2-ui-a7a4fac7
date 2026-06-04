@@ -75,7 +75,11 @@ import { SmartReportRender } from "@/components/viewer-widgets/SmartReportRender
 
 <SmartReportRender
   role={role}
-  scope={{ type: "bucket", bucketId: 28454, filter: { project: "utility" } }}
+  scope={{
+    type: "bucket",
+    bucketId: 28454,
+    filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
+  }}
 />
 ```
 
@@ -99,7 +103,7 @@ move. The app declaration is metadata only. Its `_edit` sibling
 
 1. Mounts for BOTH roles (`anonymous`, `member`); `data-role` reflects the prop.
 2. Renders the Utility fixture's four sections + CiteChips over a
-   `bucket + project filter` scope.
+   `bucket + projectId filter` scope.
 3. Export / Save lock state differs by role + `preview_only`.
 4. `✎ edit §N` dispatches the `editTemplate` intent through the orchestrator
    (the render→builder hand-off; routes to `advanceFrame("f4a", { selectedReportSectionId })`).

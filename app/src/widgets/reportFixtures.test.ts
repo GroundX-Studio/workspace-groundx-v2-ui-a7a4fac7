@@ -4,20 +4,34 @@ import type { ContentScope } from "@groundx/shared";
 
 import { getReportFixture, reportTemplateIdForScope } from "./reportFixtures";
 
+const UTILITY_PROJECT_ID = "proj_c7701da7-0e08-482a-a496-df9dfe991613";
+
 describe("report demo fixtures — 2026-05-29-smart-report-screen Phase 2", () => {
   const utilityScope: ContentScope = {
     type: "bucket",
     bucketId: 28454,
-    filter: { project: "utility" },
+    filter: { projectId: UTILITY_PROJECT_ID },
   };
 
-  it("the Utility report fixture is scoped bucket+project-filter (NOT a document-id list)", () => {
+  it("the Utility report fixture is scoped bucket+projectId-filter (NOT a document-id list)", () => {
     const report = getReportFixture(utilityScope);
     expect(report).not.toBeNull();
     expect(report!.scope.type).toBe("bucket");
     if (report!.scope.type === "bucket") {
-      expect(report!.scope.filter).toMatchObject({ project: "utility" });
+      expect(report!.scope.filter).toMatchObject({ projectId: UTILITY_PROJECT_ID });
+      expect(report!.scope.filter).not.toHaveProperty("project");
     }
+  });
+
+  it("does not route stale bucket+project scopes into the Utility report", () => {
+    const staleFilter = { ["project"]: "utility" };
+    const staleScope: ContentScope = {
+      type: "bucket",
+      bucketId: 28454,
+      filter: staleFilter,
+    };
+    expect(getReportFixture(staleScope)).toBeNull();
+    expect(reportTemplateIdForScope(staleScope)).toBeNull();
   });
 
   it("the Utility fixture has the four IC-brief sections with the right renderAs mix", () => {
@@ -65,7 +79,7 @@ describe("reportTemplateIdForScope — scope→template routing (2026-05-31-smar
     const utilityScope: ContentScope = {
       type: "bucket",
       bucketId: 28454,
-      filter: { project: "utility" },
+      filter: { projectId: UTILITY_PROJECT_ID },
     };
     // The template id (NOT a rendered report) — the surface fetches the report
     // from the endpoint using this id; the helper only decides WHICH template.
@@ -84,7 +98,7 @@ describe("reportTemplateIdForScope — scope→template routing (2026-05-31-smar
     const loanScope: ContentScope = {
       type: "bucket",
       bucketId: 28454,
-      filter: { project: "loan" },
+      filter: { projectId: "proj_loan" },
     };
     expect(reportTemplateIdForScope(loanScope)).toBeNull();
   });

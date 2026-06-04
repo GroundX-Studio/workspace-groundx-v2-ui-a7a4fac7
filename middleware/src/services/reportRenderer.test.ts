@@ -40,11 +40,12 @@ import {
  */
 
 const SAMPLE_BUCKET = 28454;
+const SAMPLE_PROJECT_ID = "proj_c7701da7-0e08-482a-a496-df9dfe991613";
 
 const utilityScope: ContentScope = {
   type: "bucket",
   bucketId: SAMPLE_BUCKET,
-  filter: { project: "utility" },
+  filter: { projectId: SAMPLE_PROJECT_ID },
 };
 
 function baseRequest(overrides: Partial<RenderReportRequest> = {}): RenderReportRequest {
@@ -109,10 +110,30 @@ function utilityLiveDeps(): RenderReportDeps {
 }
 
 describe("resolveScopeDocSet + ScopeDocIndex", () => {
-  it("resolves a bucket + project filter scope to the project's doc set", async () => {
+  it("resolves a bucket + projectId filter scope to the project's doc set", async () => {
     expect(resolveScopeDocSet(utilityScope, UTILITY_REPORT_DOC_INDEX)).toEqual([
       "utility-bill-2026-04",
     ]);
+  });
+
+  it("uses projectId, not the stale project key, when resolving product report scopes", async () => {
+    const staleFilter = { ["project"]: "utility" };
+    const index = {
+      buckets: {
+        [SAMPLE_BUCKET]: {
+          [SAMPLE_PROJECT_ID]: ["utility-bill-2026-04"],
+        },
+      },
+      groups: {},
+    };
+
+    expect(resolveScopeDocSet(utilityScope, index)).toEqual(["utility-bill-2026-04"]);
+    expect(
+      resolveScopeDocSet(
+        { type: "bucket", bucketId: SAMPLE_BUCKET, filter: staleFilter },
+        index,
+      ),
+    ).toBeNull();
   });
 
   it("resolves an explicit documents[] scope to its own ids (index-independent)", async () => {
@@ -538,7 +559,7 @@ describe("renderReport — §7 gate + idle parity (no MOCK_MODE)", () => {
   it("a sample scope that resolves to an empty doc set idles (reason: empty_scope) without an LLM call", async () => {
     const { groundxClient, llmClient } = throwingClients();
     // A bucket the doc index can't place → empty doc set.
-    const emptyScope: ContentScope = { type: "bucket", bucketId: SAMPLE_BUCKET, filter: { project: "no-such-project" } };
+    const emptyScope: ContentScope = { type: "bucket", bucketId: SAMPLE_BUCKET, filter: { projectId: "proj_missing" } };
     const deps: RenderReportDeps = {
       samplesBucketId: SAMPLE_BUCKET,
       getTemplate: async () => liveTemplate,

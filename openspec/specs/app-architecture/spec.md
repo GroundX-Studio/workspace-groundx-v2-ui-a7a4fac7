@@ -249,38 +249,64 @@ The `noTool` value SHALL be a justification string. It lands as a `data-no-tool`
 
 ### Requirement: The intent dispatch surface SHALL be the single execution path for canvas state changes
 
-`CanvasOrchestratorContext.dispatch()` SHALL be the only path that turns a `CanvasIntent` into an in-app state change. The previously-defined `registerAdapter` mechanism is RETIRED — no widget today uses it, and the design favors a single switch inside `dispatch()` over a runtime registration plane (one place to read every intent's behavior).
+`CanvasOrchestratorContext.dispatch()` SHALL be the canonical entry point that
+turns a `CanvasIntent` into an in-app state change. The orchestrator SHALL
+switch exhaustively over every `CanvasIntent.kind` with a `never` check so a new
+intent kind without a handler or explicit retained-adapter case fails
+type-checking.
 
-Built-in handlers inside `dispatch()` SHALL cover every intent kind defined in the `CanvasIntent` union. An intent kind that is type-defined but has no handler SHALL be flagged as a drift signal (TypeScript exhaustiveness check in the dispatch switch).
+The `registerAdapter` mechanism is RETAINED for current live callers whose
+intent kinds are explicitly named in the dispatch switch as adapter-backed
+cases. Current retained callers include `OnboardingWizard`, `DialogTitle`, and
+`SignUpWidget`. New intent behavior SHOULD prefer a built-in dispatch case
+unless an OpenSpec plan justifies an adapter-backed extension.
 
-The `CanvasIntent` union SHALL be defined by a single shared Zod schema (`canvasIntentSchema`) in `@groundx/shared`; the app `CanvasIntent` type SHALL be derived from it via `z.infer` (one source of truth — the app MUST NOT hand-declare a rival union). The dispatch exhaustiveness check SHALL continue to switch on the same `kind` discriminator. Every boundary that reads or writes a persisted `CanvasIntent` (the `chat_sessions.current_intent_json` arbitrary-JSON column) SHALL validate it through the shared schema rather than blind-casting it: an intent that fails validation SHALL coerce to `null` rather than flow into the orchestrator as a typed intent, and a valid intent SHALL pass through unchanged.
+The `CanvasIntent` union SHALL be defined by the shared Zod schema in
+`@groundx/shared`; every boundary that reads or writes a persisted
+`CanvasIntent` SHALL validate through that shared schema.
 
 #### Scenario: A new intent kind without a handler fails type-checking
 
-- **GIVEN** a new `CanvasIntent` kind is added to the union in `contexts/CanvasOrchestratorContext/types.ts`
+- **GIVEN** a new `CanvasIntent` kind is added to the shared union
 - **WHEN** `npx tsc --noEmit` runs
-- **THEN** the exhaustiveness check inside `dispatch()` fails with an error naming the unhandled kind
+- **THEN** the dispatch exhaustiveness check fails unless the kind has a
+  built-in dispatch branch or an explicit adapter-backed no-op case.
+
+#### Scenario: Current adapter-backed intents remain explicit
+
+- **GIVEN** a current adapter-backed intent such as `submitSignup`,
+  `wizardNext`, `wizardBack`, `wizardFinish`, `dismissWizard`, or `closeDialog`
+- **WHEN** `dispatch()` receives the intent
+- **THEN** the switch names the kind explicitly before the retained
+  `registerAdapter` fallback runs.
 
 #### Scenario: An LLM tool dispatches its produced intent through the canonical orchestrator path
 
 - **GIVEN** the LLM emits a tool call for `open_document`
-- **WHEN** the middleware validates the call + invokes the tool's handler
+- **WHEN** the middleware validates the call and invokes the tool's handler
 - **THEN** the result is a `CanvasIntent` with `kind === "highlightCitation"`
 - **AND** the frontend receives the intent via `ChatReply.intents[]`
-- **AND** dispatching that intent through the orchestrator produces the same state change as a `CiteChip` click
+- **AND** dispatching that intent through the orchestrator produces the same
+  state change as a `CiteChip` click.
 
 #### Scenario: A corrupt persisted intent is rejected on hydration, not blind-cast
 
-- **GIVEN** a server `chat_sessions` row whose `current_intent_json` holds a malformed intent (a real-looking `kind` but missing the variant's required fields, e.g. `{ "kind": "openDocument" }` with no `documentId`)
-- **WHEN** `ChatStoreServerHydrator` hydrates the session and `coerceHydratedIntent` runs the value through `parseCanvasIntent`
-- **THEN** the hydrated session's `currentIntent` is `null` (the corrupt value does NOT masquerade as a typed `CanvasIntent` in the orchestrator)
-- **AND** the rest of the session row hydrates unaffected
+- **GIVEN** a server `chat_sessions` row whose `current_intent_json` holds a
+  malformed intent, such as `{ "kind": "openDocument" }` with no `documentId`
+- **WHEN** `ChatStoreServerHydrator` hydrates the session and
+  `coerceHydratedIntent` runs the value through `parseCanvasIntent`
+- **THEN** the hydrated session's `currentIntent` is `null`
+- **AND** the corrupt value does not masquerade as a typed `CanvasIntent` in the
+  orchestrator
+- **AND** the rest of the session row hydrates unaffected.
 
 #### Scenario: A valid persisted intent round-trips unchanged
 
-- **GIVEN** a server `chat_sessions` row whose `current_intent_json` holds a well-formed `{ "kind": "openDocument", "documentId": "util-1", "page": 2 }`
-- **WHEN** the session hydrates through `coerceHydratedIntent` / `parseCanvasIntent`
-- **THEN** the hydrated `currentIntent` equals the persisted intent (behavior preserved for valid intents)
+- **GIVEN** a server `chat_sessions` row whose `current_intent_json` holds a
+  well-formed `{ "kind": "openDocument", "documentId": "util-1", "page": 2 }`
+- **WHEN** the session hydrates through `coerceHydratedIntent` and
+  `parseCanvasIntent`
+- **THEN** the hydrated `currentIntent` equals the persisted intent.
 
 ### Requirement: F1 overlay SHALL hide the underneath shell from assistive tech
 
@@ -1068,4 +1094,3 @@ separate shared/type-only surface.
 - **THEN** the top-level `realApi.login/register/...` members still exist
 - **AND** the new `realApi.auth.*` group is the only auth surface used by migrated
   auth consumers
-

@@ -133,4 +133,20 @@ describe("ga wrapper (OB-03)", () => {
     gaSetDefaults({ sessionId: "sess-1" });
     expect(window.gtag).not.toHaveBeenCalled();
   });
+
+  it("gaSetDefaults called before initGa is flushed once GA initializes", async () => {
+    const { initGa, gaSetDefaults } = await freshImport();
+
+    gaSetDefaults({ sessionId: "sess-1", appMode: "onboarding" });
+    expect(window.gtag).not.toHaveBeenCalled();
+
+    initGa("G-ABC12345");
+
+    const setCalls = (window.gtag as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === "set",
+    );
+    expect(setCalls).toEqual([
+      ["set", { sessionId: "sess-1", appMode: "onboarding" }],
+    ]);
+  });
 });

@@ -60,7 +60,11 @@ describe("makeFakeApi", () => {
     await expect(
       api.report.renderReport({
         templateId: "rt-utility-ic-brief",
-        scope: { type: "bucket", bucketId: 28454, filter: { project: "utility" } },
+        scope: {
+          type: "bucket",
+          bucketId: 28454,
+          filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
+        },
         chatSessionId: "chat-1",
       }),
     ).resolves.toMatchObject({

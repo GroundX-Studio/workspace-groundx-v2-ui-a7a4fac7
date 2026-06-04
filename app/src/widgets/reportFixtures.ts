@@ -10,9 +10,9 @@
  * formed `RenderedReport` (`Result = Template + Scope + answers`) — sections
  * with `renderAs` formatters + cited bodies.
  *
- * The Utility report is deliberately scoped `bucket + project filter` (resolves
- * to the one bill), NOT a document-id list — the demos open on
- * `{ bucket, filter:{ project } }` (design.md D4), and the surface is
+ * The Utility report is deliberately scoped `bucket + projectId filter`
+ * (resolves to the one bill), NOT a document-id list — the demos open on
+ * `{ bucket, filter:{ projectId } }` (design.md D4), and the surface is
  * doc-count-agnostic so Solar's `group` scope renders on the same contract.
  */
 
@@ -21,16 +21,24 @@ import type { ContentScope } from "@groundx/shared";
 import type { RenderedReport } from "@/types/report";
 
 const UTILITY_DOC = "utility-bill-2026-04";
+const UTILITY_PROJECT_ID = "proj_c7701da7-0e08-482a-a496-df9dfe991613";
+const UTILITY_PROJECT_IDS = new Set([UTILITY_PROJECT_ID, "proj_utility"]);
+
+function scopeProjectIds(scope: ContentScope): string[] {
+  if (scope.type !== "bucket") return [];
+  const projectId = scope.filter?.projectId;
+  return Array.isArray(projectId) ? projectId : projectId != null ? [projectId] : [];
+}
 
 /**
- * The Utility single-document IC-brief report. Scope = `bucket + project
+ * The Utility single-document IC-brief report. Scope = `bucket + projectId
  * filter` (the bill). Four sections: billing summary ¶, charge breakdown ▦,
  * anomalies •, recommendation ¶ — each with a cited body into the bill.
  */
 const UTILITY_REPORT: RenderedReport = {
   reportId: "rr-utility-ic-brief",
   templateId: "rt-utility-ic-brief",
-  scope: { type: "bucket", bucketId: 28454, filter: { project: "utility" } },
+  scope: { type: "bucket", bucketId: 28454, filter: { projectId: UTILITY_PROJECT_ID } },
   status: "complete",
   resolvedVariables: {},
   exportFormats: ["pdf", "md", "link"],
@@ -153,14 +161,14 @@ const SOLAR_REPORT_STUB: RenderedReport = {
  * Look up the demo report fixture for a render-time `ContentScope` (used to
  * seed the builder rows). Returns `null` when no fixture matches (the surface
  * then shows its empty / idle state). Matching is scope-shape-aware:
- *   • `bucket` + `filter.project: "utility"` → the Utility IC brief.
+ *   • `bucket` + Utility `filter.projectId` → the Utility IC brief.
  *   • `group` → the Solar multi-doc stub.
  */
 export function getReportFixture(scope: ContentScope): RenderedReport | null {
   if (scope.type === "bucket") {
-    const project = scope.filter?.project;
-    const projects = Array.isArray(project) ? project : project != null ? [project] : [];
-    if (projects.includes("utility")) return UTILITY_REPORT;
+    if (scopeProjectIds(scope).some((projectId) => UTILITY_PROJECT_IDS.has(projectId))) {
+      return UTILITY_REPORT;
+    }
     return null;
   }
   if (scope.type === "group") return SOLAR_REPORT_STUB;
@@ -178,9 +186,9 @@ export function getReportFixture(scope: ContentScope): RenderedReport | null {
  */
 export function reportTemplateIdForScope(scope: ContentScope): string | null {
   if (scope.type === "bucket") {
-    const project = scope.filter?.project;
-    const projects = Array.isArray(project) ? project : project != null ? [project] : [];
-    if (projects.includes("utility")) return UTILITY_REPORT.templateId;
+    if (scopeProjectIds(scope).some((projectId) => UTILITY_PROJECT_IDS.has(projectId))) {
+      return UTILITY_REPORT.templateId;
+    }
     return null;
   }
   if (scope.type === "group") return SOLAR_REPORT_STUB.templateId;

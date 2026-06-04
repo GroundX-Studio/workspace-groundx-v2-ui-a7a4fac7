@@ -82,13 +82,13 @@ export interface ReportTemplate {
 
 /**
  * A doc-organization index: for each bucket, the docs it holds keyed by their
- * `project` filter-field value (`"*"` = every doc in the bucket, used when a
+ * `projectId` filter-field value (`"*"` = every doc in the bucket, used when a
  * scope carries no filter), plus the group → doc-set memberships for
  * cross-bucket scopes. This is the doc-org map a real deployment derives from
  * GroundX; the fixture index hardcodes the demo content.
  */
 export interface ScopeDocIndex {
-  /** bucketId → (project filter value → doc ids). `"*"` lists the whole bucket. */
+  /** bucketId → (projectId filter value → doc ids). `"*"` lists the whole bucket. */
   buckets: Record<number, Record<string, string[]>>;
   /** groupId → doc ids (cross-bucket membership). */
   groups: Record<number, string[]>;
@@ -96,7 +96,7 @@ export interface ScopeDocIndex {
 
 /**
  * The default doc-org index for the report demos. The Utility bill lives in
- * the shared samples bucket under the `project: "utility"` filter value; the
+ * the shared samples bucket under the real seeded `projectId` filter value; the
  * Solar group is a multi-doc stub proving the cross-bucket scope SHAPE resolves.
  * A real deployment derives this index from GroundX rather than hardcoding it.
  */
@@ -104,7 +104,8 @@ export const UTILITY_REPORT_DOC_INDEX: ScopeDocIndex = {
   buckets: {
     28454: {
       "*": ["utility-bill-2026-04"],
-      utility: ["utility-bill-2026-04"],
+      "proj_c7701da7-0e08-482a-a496-df9dfe991613": ["utility-bill-2026-04"],
+      proj_utility: ["utility-bill-2026-04"],
     },
   },
   groups: {
@@ -122,9 +123,9 @@ function filterValues(value: string | string[] | undefined): string[] {
  * Resolve any `ContentScope` shape to the concrete doc-id set it targets,
  * against a `ScopeDocIndex`. Returns `null` when the index can't place the
  * scope (unknown bucket/group). The composable `filter` is honored on every
- * shape (per the locked ContentScope contract): a `bucket` with a `project`
- * filter resolves to that project's docs; a bare `bucket` resolves to the whole
- * bucket (`"*"`).
+ * shape (per the locked ContentScope contract): a `bucket` with a `projectId`
+ * filter resolves to that project's docs; a bare `bucket` resolves to the
+ * whole bucket (`"*"`).
  */
 export function resolveScopeDocSet(
   scope: ContentScope,
@@ -140,14 +141,17 @@ export function resolveScopeDocSet(
   // bucket (== workspace), optionally project-filtered.
   const bucket = index.buckets[scope.bucketId];
   if (!bucket) return null;
-  const projects = filterValues(scope.filter?.project);
-  if (projects.length === 0) {
-    // No project filter → whole workspace.
+  const projectIds = filterValues(scope.filter?.projectId);
+  const hasFilter = scope.filter != null && Object.keys(scope.filter).length > 0;
+  if (projectIds.length === 0) {
+    // No filter → whole workspace. A filtered scope without projectId is not
+    // understood by this product resolver and must not silently widen.
+    if (hasFilter) return null;
     return bucket["*"] ?? null;
   }
   const docs = new Set<string>();
-  for (const project of projects) {
-    for (const id of bucket[project] ?? []) docs.add(id);
+  for (const projectId of projectIds) {
+    for (const id of bucket[projectId] ?? []) docs.add(id);
   }
   return docs.size > 0 ? [...docs] : null;
 }

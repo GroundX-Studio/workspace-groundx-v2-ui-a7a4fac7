@@ -1128,7 +1128,11 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 â€
     return agent;
   }
 
-  const utilityScope = { type: "bucket", bucketId: SAMPLES_BUCKET, filter: { project: "utility" } };
+  const utilityScope = {
+    type: "bucket",
+    bucketId: SAMPLES_BUCKET,
+    filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
+  };
 
   function renderBody(overrides: Record<string, unknown> = {}) {
     return {
@@ -1255,7 +1259,11 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 â€
 
 describe("POST /api/widgets/smart-report/reports/render â€” live path (2026-06-01-live-report-render)", () => {
   const SAMPLES_BUCKET = 28454;
-  const utilityScope = { type: "bucket", bucketId: SAMPLES_BUCKET, filter: { project: "utility" } };
+  const utilityScope = {
+    type: "bucket",
+    bucketId: SAMPLES_BUCKET,
+    filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
+  };
 
   function liveSetup(llmClient: LlmClient, groundxClient: GroundXClient) {
     const repository = new MemoryAppRepository();

@@ -96,7 +96,11 @@ import { SmartReportBuilder } from "@/components/viewer-widgets/SmartReportBuild
 
 <SmartReportBuilder
   role={role}
-  scope={{ type: "bucket", bucketId: 28454, filter: { project: "utility" } }}
+  scope={{
+    type: "bucket",
+    bucketId: 28454,
+    filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
+  }}
 />
 ```
 

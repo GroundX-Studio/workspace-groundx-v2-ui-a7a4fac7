@@ -462,14 +462,14 @@ export const OnboardingShell: FC = () => {
 
   // The scope ScopedCanvas feeds the mounted widget, by the active step kind:
   //   • doc-viewer / interact-chat → the single document (documents scope)
-  //   • report → bucket + project filter (the project filter-field value IS
-  //     the scenario id; the opening display context for every demo sample)
+  //   • report → bucket + projectId filter (the GroundX data-org key for the
+  //     active scenario; the opening display context for every demo sample)
   const canvasScope: ContentScope = useMemo(() => {
     if (effectiveStepKind === "report") {
       return {
         type: "bucket",
         bucketId: scenarioRegistry.bucketId ?? 28454,
-        filter: { project: canvasScenarioId ?? "utility" },
+        filter: { projectId: canvasScenario?.projectId ?? "proj_utility" },
       };
     }
     if (canvasDocId) {
@@ -479,7 +479,7 @@ export const OnboardingShell: FC = () => {
     // scope holds the widget's neutral loading state (PdfViewer gates its
     // fetch on a resolved id).
     return { type: "documents", documentIds: [] };
-  }, [effectiveStepKind, scenarioRegistry.bucketId, canvasScenarioId, canvasDocId]);
+  }, [effectiveStepKind, scenarioRegistry.bucketId, canvasScenario?.projectId, canvasDocId]);
 
   // The viewer step ScopedCanvas selects the widget from. Use the live step
   // when present; otherwise synthesize from the frame projection so the

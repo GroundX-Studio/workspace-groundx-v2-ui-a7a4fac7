@@ -12,11 +12,11 @@
  * idempotent no-ops. Catch sites never throw — failed pushes drop
  * silently rather than spamming Sentry.
  *
- * Wire-up: `main.tsx` calls `initGa(import.meta.env.VITE_GA_MEASUREMENT_ID)`
- * once at boot. The 4 dimensions get set by individual contexts at the
- * right boundary (session bootstrap → sessionId; pickScenario →
- * currentSample; AppModeContext init → appMode; LLM-provider env →
- * llmProvider).
+ * Wire-up: `AnalyticsConsentProvider` calls
+ * `initGa(import.meta.env.VITE_GA_MEASUREMENT_ID)` after consent. The 4
+ * dimensions get set by individual contexts at the right boundary
+ * (session bootstrap → sessionId; pickScenario → currentSample;
+ * AppModeContext init → appMode; LLM-provider env → llmProvider).
  */
 
 declare global {
@@ -27,6 +27,8 @@ declare global {
 }
 
 let initialized = false;
+let pendingDefaults: GaDefaults = {};
+let hasPendingDefaults = false;
 
 function ensureGtagShim(): void {
   if (typeof window === "undefined") return;
@@ -70,6 +72,7 @@ export function initGa(measurementId: string | undefined | null): boolean {
     send_page_view: true,
   });
   initialized = true;
+  if (hasPendingDefaults) emitDefaults(pendingDefaults);
   return true;
 }
 
@@ -103,12 +106,18 @@ export interface GaDefaults {
   llmProvider?: string;
 }
 
-export function gaSetDefaults(partial: GaDefaults): void {
-  if (!initialized) return;
+function emitDefaults(partial: GaDefaults): void {
   if (typeof window === "undefined" || typeof window.gtag !== "function") return;
   try {
     window.gtag("set", partial);
   } catch {
     // see gaTrack()
   }
+}
+
+export function gaSetDefaults(partial: GaDefaults): void {
+  pendingDefaults = { ...pendingDefaults, ...partial };
+  hasPendingDefaults = true;
+  if (!initialized) return;
+  emitDefaults(partial);
 }
