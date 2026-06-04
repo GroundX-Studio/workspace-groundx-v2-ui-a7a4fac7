@@ -39,3 +39,30 @@ export interface SampleProject {
   /** Marks the canonical demo with a "★ start here" tag. */
   startHere?: boolean;
 }
+
+/** The three categories the runner recognises inside a schema (see F3 Extract). */
+export type FieldCategoryId = "statement" | "meters" | "charges";
+
+/** A single extracted value with its source citation. */
+export interface ExtractedField {
+  /** YAML key, written uppercase, e.g. "PEAK_DEMAND_KW". */
+  name: string;
+  /** Extracted value, e.g. "16.2" or "commercial · TOU-B-3". */
+  value: string;
+  /** Citation pointing at (doc, page) — e.g. "[5] p.1". Drives provenance highlighting. */
+  citation?: string;
+  /** Free-tier locked: rendered blurred behind the sign-in gate. */
+  locked?: boolean;
+}
+
+/** A category of extracted fields shown as a view in the Extract canvas. */
+export interface FieldCategory {
+  id: FieldCategoryId;
+  /** Lowercase label as written in the spec ("statement" / "meters" / "charges"). */
+  label: string;
+  /** Short count shown next to the label ("20", "8 meters", "56 charges"). */
+  summary: string;
+  fields: ExtractedField[];
+  /** How many additional fields sit behind the gate ("N more fields locked"). */
+  lockedCount?: number;
+}

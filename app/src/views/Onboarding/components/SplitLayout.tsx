@@ -13,6 +13,7 @@ import { KeyboardEvent, useCallback, useEffect, useRef } from "react";
 
 import { BORDER, GREEN, INPUT_BORDER } from "@/constants";
 
+import { UTILITY_BILL_CATEGORIES } from "../flow/extractionData";
 import { CHAT_WIDTH_MAX, CHAT_WIDTH_MIN } from "../flow/flowData";
 import { useFlow } from "../flow/FlowContext";
 import { Canvas } from "./Canvas";
@@ -22,7 +23,22 @@ import { ChatPanel } from "./ChatPanel";
 const RESIZE_STEP = 16;
 
 export function SplitLayout() {
-  const { selectedSample, activePhase, chatWidth, setChatWidth, focusMode, setFocusMode, resetToIngest } = useFlow();
+  const {
+    selectedSample,
+    activePhase,
+    view,
+    hoveredField,
+    setHoveredField,
+    showExtract,
+    chatWidth,
+    setChatWidth,
+    focusMode,
+    setFocusMode,
+    resetToIngest,
+  } = useFlow();
+
+  // Only the canonical Utility Bill demo has extraction data wired in this slice.
+  const category = selectedSample?.id === "utility-bill" ? UTILITY_BILL_CATEGORIES[view] : null;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
   const chatFocused = focusMode === "chat";
@@ -86,7 +102,7 @@ export function SplitLayout() {
           height: "100%",
         }}
       >
-        <ChatPanel sample={selectedSample} onFocusChat={toggleChatFocus} />
+        <ChatPanel sample={selectedSample} phase={activePhase} onFocusChat={toggleChatFocus} onPickView={showExtract} />
       </Box>
 
       {/* Drag handle */}
@@ -130,7 +146,14 @@ export function SplitLayout() {
       {/* Canvas pane */}
       {chatFocused ? null : (
         <Box sx={{ flex: 1, minWidth: 0, height: "100%" }}>
-          <Canvas sample={selectedSample} phase={activePhase} onSwitchSample={resetToIngest} />
+          <Canvas
+            sample={selectedSample}
+            phase={activePhase}
+            category={category}
+            hoveredField={hoveredField}
+            onHoverField={setHoveredField}
+            onSwitchSample={resetToIngest}
+          />
         </Box>
       )}
     </Box>

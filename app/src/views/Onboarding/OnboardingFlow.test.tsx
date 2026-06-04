@@ -18,17 +18,27 @@ describe("OnboardingFlow", () => {
     expect(screen.getByText("Workspaces")).toBeInTheDocument();
   });
 
-  it("advances into the split layout when a sample is picked", () => {
+  it("advances into the split layout (Understand) when a sample is picked", () => {
     renderWithAppProviders(<OnboardingFlow />, "/start");
 
     fireEvent.click(screen.getByText("Utility Bill"));
 
-    // Chat panel + canvas now render the split.
+    // Chat panel + canvas now render the split, on the Understand step.
     expect(screen.getByText("Conversation")).toBeInTheDocument();
-    expect(screen.getByText("Extract every charge by meter")).toBeInTheDocument();
-    expect(screen.getByText("[1] utility-bill p.2")).toBeInTheDocument();
-    expect(screen.getByText(/Reading utility-bill\.pdf/)).toBeInTheDocument();
+    expect(screen.getByText("Pick a view:")).toBeInTheDocument();
     expect(screen.getByRole("separator", { name: "Resize chat and canvas" })).toBeInTheDocument();
+  });
+
+  it("opens the Extract view with citable fields when a Pick-a-view chip is clicked", () => {
+    renderWithAppProviders(<OnboardingFlow />, "/start");
+
+    fireEvent.click(screen.getByText("Utility Bill"));
+    fireEvent.click(screen.getByRole("button", { name: "meters" }));
+
+    expect(screen.getByText("Extracted fields")).toBeInTheDocument();
+    expect(screen.getByText("PEAK_DEMAND_KW")).toBeInTheDocument();
+    expect(screen.getByText("[3] p.1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "unlock everything →" })).toBeInTheDocument();
   });
 
   it("lets keyboard users select a sample (cards are buttons activated by Enter)", () => {
