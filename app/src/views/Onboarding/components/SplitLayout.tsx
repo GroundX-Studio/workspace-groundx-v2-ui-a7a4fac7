@@ -1,21 +1,25 @@
 /**
- * SplitLayout — the default two-pane split: chat panel (left) | drag handle |
- * canvas (right). Drag the divider to resize; the chat owns a fixed px width and
- * the canvas takes the rest. A focus toggle lets the chat take over the full
- * width (the spec's "focus chat" mode); snapping back restores the split.
+ * SplitLayout — the workspace surface for P2+.
  *
- * Below tablet the drag handle disappears and focus modes take over — that
- * responsive behaviour is wired in a later slice; this is the desktop split.
+ * Desktop / ultrawide (≥ 1024): a two-pane split — chat (left) | drag handle |
+ * canvas (right). Drag the divider to resize; a focus toggle lets the chat take
+ * the full width.
+ *
+ * Compact (< 1024, tablet portrait + mobile): the two panes can't co-exist
+ * meaningfully, so the drag handle disappears and a Chat / Workspace tab switch
+ * shows one pane at a time, full-width. The canvas stacks its internals.
  */
 
 import Box from "@mui/material/Box";
+import ButtonBase from "@mui/material/ButtonBase";
 import { KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import { BORDER, GREEN, INPUT_BORDER } from "@/constants";
+import { BORDER, GREEN, INPUT_BORDER, MUTED_ON_LIGHT, NAVY, WHITE } from "@/constants";
 
 import { getSampleData } from "../flow/extractionData";
 import { CHAT_WIDTH_MAX, CHAT_WIDTH_MIN } from "../flow/flowData";
 import { useFlow } from "../flow/FlowContext";
+import { useViewport } from "../useViewport";
 import { Canvas } from "./Canvas";
 import { ChatPanel } from "./ChatPanel";
 
@@ -47,6 +51,8 @@ export function SplitLayout() {
     setFocusMode,
   } = useFlow();
 
+  const { isCompact } = useViewport();
+
   // Per-sample data registry — unwired samples render coming-soon (no special-casing).
   const data = getSampleData(selectedSample?.id);
   const openedField =
@@ -55,6 +61,8 @@ export function SplitLayout() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
   const chatFocused = focusMode === "chat";
+  // On compact, focusMode doubles as the active tab (canvas → Workspace, else Chat).
+  const activePane = focusMode === "canvas" ? "canvas" : "chat";
 
   const onPointerMove = useCallback(
     (event: PointerEvent) => {
@@ -96,6 +104,83 @@ export function SplitLayout() {
     [chatWidth, setChatWidth],
   );
 
+  const chatPanel = (
+    <ChatPanel
+      sample={selectedSample}
+      frame={frame}
+      wired={Boolean(data)}
+      onFocusChat={isCompact ? undefined : toggleChatFocus}
+      onPickView={showExtract}
+      onCompare={compareMeters}
+      selectedValue={openedField?.value}
+      selectedCitation={openedField?.citation}
+      comparisonQuestion={data?.comparisonQuestion}
+      comparisonAnswer={data?.comparisonAnswer}
+      gateOpen={gateOpen}
+      booking={booking}
+      onCloseGate={closeGate}
+      onBookCall={bookCall}
+      onBackToGate={backToGate}
+    />
+  );
+
+  const canvasPane = (
+    <Canvas
+      sample={selectedSample}
+      frame={frame}
+      data={data}
+      view={view}
+      hoveredField={hoveredField}
+      selectedField={selectedField}
+      booking={booking}
+      stacked={isCompact}
+      onHoverField={setHoveredField}
+      onSelectField={selectField}
+      onClearField={clearField}
+      onOpenGate={openGate}
+      onCloseGate={closeGate}
+      onSwitchSample={resetToIngest}
+    />
+  );
+
+  // ── Compact (tablet portrait + mobile): Chat / Workspace tab switch ──
+  if (isCompact) {
+    const TABS = [
+      { pane: "chat" as const, label: "Chat" },
+      { pane: "canvas" as const, label: "Workspace" },
+    ];
+    return (
+      <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, width: "100%" }}>
+        <Box role="tablist" aria-label="Chat or workspace" sx={{ display: "flex", flexShrink: 0, borderBottom: `1px solid ${BORDER}`, backgroundColor: WHITE }}>
+          {TABS.map(({ pane, label }) => {
+            const active = activePane === pane;
+            return (
+              <ButtonBase
+                key={pane}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setFocusMode(pane)}
+                disableRipple
+                sx={{
+                  flex: 1,
+                  py: 1.25,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: active ? NAVY : MUTED_ON_LIGHT,
+                  borderBottom: `2px solid ${active ? GREEN : "transparent"}`,
+                }}
+              >
+                {label}
+              </ButtonBase>
+            );
+          })}
+        </Box>
+        <Box sx={{ flex: 1, minHeight: 0, minWidth: 0 }}>{activePane === "chat" ? chatPanel : canvasPane}</Box>
+      </Box>
+    );
+  }
+
+  // ── Desktop / ultrawide: resizable split ──
   return (
     <Box ref={containerRef} sx={{ display: "flex", height: "100%", minHeight: 0, width: "100%" }}>
       {/* Chat pane */}
@@ -108,23 +193,7 @@ export function SplitLayout() {
           height: "100%",
         }}
       >
-        <ChatPanel
-          sample={selectedSample}
-          frame={frame}
-          wired={Boolean(data)}
-          onFocusChat={toggleChatFocus}
-          onPickView={showExtract}
-          onCompare={compareMeters}
-          selectedValue={openedField?.value}
-          selectedCitation={openedField?.citation}
-          comparisonQuestion={data?.comparisonQuestion}
-          comparisonAnswer={data?.comparisonAnswer}
-          gateOpen={gateOpen}
-          booking={booking}
-          onCloseGate={closeGate}
-          onBookCall={bookCall}
-          onBackToGate={backToGate}
-        />
+        {chatPanel}
       </Box>
 
       {/* Drag handle */}
@@ -160,25 +229,7 @@ export function SplitLayout() {
       )}
 
       {/* Canvas pane */}
-      {chatFocused ? null : (
-        <Box sx={{ flex: 1, minWidth: 0, height: "100%" }}>
-          <Canvas
-            sample={selectedSample}
-            frame={frame}
-            data={data}
-            view={view}
-            hoveredField={hoveredField}
-            selectedField={selectedField}
-            booking={booking}
-            onHoverField={setHoveredField}
-            onSelectField={selectField}
-            onClearField={clearField}
-            onOpenGate={openGate}
-            onCloseGate={closeGate}
-            onSwitchSample={resetToIngest}
-          />
-        </Box>
-      )}
+      {chatFocused ? null : <Box sx={{ flex: 1, minWidth: 0, height: "100%" }}>{canvasPane}</Box>}
     </Box>
   );
 }

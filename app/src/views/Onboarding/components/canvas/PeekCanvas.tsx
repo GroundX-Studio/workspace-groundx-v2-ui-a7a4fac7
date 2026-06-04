@@ -14,11 +14,13 @@ export interface PeekCanvasProps {
   sampleName?: string;
   category: FieldCategory;
   field: ExtractedField;
+  /** Compact: stack the doc above the provenance panel instead of side-by-side. */
+  stacked?: boolean;
   onClearField?: () => void;
   onUnlock?: () => void;
 }
 
-export const PeekCanvas = ({ sampleName, category, field, onClearField, onUnlock }: PeekCanvasProps) => (
+export const PeekCanvas = ({ sampleName, category, field, stacked, onClearField, onUnlock }: PeekCanvasProps) => (
   <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
     <Stack
       direction="row"
@@ -34,8 +36,17 @@ export const PeekCanvas = ({ sampleName, category, field, onClearField, onUnlock
       <Box sx={{ flex: 1 }} />
       <CrumbButton label="▴ collapse" onClick={onClearField} />
     </Stack>
-    <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
-      <Box sx={{ flex: 1, minWidth: 0, overflow: "auto", p: 2.5, borderRight: `1px solid ${BORDER}` }}>
+    <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: stacked ? "column" : "row", overflow: stacked ? "auto" : "visible" }}>
+      <Box
+        sx={{
+          flex: stacked ? "0 0 auto" : 1,
+          minWidth: 0,
+          overflow: stacked ? "visible" : "auto",
+          p: 2.5,
+          borderRight: stacked ? "none" : `1px solid ${BORDER}`,
+          borderBottom: stacked ? `1px solid ${BORDER}` : "none",
+        }}
+      >
         <DocToolbar docName={docName(sampleName)} />
         <DocPage title={`${(sampleName ?? "DOCUMENT").toUpperCase()} · PAGE 1`}>
           <DocLine width="92%" />
@@ -50,7 +61,7 @@ export const PeekCanvas = ({ sampleName, category, field, onClearField, onUnlock
           <DocLine width="73%" />
         </DocPage>
       </Box>
-      <Box sx={{ width: { xs: 280, lg: 340 }, flexShrink: 0, minWidth: 0 }}>
+      <Box sx={{ width: stacked ? "100%" : { xs: 280, lg: 340 }, flexShrink: 0, minWidth: 0 }}>
         <FieldProvenance field={field} category={category} />
       </Box>
     </Box>

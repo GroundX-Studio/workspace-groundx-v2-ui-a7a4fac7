@@ -79,21 +79,23 @@ export function ChatPanel({
       <Stack direction="row" alignItems="center" spacing={1} sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${BORDER}` }}>
         <Avatar who="G" />
         <Typography sx={{ flex: 1, fontWeight: 700, color: NAVY, fontSize: 15 }}>Conversation</Typography>
-        <IconButton
-          aria-label="Focus chat"
-          onClick={onFocusChat}
-          disableRipple
-          sx={{
-            width: 30,
-            height: 30,
-            backgroundColor: "transparent",
-            border: `1px solid ${INPUT_BORDER}`,
-            color: MUTED_ON_LIGHT,
-            "&:hover": { backgroundColor: TINT },
-          }}
-        >
-          <OpenInFullIcon sx={{ fontSize: 15 }} />
-        </IconButton>
+        {onFocusChat ? (
+          <IconButton
+            aria-label="Focus chat"
+            onClick={onFocusChat}
+            disableRipple
+            sx={{
+              width: 30,
+              height: 30,
+              backgroundColor: "transparent",
+              border: `1px solid ${INPUT_BORDER}`,
+              color: MUTED_ON_LIGHT,
+              "&:hover": { backgroundColor: TINT },
+            }}
+          >
+            <OpenInFullIcon sx={{ fontSize: 15 }} />
+          </IconButton>
+        ) : null}
       </Stack>
 
       {/* Messages */}

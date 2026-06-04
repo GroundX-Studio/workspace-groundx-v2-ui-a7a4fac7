@@ -25,8 +25,9 @@ async function expectNoHorizontalOverflow(page: Page) {
     .toBeLessThanOrEqual(1);
 }
 
-// The split layout is desktop-only until the responsive slice.
-const desktopOnly = () => test.skip(test.info().project.name !== "desktop", "Onboarding split layout is desktop-only");
+// The deep desktop flow uses the resizable split; the compact tests cover tablet + mobile.
+const desktopOnly = () => test.skip(test.info().project.name !== "desktop", "Desktop split flow");
+const compactOnly = () => test.skip(test.info().project.name === "desktop", "Compact (tablet/mobile) layout");
 
 test.describe("onboarding flow (/start)", () => {
   test("walks the Ingest → Understand → Extract → peek → Interact path with no console errors", async ({ page }) => {
@@ -151,5 +152,37 @@ test.describe("onboarding flow (/start)", () => {
     await expect(page.getByRole("separator", { name: "Resize chat and canvas" })).toHaveCount(0);
     await page.getByRole("button", { name: "Focus chat" }).click();
     await expect(page.getByRole("separator", { name: "Resize chat and canvas" })).toBeVisible();
+  });
+});
+
+test.describe("onboarding flow — compact (tablet + mobile)", () => {
+  test("P1 ingest fits the viewport with no horizontal overflow", async ({ page }) => {
+    compactOnly();
+    await page.goto("/start");
+    await expect(page.getByRole("heading", { name: "Connect your data to GroundX." })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("uses a Chat / Workspace tab switch (no drag handle) and stacks the workspace", async ({ page }) => {
+    compactOnly();
+    const errors = trackErrors(page);
+    await page.goto("/start");
+    await page.getByRole("button", { name: "Try the Utility Bill sample" }).click();
+
+    // Compact = tabs, not the resizable split.
+    await expect(page.getByRole("tab", { name: "Chat" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Workspace" })).toBeVisible();
+    await expect(page.getByRole("separator", { name: "Resize chat and canvas" })).toHaveCount(0);
+    await expect(page.getByText("Pick a view:")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    // Pick a view in chat, then view the (stacked) extract in the workspace tab.
+    await page.getByRole("button", { name: "meters", exact: true }).click();
+    await page.getByRole("tab", { name: "Workspace" }).click();
+    await expect(page.getByText("Extracted fields")).toBeVisible();
+    await expect(page.getByText("Pick a view:")).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+
+    expect(errors).toEqual([]);
   });
 });

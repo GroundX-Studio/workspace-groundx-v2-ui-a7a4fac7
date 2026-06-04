@@ -14,15 +14,26 @@ export interface ExtractCanvasProps {
   sampleName?: string;
   category: FieldCategory;
   hoveredField: string | null;
+  /** Compact: stack the doc above the fields instead of side-by-side. */
+  stacked?: boolean;
   onHoverField: (name: string | null) => void;
   onSelectField: (name: string) => void;
   onUnlock?: () => void;
 }
 
-export const ExtractCanvas = ({ sampleName, category, hoveredField, onHoverField, onSelectField, onUnlock }: ExtractCanvasProps) => (
+export const ExtractCanvas = ({ sampleName, category, hoveredField, stacked, onHoverField, onSelectField, onUnlock }: ExtractCanvasProps) => (
   <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-    <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
-      <Box sx={{ flex: 1, minWidth: 0, overflow: "auto", p: 2.5, borderRight: `1px solid ${BORDER}` }}>
+    <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: stacked ? "column" : "row", overflow: stacked ? "auto" : "visible" }}>
+      <Box
+        sx={{
+          flex: stacked ? "0 0 auto" : 1,
+          minWidth: 0,
+          overflow: stacked ? "visible" : "auto",
+          p: 2.5,
+          borderRight: stacked ? "none" : `1px solid ${BORDER}`,
+          borderBottom: stacked ? `1px solid ${BORDER}` : "none",
+        }}
+      >
         <DocToolbar docName={docName(sampleName)} />
         <DocPage title={`${(sampleName ?? "DOCUMENT").toUpperCase()} · PAGE 1`}>
           <DocLine width="92%" />
@@ -54,7 +65,7 @@ export const ExtractCanvas = ({ sampleName, category, hoveredField, onHoverField
           <DocLine width="73%" />
         </DocPage>
       </Box>
-      <Box sx={{ width: { xs: 280, lg: 340 }, flexShrink: 0, minWidth: 0 }}>
+      <Box sx={{ width: stacked ? "100%" : { xs: 280, lg: 340 }, flexShrink: 0, minWidth: 0 }}>
         <ExtractedFields category={category} hoveredField={hoveredField} onHoverField={onHoverField} onSelectField={onSelectField} />
       </Box>
     </Box>

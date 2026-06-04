@@ -39,6 +39,7 @@ import {
 
 import { NAV_WIDTH_COLLAPSED, NAV_WIDTH_EXPANDED } from "../flow/flowData";
 import { useFlow } from "../flow/FlowContext";
+import { useViewport } from "../useViewport";
 
 interface NavItemProps {
   icon: ReactNode;
@@ -93,7 +94,9 @@ const NavItem = ({ icon, label, active = false, locked = false, expanded, onClic
 
 export function NavRail() {
   const { navExpanded, toggleNav, openGate } = useFlow();
-  const expanded = navExpanded;
+  const { isCompact } = useViewport();
+  // Compact viewports force the icon rail (the spec's "minimal 48"); no manual toggle.
+  const expanded = navExpanded && !isCompact;
 
   return (
     <Box
@@ -150,7 +153,7 @@ export function NavRail() {
         ) : null}
       </Stack>
 
-      {!expanded ? (
+      {!expanded && !isCompact ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 0.5 }}>
           <ButtonBase onClick={toggleNav} disableRipple aria-label="Expand navigation" sx={{ p: 0.5, borderRadius: BORDER_RADIUS, color: MUTED_ON_LIGHT, "&:hover": { backgroundColor: TINT } }}>
             <MenuOpenIcon sx={{ fontSize: 18 }} />

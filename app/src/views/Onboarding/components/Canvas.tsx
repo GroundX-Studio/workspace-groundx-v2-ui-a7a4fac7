@@ -43,6 +43,8 @@ export interface CanvasProps {
   selectedField: string | null;
   /** P6a: the canvas shows the Calendly embed (the chat shows booking context). */
   booking?: boolean;
+  /** Compact viewport — the two-pane sub-canvases stack vertically. */
+  stacked?: boolean;
   onHoverField: (name: string | null) => void;
   onSelectField: (name: string) => void;
   onClearField: () => void;
@@ -61,6 +63,7 @@ export function Canvas({
   hoveredField,
   selectedField,
   booking,
+  stacked,
   onHoverField,
   onSelectField,
   onClearField,
@@ -83,6 +86,7 @@ export function Canvas({
           sampleName={sample?.name}
           category={category}
           hoveredField={hoveredField}
+          stacked={stacked}
           onHoverField={onHoverField}
           onSelectField={onSelectField}
           onUnlock={onOpenGate}
@@ -91,7 +95,14 @@ export function Canvas({
     }
     if (frame === "peek" && category && peekField) {
       return (
-        <PeekCanvas sampleName={sample?.name} category={category} field={peekField} onClearField={onClearField} onUnlock={onOpenGate} />
+        <PeekCanvas
+          sampleName={sample?.name}
+          category={category}
+          field={peekField}
+          stacked={stacked}
+          onClearField={onClearField}
+          onUnlock={onOpenGate}
+        />
       );
     }
     if (frame === "compare") {

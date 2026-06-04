@@ -42,6 +42,28 @@ const createMemoryStorage = (): Storage => {
   } as Storage;
 };
 
+// jsdom doesn't implement matchMedia, which MUI's useMediaQuery (the responsive
+// breakpoints in views/Onboarding) calls. Without this it warns via
+// console.error — which the guard below turns into a thrown error. Default every
+// query to no-match, so components render their desktop/base layout in jsdom.
+if (typeof window !== "undefined" && !window.matchMedia) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: (query: string): MediaQueryList =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  });
+}
+
 const localStorageMock = createMemoryStorage();
 const sessionStorageMock = createMemoryStorage();
 
