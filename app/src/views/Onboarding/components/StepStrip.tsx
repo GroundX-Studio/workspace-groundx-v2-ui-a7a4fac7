@@ -98,13 +98,14 @@ export interface StepStripProps {
 }
 
 export function StepStrip({ activePhase }: StepStripProps) {
-  const top = STEP_STRIP.filter((s) => s.group !== "analyze");
   const analyze = STEP_STRIP.filter((s) => s.group === "analyze");
   const analyzeActive = analyze.some((s) => s.phase === activePhase);
 
-  const ingest = top[0];
-  const understand = top[1];
-  const integrate = top[2];
+  // Look stages up by phase so the layout doesn't silently break if STEP_STRIP is reordered.
+  const stageFor = (phase: FlowPhase) => STEP_STRIP.find((s) => s.phase === phase)!;
+  const ingest = stageFor("ingest");
+  const understand = stageFor("understand");
+  const integrate = stageFor("integrate");
 
   return (
     <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexWrap: "wrap", rowGap: 1 }}>

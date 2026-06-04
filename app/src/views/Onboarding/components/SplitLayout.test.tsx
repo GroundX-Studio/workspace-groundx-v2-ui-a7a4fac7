@@ -26,4 +26,17 @@ describe("SplitLayout", () => {
 
     expect(screen.queryByRole("separator", { name: "Resize chat and canvas" })).not.toBeInTheDocument();
   });
+
+  it("resizes via arrow keys on the divider", () => {
+    renderSplit();
+
+    const divider = screen.getByRole("separator", { name: "Resize chat and canvas" });
+    const before = Number(divider.getAttribute("aria-valuenow"));
+    fireEvent.keyDown(divider, { key: "ArrowRight" });
+
+    const after = Number(
+      screen.getByRole("separator", { name: "Resize chat and canvas" }).getAttribute("aria-valuenow"),
+    );
+    expect(after).toBe(before + 16);
+  });
 });

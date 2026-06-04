@@ -133,20 +133,21 @@ export function NavRail() {
         {expanded ? (
           <Typography sx={{ flex: 1, fontWeight: 700, color: NAVY, fontSize: 16 }}>GroundX</Typography>
         ) : null}
-        <ButtonBase
-          onClick={toggleNav}
-          disableRipple
-          aria-label={expanded ? "Collapse navigation" : "Expand navigation"}
-          sx={{
-            borderRadius: BORDER_RADIUS,
-            p: 0.5,
-            color: MUTED_ON_LIGHT,
-            "&:hover": { backgroundColor: TINT },
-            ...(expanded ? {} : { display: "none" }),
-          }}
-        >
-          <ChevronLeftIcon sx={{ fontSize: 18 }} />
-        </ButtonBase>
+        {expanded ? (
+          <ButtonBase
+            onClick={toggleNav}
+            disableRipple
+            aria-label="Collapse navigation"
+            sx={{
+              borderRadius: BORDER_RADIUS,
+              p: 0.5,
+              color: MUTED_ON_LIGHT,
+              "&:hover": { backgroundColor: TINT },
+            }}
+          >
+            <ChevronLeftIcon sx={{ fontSize: 18 }} />
+          </ButtonBase>
+        ) : null}
       </Stack>
 
       {!expanded ? (
@@ -167,7 +168,10 @@ export function NavRail() {
 
       <Box sx={{ flex: 1 }} />
 
-      {/* Bottom: account */}
+      {/* Bottom: account.
+          TODO(F6+): wire these to real actions — Book a call (Calendly embed, F6a),
+          Docs (external link), and Sign in (the F6 gate). They are inert placeholders
+          in this foundation slice. */}
       <Stack spacing={0.75}>
         {expanded ? (
           <Box sx={{ border: `1px solid ${GREEN}`, borderRadius: BORDER_RADIUS, p: 1.25, backgroundColor: alpha(GREEN, 0.08) }}>

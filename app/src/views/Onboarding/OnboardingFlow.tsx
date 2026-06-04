@@ -45,6 +45,7 @@ const OnboardingFlowInner = () => {
         >
           <StepStrip activePhase={activePhase} />
           <Box sx={{ flex: 1 }} />
+          {/* TODO(F6): wire to the sign-in gate. Inert placeholder in this slice. */}
           <ButtonBase
             disableRipple
             sx={{ fontSize: 13, fontWeight: FONT_WEIGHT_LABEL, color: NAVY, px: 1, py: 0.5, borderRadius: 1 }}

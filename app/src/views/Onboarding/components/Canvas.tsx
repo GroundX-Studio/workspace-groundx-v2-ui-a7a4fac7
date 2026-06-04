@@ -31,6 +31,8 @@ import {
   WHITE,
 } from "@/constants";
 
+import { onEnterOrSpace } from "@/shared/utils/onEnterOrSpace";
+
 import { FlowPhase, SampleProject } from "../flow/flowTypes";
 
 const scanSweep = keyframes`
@@ -74,13 +76,17 @@ export function Canvas({ sample, phase, onSwitchSample }: CanvasProps) {
           {sample ? sample.name : "Workspace"}
         </Typography>
         {sample ? (
+          // TODO(F3+): this should open a sample picker. In the foundation slice
+          // "switch" returns to F1 ingest (onSwitchSample = resetToIngest).
           <Stack
             direction="row"
             alignItems="center"
             spacing={0.75}
             onClick={onSwitchSample}
+            onKeyDown={onSwitchSample ? onEnterOrSpace(onSwitchSample) : undefined}
             role="button"
             tabIndex={0}
+            aria-label={`Switch sample, currently ${sample.name}`}
             sx={{
               cursor: "pointer",
               px: 1.25,
@@ -101,6 +107,9 @@ export function Canvas({ sample, phase, onSwitchSample }: CanvasProps) {
       {/* Body: doc render */}
       <Box sx={{ flex: 1, overflow: "auto", p: 3, display: "flex", justifyContent: "center" }}>
         <Box sx={{ width: "100%", maxWidth: 560 }}>
+          {/* TODO(F3): the understand phase has no completion in this slice, so this
+              parsing banner + scan animation run indefinitely. Drive it to a settled
+              state once F3 (Extract) lands and the parse can actually finish. */}
           {understanding ? (
             <Stack
               direction="row"

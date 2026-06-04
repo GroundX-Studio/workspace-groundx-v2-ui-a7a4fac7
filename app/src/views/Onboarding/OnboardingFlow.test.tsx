@@ -31,6 +31,15 @@ describe("OnboardingFlow", () => {
     expect(screen.getByRole("separator", { name: "Resize chat and canvas" })).toBeInTheDocument();
   });
 
+  it("lets keyboard users select a sample (cards are buttons activated by Enter)", () => {
+    renderWithAppProviders(<OnboardingFlow />, "/start");
+
+    const card = screen.getByRole("button", { name: "Try the Utility Bill sample" });
+    fireEvent.keyDown(card, { key: "Enter" });
+
+    expect(screen.getByText("Conversation")).toBeInTheDocument();
+  });
+
   it("collapses the nav rail to an icon-only rail", () => {
     renderWithAppProviders(<OnboardingFlow />, "/start");
 

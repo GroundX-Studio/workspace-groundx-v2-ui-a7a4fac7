@@ -34,6 +34,7 @@ import {
 import { CommonSubmitButton } from "@/shared/components/CommonSubmitButton";
 import { GxCard } from "@/shared/components/GxCard";
 import { GxPill } from "@/shared/components/GxPill";
+import { onEnterOrSpace } from "@/shared/utils/onEnterOrSpace";
 
 import { CapabilityPills } from "../components/CapabilityPills";
 import { SAMPLES } from "../flow/flowData";
@@ -55,7 +56,11 @@ const Eyebrow = ({ children, icon }: { children: ReactNode; icon?: ReactNode }) 
 const SampleCard = ({ sample, onPick }: { sample: SampleProject; onPick: (sample: SampleProject) => void }) => (
   <GxCard
     interactive
+    role="button"
+    tabIndex={0}
+    aria-label={`Try the ${sample.name} sample`}
     onClick={() => onPick(sample)}
+    onKeyDown={onEnterOrSpace(() => onPick(sample))}
     sx={{ position: "relative", display: "flex", flexDirection: "column", gap: 1.5 }}
   >
     {sample.startHere ? (

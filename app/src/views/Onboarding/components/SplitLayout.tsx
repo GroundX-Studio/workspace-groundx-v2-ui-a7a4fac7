@@ -9,13 +9,17 @@
  */
 
 import Box from "@mui/material/Box";
-import { useCallback, useEffect, useRef } from "react";
+import { KeyboardEvent, useCallback, useEffect, useRef } from "react";
 
 import { BORDER, GREEN, INPUT_BORDER } from "@/constants";
 
+import { CHAT_WIDTH_MAX, CHAT_WIDTH_MIN } from "../flow/flowData";
 import { useFlow } from "../flow/FlowContext";
 import { Canvas } from "./Canvas";
 import { ChatPanel } from "./ChatPanel";
+
+/** Keyboard resize step (px) for the divider's arrow-key handler. */
+const RESIZE_STEP = 16;
 
 export function SplitLayout() {
   const { selectedSample, activePhase, chatWidth, setChatWidth, focusMode, setFocusMode, resetToIngest } = useFlow();
@@ -57,6 +61,19 @@ export function SplitLayout() {
     setFocusMode(chatFocused ? "split" : "chat");
   }, [chatFocused, setFocusMode]);
 
+  const onDividerKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setChatWidth(chatWidth - RESIZE_STEP);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setChatWidth(chatWidth + RESIZE_STEP);
+      }
+    },
+    [chatWidth, setChatWidth],
+  );
+
   return (
     <Box ref={containerRef} sx={{ display: "flex", height: "100%", minHeight: 0, width: "100%" }}>
       {/* Chat pane */}
@@ -78,7 +95,12 @@ export function SplitLayout() {
           role="separator"
           aria-label="Resize chat and canvas"
           aria-orientation="vertical"
+          aria-valuenow={Math.round(chatWidth)}
+          aria-valuemin={CHAT_WIDTH_MIN}
+          aria-valuemax={CHAT_WIDTH_MAX}
+          tabIndex={0}
           onPointerDown={startDragging}
+          onKeyDown={onDividerKeyDown}
           sx={{
             position: "relative",
             width: 10,
@@ -89,6 +111,7 @@ export function SplitLayout() {
             justifyContent: "center",
             backgroundColor: "transparent",
             "&:hover .gx-grip": { backgroundColor: GREEN },
+            "&:focus-visible": { outline: "none", "& .gx-grip": { backgroundColor: GREEN, height: 56 } },
           }}
         >
           <Box
