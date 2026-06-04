@@ -339,7 +339,7 @@ task has no bespoke one:
    actually run green — open the test file, confirm the assertions
    weren't silently weakened or left targeting renamed ids.
 5. **Cross-plan collision check.** If the task touched a multi-plan
-   file (`widget-contract.test.ts`, `tools/types.ts`+`registry.ts`,
+   file (`widget-contract.test.ts`, `tools/types.ts`+`appToolSpecs.ts`,
    `specs/app-architecture/spec.md`, `ChatColumn.tsx`,
    `docs/agents/data-model.md`), confirm it didn't break a sibling
    plan's assumption.

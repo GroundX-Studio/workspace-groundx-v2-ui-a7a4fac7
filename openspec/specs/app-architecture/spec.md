@@ -186,37 +186,38 @@ Every component placed under `app/src/components/chat-widgets/<Name>/` or `app/s
 
 ### Requirement: Every widget SHALL declare its LLM tool surface
 
-Every component placed under `app/src/components/chat-widgets/<Name>/` or `app/src/components/viewer-widgets/<Name>/` SHALL ship EITHER a sibling `<Name>.tools.ts` file declaring its LLM-callable tools OR a sibling `no-llm.md` file explicitly opting out. The drift-guard test at `app/src/test/widget-contract.test.ts` SHALL enforce this — silent omission of both files fails the build.
+Every LLM-drivable widget SHALL declare its app-side tool metadata or an explicit no-LLM opt-out.
+
+Every component placed under `app/src/components/chat-widgets/<Name>/` or
+`app/src/components/viewer-widgets/<Name>/` SHALL ship EITHER a sibling
+`<Name>.tools.ts` file declaring its LLM-callable metadata OR a sibling
+`no-llm.md` file explicitly opting out. The drift-guard test at
+`app/src/test/widget-contract.test.ts` SHALL enforce this; silent omission of
+both files fails the build.
 
 A `<Name>.tools.ts` exports `tools: WidgetTool[]` where each tool carries:
 
 - `name: string` — snake_case LLM-facing function name
 - `description: string` — what the tool does, written for the LLM
-- `category: "read" | "mutate"` — whether the tool mutates persisted state
-- `input: z.ZodSchema` — Zod schema for input validation at the middleware boundary
-- `handler: (input) => CanvasIntent` — produces an intent to dispatch
+- `category: "read" | "mutate"` — whether the server tool mutates persisted state
+- `input: z.ZodSchema` — Zod schema mirrored by the middleware `ServerTool`
 - `availableIn?: Array<"onboarding" | "steady">` — mode scoping; defaults to both
+- `availableSteps?: ViewerStep["kind"][]` — viewer-step relevance metadata
+- `rendersWidget?: string` — optional chat-widget reachability binding
 
-A `no-llm.md` SHALL contain a `## Why` section justifying the opt-out (typical reasons: pure display, user-driven nav with no LLM-controllable surface, already-user-confirmed legacy flow).
-
-#### Scenario: Drift guard fires when both tools.ts AND no-llm.md are missing
-
-- **GIVEN** a new widget directory `app/src/components/chat-widgets/Foo/` containing only `Foo.tsx`, `Foo.test.tsx`, and `README.md`
-- **WHEN** `npx vitest run app/src/test/widget-contract.test.ts` executes
-- **THEN** the drift guard fails with an error naming the missing tool-surface declaration
-- **AND** the error message names both acceptable resolutions (`<Name>.tools.ts` or `no-llm.md`)
+App tool declarations SHALL be declarative metadata only. They SHALL NOT expose
+a runtime `handler`, and they SHALL NOT be composed into a production app
+`toolRegistry`. Executable tool validation and `CanvasIntent` construction live
+in middleware `SERVER_TOOL_CATALOG`.
 
 #### Scenario: Drift guard accepts a fully-conforming LLM-drivable widget
 
-- **GIVEN** `chat-widgets/Foo/` contains `Foo.tsx`, `Foo.test.tsx`, `README.md`, AND `Foo.tools.ts` exporting a valid `WidgetTool[]`
+- **GIVEN** `chat-widgets/Foo/` contains `Foo.tsx`, `Foo.test.tsx`,
+  `README.md`, AND `Foo.tools.ts` exporting valid `WidgetTool[]` metadata
 - **WHEN** the drift guard runs
 - **THEN** the test passes for that directory
-
-#### Scenario: Drift guard accepts an explicit no-llm opt-out
-
-- **GIVEN** `chat-widgets/Foo/` contains `Foo.tsx`, `Foo.test.tsx`, `README.md`, AND `no-llm.md` with a `## Why` section
-- **WHEN** the drift guard runs
-- **THEN** the test passes for that directory
+- **AND** the app metadata handler guard confirms `Foo.tools.ts` has no
+  `handler` field.
 
 ### Requirement: Every interactive primitive SHALL require a tool or explicit no-tool binding
 
@@ -474,44 +475,28 @@ real bucket.
 
 ### Requirement: Data catalogs SHALL share a `Catalog<T>` read contract
 
-Every data catalog SHALL satisfy a shared `Catalog<T>` contract exposing `all(): readonly T[]` and
-`byId(id: string): T | undefined`. A data catalog is a collection looked up by id and enumerated —
-today `ScenarioRegistry`, `toolRegistry`, and `chatExperienceRegistry`. Locally-sourced catalogs
-(static or glob-discovered) SHALL additionally enforce a unique-id invariant that fails at build/boot
-on a duplicate id. A catalog SHALL be lookup + enumeration only: it SHALL NOT resolve an entry from a
-route/entry context and SHALL NOT mount or otherwise dispatch behavior.
+Every data catalog SHALL satisfy a shared `Catalog<T>` contract exposing
+`all(): readonly T[]` and `byId(id: string): T | undefined`. A data catalog is a
+collection looked up by id and enumerated — today `ScenarioRegistry`,
+`scopedViewerWidgetRegistry`, and `chatExperienceRegistry`. Locally-sourced
+catalogs (static or glob-discovered) SHALL additionally enforce a unique-id
+invariant that fails at build/boot on a duplicate id. A catalog SHALL be lookup
++ enumeration only: it SHALL NOT resolve an entry from a route/entry context and
+SHALL NOT mount or otherwise dispatch behavior.
 
-The unique-id helper SHALL accept an optional source-label extractor; when a glob-discovered catalog
-supplies it (e.g. each entry's module path), the duplicate-id error SHALL name the colliding source
-modules. Without it, the error names the duplicate id only.
-
-Sourcing and delivery MAY differ and SHALL NOT be flattened: a remote catalog MAY add an async status
-machine + `refresh()` and be delivered via a React Context; a local catalog MAY be a plain singleton.
-The shared contract governs the data-access API only. No catalog base class or runtime catalog
-framework SHALL be introduced — the contract is a type plus a unique-id helper.
+Declarative app tool metadata is not a production catalog. Tests MAY collect
+that metadata with the shared `assertUniqueIds` helper for parity/quality
+checks, but this collection SHALL NOT expose `byId`, step filtering, mode
+filtering, or executable dispatch.
 
 #### Scenario: Each catalog satisfies the shared read API
 
-- **GIVEN** `ScenarioRegistry`, `toolRegistry`, and `chatExperienceRegistry`
+- **GIVEN** `ScenarioRegistry`, `scopedViewerWidgetRegistry`, and
+  `chatExperienceRegistry`
 - **WHEN** their public APIs are inspected
 - **THEN** each exposes `all()` and `byId(id)` conforming to `Catalog<T>`
-- **AND** `toolRegistry` retains `byName` as a documented alias (a tool's id is its `name`) and its
-  tool-specific `forStep(...)` extension
-- **AND** `ScenarioRegistry` retains its async status + `refresh()` as the remote-catalog extension.
-
-#### Scenario: A local catalog rejects a duplicate id at boot
-
-- **GIVEN** a glob-discovered catalog (e.g. `toolRegistry` or `chatExperienceRegistry`) with two entries sharing an id, assembled via the unique-id helper with a source-label extractor (each entry's module path)
-- **WHEN** the catalog is assembled at boot
-- **THEN** assembly throws an error naming the duplicate id
-- **AND** because the source-label extractor was supplied, the error also names the colliding source modules.
-
-#### Scenario: A catalog does not dispatch
-
-- **GIVEN** any data catalog
-- **WHEN** its surface is inspected
-- **THEN** it offers lookup (`byId`) and enumeration (`all`) only
-- **AND** it exposes no `resolve(context)`-style method that selects or mounts an entry from a route/entry context.
+- **AND** `ScenarioRegistry` retains its async status + `refresh()` as the
+  remote-catalog extension.
 
 ### Requirement: "Registry"/"Catalog" naming SHALL denote a read catalog, not mutable state
 

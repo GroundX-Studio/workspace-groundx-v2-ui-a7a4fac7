@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:subagent-driven-development` (recommended) or
 > `superpowers:executing-plans` to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Close GitHub `#16` and `#17` by removing the orphan app runtime tool
 registry and normalizing scoped project filters to `projectId`.
@@ -56,7 +56,7 @@ If a review fails, stop the chain and patch the failing task before continuing.
 - Modify: `app/src/conversation/experiences/scopedChatExperience.tsx` tests if
   a dedicated test file exists; otherwise cover through project experience tests.
 
-- [ ] **Step 1: Add a failing ProjectsView scope test**
+- [x] **Step 1: Add a failing ProjectsView scope test**
 
 Add a test that proves ready scenarios use the resolved `projectId` key/value:
 
@@ -84,7 +84,7 @@ If the current harness scenario fixture uses only `{id:"utility"}`, update only
 the test fixture to include `projectId: "proj_utility"`; do not update runtime
 code yet.
 
-- [ ] **Step 2: Add a failing no-slug-fallback test**
+- [x] **Step 2: Add a failing no-slug-fallback test**
 
 Add a test that proves the project route does not create a chat session using a
 scenario slug while the scenario registry is still loading. The exact harness
@@ -96,7 +96,7 @@ becomes ready, the normal `ConversationFlow` route renders from the same
 `ScopedConversationShell` path with exactly one project-scoped session keyed by
 the resolved `projectId`.
 
-- [ ] **Step 3: Add a failing Project experience grounding test**
+- [x] **Step 3: Add a failing Project experience grounding test**
 
 Update `PROJECT_SCOPE` in
 `app/src/conversation/experiences/project/experience.test.tsx` to:
@@ -116,7 +116,7 @@ expect(exp.scopeHint?.scenarioTitle).toContain('"projectId":"proj_utility"');
 expect(exp.scopeHint?.scenarioTitle).not.toContain('"project":"utility"');
 ```
 
-- [ ] **Step 4: Run red tests**
+- [x] **Step 4: Run red tests**
 
 Run:
 
@@ -129,7 +129,7 @@ npm --workspace app test -- --run \
 Expected: fails because runtime still builds `filter.project` and the shared
 scenario type does not yet require `projectId`.
 
-- [ ] **Step 5: Record adversarial review 1**
+- [x] **Step 5: Record adversarial review 1**
 
 Review whether the failing tests are user-visible enough. They must prove the
 actual scoped conversation session/grounding value changes, not only a local
@@ -147,7 +147,7 @@ project session before the scenario registry is ready.
 - Modify: `middleware/src/scenarios/typesDriftGuard.ts`
 - Modify: app fixtures that construct `ScenarioConfig`
 
-- [ ] **Step 1: Extend the shared schema**
+- [x] **Step 1: Extend the shared schema**
 
 In `shared/src/index.ts`, update `scenarioConfigSchema`:
 
@@ -162,7 +162,7 @@ export const scenarioConfigSchema = z.object({
 });
 ```
 
-- [ ] **Step 2: Populate `projectId` in middleware registry**
+- [x] **Step 2: Populate `projectId` in middleware registry**
 
 In `middleware/src/scenarios/registry.ts`, compute once per scenario:
 
@@ -184,7 +184,7 @@ scenarios.push({
 });
 ```
 
-- [ ] **Step 3: Update scenario registry tests**
+- [x] **Step 3: Update scenario registry tests**
 
 Add an assertion for mapped utility:
 
@@ -198,7 +198,7 @@ it("returns the resolved projectId on each ScenarioConfig", async () => {
 });
 ```
 
-- [ ] **Step 4: Update shared/app/middleware drift fixtures**
+- [x] **Step 4: Update shared/app/middleware drift fixtures**
 
 Every representative `ScenarioConfig` fixture must include `projectId`.
 Use `"proj_utility"` for app-only fixtures unless the test is specifically
@@ -215,7 +215,7 @@ Remove masking casts that let missing `projectId` fixtures compile, especially
 or scenario registry fixtures. If a cast is still necessary for a test harness,
 the fixture must still include `projectId`.
 
-- [ ] **Step 5: Run focused boundary tests**
+- [x] **Step 5: Run focused boundary tests**
 
 Run:
 
@@ -227,7 +227,7 @@ npm --workspace app test -- --run src/types/scenarios.drift.test.ts
 
 Expected: all pass.
 
-- [ ] **Step 6: Record adversarial review 2**
+- [x] **Step 6: Record adversarial review 2**
 
 Review for duplicated project-id mappings. The app must not introduce its own
 copy of `SAMPLE_PROJECT_ID_BY_SCENARIO`.
@@ -244,7 +244,7 @@ copy of `SAMPLE_PROJECT_ID_BY_SCENARIO`.
 - Optional create: `app/src/views/Scoped/projectScopeVocabulary.test.ts`
 - Optional create: `app/src/views/Scoped/projectScope.ts`
 
-- [ ] **Step 1: Rename project prop vocabulary**
+- [x] **Step 1: Rename project prop vocabulary**
 
 In `ScopedConversationShellProps`, replace `projectValue?: string` with:
 
@@ -253,7 +253,7 @@ In `ScopedConversationShellProps`, replace `projectValue?: string` with:
 projectId?: string;
 ```
 
-- [ ] **Step 2: Build project scope with `filter.projectId` and no slug fallback**
+- [x] **Step 2: Build project scope with `filter.projectId` and no slug fallback**
 
 In `ScopedConversationShell`, derive:
 
@@ -287,7 +287,7 @@ If useful, create a tiny scoped-route helper such as
 `buildProjectContentScope({ bucketId, projectId })` so all `/projects`
 construction uses one local vocabulary point.
 
-- [ ] **Step 3: Update scoped experience filtering**
+- [x] **Step 3: Update scoped experience filtering**
 
 In `makeScopedIntro`, replace `scope.filter?.project` reads with
 `scope.filter?.projectId`, and compare against `scenario.projectId`:
@@ -304,7 +304,7 @@ const scenarios = projectIds
   : registryState.scenarios;
 ```
 
-- [ ] **Step 4: Add a targeted source guard**
+- [x] **Step 4: Add a targeted source guard**
 
 Create `app/src/views/Scoped/projectScopeVocabulary.test.ts`:
 
@@ -341,7 +341,7 @@ const ROOT = resolve(process.cwd(), "src");
 This guard is scoped to the `/projects` route/experience vocabulary. Do not add
 a global ban on `filter.project`; SmartReport `#11` owns its remaining drift.
 
-- [ ] **Step 5: Run focused app tests**
+- [x] **Step 5: Run focused app tests**
 
 Run:
 
@@ -355,7 +355,7 @@ npm --workspace app test -- --run \
 
 Expected: all pass.
 
-- [ ] **Step 6: Required Chrome verification when available**
+- [x] **Step 6: Required Chrome verification when available**
 
 If Chrome DevTools MCP is available during execution, start the dev stack in
 memory mode and verify `/projects` chat summary includes `filter
@@ -365,7 +365,7 @@ task notes and keep the focused app tests as the fallback evidence.
 For this workspace, Chrome DevTools MCP is expected to be available; do not use
 the fallback unless tool discovery fails during execution.
 
-- [ ] **Step 7: Record adversarial review 3**
+- [x] **Step 7: Record adversarial review 3**
 
 Review that the change did not touch SmartReport `filter.project` fixtures from
 `#11`, and did not fold BYO upload stamping from `#3` into this issue.
@@ -379,7 +379,7 @@ Review that the change did not touch SmartReport `filter.project` fixtures from
 - Modify: `app/scripts/check-tool-quality.test.mjs`
 - Modify: `app/scripts/check-tool-references.test.mjs`
 
-- [ ] **Step 1: Add a failing handler drift guard**
+- [x] **Step 1: Add a failing handler drift guard**
 
 Create `app/src/tools/appToolMetadata.test.ts`:
 
@@ -420,7 +420,7 @@ describe("app tool declarations", () => {
 });
 ```
 
-- [ ] **Step 2: Run red #16 guard**
+- [x] **Step 2: Run red #16 guard**
 
 Run:
 
@@ -433,7 +433,7 @@ Expected: fails because app tool files still contain `handler` and
 scaffold template tool files so future copies do not inherit dead execution
 metadata.
 
-- [ ] **Step 3: Record adversarial review 4**
+- [x] **Step 3: Record adversarial review 4**
 
 Review that the guard targets the actual issue: dead app execution metadata and
 registry singleton, not the useful declarative app tool metadata.
@@ -456,7 +456,7 @@ registry singleton, not the useful declarative app tool metadata.
 - Modify: `app/src/widgets/scopedViewerWidget.ts` comments if they claim the
   descriptor tools are surfaced through the app runtime registry
 
-- [ ] **Step 1: Remove execution fields from `WidgetTool`**
+- [x] **Step 1: Remove execution fields from `WidgetTool`**
 
 In `app/src/tools/types.ts`, remove the `handler` property and the
 `CanvasIntent` import. Delete the `ToolRegistry` interface. Keep:
@@ -476,7 +476,7 @@ export interface WidgetTool<TSchema extends ZodTypeAny = ZodTypeAny> {
 Rewrite the file header to state that app `WidgetTool` is declarative metadata
 only; middleware `ServerTool.intentBuilder` is the executable production side.
 
-- [ ] **Step 2: Remove `handler` from app tool declarations**
+- [x] **Step 2: Remove `handler` from app tool declarations**
 
 For every app `*.tools.ts` file, including scaffold templates, delete
 `handler: ...`. Keep `name`,
@@ -491,7 +491,7 @@ metadata. They remain excluded from live parity/quality/reference collection
 unless a separate task intentionally promotes templates into production app
 tool metadata.
 
-- [ ] **Step 3: Replace registry usage in parity tests**
+- [x] **Step 3: Replace registry usage in parity tests**
 
 If a pure helper is needed, create `app/src/tools/appToolSpecs.ts`:
 
@@ -533,7 +533,7 @@ const appByName = new Map(appTools.map((tool) => [tool.name, tool]));
 const appNames = appTools.map((tool) => tool.name).sort();
 ```
 
-- [ ] **Step 4: Delete the runtime registry**
+- [x] **Step 4: Delete the runtime registry**
 
 Delete:
 
@@ -542,14 +542,14 @@ app/src/tools/registry.ts
 app/src/tools/registry.test.ts
 ```
 
-- [ ] **Step 5: Update script self-test fixtures**
+- [x] **Step 5: Update script self-test fixtures**
 
 In `app/scripts/check-tool-quality.test.mjs` and
 `app/scripts/check-tool-references.test.mjs`, remove `handler` from temporary
 fixture tool literals so the fixture style matches the new declarative app tool
 shape.
 
-- [ ] **Step 6: Update TypeScript test fixtures**
+- [x] **Step 6: Update TypeScript test fixtures**
 
 Run:
 
@@ -561,7 +561,7 @@ Remove dead `handler` fields from test-only `WidgetTool` literals and update
 assertions that assumed app-side handler execution. Do not remove widget
 descriptor `tools` arrays.
 
-- [ ] **Step 7: Run focused #16 tests**
+- [x] **Step 7: Run focused #16 tests**
 
 Run:
 
@@ -577,7 +577,7 @@ npm --workspace app test -- --run \
 
 Expected: all pass.
 
-- [ ] **Step 8: Record adversarial review 5**
+- [x] **Step 8: Record adversarial review 5**
 
 Review import graph with:
 
@@ -603,7 +603,7 @@ work, and non-code prose explaining that handlers were removed.
 - Verify only GitHub `#16` and `#17` are closed by this change; keep `#13`,
   `#14`, and `#15` open in backlog unless a separate user request changes scope
 
-- [ ] **Step 1: Update data-model docs**
+- [x] **Step 1: Update data-model docs**
 
 In `docs/agents/data-model.md`, replace the app tool row with the new model:
 
@@ -614,7 +614,7 @@ In `docs/agents/data-model.md`, replace the app tool row with the new model:
 Also update scenario/project wording so `ScenarioConfig.projectId` is the app
 boundary value used to build scoped project `ContentScope.filter.projectId`.
 
-- [ ] **Step 2: Update README/comments that claim app handlers execute**
+- [x] **Step 2: Update README/comments that claim app handlers execute**
 
 Search:
 
@@ -628,7 +628,7 @@ not rewrite page-budget `#13`, group-resolver `#14`, or signed-in
 `OnboardingWizard` `#15` behavior here; removing dead handler metadata from
 `OnboardingWizard.tools.ts` is not enough to close `#15`.
 
-- [ ] **Step 3: Run validation and browser verification**
+- [x] **Step 3: Run validation and browser verification**
 
 Run:
 
@@ -662,7 +662,7 @@ verify `/projects` in the browser:
 If Chrome DevTools MCP is unavailable, record the tool-unavailable evidence in
 the issue comments and final summary.
 
-- [ ] **Step 4: Commit and GitHub cleanup**
+- [x] **Step 4: Commit and GitHub cleanup**
 
 Commit after validation:
 
@@ -687,7 +687,7 @@ Close `#16` and `#17` only after the commit exists and validation output is
 recorded in the issue comments. Confirm `#13`, `#14`, and `#15` remain open with
 their backlog labels.
 
-- [ ] **Step 5: Archive OpenSpec**
+- [x] **Step 5: Archive OpenSpec**
 
 Archive when both issues are closed or explicitly narrowed:
 
@@ -706,7 +706,7 @@ git add openspec
 git commit -m "docs: archive tool registry and project scope fix"
 ```
 
-- [ ] **Step 6: Final adversarial review**
+- [x] **Step 6: Final adversarial review**
 
 Confirm:
 

@@ -81,12 +81,12 @@ Order in the provider tree: `Api` → `AppMode` → `ChatStore` (via
 → `CanvasOrchestrator` / `OnboardingSkill` → views.
 
 `AgentToolBusContext` was retired in widget-llm-integration Phase 2
-(2026-05-27). The architectural replacement is the declarative widget
-tool registry (`app/src/tools/registry.ts`, Phase 3) — each widget
-ships its own `<Name>.tools.ts`, the registry auto-discovers them at
-boot, and the middleware emits tool calls via native LLM function
-calling rather than via an in-app event bus. The retired bus had
-zero production consumers.
+(2026-05-27). Production LLM tool execution now lives in middleware
+`SERVER_TOOL_CATALOG`: each app widget may ship declarative
+`<Name>.tools.ts` metadata for parity/quality/reference checks, but the
+middleware validates tool calls and builds `CanvasIntent` values via server
+`intentBuilder`s. The retired bus and the old app runtime tool registry had zero
+production consumers.
 
 ## ChatSession + ViewerSession (master pairing)
 

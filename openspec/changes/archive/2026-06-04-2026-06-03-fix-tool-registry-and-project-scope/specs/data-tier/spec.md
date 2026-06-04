@@ -27,6 +27,8 @@ frontend SHALL NOT receive the grant graph and SHALL build only a `ContentScope`
 - **THEN** `compileRagFilter` intersects B's authorized set (which excludes
   `proj_a`) and the search returns no documents from `proj_a`.
 
+## ADDED Requirements
+
 ### Requirement: ScenarioConfig SHALL expose the resolved projectId used for sample document filters
 
 The shared `ScenarioConfig` returned by `GET /api/scenarios` SHALL include a
@@ -43,4 +45,3 @@ duplicating middleware-only mapping constants.
 - **THEN** `ScenarioConfig.projectId` is
   `"proj_c7701da7-0e08-482a-a496-df9dfe991613"`
 - **AND** the app uses that value for `/projects` scoping.
-
