@@ -20,12 +20,12 @@ const renderWizard = (context: Partial<OnboardingContextI> = {}) => {
   const steps = [
     {
       id: "intro",
-      title: "Learn the console",
-      body: "This custom onboarding copy comes from app config.",
+      title: "Review your signed-in Studio",
+      body: "This custom authenticated onboarding copy comes from app config.",
       primaryActionLabel: "Show me around",
-      routeHint: "Start on Home.",
-      educationLabel: "About onboarding",
-      sourceFrame: "F1 Ingest",
+      routeHint: "Start from the current product route.",
+      educationLabel: "About signed-in onboarding",
+      sourceFrame: "Authenticated Studio",
       launchHref: "/onboarding",
       launchLabel: "Open onboarding sandbox",
     },
@@ -51,11 +51,11 @@ describe("OnboardingWizard", () => {
     renderWizard();
 
     expect(screen.getByRole("dialog", { name: /welcome to groundx studio/i })).toBeInTheDocument();
-    expect(screen.getByText("Learn the console")).toBeInTheDocument();
-    expect(screen.getByText("This custom onboarding copy comes from app config.")).toBeInTheDocument();
-    expect(screen.getByText("Start on Home.")).toBeInTheDocument();
-    expect(screen.getByText("About onboarding")).toBeInTheDocument();
-    expect(screen.getByText("F1 Ingest")).toBeInTheDocument();
+    expect(screen.getByText("Review your signed-in Studio")).toBeInTheDocument();
+    expect(screen.getByText("This custom authenticated onboarding copy comes from app config.")).toBeInTheDocument();
+    expect(screen.getByText("Start from the current product route.")).toBeInTheDocument();
+    expect(screen.getByText("About signed-in onboarding")).toBeInTheDocument();
+    expect(screen.getByText("Authenticated Studio")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open onboarding sandbox" })).toHaveAttribute("href", "/onboarding");
   });
 

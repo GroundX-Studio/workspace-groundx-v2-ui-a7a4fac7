@@ -26,18 +26,29 @@ describe("appConfig", () => {
     });
     expect(DEFAULT_APP_CONFIG.onboarding.enabled).toBe(true);
     expect(DEFAULT_APP_CONFIG.onboarding.steps.map((step) => step.id)).toEqual([
-      "ingest",
-      "understand",
-      "extract",
-      "interact-report",
+      "sessions",
+      "scopes",
+      "sandbox",
+      "outputs",
       "integrate",
     ]);
     expect(DEFAULT_APP_CONFIG.onboarding.steps[0]).toMatchObject({
-      title: "Start from a source",
-      sourceFrame: "F1 Ingest",
+      title: "Pick up where the proof left off",
+      sourceFrame: "Saved sessions",
+    });
+    expect(DEFAULT_APP_CONFIG.onboarding.steps[1]).toMatchObject({
+      title: "Work in Workspaces and Projects",
+      launchHref: "/workspaces",
+      launchLabel: "Open Workspaces",
+    });
+    expect(DEFAULT_APP_CONFIG.onboarding.steps[2]).toMatchObject({
+      title: "Use the sandbox for the guided walkthrough",
       launchHref: "/onboarding",
       launchLabel: "Open onboarding sandbox",
     });
+    expect(DEFAULT_APP_CONFIG.onboarding.steps.map((step) => `${step.title} ${step.body}`).join(" ")).not.toMatch(
+      /starter home page|workspace setup|name your workspace/i
+    );
     expect(DEFAULT_APP_CONFIG.design).toEqual({});
   });
 

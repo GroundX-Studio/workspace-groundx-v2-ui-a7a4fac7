@@ -93,11 +93,13 @@ describe("OnboardingProvider", () => {
     renderProvider();
 
     expect(await screen.findByRole("dialog", { name: /welcome to groundx studio/i })).toBeInTheDocument();
-    expect(screen.getByText("Start from a source")).toBeInTheDocument();
-    expect(screen.getByText(/Pick a sample, upload a PDF, or connect a source/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open onboarding sandbox/i })).toHaveAttribute("href", "/onboarding");
+    expect(screen.getByText("Pick up where the proof left off")).toBeInTheDocument();
+    expect(screen.getByText(/current conversations and saved chat sessions/i)).toBeInTheDocument();
+    expect(screen.getByText("Saved sessions")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open onboarding sandbox/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Start with the app shell")).not.toBeInTheDocument();
     expect(screen.queryByText(/Replace the starter Home page/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Name your workspace/i)).not.toBeInTheDocument();
   });
 
   it("does not open after onboarding is complete", () => {
@@ -123,7 +125,7 @@ describe("OnboardingProvider", () => {
     const { updateAppMetadata } = renderProvider();
 
     await screen.findByRole("dialog", { name: /welcome to groundx studio/i });
-    for (const label of ["Next: Understand", "Next: Extract", "Next: Interact", "Next: Integrate"]) {
+    for (const label of ["Next: Workspaces", "Next: Sandbox", "Next: Outputs", "Next: Integrate"]) {
       await act(async () => {
         await user.click(screen.getByRole("button", { name: label }));
       });

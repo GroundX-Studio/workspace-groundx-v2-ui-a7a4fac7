@@ -12,7 +12,16 @@ import { makeFakeApi, type ApiOverrides } from "@/test/makeFakeApi";
 const user = { username: "acct-1", email: "pat@example.com", first: "Pat", last: "Lee" };
 
 const Harness = () => {
-  const { auth, user: authedUser, login, logout, register, resetPassword, confirmChangingPassword, updateAppMetadata } = useAuthContext();
+  const {
+    auth,
+    user: authedUser,
+    login,
+    logout,
+    register,
+    resetPassword,
+    confirmChangingPassword,
+    updateAppMetadata,
+  } = useAuthContext();
   const { errorMessage, successMessage, setSuccessMessage } = useMessageContext();
 
   return (
