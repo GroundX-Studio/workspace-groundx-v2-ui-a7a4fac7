@@ -8,6 +8,7 @@ import { Dashboard } from "@/views/CoreLayouts/Dashboard";
 import { Health } from "@/views/Health/Health";
 import { Home } from "@/views/Home/Home";
 import { Login } from "@/views/Auth/Login";
+import { OnboardingFlow } from "@/views/Onboarding/OnboardingFlow";
 import { Register } from "@/views/Auth/Register";
 import { ResetPassword } from "@/views/Auth/ResetPassword";
 import { ROUTER_PATHS } from "@/router/routerPaths";
@@ -34,4 +35,5 @@ export const router = createBrowserRouter([
   { path: ROUTER_PATHS.AUTH_RESET_PASSWORD, element: <ResetPassword /> },
   { path: ROUTER_PATHS.HEALTH, element: <Health /> },
   { path: ROUTER_PATHS.BANNED, element: <Banned /> },
+  { path: ROUTER_PATHS.ONBOARDING, element: <OnboardingFlow /> },
 ]);
