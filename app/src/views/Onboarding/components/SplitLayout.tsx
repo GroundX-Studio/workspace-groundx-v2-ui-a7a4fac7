@@ -29,6 +29,9 @@ export function SplitLayout() {
     view,
     hoveredField,
     setHoveredField,
+    selectedField,
+    selectField,
+    clearField,
     showExtract,
     chatWidth,
     setChatWidth,
@@ -39,6 +42,7 @@ export function SplitLayout() {
 
   // Only the canonical Utility Bill demo has extraction data wired in this slice.
   const category = selectedSample?.id === "utility-bill" ? UTILITY_BILL_CATEGORIES[view] : null;
+  const openedField = category && selectedField ? (category.fields.find((f) => f.name === selectedField) ?? null) : null;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
   const chatFocused = focusMode === "chat";
@@ -102,7 +106,14 @@ export function SplitLayout() {
           height: "100%",
         }}
       >
-        <ChatPanel sample={selectedSample} phase={activePhase} onFocusChat={toggleChatFocus} onPickView={showExtract} />
+        <ChatPanel
+          sample={selectedSample}
+          phase={activePhase}
+          onFocusChat={toggleChatFocus}
+          onPickView={showExtract}
+          selectedValue={openedField?.value}
+          selectedCitation={openedField?.citation}
+        />
       </Box>
 
       {/* Drag handle */}
@@ -152,6 +163,9 @@ export function SplitLayout() {
             category={category}
             hoveredField={hoveredField}
             onHoverField={setHoveredField}
+            selectedField={selectedField}
+            onSelectField={selectField}
+            onClearField={clearField}
             onSwitchSample={resetToIngest}
           />
         </Box>

@@ -43,6 +43,22 @@ export interface SampleProject {
 /** The three categories the runner recognises inside a schema (see F3 Extract). */
 export type FieldCategoryId = "statement" | "meters" | "charges";
 
+/** The expanded provenance shown when a field is opened (F4 citation peek). */
+export interface FieldProvenance {
+  /** Field type, e.g. "kW · float". */
+  type: string;
+  /** Source location, e.g. "utility-bill.pdf · page 1 · region (520, 380) → (740, 460)". */
+  source: string;
+  /** Why this value matched — the model's reasoning, one line each. */
+  whyMatched: string[];
+  /** Match confidence, 0–100. */
+  confidence: number;
+  /** Nearby extracted values, "name · value". */
+  neighbors: string[];
+  /** Lines rendered inside the highlighted doc region's MATCH box. */
+  matchBox: string[];
+}
+
 /** A single extracted value with its source citation. */
 export interface ExtractedField {
   /** YAML key, written uppercase, e.g. "PEAK_DEMAND_KW". */
@@ -53,6 +69,8 @@ export interface ExtractedField {
   citation?: string;
   /** Free-tier locked: rendered blurred behind the sign-in gate. */
   locked?: boolean;
+  /** Rich provenance for the F4 peek; derived defaults are used when absent. */
+  provenance?: FieldProvenance;
 }
 
 /** A category of extracted fields shown as a view in the Extract canvas. */

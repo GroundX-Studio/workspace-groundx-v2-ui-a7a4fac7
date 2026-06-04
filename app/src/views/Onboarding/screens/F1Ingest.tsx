@@ -227,7 +227,7 @@ export function F1Ingest() {
         Connect your data to GroundX.
       </Typography>
       <Typography sx={{ mt: 1, fontSize: 15, color: BODY_TEXT, maxWidth: 760 }}>
-        GroundX works on the docs that break general-purpose AI — contracts, claims, policies, forms, technical diagrams. Try a
+        Extract structured, cited data from complex documents — contracts, claims, policies, forms, technical diagrams. Try a
         sample, or bring your own (sign-up required).
       </Typography>
 
@@ -296,7 +296,7 @@ export function F1Ingest() {
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 4 }}>
         <LockOutlinedIcon sx={{ fontSize: 14, color: MUTED_ON_LIGHT }} />
         <Typography sx={{ fontSize: 12.5, color: MUTED_ON_LIGHT }}>
-          Your docs are yours. GroundX never trains on uploaded content. Air-gapped on-prem available for regulated buyers.
+          Your documents are yours and aren&apos;t used to train models. Sample data shown here is illustrative.
         </Typography>
       </Stack>
     </Box>

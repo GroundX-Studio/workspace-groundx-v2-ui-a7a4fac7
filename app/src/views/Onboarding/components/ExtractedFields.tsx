@@ -28,6 +28,7 @@ import {
   WHITE,
 } from "@/constants";
 import DropdownMenu, { DropdownMenuItemConfig } from "@/shared/components/DropdownMenu";
+import { onEnterOrSpace } from "@/shared/utils/onEnterOrSpace";
 
 import { EXTRACT_MENU_ACTIONS } from "../flow/extractionData";
 import { ExtractedField, FieldCategory } from "../flow/flowTypes";
@@ -36,12 +37,19 @@ const FieldRow = ({
   field,
   hovered,
   onHover,
+  onSelect,
 }: {
   field: ExtractedField;
   hovered: boolean;
   onHover: (name: string | null) => void;
+  onSelect: () => void;
 }) => (
   <Box
+    role={field.locked ? undefined : "button"}
+    tabIndex={field.locked ? undefined : 0}
+    aria-label={field.locked ? undefined : `Open provenance for ${field.name}`}
+    onClick={field.locked ? undefined : onSelect}
+    onKeyDown={field.locked ? undefined : onEnterOrSpace(onSelect)}
     onMouseEnter={() => onHover(field.locked ? null : field.name)}
     onMouseLeave={() => onHover(null)}
     sx={{
@@ -53,6 +61,8 @@ const FieldRow = ({
       borderRadius: BORDER_RADIUS,
       border: `1px solid ${hovered ? GREEN : BORDER}`,
       backgroundColor: hovered ? alpha(GREEN, 0.16) : WHITE,
+      cursor: field.locked ? "default" : "pointer",
+      "&:focus-visible": { outline: "none", borderColor: GREEN, backgroundColor: alpha(GREEN, 0.16) },
       ...(field.locked ? { opacity: 0.55, filter: "blur(0.5px)" } : {}),
     }}
   >
@@ -78,9 +88,11 @@ export interface ExtractedFieldsProps {
   category: FieldCategory;
   hoveredField: string | null;
   onHoverField: (name: string | null) => void;
+  /** Open a field's provenance peek (F4). */
+  onSelectField: (name: string) => void;
 }
 
-export function ExtractedFields({ category, hoveredField, onHoverField }: ExtractedFieldsProps) {
+export function ExtractedFields({ category, hoveredField, onHoverField, onSelectField }: ExtractedFieldsProps) {
   const menuItems: DropdownMenuItemConfig[] = EXTRACT_MENU_ACTIONS.map((action) => ({
     label: action.label,
     // TODO(F3a / F6): wire schema save/edit, exports, filter, and group-by. Gated items need the sign-in gate.
@@ -131,7 +143,13 @@ export function ExtractedFields({ category, hoveredField, onHoverField }: Extrac
 
         <Stack spacing={0.75}>
           {category.fields.map((field) => (
-            <FieldRow key={field.name} field={field} hovered={hoveredField === field.name} onHover={onHoverField} />
+            <FieldRow
+              key={field.name}
+              field={field}
+              hovered={hoveredField === field.name}
+              onHover={onHoverField}
+              onSelect={() => onSelectField(field.name)}
+            />
           ))}
         </Stack>
 

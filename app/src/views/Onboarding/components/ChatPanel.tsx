@@ -122,18 +122,42 @@ const ViewChips = ({
   </Box>
 );
 
+const Cite = ({ label }: { label: string }) => (
+  <Box
+    component="span"
+    sx={{
+      ml: 0.5,
+      px: 0.75,
+      py: "1px",
+      borderRadius: BORDER_RADIUS_PILL,
+      fontSize: 11,
+      fontWeight: 600,
+      color: NAVY,
+      backgroundColor: alpha(GREEN, 0.3),
+      whiteSpace: "nowrap",
+    }}
+  >
+    {label}
+  </Box>
+);
+
 export interface ChatPanelProps {
   sample: SampleProject | null;
   phase: FlowPhase;
   onFocusChat?: () => void;
   /** Open an Extract category from a view chip. */
   onPickView?: (view: FieldCategoryId) => void;
+  /** Value of the field opened in the peek (F4), for the grounded answer. */
+  selectedValue?: string;
+  /** Citation of the opened field, e.g. "[3] p.1". */
+  selectedCitation?: string;
 }
 
-export function ChatPanel({ sample, phase, onFocusChat, onPickView }: ChatPanelProps) {
+export function ChatPanel({ sample, phase, onFocusChat, onPickView, selectedValue, selectedCitation }: ChatPanelProps) {
   const isUtilityBill = sample?.id === "utility-bill";
   const docName = sample ? `${sample.name.toLowerCase().replace(/\s+/g, "-")}.pdf` : "document.pdf";
   const understanding = phase === "understand";
+  const interacting = phase === "interact";
 
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", backgroundColor: WHITE, minWidth: 0 }}>
@@ -173,14 +197,28 @@ export function ChatPanel({ sample, phase, onFocusChat, onPickView }: ChatPanelP
                     <AssistantBubble>Done. {UNDERSTAND_SUMMARY}</AssistantBubble>
                     <ViewChips label="Pick a view:" onPick={onPickView} />
                   </>
+                ) : interacting ? (
+                  <>
+                    <Typography sx={{ pl: 4, fontSize: 12, color: MUTED_ON_LIGHT }}>
+                      ▾ earlier turns (reading · 6 thinking notes · extract)
+                    </Typography>
+                    <UserBubble>how did you get {selectedValue ?? "that value"}?</UserBubble>
+                    <AssistantBubble>
+                      Pulled from the demand summary box on page 1 — the source region is lit on the doc, full
+                      provenance on the right.
+                      {selectedCitation ? <Cite label={selectedCitation} /> : null}
+                    </AssistantBubble>
+                    <AssistantBubble>Open another field to inspect it, or ▴ collapse to return to all fields.</AssistantBubble>
+                  </>
                 ) : (
                   <>
                     <Typography sx={{ pl: 4, fontSize: 12, color: MUTED_ON_LIGHT }}>
-                      ▾ thinking notes (closing the comprehension gap…)
+                      ▾ thinking notes (reading · identifying fields · anchoring citations…)
                     </Typography>
                     <AssistantBubble>Done. {UNDERSTAND_SUMMARY}</AssistantBubble>
                     <AssistantBubble>
                       8 meters · 10 fields each. Hover a field on the right and I&apos;ll light up its rows on the doc.
+                      Click one to see why it matched.
                     </AssistantBubble>
                     <ViewChips label="Or another view:" onPick={onPickView} extra={["compare two meters", "edit schema"]} />
                   </>

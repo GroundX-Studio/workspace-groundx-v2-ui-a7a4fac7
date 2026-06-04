@@ -6,22 +6,14 @@
 
 import { ExtractedField, FieldCategory, FieldCategoryId } from "./flowTypes";
 
-/** F2 "thinking" notes streamed into chat as GroundX reads the doc. */
+// NOTE: placeholder copy. The real Understand-phase messaging (product positioning)
+// is intentionally kept out of this repo; swap these in from the product copy source.
+/** F2 "thinking" notes streamed into chat while the document is read. */
 export const UNDERSTAND_NOTES: { title: string; body: string }[] = [
-  {
-    title: "Closing the document comprehension gap",
-    body: "the structural barrier general-purpose AI can't cross — the whole point of GroundX.",
-  },
-  { title: "Vision-first parsing", body: "I read tables, paragraphs, and figures before any LLM touches the doc." },
-  {
-    title: "Agentic enrichment",
-    body: "narrow agents reason about each semantic object in parallel — 8 meters won't get confused with each other.",
-  },
-  {
-    title: "Pixel-level provenance",
-    body: "every value is anchored to its page region, so each citation clicks straight back to its source.",
-  },
-  { title: "Hybrid retrieval", body: "proprietary relevance + semantic scoring, not just embeddings." },
+  { title: "Reading the document", body: "parsing the layout — tables, paragraphs, and figures." },
+  { title: "Identifying fields", body: "grouping the extracted values by section." },
+  { title: "Anchoring citations", body: "linking each value back to the page region it came from." },
+  { title: "Checking confidence", body: "validating values and types before they're shown." },
 ];
 
 /** The summary line that closes the Understand pass. */
@@ -30,7 +22,23 @@ export const UNDERSTAND_SUMMARY = "3 pages · 20 statement fields · 8 meters ·
 const METER_3: ExtractedField[] = [
   { name: "METER_ID", value: "#3", citation: "[1] p.1" },
   { name: "SERVICE_TYPE", value: "commercial · TOU-B-3", citation: "[2] p.1" },
-  { name: "PEAK_DEMAND_KW", value: "16.2", citation: "[3] p.1" },
+  {
+    name: "PEAK_DEMAND_KW",
+    value: "16.2",
+    citation: "[3] p.1",
+    provenance: {
+      type: "kW · float",
+      source: "utility-bill.pdf · page 1 · region (520, 380) → (740, 460)",
+      whyMatched: [
+        '"METER 3" header anchors scope to meter #3',
+        '"DEMAND SUMMARY" label disambiguates from energy',
+        '"Peak kW" row · unit normalized · float parse',
+      ],
+      confidence: 98,
+      neighbors: ["off_peak_demand_kw · 9.4", "total_kwh · 892", "off_peak_kwh · 410"],
+      matchBox: ["METER 3 · DEMAND SUMMARY", "Peak kW   16.2", "Off-peak kW   9.4"],
+    },
+  },
   { name: "ENERGY_ON_PEAK_KWH", value: "892", citation: "[4] p.1" },
   { name: "ENERGY_OFF_PEAK_KWH", value: "410", citation: "[5] p.1" },
   { name: "ENERGY_BASE_KWH", value: "90", citation: "[6] p.2" },

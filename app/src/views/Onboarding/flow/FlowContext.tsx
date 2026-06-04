@@ -29,12 +29,18 @@ export interface FlowContextValue {
   view: FieldCategoryId;
   /** Field name currently hovered in the Extract panel, for doc provenance highlight. */
   hoveredField: string | null;
+  /** Field opened into the provenance peek (F4), or null in the plain Extract list. */
+  selectedField: string | null;
   /** Pick a sample on F1 and advance into the split layout (F2). */
   selectSample: (sample: SampleProject) => void;
   /** Open the Extract view (F3) for a category — from F2's "Pick a view" or in-Extract switching. */
   showExtract: (view: FieldCategoryId) => void;
   /** Highlight (or clear) the doc region for a hovered field. */
   setHoveredField: (name: string | null) => void;
+  /** Open a field's provenance peek (F4); flips the step strip to Interact. */
+  selectField: (name: string) => void;
+  /** Collapse the peek back to the Extract field list (F3). */
+  clearField: () => void;
   /** Jump to a specific frame. */
   goToStep: (step: FlowStepId) => void;
   /** Return to the full-width ingest screen. */
@@ -56,6 +62,7 @@ export const FlowProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [focusMode, setFocusMode] = useState<FocusMode>("split");
   const [view, setView] = useState<FieldCategoryId>("meters");
   const [hoveredField, setHoveredField] = useState<string | null>(null);
+  const [selectedField, setSelectedField] = useState<string | null>(null);
 
   const selectSample = useCallback((sample: SampleProject) => {
     setSelectedSample(sample);
@@ -66,8 +73,19 @@ export const FlowProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const showExtract = useCallback((next: FieldCategoryId) => {
     setView(next);
     setHoveredField(null);
+    setSelectedField(null);
     setStep("F3");
     setFocusMode("split");
+  }, []);
+
+  const selectField = useCallback((name: string) => {
+    setSelectedField(name);
+    setStep("F4");
+  }, []);
+
+  const clearField = useCallback(() => {
+    setSelectedField(null);
+    setStep("F3");
   }, []);
 
   const goToStep = useCallback((next: FlowStepId) => setStep(next), []);
@@ -75,6 +93,7 @@ export const FlowProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const resetToIngest = useCallback(() => {
     setSelectedSample(null);
     setHoveredField(null);
+    setSelectedField(null);
     setStep("F1");
   }, []);
 
@@ -92,9 +111,12 @@ export const FlowProvider: FC<{ children: ReactNode }> = ({ children }) => {
       focusMode,
       view,
       hoveredField,
+      selectedField,
       selectSample,
       showExtract,
       setHoveredField,
+      selectField,
+      clearField,
       goToStep,
       resetToIngest,
       toggleNav,
@@ -109,8 +131,11 @@ export const FlowProvider: FC<{ children: ReactNode }> = ({ children }) => {
       focusMode,
       view,
       hoveredField,
+      selectedField,
       selectSample,
       showExtract,
+      selectField,
+      clearField,
       goToStep,
       resetToIngest,
       toggleNav,

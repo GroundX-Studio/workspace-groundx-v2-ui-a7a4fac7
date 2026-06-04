@@ -1,14 +1,15 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ExtractedFields } from "./ExtractedFields";
 import { UTILITY_BILL_CATEGORIES } from "../flow/extractionData";
 
 const meters = UTILITY_BILL_CATEGORIES.meters;
+const noop = () => {};
 
 describe("ExtractedFields", () => {
   it("renders fields with values, citations, and the locked footer", () => {
-    render(<ExtractedFields category={meters} hoveredField={null} onHoverField={() => {}} />);
+    render(<ExtractedFields category={meters} hoveredField={null} onHoverField={noop} onSelectField={noop} />);
 
     expect(screen.getByText("PEAK_DEMAND_KW")).toBeInTheDocument();
     expect(screen.getByText("16.2")).toBeInTheDocument();
@@ -16,17 +17,17 @@ describe("ExtractedFields", () => {
     expect(screen.getByText(/3 more fields locked/)).toBeInTheDocument();
   });
 
-  it("highlights the row matching the hovered field", () => {
-    const { rerender } = render(<ExtractedFields category={meters} hoveredField={null} onHoverField={() => {}} />);
-    // Re-render with a hovered field; the matching row should expose its citation unchanged.
-    rerender(<ExtractedFields category={meters} hoveredField="PEAK_DEMAND_KW" onHoverField={() => {}} />);
+  it("opens a field's provenance when its row is activated", () => {
+    const onSelectField = vi.fn();
+    render(<ExtractedFields category={meters} hoveredField={null} onHoverField={noop} onSelectField={onSelectField} />);
 
-    expect(screen.getByText("PEAK_DEMAND_KW")).toBeInTheDocument();
-    expect(screen.getByText("16.2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open provenance for PEAK_DEMAND_KW" }));
+
+    expect(onSelectField).toHaveBeenCalledWith("PEAK_DEMAND_KW");
   });
 
   it("exposes gated schema actions behind the menu", () => {
-    render(<ExtractedFields category={meters} hoveredField={null} onHoverField={() => {}} />);
+    render(<ExtractedFields category={meters} hoveredField={null} onHoverField={noop} onSelectField={noop} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Extract actions menu" }));
 

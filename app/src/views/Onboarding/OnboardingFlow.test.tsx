@@ -41,6 +41,24 @@ describe("OnboardingFlow", () => {
     expect(screen.getByRole("button", { name: "unlock everything →" })).toBeInTheDocument();
   });
 
+  it("opens a field's provenance peek (F4) and collapses back to the field list", () => {
+    renderWithAppProviders(<OnboardingFlow />, "/start");
+
+    fireEvent.click(screen.getByText("Utility Bill"));
+    fireEvent.click(screen.getByRole("button", { name: "meters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open provenance for PEAK_DEMAND_KW" }));
+
+    // Provenance peek is open.
+    expect(screen.getByText("Field provenance")).toBeInTheDocument();
+    expect(screen.getByText("WHY MATCHED")).toBeInTheDocument();
+    expect(screen.getByText(/region \(520, 380\)/)).toBeInTheDocument();
+    expect(screen.getByText(/how did you get 16\.2\?/)).toBeInTheDocument();
+
+    // Collapse returns to the Extract field list.
+    fireEvent.click(screen.getByRole("button", { name: "← all fields" }));
+    expect(screen.getByText("Extracted fields")).toBeInTheDocument();
+  });
+
   it("lets keyboard users select a sample (cards are buttons activated by Enter)", () => {
     renderWithAppProviders(<OnboardingFlow />, "/start");
 

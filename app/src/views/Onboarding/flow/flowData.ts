@@ -64,7 +64,8 @@ export const STEP_PHASE: Record<FlowStepId, FlowPhase> = {
   F1: "ingest",
   F2: "understand",
   F3: "extract",
-  F4: "extract",
+  // F4 opens a field's provenance; the step strip flips Extract → Interact here.
+  F4: "interact",
   F5: "interact",
   F6: "interact",
   F7: "integrate",

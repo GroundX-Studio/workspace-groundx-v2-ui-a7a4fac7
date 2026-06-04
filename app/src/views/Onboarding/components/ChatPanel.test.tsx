@@ -18,7 +18,7 @@ describe("ChatPanel", () => {
     render(<ChatPanel sample={utilityBill} phase="understand" />);
 
     expect(screen.getByText(/Reading utility-bill\.pdf now/)).toBeInTheDocument();
-    expect(screen.getByText(/Closing the document comprehension gap/)).toBeInTheDocument();
+    expect(screen.getByText(/Anchoring citations/)).toBeInTheDocument();
     expect(screen.getByText("Pick a view:")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "meters" })).toBeInTheDocument();
   });
