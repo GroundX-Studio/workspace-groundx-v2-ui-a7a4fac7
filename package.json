@@ -13,6 +13,8 @@
     "build": "npm --workspace app run build && npm --workspace middleware run build",
     "test": "npm run test:alias && npm run test:setup-env && npm --workspace app test && npm --workspace middleware test",
     "test:e2e": "npm --workspace app run test:e2e",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test:alias": "node scripts/test-vite-alias.mjs",
     "test:setup-env": "node scripts/test-setup-local-env.mjs",
     "smoke:dev": "node scripts/smoke-dev.mjs",
@@ -21,7 +23,13 @@
     "preview": "npm --workspace app run preview"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "@eslint/js": "^9.39.4",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^15.15.0",
+    "typescript-eslint": "^8.60.1"
   },
   "engines": {
     "node": ">=20"
