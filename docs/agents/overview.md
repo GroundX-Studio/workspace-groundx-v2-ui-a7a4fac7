@@ -19,7 +19,7 @@ Frame sequence (F-series):
 | F4 | (retired — folded into F3a) | — |
 | F5 | Interact — chat with sources, citation chips → PDF viewer with bbox highlight | Real |
 | F6 | Gate — sign-up via real Partner API register + claim (renamed from "magic-link" 2026-05-25). Renders as a `sign-up` overlay z-stacked on the canvas (master-viewer-session); doesn't replace the chat column | Real |
-| F7 | Integrate — copy-paste API snippet + download agent plugins | Stub |
+| F7 | Integrate — 2-column API tile (curl/Python/TS) + Agent Plugins tile (Claude·OpenAI·Gemini·Cursor), unlock banner, on-prem footnote | Real (`viewer-widgets/Integrate`) |
 
 ## What's deliberately NOT done yet
 
@@ -31,9 +31,6 @@ Frame sequence (F-series):
 - **F4 SchemaView as a standalone frame.** Retired; the
   schema-agent loop is now F3a, reached from F3's fields-panel
   hamburger.
-- **F7 IntegrateView.** Still a stub. UI-02 (connectors catalog +
-  copy-paste API snippet + agent-plugin downloads) is the
-  product surface; not started.
 - **Streaming chat responses.** `routeChat` returns a full envelope
   on completion. Streaming (SSE / WebSocket) is CF-11 — deferred
   until the live RAG path stabilizes.
