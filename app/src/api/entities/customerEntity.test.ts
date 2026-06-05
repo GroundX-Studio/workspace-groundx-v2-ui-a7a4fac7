@@ -26,7 +26,7 @@ import {
  */
 type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 type _assertAppUserMetadata = Assert<Eq<AppUserMetadata, SharedAppUserMetadata>>;
 
 vi.mock("@/api/axios", () => ({

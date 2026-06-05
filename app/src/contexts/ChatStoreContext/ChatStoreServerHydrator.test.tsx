@@ -34,7 +34,7 @@ function StubAuthProvider({ auth, children }: { auth: AuthShape; children: React
           auth: { isLoggedIn: auth.isLoggedIn, userName: "u", token: "t", xJwtToken: "x" },
           // The rest of AuthContextI we don't exercise — cast to any
           // so the type check stays narrow but the runtime is happy.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
         } as any
       }
     >
