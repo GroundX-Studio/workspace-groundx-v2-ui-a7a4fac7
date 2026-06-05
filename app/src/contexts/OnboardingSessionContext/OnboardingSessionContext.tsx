@@ -192,7 +192,10 @@ function useSessionFacade(): OnboardingSessionApi {
       // OB-03 — currentSample sticks to GA4 events from this point.
       gaSetDefaults({ currentSample: scenario });
     },
-    [upsertAndActivate, appendViewerEvent, pushStep],
+    // `registry.state.entities` is read above to resolve an existing entity's
+    // lastFrame; it's the memoized ChatStore Map (stable until entities change),
+    // so including it keeps the resolved frame current without per-render churn.
+    [upsertAndActivate, appendViewerEvent, pushStep, registry.state.entities],
   );
 
   // post-mvs-cleanup Phase B — `frameToStepStandalone` is now a module-
