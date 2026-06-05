@@ -337,7 +337,7 @@ export const OnboardingShell: FC = () => {
       };
       advanceFrame(frameByStep[stepId]);
     },
-    [advanceFrame, appMode.authState, isF1, navigate, session.scenario],
+    [advanceFrame, appMode.authState, navigate, session.scenario],
   );
 
   // WF-01 C3 (2026-05-28). Sub-pill clicks (Extract / Interact / Report)
