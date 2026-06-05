@@ -1,9 +1,10 @@
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { darken } from "@mui/material/styles";
 import { useEffect, useRef, useState, type FC, type ReactNode } from "react";
 
-import { BORDER, BORDER_RADIUS, NAVY, WHITE } from "@/constants";
+import { BORDER, BORDER_RADIUS, FONT_WEIGHT_HEADLINE, NAVY, WHITE } from "@/constants";
 import { initAnalytics } from "@/lib/analytics";
 import { gaSetDefaults, initGa } from "@/lib/ga";
 
@@ -128,9 +129,9 @@ export const AnalyticsConsentProvider: FC<AnalyticsConsentProviderProps> = ({
                 color: WHITE,
                 cursor: "pointer",
                 font: "inherit",
-                fontWeight: 700,
+                fontWeight: FONT_WEIGHT_HEADLINE,
                 whiteSpace: "nowrap",
-                "&:hover": { bgcolor: "#182554" },
+                "&:hover": { bgcolor: darken(NAVY, 0.2) },
                 "&:focus-visible": {
                   outline: "2px solid #7f96ff",
                   outlineOffset: 2,
