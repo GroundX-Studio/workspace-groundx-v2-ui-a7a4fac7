@@ -212,7 +212,7 @@ function useSessionFacade(): OnboardingSessionApi {
         const leavingKey = activeKeyRef.current;
         // Diagnostic — dev-only console trace of frame transitions.
         // eslint-disable-next-line no-console
-        console.log("[advanceFrame] →", frame, "(deactivating entity)");
+        if (import.meta.env.DEV) console.log("[advanceFrame] →", frame, "(deactivating entity)");
         activate(null);
         setSignupOpen(false);
         // Returning to the F1 picker means the user has bailed out of
@@ -246,14 +246,16 @@ function useSessionFacade(): OnboardingSessionApi {
       const entityKeyAtAdvance = activeKeyRef.current;
       updateActive((session) => {
         // Diagnostic — log the actual from→to transition.
-        // eslint-disable-next-line no-console
-        console.log(
-          "[advanceFrame]",
-          session.lastFrame,
-          "→",
-          frame,
-          session.lastFrame === frame ? "(no-op, already there)" : "",
-        );
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log(
+            "[advanceFrame]",
+            session.lastFrame,
+            "→",
+            frame,
+            session.lastFrame === frame ? "(no-op, already there)" : "",
+          );
+        }
         if (session.lastFrame === frame) return session;
         const completedFrames = new Set(session.completedFrames);
         completedFrames.add(session.lastFrame);
