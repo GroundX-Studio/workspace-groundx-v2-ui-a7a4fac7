@@ -11,6 +11,7 @@
 // LOUDLY with an explicit message (never silently passed).
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { chromium } from "playwright";
 
 const timeoutMs = Number.parseInt(process.env.SMOKE_TIMEOUT_MS ?? "30000", 10);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -55,6 +56,36 @@ async function expectJson(url, init, validate) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function expectFrontendRenders(url) {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  const runtimeErrors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error" && !message.text().startsWith("Failed to load resource:")) {
+      runtimeErrors.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => {
+    runtimeErrors.push(error.stack ?? error.message);
+  });
+
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1000);
+    const rootChildCount = await page.locator("#root > *").count();
+    if (rootChildCount === 0) {
+      throw new Error(
+        `frontend did not render into #root. Runtime errors: ${runtimeErrors.join("\n") || "(none)"}`,
+      );
+    }
+    if (runtimeErrors.length > 0) {
+      throw new Error(`frontend rendered with runtime errors: ${runtimeErrors.join("\n")}`);
+    }
+  } finally {
+    await browser.close();
+  }
 }
 
 async function freePort() {
@@ -109,6 +140,7 @@ try {
   const proxied = await waitFor(`${frontendUrl}/api/healthz`, "frontend proxy");
   const body = await proxied.json();
   if (body.status !== "ok") throw new Error(`frontend proxy returned unexpected body: ${JSON.stringify(body)}`);
+  await expectFrontendRenders(frontendUrl);
 
   await expectJson(
     `${frontendUrl}/api/onboarding/session`,
