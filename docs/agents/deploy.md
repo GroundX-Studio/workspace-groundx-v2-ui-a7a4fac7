@@ -175,11 +175,13 @@ kubectl.
 
 ### `uninstall.yml`
 
-Inputs: `environment`, `confirm` (must equal literal "uninstall"),
-`deleteNamespace` (bool). Runs `helm uninstall` and optionally
-`kubectl delete ns`. The confirm phrase is the safety guard —
-GitHub Environments' "required reviewers" is the secondary guard
-for `prod`.
+Inputs: `environment`, `confirm` (must equal literal "uninstall"). Runs
+`helm uninstall` and deletes common release-labeled leftovers if Helm leaves
+resources behind. It does not delete namespaces; those are pre-created deploy
+configuration. Prefer the managed `deployment_teardown` MCP/API path when
+removing only a deployment; `helm_uninstall` / `uninstall.yml` is the lower-level
+fallback. The confirm phrase is the safety guard — GitHub Environments'
+"required reviewers" is the secondary guard for `prod`.
 
 ### `alb-alarms.yml`
 

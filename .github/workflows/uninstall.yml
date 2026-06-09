@@ -24,11 +24,6 @@ on:
         description: Type the word "uninstall" exactly to confirm
         required: true
         type: string
-      deleteNamespace:
-        description: Also delete the namespace and all remaining resources in it
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -117,8 +112,14 @@ jobs:
             echo "Helm release $rel not found in $ns — nothing to uninstall."
           fi
 
-      - name: Delete namespace
-        if: ${{ inputs.deleteNamespace }}
+      - name: Delete release-owned leftovers
         run: |
           export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
-          kubectl delete namespace "${{ steps.target.outputs.namespace }}" --ignore-not-found --wait=true
+          ns="${{ steps.target.outputs.namespace }}"
+          rel="${{ steps.target.outputs.release_name }}"
+          selector="app.kubernetes.io/instance=$rel"
+          if ! kubectl get namespace "$ns" >/dev/null 2>&1; then
+            echo "Namespace $ns not found — no release leftovers to delete."
+            exit 0
+          fi
+          kubectl -n "$ns" delete deployment,replicaset,pod,service,ingress,configmap,horizontalpodautoscaler,job,cronjob -l "$selector" --ignore-not-found --wait=true

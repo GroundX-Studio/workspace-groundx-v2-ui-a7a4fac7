@@ -177,6 +177,22 @@ function toGrantView(grant: ProjectGrantRecord) {
   return { projectId: grant.projectId, principalUsername: grant.principalUsername, role: grant.role };
 }
 
+function healthPayload(env: AppEnv): Record<string, string> {
+  const payload: Record<string, string> = { status: "ok" };
+  const deploymentFields: Array<[string, string | undefined]> = [
+    ["commitSha", env.GROUNDX_DEPLOY_COMMIT_SHA],
+    ["imageTag", env.GROUNDX_DEPLOY_IMAGE_TAG],
+    ["environment", env.GROUNDX_DEPLOY_ENVIRONMENT],
+    ["namespace", env.GROUNDX_DEPLOY_NAMESPACE],
+    ["publicHost", env.GROUNDX_DEPLOY_PUBLIC_HOST],
+    ["releaseName", env.GROUNDX_DEPLOY_RELEASE_NAME],
+  ];
+  for (const [key, value] of deploymentFields) {
+    if (value) payload[key] = value;
+  }
+  return payload;
+}
+
 export interface AppDependencies {
   env: AppEnv;
   repository: AppRepository;
@@ -318,7 +334,7 @@ export function createApp({
     keyGenerator: sessionAwareKey,
   });
 
-  app.get("/api/healthz", (_req, res) => res.json({ status: "ok" }));
+  app.get("/api/healthz", (_req, res) => res.json(healthPayload(env)));
 
   // SC-01 — explicit CSRF-token bootstrap endpoint. The middleware
   // already issues the cookie on every response, but a client that

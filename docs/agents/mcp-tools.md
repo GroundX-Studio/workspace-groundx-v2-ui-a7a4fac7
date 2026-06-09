@@ -17,6 +17,12 @@ flow.
 | `commit_push` | After ANY local change | `cwd` (scaffold path), `message`. Optionally `PARTNER_API_KEY` to force a fresh git-session token. Stages tracked + non-ignored untracked files; commits; pushes |
 | `sync_status` | Pre-flight before a push, or any time you wonder about the local state | `cwd`, `branch` (usually `workspace/<id>`) |
 | `deploy_config` | Set GitHub Environment vars / secrets per environment | `PARTNER_API_KEY`, `projectId`, `environment`, `variables?`, `secrets?` |
+| `deployment_status` | Read managed deployment status and evidence | `PARTNER_API_KEY`, `projectId`, `environment` |
+| `deployment_public_health` | Probe public URL health and freshness metadata | `PARTNER_API_KEY`, `projectId`, `environment` |
+| `deployment_diagnostics` | Queue structured deployment diagnostics | `PARTNER_API_KEY`, `projectId`, `environment` |
+| `deployment_retry` | Retry the latest managed deployment | `PARTNER_API_KEY`, `projectId`, `environment`, `reason?` |
+| `deployment_repair` | Queue allowlisted deployment repair | `PARTNER_API_KEY`, `projectId`, `environment`, `action`, `confirm=true`, `reason` |
+| `deployment_teardown` | Tear down a managed deployment without deleting the project/repo | `PARTNER_API_KEY`, `projectId`, `environment`, `confirm="teardown"`, `reason` |
 | `publish` | Trigger the deploy workflow on a chosen environment | `PARTNER_API_KEY`, `projectId`, `environment` (defaults to `dev`) |
 | `operation_wait` | Poll a long-running workspace operation independently | `PARTNER_API_KEY`, `projectId`, `operationId` |
 

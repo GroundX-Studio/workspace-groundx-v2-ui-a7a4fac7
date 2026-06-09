@@ -10,13 +10,13 @@ import { authorizedProjectIds } from "./services/projectAccess.js";
 import { FakeGroundXClient, FakeLlmClient, FakePartnerClient, FakeScenarioRegistry, testEnv } from "./test/fakes.js";
 import type { GroundXClient, GroundXPartnerClient, LlmClient } from "./types.js";
 
-function setup() {
+function setup(env = testEnv) {
   const repository = new MemoryAppRepository();
   const partnerClient = new FakePartnerClient();
   const groundxClient = new FakeGroundXClient();
   const llmClient = new FakeLlmClient();
   const scenarioRegistry = new FakeScenarioRegistry();
-  const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+  const app = createApp({ env, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
   return { app, repository, partnerClient, groundxClient, llmClient, scenarioRegistry };
 }
 
@@ -64,6 +64,28 @@ describe("middleware scaffold", () => {
   it("serves health without authentication", async () => {
     const { app } = setup();
     await request(app).get("/api/healthz").expect(200, { status: "ok" });
+  });
+
+  it("serves deployment provenance on health when provided", async () => {
+    const { app } = setup({
+      ...testEnv,
+      GROUNDX_DEPLOY_COMMIT_SHA: "abc123",
+      GROUNDX_DEPLOY_ENVIRONMENT: "dev",
+      GROUNDX_DEPLOY_IMAGE_TAG: "project-dev",
+      GROUNDX_DEPLOY_NAMESPACE: "project-dev",
+      GROUNDX_DEPLOY_PUBLIC_HOST: "workspace-project-dev.groundx.ai",
+      GROUNDX_DEPLOY_RELEASE_NAME: "project-dev",
+    });
+
+    await request(app).get("/api/healthz").expect(200, {
+      status: "ok",
+      commitSha: "abc123",
+      environment: "dev",
+      imageTag: "project-dev",
+      namespace: "project-dev",
+      publicHost: "workspace-project-dev.groundx.ai",
+      releaseName: "project-dev",
+    });
   });
 
   it("B1: the messages-hydrate route validates citations_json — drops malformed entries, strips unknown keys", async () => {

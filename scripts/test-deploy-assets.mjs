@@ -173,6 +173,16 @@ assert(workflow.includes("aws eks update-kubeconfig"), "workflow must generate t
 assert(!/KUBE_CONFIG_DATA/.test(workflow), "KUBE_CONFIG_DATA must not appear — dynamic kubeconfig replaces the static secret");
 assert(workflow.includes("kubectl -n \"$K8S_NAMESPACE\" get secret \"$MIDDLEWARE_SECRET_NAME\" -o jsonpath='{.data.SESSION_SECRET}'"), "workflow must preserve existing SESSION_SECRET");
 assert(workflow.includes("openssl rand -base64 48"), "workflow must generate SESSION_SECRET on first deploy");
+for (const key of [
+  "GROUNDX_DEPLOY_COMMIT_SHA",
+  "GROUNDX_DEPLOY_ENVIRONMENT",
+  "GROUNDX_DEPLOY_IMAGE_TAG",
+  "GROUNDX_DEPLOY_NAMESPACE",
+  "GROUNDX_DEPLOY_RELEASE_NAME",
+]) {
+  assert(workflow.includes(`printf '${key}=%s\\n'`), `workflow must write ${key} into middleware runtime env`);
+}
+assert(workflow.includes("append_optional_env 'GROUNDX_DEPLOY_PUBLIC_HOST'"), "workflow must write public host provenance when present");
 assert(workflow.includes("${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.image_tag }}"), "frontend build must push the per-env image tag");
 assert(workflow.includes("${{ steps.deploy-vars.outputs.middleware_repo }}:${{ steps.deploy-vars.outputs.image_tag }}"), "middleware build must push the per-env image tag");
 
@@ -252,8 +262,15 @@ assert(diagnoseWf.includes("kubectl describe"), "diagnose must describe pods");
 assert(/--previous/.test(diagnoseWf), "diagnose must also pull previous-container logs (for crash loops)");
 const uninstallWf = read(".github/workflows/uninstall.yml");
 assert(uninstallWf.includes("helm uninstall"), "uninstall must run helm uninstall");
+assert(uninstallWf.includes("Delete release-owned leftovers"), "uninstall must fall back to deleting release-owned Kubernetes resources");
+assert(uninstallWf.includes('selector="app.kubernetes.io/instance=$rel"'), "uninstall fallback must scope cleanup to the Helm release label");
+assert(
+  uninstallWf.includes('kubectl -n "$ns" delete deployment,replicaset,pod,service,ingress,configmap,horizontalpodautoscaler,job,cronjob -l "$selector"'),
+  "uninstall fallback must delete common release-scoped resources when Helm leaves leftovers",
+);
 assert(/inputs\.confirm/.test(uninstallWf), "uninstall must require explicit confirmation input");
-assert(/deleteNamespace/.test(uninstallWf), "uninstall must offer optional namespace deletion");
+assert(!/deleteNamespace/.test(uninstallWf), "uninstall must not expose namespace deletion");
+assert(!/kubectl delete namespace/.test(uninstallWf), "uninstall must not delete namespaces");
 
 if (commandExists("helm")) {
   execFileSync("helm", ["lint", "deploy/helm/groundx-web-ui"], { cwd: root, stdio: "inherit" });

@@ -286,6 +286,12 @@ jobs:
           {
             printf 'NODE_ENV=%s\n' "$MIDDLEWARE_NODE_ENV"
             printf 'PORT=3001\n'
+            printf 'GROUNDX_DEPLOY_COMMIT_SHA=%s\n' "${{ inputs.commitSha || github.sha }}"
+            printf 'GROUNDX_DEPLOY_ENVIRONMENT=%s\n' "$DEPLOY_ENVIRONMENT"
+            printf 'GROUNDX_DEPLOY_IMAGE_TAG=%s\n' "${{ steps.deploy-vars.outputs.image_tag }}"
+            printf 'GROUNDX_DEPLOY_NAMESPACE=%s\n' "$K8S_NAMESPACE"
+            append_optional_env 'GROUNDX_DEPLOY_PUBLIC_HOST' "${{ steps.deploy-vars.outputs.public_host }}"
+            printf 'GROUNDX_DEPLOY_RELEASE_NAME=%s\n' "${{ steps.deploy-vars.outputs.release_name }}"
             append_optional_env 'LOG_LEVEL' "$LOG_LEVEL"
             printf 'APP_REPOSITORY_MODE=%s\n' "$APP_REPOSITORY_MODE"
             append_optional_env 'ALLOWED_ORIGIN' "$ALLOWED_ORIGIN"
