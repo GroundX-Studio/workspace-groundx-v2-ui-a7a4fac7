@@ -11,6 +11,7 @@ albSslRedirect: "443"
 ingressClassName: ""
 tlsSecretName: ""
 imagePullSecretName: ""
+rolloutRevision: ""
 
 namespace:
   create: false
