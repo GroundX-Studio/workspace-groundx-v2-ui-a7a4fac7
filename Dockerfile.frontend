@@ -14,6 +14,7 @@ FROM deps AS build
 # @groundx/shared (resolved via the workspace symlink → its built dist).
 COPY shared shared
 RUN npm --workspace @groundx/shared run build
+COPY middleware middleware
 COPY app app
 RUN npm --workspace app run build
 # OB-05 — drop sourcemaps from the runtime image. `vite build` emits
