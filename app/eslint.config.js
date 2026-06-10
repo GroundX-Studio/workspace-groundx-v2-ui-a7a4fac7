@@ -55,6 +55,11 @@ export default tseslint.config(
       // deliberate naming pattern in api/common.ts so each API surface
       // has its own option type even when shapes overlap. Demote to warn.
       "@typescript-eslint/no-empty-object-type": "warn",
+      // Catch left-in debug logging (e.g. ungated `console.log` that ships
+      // to prod). warn, matching this config's "warn side" posture;
+      // `warn`/`error` stay allowed for real diagnostics. Intentional
+      // DEV-only traces gate on `import.meta.env.DEV` + an explicit disable.
+      "no-console": ["warn", { allow: ["warn", "error"] }],
     },
   },
   {

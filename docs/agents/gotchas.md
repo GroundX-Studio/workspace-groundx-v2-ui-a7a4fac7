@@ -133,6 +133,19 @@ jsdom has no `matchMedia`, so anything Motion-driven looks
 tests; leave default for tests that should assert the reduced-
 motion path.
 
+### Node 24/25 Web Storage shadows jsdom's in tests
+
+Node 24+ ships a built-in global `localStorage`/`sessionStorage`. With
+no `--localstorage-file` it overrides jsdom's working Storage with a
+stub whose `clear`/`setItem` are undefined, so the `beforeEach`
+`localStorage.clear()` throws and the whole app suite goes red — even
+though `engines` is `>=20`. `app/src/test/setup.ts` installs an
+in-memory Storage when the active one is non-functional (a no-op on
+CI's older Node, which has no such global). One residual: jsdom's
+`StorageEvent` `storageArea` webidl check rejects the stand-in, so the
+ChatStore cross-tab-StorageEvent test stays red on Node 24/25 — run on
+the CI Node, or upgrade jsdom (24→29).
+
 ### URL is the source of truth for which surface mounts
 
 Don't call `advanceFrame(frame)` from a view and expect the URL
@@ -179,6 +192,17 @@ runtime mode. A drift guard
 (`services/noMockMode.drift.test.ts`) fails if `MOCK_MODE`, a
 `Dev*` client, `chatMocks`, or a `mockMode` deps field
 reappears in runtime code.
+
+### e2e + the local onboarding flow need the real GroundX Partner key
+
+A corollary of "no mock mode": with only the placeholder key in
+`.env.local`, `/api/scenarios` returns `[]` (the seeded samples bucket
+isn't visible to the key's account), so the F1 picker is empty and
+every onboarding e2e times out waiting for `getByTestId('sample-utility')`.
+Local onboarding dev + e2e require the real GroundX-Studio Partner key
+(via the `setup_env` MCP tool or the CI secret) — a regular GroundX API
+key for a different account authenticates fine but won't load the
+seeded samples.
 
 ### `requireAuthenticatedUser` returns 401 with `code: ANONYMOUS_SESSION`
 

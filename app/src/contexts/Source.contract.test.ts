@@ -19,11 +19,11 @@ import type { ViewerEvent } from "./ChatStoreContext/types";
  */
 type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 type _assertIntentSourceDerivesFromSource = Assert<Eq<IntentSource, Exclude<Source, "system">>>;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 type _assertOrchestratorIntentSource = Assert<Eq<OrchestratorIntentSource, IntentSource>>;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 type _assertViewerEventSource = Assert<Eq<ViewerEvent["source"], Source>>;
 
 describe("Source — single source (@groundx/shared)", () => {

@@ -348,6 +348,7 @@ export async function sendChatMessage(
     // see what was actually asked of GroundX + the LLM without
     // context-switching to the middleware terminal. Gated on
     // import.meta.env.DEV so prod builds strip the call entirely.
+    /* eslint-disable no-console -- intentional DEV-only diagnostic, stripped from prod by the DEV gate */
     if (import.meta.env.DEV && result.reply?._debug) {
       console.groupCollapsed(
         `[chat] ${result.reply._debug.mode} · "${input.newUserMessage.slice(0, 60)}${input.newUserMessage.length > 60 ? "…" : ""}"`,
@@ -358,6 +359,7 @@ export async function sendChatMessage(
       console.log("answer", result.reply.answer);
       console.groupEnd();
     }
+    /* eslint-enable no-console */
     return result;
   } catch (err) {
     if (err instanceof ChatApiError && err.status === 404) {

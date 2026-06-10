@@ -146,7 +146,7 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
         setProcesses(nextProcesses);
         return nextProcesses;
       }),
-    [run]
+    [api, run]
   );
 
   return (

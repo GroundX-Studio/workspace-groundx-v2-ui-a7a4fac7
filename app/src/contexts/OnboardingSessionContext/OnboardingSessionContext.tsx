@@ -192,7 +192,10 @@ function useSessionFacade(): OnboardingSessionApi {
       // OB-03 — currentSample sticks to GA4 events from this point.
       gaSetDefaults({ currentSample: scenario });
     },
-    [upsertAndActivate, appendViewerEvent, pushStep],
+    // `registry.state.entities` is read above to resolve an existing entity's
+    // lastFrame; it's the memoized ChatStore Map (stable until entities change),
+    // so including it keeps the resolved frame current without per-render churn.
+    [upsertAndActivate, appendViewerEvent, pushStep, registry.state.entities],
   );
 
   // post-mvs-cleanup Phase B — `frameToStepStandalone` is now a module-
@@ -212,7 +215,7 @@ function useSessionFacade(): OnboardingSessionApi {
         const leavingKey = activeKeyRef.current;
         // Diagnostic — dev-only console trace of frame transitions.
         // eslint-disable-next-line no-console
-        console.log("[advanceFrame] →", frame, "(deactivating entity)");
+        if (import.meta.env.DEV) console.log("[advanceFrame] →", frame, "(deactivating entity)");
         activate(null);
         setSignupOpen(false);
         // Returning to the F1 picker means the user has bailed out of
@@ -246,14 +249,16 @@ function useSessionFacade(): OnboardingSessionApi {
       const entityKeyAtAdvance = activeKeyRef.current;
       updateActive((session) => {
         // Diagnostic — log the actual from→to transition.
-        // eslint-disable-next-line no-console
-        console.log(
-          "[advanceFrame]",
-          session.lastFrame,
-          "→",
-          frame,
-          session.lastFrame === frame ? "(no-op, already there)" : "",
-        );
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log(
+            "[advanceFrame]",
+            session.lastFrame,
+            "→",
+            frame,
+            session.lastFrame === frame ? "(no-op, already there)" : "",
+          );
+        }
         if (session.lastFrame === frame) return session;
         const completedFrames = new Set(session.completedFrames);
         completedFrames.add(session.lastFrame);

@@ -2,7 +2,7 @@ import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
+import { useCallback, useEffect, useMemo, useRef, type FC } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -337,7 +337,7 @@ export const OnboardingShell: FC = () => {
       };
       advanceFrame(frameByStep[stepId]);
     },
-    [advanceFrame, appMode.authState, isF1, navigate, session.scenario],
+    [advanceFrame, appMode.authState, navigate, session.scenario],
   );
 
   // WF-01 C3 (2026-05-28). Sub-pill clicks (Extract / Interact / Report)

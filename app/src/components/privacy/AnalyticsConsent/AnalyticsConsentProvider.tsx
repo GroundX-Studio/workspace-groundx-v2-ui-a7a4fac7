@@ -2,6 +2,7 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import { darken } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
+import { darken } from "@mui/material/styles";
 import { useEffect, useRef, useState, type FC, type ReactNode } from "react";
 
 import { BORDER, BORDER_RADIUS, FONT_WEIGHT_HEADLINE, NAVY, WHITE } from "@/constants";

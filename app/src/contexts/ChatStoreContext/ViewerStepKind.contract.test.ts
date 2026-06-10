@@ -17,7 +17,7 @@ import type { ViewerStep } from "./types";
 type AppViewerStepKind = ViewerStep["kind"];
 type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 type _assertExactlyEqual = Assert<Eq<AppViewerStepKind, ViewerStepKind>>;
 
 describe("ViewerStepKind — single source (@groundx/shared)", () => {
