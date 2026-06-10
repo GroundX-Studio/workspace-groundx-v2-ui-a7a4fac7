@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./intent-catalog": {
+      "types": "./dist/intent-catalog.d.ts",
+      "import": "./dist/intent-catalog.js"
     }
   },
   "scripts": {

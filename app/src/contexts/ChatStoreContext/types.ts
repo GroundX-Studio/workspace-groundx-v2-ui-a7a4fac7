@@ -398,6 +398,13 @@ export type ViewerStep =
          */
         tier?: import("@/types/onboarding").CitationTier;
       };
+      /**
+       * "Show all sources" — every citation region of an answer, drawn at once
+       * (color-coded per `[N]`). Set by the `showCitations` intent sink; the
+       * viewer pane renders the regions whose `page` matches the active page.
+       * Independent of the single-region `highlight` above.
+       */
+      litRegions?: ReadonlyArray<import("@groundx/shared").CitationRegion>;
     }
   | { kind: "extract-workbench"; scenarioId: string; focusedCategoryId?: string }
   | { kind: "interact-chat"; scenarioId: string }
@@ -820,6 +827,24 @@ export interface ChatStoreApi {
     /** WF-06b — attribution tier threaded into the step's highlight slot. */
     tier?: import("@/types/onboarding").CitationTier;
   }) => void;
+  /**
+   * "Show all sources" sink for `CanvasIntent.showCitations`: open the cited
+   * document at `page` and draw EVERY citation region at once (color-coded).
+   * Mirrors `gotoDocViewer`'s mutate-in-place / push behavior but writes the
+   * step's `litRegions` (and clears the single-region `highlight`). No-op when
+   * no active session.
+   */
+  showCitationRegions: (input: {
+    documentId: string;
+    page: number;
+    regions: ReadonlyArray<import("@groundx/shared").CitationRegion>;
+  }) => void;
+  /**
+   * Toggle-off sink for `CanvasIntent.highlightCitation` (add-citation-toggle):
+   * clear the active `doc-viewer` step's highlight overlay, leaving the page
+   * shown. No-op when there's no active highlight.
+   */
+  clearCitationHighlight: () => void;
 }
 
 export interface NewViewerEventInput {

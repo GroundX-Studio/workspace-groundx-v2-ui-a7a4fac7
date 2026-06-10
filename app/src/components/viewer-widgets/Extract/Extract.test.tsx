@@ -1,6 +1,6 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState, type FC } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 
@@ -137,5 +137,116 @@ describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () =>
     const flip = screen.getByTestId("flip-scope");
     flip.click();
     await waitFor(() => expect(screen.getByTestId("pdf-viewer-widget")).toBeInTheDocument());
+  });
+});
+
+describe("Extract — render-surface layout (extract-screen-audit fixes)", () => {
+  // Field ids are unbreakable snake_case tokens; they must be allowed to wrap so
+  // they never overflow into / collide with the value beside them.
+  it("lets long field ids wrap instead of overflowing into the value", () => {
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    expect(screen.getByTestId("extract-field-id-account_number")).toBeInTheDocument();
+    // jsdom's CSS parser doesn't recognize the `anywhere` value, so assert the
+    // rule was emitted into the emotion stylesheet rather than via getComputedStyle.
+    const css = Array.from(document.querySelectorAll("style"))
+      .map((s) => s.textContent ?? "")
+      .join("");
+    expect(css).toContain("overflow-wrap:anywhere");
+  });
+
+  // Each field is a key-value CARD: id + value in a header row over a
+  // full-width description that is NEVER truncated (no line-clamp). The value
+  // never shares a column with the description, so the description always has
+  // the full width.
+  it("renders each field as a key-value card with a full, non-truncated description", () => {
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    const row = screen.getByTestId("field-row-account_number");
+    expect(row).toHaveStyle({ display: "flex" });
+    expect(row).toHaveStyle({ flexDirection: "column" });
+    // The description renders as its own full-width block...
+    expect(screen.getByTestId("extract-field-desc-account_number")).toBeInTheDocument();
+    // ...and nothing in the panel clamps/truncates text.
+    const css = Array.from(document.querySelectorAll("style"))
+      .map((s) => s.textContent ?? "")
+      .join("");
+    expect(css).not.toContain("line-clamp");
+  });
+
+  // The category tabs WRAP when narrow — they must never become a horizontal
+  // scrollbar (the band-aid that shipped and was rejected).
+  it("wraps the category tabs, never a horizontal scrollbar", () => {
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    const tabs = screen.getByTestId("extract-category-tabs");
+    expect(tabs).toHaveStyle({ flexWrap: "wrap" });
+    expect(tabs).not.toHaveStyle({ overflowX: "auto" });
+    expect(tabs).not.toHaveStyle({ overflowX: "scroll" });
+  });
+});
+
+// Responsive layout is driven by the MEASURED canvas width via ResizeObserver
+// (not a viewport media query — the resizable chat pane changes how much room the
+// canvas has). jsdom has no ResizeObserver/layout, so inject one reporting a
+// fixed width. These guard BOTH the "side-by-side only when there's room" rule
+// and the regression where the observer never fired (container left unmeasured).
+describe("Extract — responsive document/schema layout (regression guards)", () => {
+  let originalRO: typeof globalThis.ResizeObserver;
+  let canvasWidth = 1000;
+  beforeEach(() => {
+    originalRO = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private cb: ResizeObserverCallback;
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb;
+      }
+      observe(): void {
+        this.cb([{ contentRect: { width: canvasWidth } } as ResizeObserverEntry], this);
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof globalThis.ResizeObserver;
+  });
+  afterEach(() => {
+    globalThis.ResizeObserver = originalRO;
+  });
+
+  it("shows PDF and schema side-by-side (no toggle, no slider) when the canvas is wide", async () => {
+    canvasWidth = 1000;
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("extract-doc-pane")).toBeInTheDocument();
+      expect(screen.getByTestId("extract-fields-panel")).toBeInTheDocument();
+    });
+    // No single-pane toggle and — crucially — no resize slider (that was removed).
+    expect(screen.queryByTestId("extract-pane-toggle")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("separator", { name: /resize document pane/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("collapses to a Document/Fields toggle (not a cramped split) when the canvas is narrow", async () => {
+    canvasWidth = 500;
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    await waitFor(() => expect(screen.getByTestId("extract-pane-toggle")).toBeInTheDocument());
+    // One pane at a time: document by default, schema reachable via the toggle.
+    expect(screen.getByTestId("extract-doc-pane")).toBeInTheDocument();
+    expect(screen.queryByTestId("extract-fields-panel")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("extract-pane-toggle-fields"));
+    await waitFor(() => expect(screen.getByTestId("extract-fields-panel")).toBeInTheDocument());
+    expect(screen.queryByTestId("extract-doc-pane")).not.toBeInTheDocument();
   });
 });

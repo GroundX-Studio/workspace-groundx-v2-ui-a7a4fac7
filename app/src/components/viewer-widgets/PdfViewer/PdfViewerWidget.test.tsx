@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
@@ -65,6 +65,22 @@ const fakeXray = {
 };
 
 describe("PdfViewerWidget", () => {
+  // 2026-06-09 — the widget root must fill its slot on BOTH axes. It
+  // declared only `height: 100%`, so in a `display:flex` (row) parent
+  // (Extract's single-pane `extract-doc-pane`) it collapsed to its
+  // content width (~196px in a 686px pane) — the page rendered in a
+  // skinny column with the rest of the pane wasted. ScopedCanvas wraps
+  // it in a block 100%×100% Box so the bug was invisible there; only a
+  // flex-row parent surfaced it. jsdom has no layout, so this guards the
+  // *declared* fill invariant rather than the measured px (the px
+  // regression was caught in a real browser).
+  it("fills its container on both axes so it never collapses in a flex-row parent", () => {
+    getXrayMock.mockResolvedValue(fakeXray);
+    render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
+    const root = screen.getByTestId("pdf-viewer-widget");
+    expect(root).toHaveStyle({ width: "100%", height: "100%" });
+  });
+
   it("renders a loading state immediately and then the first page image once xray resolves", async () => {
     let resolveXray: (v: unknown) => void = () => {};
     getXrayMock.mockReturnValue(
@@ -316,7 +332,11 @@ describe("PdfViewerWidget", () => {
       expect(style).toMatch(/border:\s*1px dashed/);
     });
 
-    it("renders NO inline highlight for an ambient-tier citation (source chip only)", async () => {
+    it("renders a SOFT (approximate) highlight for an ambient-tier citation with a bbox", async () => {
+      // citation-highlight UX: an answer must always reveal where it came from.
+      // For this corpus the backend frequently returns ambient citations (the
+      // quote-verification is conservative), so ambient now draws a faint,
+      // dashed chunk-region — NOT nothing — whenever a bbox is present.
       getXrayMock.mockResolvedValue(fakeXray);
 
       render(
@@ -329,9 +349,11 @@ describe("PdfViewerWidget", () => {
         />,
         { wrapper },
       );
-      await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
-      // Ambient renders no auto inline span even when a bbox is present.
-      expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
+      const overlay = await screen.findByTestId("pdf-viewer-highlight");
+      expect(overlay.getAttribute("data-highlight-tier")).toBe("ambient");
+      const style = overlay.getAttribute("style") ?? "";
+      // ambient → softest visual: dashed border (lower-confidence, looser region).
+      expect(style).toMatch(/border:\s*1px dashed/);
     });
 
     it("does NOT render the highlight overlay when highlightBbox is absent or null", async () => {
@@ -468,6 +490,124 @@ describe("PdfViewerWidget", () => {
       render(<PdfViewerWidget scope={docScope("doc-1")} role="anonymous" />, { wrapper });
       await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
       expect(screen.queryAllByTestId(/^pdf-viewer-lit-region-/).length).toBe(0);
+    });
+  });
+
+  // add-pdf-zoom-pan — the user-visible behavior, written first (fails until
+  // the zoom layer + inline controls exist). The page magnifies on zoom-in,
+  // the citation highlight stays mounted inside the zoomed layer, and Fit
+  // resets to whole-page.
+  describe("zoom & pan", () => {
+    it("zoom controls magnify and reset the page; the citation highlight stays mounted", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(
+        <PdfViewerWidget
+          scope={docScope("doc-1")}
+          role="member"
+          targetPage={1}
+          highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
+          highlightTier="exact"
+        />,
+        { wrapper },
+      );
+      await screen.findByTestId("pdf-viewer-page-image");
+
+      // Starts at Fit: zoom 1, zoom-out disabled, highlight present.
+      const stage = screen.getByTestId("pdf-viewer-stage");
+      expect(stage).toHaveAttribute("data-zoom", "1");
+      expect(screen.getByTestId("pdf-zoom-out")).toBeDisabled();
+      expect(screen.getByTestId("pdf-viewer-highlight")).toBeInTheDocument();
+
+      // Zoom in one step → 1.25, highlight still inside the zoomed layer.
+      fireEvent.click(screen.getByTestId("pdf-zoom-in"));
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-stage")).toHaveAttribute("data-zoom", "1.25"),
+      );
+      const stageEl = screen.getByTestId("pdf-viewer-stage");
+      expect(stageEl.querySelector('[data-testid="pdf-viewer-highlight"]')).not.toBeNull();
+
+      // Fit resets to whole page.
+      fireEvent.click(screen.getByTestId("pdf-zoom-fit"));
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-viewer-stage")).toHaveAttribute("data-zoom", "1"),
+      );
+    });
+
+    it("plain scroll does nothing — no zoom, no pan", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />, { wrapper });
+      const stage = await screen.findByTestId("pdf-viewer-stage");
+      fireEvent.wheel(stage, { deltaY: -200 });
+      fireEvent.wheel(stage, { deltaY: 200 });
+      expect(stage).toHaveAttribute("data-zoom", "1");
+      expect(stage).toHaveAttribute("data-pan", "0,0");
+    });
+
+    it("Ctrl/Cmd + wheel zooms the page", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />, { wrapper });
+      const stage = await screen.findByTestId("pdf-viewer-stage");
+      fireEvent.wheel(stage, { deltaY: -120, ctrlKey: true }); // zoom in
+      await waitFor(() => expect(stage).toHaveAttribute("data-zoom", "1.25"));
+      fireEvent.wheel(stage, { deltaY: 120, metaKey: true }); // zoom back out
+      await waitFor(() => expect(stage).toHaveAttribute("data-zoom", "1"));
+    });
+
+    it("drag pans only when zoomed in", async () => {
+      // Drag uses pointer DELTAS, but clampPan needs a measured pane + page
+      // dims — inject a ResizeObserver that reports an 800×600 pane.
+      const originalRO = globalThis.ResizeObserver;
+      globalThis.ResizeObserver = class {
+        private cb: ResizeObserverCallback;
+        constructor(cb: ResizeObserverCallback) {
+          this.cb = cb;
+        }
+        observe(): void {
+          this.cb([{ contentRect: { width: 800, height: 600 } } as ResizeObserverEntry], this);
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      } as unknown as typeof globalThis.ResizeObserver;
+      try {
+        getXrayMock.mockResolvedValue(fakeXray);
+        render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />, { wrapper });
+        const stage = await screen.findByTestId("pdf-viewer-stage");
+        // jsdom's PointerEvent drops clientX/Y; a MouseEvent typed as a pointer
+        // event carries them and still reaches the pointer handlers.
+        const ptr = (type: string, x: number, y: number) =>
+          new MouseEvent(type, { clientX: x, clientY: y, bubbles: true });
+
+        // At Fit: a drag does nothing.
+        fireEvent(stage, ptr("pointerdown", 100, 100));
+        fireEvent(window, ptr("pointermove", 100, 40));
+        fireEvent(window, ptr("pointerup", 100, 40));
+        expect(stage).toHaveAttribute("data-pan", "0,0");
+
+        // Zoom in, then drag vertically → pan.y moves (clamped).
+        fireEvent.click(screen.getByTestId("pdf-zoom-in"));
+        await waitFor(() => expect(stage).toHaveAttribute("data-zoom", "1.25"));
+        fireEvent(stage, ptr("pointerdown", 100, 100));
+        fireEvent(window, ptr("pointermove", 100, 50)); // dy = -50
+        fireEvent(window, ptr("pointerup", 100, 50));
+        await waitFor(() => expect(stage).toHaveAttribute("data-pan", "0,-50"));
+      } finally {
+        globalThis.ResizeObserver = originalRO;
+      }
+    });
+
+    it("keyboard +/-/0 zooms and fits when the viewer is focused", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(<PdfViewerWidget scope={docScope("doc-1")} role="member" targetPage={1} />, { wrapper });
+      const stage = await screen.findByTestId("pdf-viewer-stage");
+      const root = screen.getByTestId("pdf-viewer-widget");
+      fireEvent.keyDown(root, { key: "+" });
+      await waitFor(() => expect(stage).toHaveAttribute("data-zoom", "1.25"));
+      fireEvent.keyDown(root, { key: "-" });
+      await waitFor(() => expect(stage).toHaveAttribute("data-zoom", "1"));
+      fireEvent.keyDown(root, { key: "+" });
+      await waitFor(() => expect(stage).toHaveAttribute("data-zoom", "1.25"));
+      fireEvent.keyDown(root, { key: "0" }); // fit
+      await waitFor(() => expect(stage).toHaveAttribute("data-zoom", "1"));
     });
   });
 });

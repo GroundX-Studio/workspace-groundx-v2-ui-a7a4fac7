@@ -1647,6 +1647,84 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     [],
   );
 
+  // "Show all sources" sink — open the doc at `page` and draw all citation
+  // regions at once. Mirrors gotoDocViewer's mutate/push, but writes
+  // `litRegions` and clears the single-region `highlight`.
+  const showCitationRegions = useCallback(
+    (input: {
+      documentId: string;
+      page: number;
+      regions: ReadonlyArray<import("@groundx/shared").CitationRegion>;
+    }) => {
+      setState((prev) => {
+        if (!prev.activeSessionId) return prev;
+        const current = prev.sessions.get(prev.activeSessionId);
+        if (!current) return prev;
+        const cur = current.viewer.currentStep.stepIndex;
+        const top = cur >= 0 ? current.viewer.history[cur] : null;
+        const regions = [...input.regions];
+        if (top != null && top.kind === "doc-viewer" && top.documentId === input.documentId) {
+          const nextHistory = current.viewer.history.slice();
+          nextHistory[cur] = {
+            ...top,
+            page: input.page,
+            highlight: undefined,
+            litRegions: regions,
+            scanning: false,
+          };
+          const sessions = new Map(prev.sessions);
+          sessions.set(prev.activeSessionId, {
+            ...current,
+            viewer: { ...current.viewer, history: nextHistory },
+            updatedAt: Date.now(),
+          });
+          return { ...prev, sessions };
+        }
+        const newStep: import("./types").ViewerStep = {
+          kind: "doc-viewer",
+          documentId: input.documentId,
+          page: input.page,
+          litRegions: regions,
+        };
+        const nextHistory = [...current.viewer.history, newStep];
+        const sessions = new Map(prev.sessions);
+        sessions.set(prev.activeSessionId, {
+          ...current,
+          viewer: {
+            ...current.viewer,
+            history: nextHistory,
+            currentStep: { stepIndex: nextHistory.length - 1 },
+          },
+          updatedAt: Date.now(),
+        });
+        return { ...prev, sessions };
+      });
+    },
+    [],
+  );
+
+  // Toggle-off sink (add-citation-toggle): clear the current doc-viewer step's
+  // highlight, leaving the page shown. No-op when there's no active highlight.
+  const clearCitationHighlight = useCallback(() => {
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      const cur = current.viewer.currentStep.stepIndex;
+      const top = cur >= 0 ? current.viewer.history[cur] : null;
+      if (!top || top.kind !== "doc-viewer" || top.highlight == null) return prev;
+      const nextHistory = current.viewer.history.slice();
+      nextHistory[cur] = { ...top, highlight: undefined };
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        viewer: { ...current.viewer, history: nextHistory },
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+  }, []);
+
   const setSchemaFieldExtraction = useCallback(
     (fieldId: string, result: import("./types").SchemaFieldExtractionResult) => {
       setState((prev) => {
@@ -1735,6 +1813,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       popOverlay,
       pushStep,
       gotoDocViewer,
+      showCitationRegions,
+      clearCitationHighlight,
     }),
     [
       newSession,
@@ -1771,6 +1851,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       popOverlay,
       pushStep,
       gotoDocViewer,
+      showCitationRegions,
+      clearCitationHighlight,
     ],
   );
 

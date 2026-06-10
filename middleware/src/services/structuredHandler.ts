@@ -183,7 +183,7 @@ async function answerCurrentEntity(deps: StructuredHandlerDeps): Promise<ChatRou
       `Last frame: \`${active.lastFrame ?? "f1"}\`. ` +
       `${safeCount(active.completedFramesJson)} frames completed so far.`,
     citations: [],
-    suggestedActions: [{ key: "show-source", label: "Show source" }],
+    suggestedActions: [{ key: "show-source", label: "Show all sources" }],
     tools: [],
     intents: [],
     toolFailures: [],

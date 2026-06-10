@@ -193,7 +193,7 @@ export async function runRagPipeline(
   }
 
   const suggestedActions: ChatRouterResponse["suggestedActions"] = [
-    { key: "show-source", label: "Show source" },
+    { key: "show-source", label: "Show all sources" },
   ];
   // widget-llm-integration follow-up A.5 — the legacy
   // `suggested-intent` chip emit is gone. `tool:suggest_intent`

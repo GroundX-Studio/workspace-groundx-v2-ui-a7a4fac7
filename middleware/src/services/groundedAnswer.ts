@@ -48,6 +48,13 @@ import type { GroundXClient, LlmClient } from "../types.js";
 import type { ContentScope, GeneratedResult } from "@groundx/shared";
 import { type OpenAiFunctionTool } from "./zodToJsonSchema.js";
 
+/**
+ * Max number of region-only "ambient" citations surfaced when the LLM emits no
+ * verified citation block. Keeps a multi-source answer from lighting up the
+ * whole search window (6 hits → 6 boxes); the top few by score are enough.
+ */
+const AMBIENT_FALLBACK_MAX = 3;
+
 /** Dependencies the grounded-answer pipeline needs. Mirrors the RAG / Extract
  * required-deps guard: the live clients are always mandatory. */
 export interface GroundedAnswerDeps {
@@ -123,16 +130,23 @@ async function verifiedCitations(
   const wordMapFetch = deps.wordMapFetch ?? fetchDocumentWordMap;
 
   if (validatedCitations.length === 0) {
-    // Ambient fallback — every snippet becomes a region-only cite (no claim-level
-    // proof → `ambient`, confidence 0; bbox kept for click-to-view).
-    return snippets.map((s) => ({
-      documentId: s.documentId,
-      page: s.pageNumber ?? 1,
-      snippet: s.text ? s.text.slice(0, RAG_SNIPPET_CHARS) : undefined,
-      bbox: s.bbox,
-      tier: "ambient" as const,
-      confidence: 0,
-    }));
+    // Ambient fallback — region-only cites (no claim-level proof → `ambient`,
+    // confidence 0; bbox kept for click-to-view). The extract-indexed corpus
+    // surfaces low-relevance / EMPTY-text chunks on the low-floor retry, and an
+    // empty snippet that still carries geometry becomes a citation with a bbox
+    // but no text — a "nonsensical" box. So drop blank-text snippets and cap the
+    // fallback to the top few by score (snippets arrive score-ordered).
+    return snippets
+      .filter((s) => typeof s.text === "string" && s.text.trim().length > 0)
+      .slice(0, AMBIENT_FALLBACK_MAX)
+      .map((s) => ({
+        documentId: s.documentId,
+        page: s.pageNumber ?? 1,
+        snippet: (s.text ?? "").slice(0, RAG_SNIPPET_CHARS),
+        bbox: s.bbox,
+        tier: "ambient" as const,
+        confidence: 0,
+      }));
   }
 
   return Promise.all(

@@ -120,13 +120,45 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // adapter is required — the orchestrator is the canonical handler.
         case "highlightCitation":
           if (chatStore) {
-            chatStore.gotoDocViewer({
+            // add-citation-toggle — a USER click on the citation that's already
+            // the active highlight clears it (click again to dismiss). The
+            // automatic `agent` highlight always sets, never toggles.
+            const activeSession = chatStore.state.activeSessionId
+              ? chatStore.state.sessions.get(chatStore.state.activeSessionId)
+              : null;
+            const stepIdx = activeSession?.viewer.currentStep.stepIndex ?? -1;
+            const top = stepIdx >= 0 ? activeSession?.viewer.history[stepIdx] : null;
+            const activeDocViewer = top?.kind === "doc-viewer" ? top : null;
+            const matchesActiveHighlight =
+              source === "user" &&
+              activeDocViewer != null &&
+              activeDocViewer.documentId === intent.documentId &&
+              activeDocViewer.highlight != null &&
+              activeDocViewer.highlight.page === intent.page &&
+              JSON.stringify(activeDocViewer.highlight.bbox ?? null) ===
+                JSON.stringify(intent.bbox ?? null);
+            if (matchesActiveHighlight) {
+              chatStore.clearCitationHighlight();
+            } else {
+              chatStore.gotoDocViewer({
+                documentId: intent.documentId,
+                page: intent.page,
+                ...(intent.bbox ? { bbox: intent.bbox } : {}),
+                // WF-06b — carry the citation tier so the viewer renders the
+                // overlay at the right precision (or suppresses it for ambient).
+                ...(intent.tier ? { tier: intent.tier } : {}),
+              });
+            }
+          }
+          break;
+        // "Show all sources" — draw every citation region at once on the cited
+        // document. Distinct from highlightCitation (single region).
+        case "showCitations":
+          if (chatStore) {
+            chatStore.showCitationRegions({
               documentId: intent.documentId,
               page: intent.page,
-              ...(intent.bbox ? { bbox: intent.bbox } : {}),
-              // WF-06b — carry the citation tier so the viewer renders the
-              // overlay at the right precision (or suppresses it for ambient).
-              ...(intent.tier ? { tier: intent.tier } : {}),
+              regions: intent.regions,
             });
           }
           break;

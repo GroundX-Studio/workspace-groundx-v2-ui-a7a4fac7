@@ -60,6 +60,12 @@ const ASSET_ALLOWLIST = new Set<string>([
   // debug-vibrant hex (#1b1b1b / #ffd700 / #90ee90) + monospace so it
   // reads as a dev tool, never product UI. Not brand tokens by design.
   "components/layout/DebugOverlay/DebugOverlay.tsx",
+  // intent-coverage: the intent-firing panel inside the single dev menu
+  // (DebugOverlay, shown via the "Fire intent" toggle on canvas screens).
+  // Same rationale as DebugOverlay — intentionally off-brand debug hex
+  // (#1b1f24 / #d29922 / #30363d) + monospace so it reads as a dev tool,
+  // never product UI. Not brand tokens by design.
+  "components/layout/DebugOverlay/IntentDebugPanel.tsx",
   // Framework-independent fallback UI — renders BEFORE the theme
   // provider has a chance to load (it's the safety net for when the
   // app tree throws during initial render). Uses inline `style={...}`

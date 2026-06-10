@@ -69,6 +69,14 @@ end-to-end coverage.
    slot on the `doc-viewer` step.
 3. Persists the mutation via the existing `patchChatSession` writer.
 
+**Toggle:** when the intent is dispatched with `source: "user"` AND it matches
+the active `doc-viewer` step's current highlight (same `documentId`, `page`, and
+`bbox`), the handler SHALL CLEAR the highlight instead of re-applying it — so
+clicking the active citation chip again dismisses the highlight (the doc page
+stays shown; only the overlay is removed). A non-matching citation switches as
+before. An `agent`-sourced highlight (the automatic "show the answer's source")
+SHALL always set and never toggle.
+
 The `CiteChip` component's existing dispatch SHALL no longer be
 silent — the handler is the canonical sink. The pre-UI-04 Popover
 fallback in `CiteChip` is RETIRED.
@@ -80,10 +88,90 @@ fallback in `CiteChip` is RETIRED.
 - **THEN** a new `doc-viewer(documentId: B, highlight: { page: 3 })` step is pushed
 - **AND** the persisted viewer-state PATCH includes the new step
 
-#### Scenario: Dispatching highlightCitation while showing the same document
+#### Scenario: Clicking the active citation again toggles the highlight off
 
-- **GIVEN** the active viewer step is `doc-viewer(documentId: A, highlight: { page: 1 })`
-- **WHEN** `dispatch({ kind: "highlightCitation", documentId: "A", page: 7, bbox: {...} })` fires
-- **THEN** the same step's `highlight` is mutated to `{ page: 7, bbox: {...} }`
-- **AND** no new step is pushed onto viewer-history
+- **GIVEN** the active `doc-viewer` step's highlight is `{ page: 3, bbox: B }` for document A
+- **WHEN** the user clicks that same citation chip again (`dispatch({ kind: "highlightCitation", documentId: A, page: 3, bbox: B }, "user")`)
+- **THEN** the step's `highlight` is cleared (no overlay) while the doc page A stays shown
+- **AND** a subsequent identical user click re-applies the highlight
+
+#### Scenario: Agent auto-highlight never toggles
+
+- **GIVEN** the active step's highlight already matches an answer's primary citation
+- **WHEN** the auto-highlight dispatches it again with `source: "agent"`
+- **THEN** the highlight remains set (it is NOT cleared)
+
+### Requirement: PdfViewerWidget SHALL provide zoom and pan controls
+
+`PdfViewerWidget` SHALL let the user zoom the page from **Fit (whole page,
+zoom = 1)** to **300% (zoom = 3)** in **25% steps**, and pan when zoomed in.
+
+It SHALL render an inline control cluster — zoom out, current level, zoom in,
+and Fit — built from existing primitives and design tokens (no hardcoded style
+literals). The controls SHALL NOT be extracted into a separate reusable
+component while `PdfViewerWidget` is the only caller.
+
+The page image and its citation / lit-region overlays SHALL share a single
+transform layer so overlays stay aligned with the page at any zoom level.
+
+The feature SHALL be available on both surfaces the viewer appears on: the
+desktop side-by-side canvas and the mobile single-pane.
+
+#### Scenario: Zoom in magnifies the page
+
+- **GIVEN** `<PdfViewerWidget>` showing a page at Fit (zoom 1)
+- **WHEN** the user activates the zoom-in control
+- **THEN** the page is rendered at a larger scale (zoom 1.25)
+- **AND** the zoom level indicator reflects the new level
+- **AND** the zoom-out and Fit controls become enabled
+
+#### Scenario: Zoom is bounded to Fit–300%
+
+- **GIVEN** the viewer at zoom 3 (300%)
+- **WHEN** the user activates zoom-in again
+- **THEN** the zoom stays at 3 and the zoom-in control is disabled
+- **AND** at Fit (zoom 1) the zoom-out control is disabled
+
+#### Scenario: Citation highlight stays aligned when zoomed
+
+- **GIVEN** a citation highlight rendered over the cited region at Fit
+- **WHEN** the user zooms to 200%
+- **THEN** the highlight overlay scales and moves with the page and remains
+  positioned over the same cited region
+
+### Requirement: Viewer pan SHALL use explicit gestures only — plain scroll never pans
+
+Panning SHALL be available **only when zoomed in (zoom > 1)** and SHALL be
+driven by explicit gestures: dragging the page, **Ctrl/Cmd + wheel** to zoom
+toward the cursor, and the keyboard (`+` / `-` / `0`) when the viewer is
+focused. A **plain wheel / scroll SHALL NOT pan or zoom** the page. A drag that
+begins on a control or a citation chip SHALL NOT pan.
+
+#### Scenario: Plain scroll does nothing
+
+- **GIVEN** the viewer at any zoom level
+- **WHEN** the user scrolls the wheel without a modifier key
+- **THEN** the page does not pan and the zoom does not change
+
+#### Scenario: Drag pans only when zoomed
+
+- **GIVEN** the viewer at Fit (zoom 1)
+- **WHEN** the user drags on the page
+- **THEN** nothing pans
+- **GIVEN** the viewer at 200%
+- **WHEN** the user drags on the page (not starting on a control or chip)
+- **THEN** the page pans, clamped so it can never be dragged fully out of view
+
+### Requirement: Zoom SHALL reset to Fit on navigation
+
+Zoom and pan are ephemeral view state. They SHALL reset to Fit (zoom 1, pan 0)
+whenever the active page changes, the document changes, or a citation is opened
+(via a chip, the auto-highlight on an answer, or "Show all sources"). They SHALL
+NOT be persisted across sessions.
+
+#### Scenario: Opening a citation resets zoom to Fit
+
+- **GIVEN** the user has zoomed the viewer to 250%
+- **WHEN** a citation is opened (chip click, answer auto-highlight, or "Show all sources")
+- **THEN** the viewer resets to Fit and shows the cited page with the highlight visible
 

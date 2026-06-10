@@ -31,6 +31,7 @@ import { useApi } from "@/contexts/ApiContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { litRegionsFromCitations } from "@/views/Onboarding/litRegions";
 
 /**
  * One live ad-hoc conversation turn. ONE definition shared by the engine,
@@ -207,12 +208,22 @@ export function useConversation(
 
   const handleSuggestedAction = useCallback(
     (action: ChatSuggestedAction, citations?: Citation[]) => {
-      // "Show source" carries no intent of its own — it opens/highlights
-      // the answer's primary citation, same as clicking the [1] chip.
+      // "Show all sources" — light up EVERY citation region of the answer at
+      // once (color-coded), distinct from a single `[N]` chip (one region) and
+      // from the auto-highlight (primary only).
       if (action.key === "show-source") {
-        const c = citations?.[0];
-        if (c) {
-          dispatchIntent(citationToHighlightIntent(c), "user");
+        const cites = citations ?? [];
+        const primary = cites[0];
+        if (primary) {
+          dispatchIntent(
+            {
+              kind: "showCitations",
+              documentId: primary.documentId,
+              page: primary.page,
+              regions: litRegionsFromCitations(cites),
+            },
+            "user",
+          );
         }
         return;
       }
@@ -351,6 +362,15 @@ export function useConversation(
         // widget-llm-integration Phase 5 — dispatch every server-validated
         // LLM tool call through the canvas orchestrator.
         dispatchReplyIntents(result.reply.intents, dispatchIntent);
+        // Auto-show the answer's source WITHOUT a click: as soon as an answer
+        // with a citation arrives, highlight its primary citation on the canvas
+        // (same surface as clicking [1] / "Show source"). Dispatched after the
+        // LLM tool intents so an explicit navigation tool, if any, wins; "agent"
+        // source marks it as automatic, not a user gesture.
+        const primaryCitation = result.reply.citations?.[0];
+        if (primaryCitation) {
+          dispatchIntent(citationToHighlightIntent(primaryCitation), "agent");
+        }
         // F3a wireframe-fix: also enqueue the proposal onto the canvas-side
         // ProposalCard queue so SchemaView's "above the list" surface fires.
         if (result.reply.proposedSchemaField) {

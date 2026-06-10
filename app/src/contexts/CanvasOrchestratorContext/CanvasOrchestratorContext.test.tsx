@@ -381,6 +381,96 @@ describe("CanvasOrchestratorContext", () => {
       }
     });
 
+    // "Show all sources" — the showCitations intent writes every citation
+    // region onto the doc-viewer step's litRegions (and clears the single
+    // highlight), so the viewer can light them all up at once.
+    it("writes all citation regions onto the doc-viewer step for showCitations", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      act(() => {
+        result.current.bus.dispatch(
+          {
+            kind: "showCitations",
+            documentId: "doc-A",
+            page: 1,
+            regions: [
+              { page: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.05, color: "green" },
+              { page: 2, x: 0.2, y: 0.3, w: 0.4, h: 0.06, color: "coral" },
+            ],
+          },
+          "user",
+        );
+      });
+      const session = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const current = session?.viewer.history[session.viewer.currentStep.stepIndex];
+      expect(current?.kind).toBe("doc-viewer");
+      if (current?.kind === "doc-viewer") {
+        expect(current.documentId).toBe("doc-A");
+        expect(current.litRegions).toHaveLength(2);
+        expect(current.litRegions?.[0]).toMatchObject({ color: "green", page: 1 });
+        expect(current.highlight).toBeUndefined();
+      }
+    });
+
+    // add-citation-toggle — a USER click on the citation already shown clears
+    // it (toggle off). Agent auto-highlight never toggles.
+    it("toggles the highlight off when the active citation is re-clicked by the user", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      const cite = {
+        kind: "highlightCitation" as const,
+        documentId: "doc-A",
+        page: 3,
+        bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.05 },
+      };
+      const topStep = () => {
+        const s = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+        return s ? s.viewer.history[s.viewer.currentStep.stepIndex] : null;
+      };
+
+      act(() => result.current.bus.dispatch(cite, "user"));
+      let top = topStep();
+      expect(top?.kind).toBe("doc-viewer");
+      if (top?.kind === "doc-viewer") expect(top.highlight?.page).toBe(3);
+
+      // Same citation, same user → cleared (toggle off).
+      act(() => result.current.bus.dispatch(cite, "user"));
+      top = topStep();
+      expect(top?.kind).toBe("doc-viewer");
+      if (top?.kind === "doc-viewer") expect(top.highlight).toBeUndefined();
+
+      // Click again → re-applied.
+      act(() => result.current.bus.dispatch(cite, "user"));
+      top = topStep();
+      if (top?.kind === "doc-viewer") expect(top.highlight?.page).toBe(3);
+    });
+
+    it("agent auto-highlight does NOT toggle off on an identical repeat", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      const cite = {
+        kind: "highlightCitation" as const,
+        documentId: "doc-A",
+        page: 2,
+        bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.05 },
+      };
+      act(() => result.current.bus.dispatch(cite, "agent"));
+      act(() => result.current.bus.dispatch(cite, "agent")); // repeat
+      const s = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const top = s?.viewer.history[s.viewer.currentStep.stepIndex];
+      expect(top?.kind).toBe("doc-viewer");
+      if (top?.kind === "doc-viewer") expect(top.highlight?.page).toBe(2); // still set
+    });
+
     // WF-06b — the citation tier rides the intent into the step's
     // highlight slot so the viewer pane can render at the right precision.
     it("threads the citation tier onto the doc-viewer step highlight slot", () => {

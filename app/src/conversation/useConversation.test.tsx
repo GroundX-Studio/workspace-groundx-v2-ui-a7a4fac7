@@ -162,6 +162,111 @@ describe("useConversation (durable engine)", () => {
     expect(onFirstUserSend).toHaveBeenCalledTimes(1);
   });
 
+  it("auto-highlights the answer's primary citation on the canvas — no click needed", async () => {
+    sendChatMessage.mockResolvedValueOnce({
+      userMessageId: "u-1",
+      assistantMessageId: "a-1",
+      reply: {
+        mode: "rag",
+        answer: "The total amount due is $7,613.20.",
+        citations: [
+          { documentId: "c3bfff49", page: 2, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.01 }, tier: "exact" },
+        ],
+        suggestedActions: [],
+        tools: [],
+        intents: [],
+        toolFailures: [],
+        proposedSchemaField: null,
+      },
+      compressionRan: false,
+    });
+
+    // Probe that surfaces the active canvas viewer step so we can prove the
+    // citation opened the source WITHOUT a user click on the chip.
+    function ViewerProbe() {
+      const { state } = useChatStore();
+      const sid = state.activeSessionId;
+      const conv = useConversation(sid);
+      const sess = sid ? state.sessions.get(sid) : null;
+      const idx = sess?.viewer.currentStep.stepIndex ?? -1;
+      const top = idx >= 0 ? sess?.viewer.history[idx] : null;
+      return (
+        <div>
+          <div data-testid="probe-session-id">{sid ?? "none"}</div>
+          <button data-testid="probe-send" onClick={() => void conv.send("total?")}>
+            send
+          </button>
+          <div data-testid="viewer-step">
+            {top && top.kind === "doc-viewer"
+              ? `${top.documentId}|${top.page}|${top.highlight?.bbox ? "bbox" : "no-bbox"}`
+              : "none"}
+          </div>
+        </div>
+      );
+    }
+
+    renderWithConversationApi(<ViewerProbe />, {
+      initialFrame: "f5",
+      initialScenario: "utility",
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("probe-session-id")).not.toHaveTextContent("none");
+    });
+
+    await act(async () => {
+      screen.getByTestId("probe-send").click();
+    });
+
+    // The canvas viewer jumped to the cited page with the bbox highlight — the
+    // same end state as clicking [1], but triggered automatically by the answer.
+    await waitFor(() => {
+      expect(screen.getByTestId("viewer-step")).toHaveTextContent("c3bfff49|2|bbox");
+    });
+  });
+
+  it("'Show all sources' lights up every citation region on the canvas", async () => {
+    function SourcesProbe() {
+      const { state } = useChatStore();
+      const sid = state.activeSessionId;
+      const conv = useConversation(sid);
+      const sess = sid ? state.sessions.get(sid) : null;
+      const idx = sess?.viewer.currentStep.stepIndex ?? -1;
+      const top = idx >= 0 ? sess?.viewer.history[idx] : null;
+      const citations = [
+        { documentId: "c3", page: 1, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.02 } },
+        { documentId: "c3", page: 2, bbox: { x: 0.2, y: 0.3, w: 0.4, h: 0.02 } },
+      ];
+      return (
+        <div>
+          <div data-testid="probe-session-id">{sid ?? "none"}</div>
+          <button
+            data-testid="show-all"
+            onClick={() =>
+              conv.handleSuggestedAction({ key: "show-source", label: "Show all sources" }, citations)
+            }
+          >
+            show
+          </button>
+          <div data-testid="lit-count">
+            {top && top.kind === "doc-viewer" ? String(top.litRegions?.length ?? 0) : "none"}
+          </div>
+        </div>
+      );
+    }
+
+    renderWithConversationApi(<SourcesProbe />, { initialFrame: "f5", initialScenario: "utility" });
+    await waitFor(() => {
+      expect(screen.getByTestId("probe-session-id")).not.toHaveTextContent("none");
+    });
+
+    await act(async () => {
+      screen.getByTestId("show-all").click();
+    });
+
+    // Both citation regions are drawn on the doc-viewer step at once.
+    await waitFor(() => expect(screen.getByTestId("lit-count")).toHaveTextContent("2"));
+  });
+
   it("projects agent-prefixed ChatStore messages into liveTurns", async () => {
     function AgentEmitter() {
       const { appendAgentMessage } = useChatStore();

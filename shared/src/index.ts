@@ -790,6 +790,20 @@ const canvasScenarioSchema = z.enum(["utility", "loan", "solar"]);
 /** Report-section render mode (shared by propose/edit report-section intents). */
 const reportRenderAsSchema = z.enum(["PARAGRAPH", "BULLETS", "TABLE"]);
 
+/**
+ * A single citation region drawn on the page (the "show all sources" surface).
+ * 0–1 page-relative coords + a palette key matching the `[N]` chip colors.
+ */
+export const citationRegionSchema = z.object({
+  page: z.number(),
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+  color: z.enum(["green", "cyan", "coral"]),
+});
+export type CitationRegion = z.infer<typeof citationRegionSchema>;
+
 export const canvasIntentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("showSample"), scenario: canvasScenarioSchema }),
   z.object({ kind: z.literal("openDocument"), documentId: z.string(), page: z.number().optional() }),
@@ -799,6 +813,15 @@ export const canvasIntentSchema = z.discriminatedUnion("kind", [
     page: z.number(),
     bbox: normalizedBboxSchema.optional(),
     tier: citationTierSchema.optional(),
+  }),
+  // "Show all sources" — light up every citation region of an answer at once
+  // (color-coded), on the cited document. Distinct from highlightCitation,
+  // which opens a single region.
+  z.object({
+    kind: z.literal("showCitations"),
+    documentId: z.string(),
+    page: z.number(),
+    regions: z.array(citationRegionSchema),
   }),
   z.object({ kind: z.literal("jumpToPage"), documentId: z.string(), page: z.number() }),
   z.object({ kind: z.literal("showExtract"), scope: contentScopeSchema, schemaId: z.string() }),

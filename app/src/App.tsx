@@ -96,6 +96,9 @@ export default function App() {
           independent (reads window.location.search), so it mounts once
           here beside the router and covers every route. Renders null in
           production / without the param. */}
+      {/* DBG-01: the single dev menu (gated on `?debug=true`). Includes the
+          intent-firing panel (intent-coverage) as a toggle on canvas screens —
+          one menu, not two. */}
       <DebugOverlay />
     </AppProviders>
   );

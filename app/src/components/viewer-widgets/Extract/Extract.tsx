@@ -173,6 +173,13 @@ const detailLabelSx = {
   textTransform: "uppercase",
 } as const;
 
+// Document / schema layout geometry (extract-screen-audit). Plain px — this is
+// responsive layout geometry, not a brand token. Below this measured canvas
+// width the PDF + schema can't both be comfortable, so the canvas switches from
+// side-by-side to a single-pane Document/Fields toggle. ~760 = a readable PDF
+// (~360) + a comfortable schema (~380) + the column gap.
+const SIDE_BY_SIDE_MIN_PX = 760;
+
 export const Extract: FC<ExtractProps> = ({ scope, role }) => {
   const api = useApi();
   const { state: appMode } = useAppMode();
@@ -195,6 +202,45 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
     if (value) setRenderMode(value);
   };
 
+  // ── Document / schema layout (extract-screen-audit) ─────────────────────
+  // The canvas shows the PDF and the field schema SIDE-BY-SIDE only when it is
+  // actually wide enough for both to be comfortable. Below that, cramming them
+  // produces a ~270px schema where field ids overflow and the category tabs
+  // can't fit — so instead we show ONE pane at a time behind a Document/Fields
+  // toggle (plain tabs, not a slider), giving the active pane the full width.
+  // The decision is driven by the MEASURED canvas width (not a viewport media
+  // query), because the resizable chat pane changes how much room the canvas
+  // actually has at any given viewport.
+  const [activePane, setActivePane] = useState<"document" | "fields">("document");
+  const [contentWidth, setContentWidth] = useState(0);
+  const contentResizeObserverRef = useRef<ResizeObserver | null>(null);
+  // Callback ref (not useEffect + ref.current): the content container only
+  // mounts AFTER the early loading return resolves, so an effect keyed on mount
+  // would observe a null ref and never re-run. A callback ref fires whenever the
+  // node actually attaches/detaches.
+  const contentRef = useCallback((node: HTMLDivElement | null) => {
+    contentResizeObserverRef.current?.disconnect();
+    if (!node || typeof ResizeObserver === "undefined") return;
+    setContentWidth(node.getBoundingClientRect().width);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (typeof w === "number") setContentWidth(w);
+    });
+    ro.observe(node);
+    contentResizeObserverRef.current = ro;
+  }, []);
+  // Assume there's room until we've measured otherwise (contentWidth === 0):
+  // the callback ref measures synchronously on attach, so a real browser has the
+  // true width before first paint (no flash); environments without ResizeObserver
+  // (jsdom) stay side-by-side.
+  const useSideBySide = contentWidth === 0 || contentWidth >= SIDE_BY_SIDE_MIN_PX;
+  // When stacked (single pane), surface the schema as soon as a field is
+  // selected (e.g. via a citation tap) so its provenance isn't hidden behind
+  // the document.
+  useEffect(() => {
+    if (!useSideBySide && selectedFieldId) setActivePane("fields");
+  }, [useSideBySide, selectedFieldId]);
+
   const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
   const { byId } = useScenarioRegistry();
   const scenario = byId(scenarioId);
@@ -207,13 +253,14 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
   const [liveSchema, setLiveSchema] = useState<ExtractionSchemaDef | null>(null);
   const [liveValues, setLiveValues] = useState<Record<string, string | number | boolean | null>>({});
   const [liveGeometry, setLiveGeometry] = useState<Map<string, ResolvedFieldGeometry>>(new Map());
-  // Monotonic load token: each scope-identity change bumps it; a resumed async
-  // load from a stale scope checks the token before committing state, so a slow
-  // prior load can't overwrite the current scope's data (`useScopeAdapter` has
-  // no cleanup hook — the token is the cancellation mechanism).
-  const loadTokenRef = useRef(0);
+  // Monotonic load sequence: each scope-identity change bumps it; a resumed
+  // async load from a stale scope checks the sequence before committing state,
+  // so a slow prior load can't overwrite the current scope's data
+  // (`useScopeAdapter` has no cleanup hook — the sequence is the cancellation
+  // mechanism).
+  const loadSeqRef = useRef(0);
   useScopeAdapter(scope, (nextScope) => {
-    const token = ++loadTokenRef.current;
+    const loadSeq = ++loadSeqRef.current;
     // Reset the prior scope's live data so a re-scope doesn't strand stale
     // schema/values while the next load resolves.
     setLiveSchema(null);
@@ -222,7 +269,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
     const docId = primaryDocumentIdFromScope(nextScope);
     // Skip placeholder ids (BYO / fixture) — the manifest fallback handles them.
     if (!docId || !isResolvedDocumentId(docId)) return;
-    const isStale = () => loadTokenRef.current !== token;
+    const isStale = () => loadSeqRef.current !== loadSeq;
     void (async () => {
       try {
         const doc = await getDocument(docId);
@@ -626,10 +673,9 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
           sx={{
             flex: 1,
             minHeight: 0,
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "1.2fr 1fr" },
-            gridTemplateRows: "auto 1fr",
-            gap: 2,
+            display: "flex",
+            flexDirection: "column",
+            gap: 1.5,
             p: { xs: 1.5, md: 2 },
             overflow: "hidden",
           }}
@@ -649,10 +695,78 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
             </Stack>
           ) : null}
 
+          {!useSideBySide ? (
+            <Box
+              data-testid="extract-pane-toggle"
+              role="tablist"
+              aria-label="Extract pane"
+              sx={{
+                flexShrink: 0,
+                alignSelf: "flex-start",
+                display: "flex",
+                gap: 0.5,
+                p: 0.5,
+                borderRadius: BORDER_RADIUS_PILL,
+                border: `1px solid ${BORDER}`,
+                backgroundColor: WHITE,
+              }}
+            >
+              {(["document", "fields"] as const).map((pane) => (
+                <Box
+                  key={pane}
+                  component="button"
+                  type="button"
+                  role="tab"
+                  aria-selected={activePane === pane}
+                  data-testid={`extract-pane-toggle-${pane}`}
+                  onClick={() => setActivePane(pane)}
+                  sx={{
+                    border: "none",
+                    cursor: "pointer",
+                    px: 1.5,
+                    py: 0.5,
+                    borderRadius: BORDER_RADIUS_PILL,
+                    fontFamily: "inherit",
+                    fontSize: FONT_SIZE_LABEL,
+                    fontWeight: FONT_WEIGHT_LABEL,
+                    color: NAVY,
+                    backgroundColor: activePane === pane ? alpha(GREEN, 0.16) : "transparent",
+                  }}
+                >
+                  {pane === "document" ? "Document" : "Fields"}
+                </Box>
+              ))}
+            </Box>
+          ) : null}
+
+          <Box
+            ref={contentRef}
+            sx={{
+              flex: 1,
+              minHeight: 0,
+              display: "flex",
+              flexDirection: "row",
+              gap: useSideBySide ? 2 : 0,
+              overflow: "hidden",
+            }}
+          >
+            {useSideBySide || activePane === "document" ? (
+              <Box
+                sx={{
+                  minHeight: 0,
+                  minWidth: 0,
+                  display: "flex",
+                  // Side-by-side: document gets a slightly smaller share than
+                  // the denser schema. Stacked: it's the only pane → full width.
+                  flex: useSideBySide ? "1 1 0" : 1,
+                }}
+              >
           <Box
             data-testid="extract-doc-pane"
             sx={{
+              flex: 1,
               minHeight: 0,
+              minWidth: 0,
               overflow: "hidden",
               borderRadius: BORDER_RADIUS_CARD,
               backgroundColor: WHITE,
@@ -682,7 +796,22 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
               </Stack>
             )}
           </Box>
+              </Box>
+            ) : null}
 
+            {useSideBySide || activePane === "fields" ? (
+              <Box
+                sx={{
+                  // Side-by-side: schema gets a slightly larger share than the
+                  // document (it's denser). Stacked: it's the only pane.
+                  flex: useSideBySide ? "1.2 1 0" : 1,
+                  minWidth: 0,
+                  minHeight: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "auto",
+                }}
+              >
           {selectedField ? (
             <Box data-testid="field-provenance-panel" sx={{ overflow: "auto", p: 1 }}>
               <Stack
@@ -908,7 +1037,11 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                     sx={{
                       display: "flex",
                       gap: 0.5,
+                      // Wrap to a second row when genuinely narrow (rare now that
+                      // a too-narrow canvas switches to the single-pane toggle).
+                      // Never a horizontal scrollbar — that's worse UX than a wrap.
                       flexWrap: "wrap",
+                      rowGap: 0.5,
                       flex: 1,
                       minWidth: 0,
                     }}
@@ -1010,10 +1143,15 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                             }
                           }}
                           sx={{
-                            display: "grid",
-                            gridTemplateColumns: "minmax(0, 1fr) auto",
-                            columnGap: 3,
-                            alignItems: "start",
+                            // Key-value CARD: a header row (field id + its value)
+                            // stacked OVER the full-width description. The value
+                            // never shares a column with the description, so the
+                            // description always gets the full width and is never
+                            // truncated. The value wraps below the id only when the
+                            // two genuinely can't share a line.
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 0.5,
                             p: 1.5,
                             borderRadius: BORDER_RADIUS,
                             cursor: "pointer",
@@ -1021,54 +1159,80 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                             "&:hover": { backgroundColor: alpha(GREEN, 0.08) },
                           }}
                         >
-                          <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              alignItems: "baseline",
+                              columnGap: 2,
+                              rowGap: 0.5,
+                            }}
+                          >
                             <Typography
                               variant="body2"
-                              sx={{ color: NAVY, fontWeight: FONT_WEIGHT_HEADLINE, fontFamily: "monospace" }}
+                              data-testid={`extract-field-id-${field.id}`}
+                              sx={{
+                                color: NAVY,
+                                fontWeight: FONT_WEIGHT_HEADLINE,
+                                fontFamily: "monospace",
+                                // Field ids are unbreakable snake_case tokens; allow
+                                // them to wrap as a last resort rather than overflow.
+                                overflowWrap: "anywhere",
+                                minWidth: 0,
+                              }}
                             >
                               {field.id}
                             </Typography>
-                            <Typography
-                              variant="caption"
+                            <Stack
+                              direction="row"
+                              spacing={0.75}
+                              alignItems="center"
                               sx={{
-                                color: MUTED_ON_LIGHT,
-                                display: "-webkit-box",
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: "vertical",
-                                overflow: "hidden",
+                                flexShrink: 0,
+                                ml: "auto",
+                                flexWrap: "wrap",
+                                justifyContent: "flex-end",
+                                rowGap: 0.5,
                               }}
                             >
-                              <Box component="span" sx={{ color: BODY_TEXT, fontWeight: FONT_WEIGHT_LABEL }}>
-                                {field.name}
-                              </Box>{" "}
-                              — {field.description}
-                            </Typography>
-                          </Stack>
-                          <Stack spacing={0.5} alignItems="flex-end" sx={{ flexShrink: 0, maxWidth: 180 }}>
-                            <Box
-                              sx={{
-                                px: 1,
-                                py: 0.5,
-                                borderRadius: BORDER_RADIUS_SM,
-                                backgroundColor: value === undefined || value === null ? "transparent" : alpha(NAVY, 0.05),
-                                fontFamily: "monospace",
-                                fontSize: FONT_SIZE_LABEL,
-                                fontWeight: FONT_WEIGHT_HEADLINE,
-                                color: NAVY,
-                                textAlign: "right",
-                                wordBreak: "break-word",
-                              }}
-                            >
-                              {value === undefined || value === null ? "—" : String(value)}
-                            </Box>
-                            {citations.length > 0 && (
-                              <Stack direction="row" spacing={0.5}>
-                                {citations.map((c, idx) => (
-                                  <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} />
-                                ))}
-                              </Stack>
-                            )}
-                          </Stack>
+                              <Box
+                                sx={{
+                                  px: 1,
+                                  py: 0.5,
+                                  borderRadius: BORDER_RADIUS_SM,
+                                  backgroundColor: value === undefined || value === null ? "transparent" : alpha(NAVY, 0.05),
+                                  fontFamily: "monospace",
+                                  fontSize: FONT_SIZE_LABEL,
+                                  fontWeight: FONT_WEIGHT_HEADLINE,
+                                  color: NAVY,
+                                  textAlign: "right",
+                                  // Long values wrap inside the chip rather than
+                                  // forcing the row wider or truncating.
+                                  wordBreak: "break-word",
+                                  overflowWrap: "anywhere",
+                                }}
+                              >
+                                {value === undefined || value === null ? "—" : String(value)}
+                              </Box>
+                              {citations.length > 0 && (
+                                <Stack direction="row" spacing={0.5}>
+                                  {citations.map((c, idx) => (
+                                    <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} />
+                                  ))}
+                                </Stack>
+                              )}
+                            </Stack>
+                          </Box>
+                          <Typography
+                            variant="caption"
+                            data-testid={`extract-field-desc-${field.id}`}
+                            sx={{ color: MUTED_ON_LIGHT }}
+                          >
+                            <Box component="span" sx={{ color: BODY_TEXT, fontWeight: FONT_WEIGHT_LABEL }}>
+                              {field.name}
+                            </Box>{" "}
+                            — {field.description}
+                          </Typography>
                         </Box>
                       );
                     })}
@@ -1104,6 +1268,9 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
               </Stack>
             </Box>
           )}
+              </Box>
+            ) : null}
+          </Box>
 
           {!isAuthed ? (
             <Box

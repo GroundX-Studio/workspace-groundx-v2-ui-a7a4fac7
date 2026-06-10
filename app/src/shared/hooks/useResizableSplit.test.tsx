@@ -148,3 +148,35 @@ describe("useResizableSplit storageKey persistence (UR-02)", () => {
     spy.mockRestore();
   });
 });
+
+// Regression guard (slider-regression-audit): the existing tests above cover the
+// hook's MATH (snap zones, clamp, persistence) but historically NOTHING exercised
+// the actual drag wiring — startDrag + the window `pointermove` listener that
+// makes the pane follow the cursor. A divider that "barely moves" passes every
+// math test, so the drag path itself must be pinned.
+describe("useResizableSplit — drag wiring (the part users actually feel)", () => {
+  it("startDrag + window pointermove moves the width by the cursor delta", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 360, min: 0, max: 1000 }));
+    act(() => result.current.startDrag(100));
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 250 }));
+    });
+    // Dragged the pointer from x=100 → x=250 (+150) ⇒ width 360 + 150 = 510.
+    expect(result.current.width).toBe(510);
+  });
+
+  it("a drag clamps to [min, max] (no runaway / no stuck pane)", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 360, min: 300, max: 400 }));
+    act(() => result.current.startDrag(0));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 5000 })));
+    expect(result.current.width).toBe(400);
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: -5000 })));
+    expect(result.current.width).toBe(300);
+  });
+
+  it("pointermove is a no-op until startDrag arms it (no phantom resize)", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 360, min: 0, max: 1000 }));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 900 })));
+    expect(result.current.width).toBe(360);
+  });
+});

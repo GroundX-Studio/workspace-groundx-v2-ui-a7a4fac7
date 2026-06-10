@@ -42,22 +42,27 @@
  */
 
 import Box from "@mui/material/Box";
+import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useEffect, useRef, useState, type FC } from "react";
+import { useCallback, useEffect, useRef, useState, type FC } from "react";
 
 import { isResolvedDocumentId } from "@/api/documentId";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
 
 import type { ContentScope, NormalizedBbox, WidgetRole } from "@groundx/shared";
 import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity";
+import { containContentRect, overlayPxRect } from "./overlayGeometry";
+import { ZOOM_MIN, ZOOM_MAX, clampPan, stepZoom, zoomAtPoint, type Vec2 } from "./zoomPan";
 import {
   BORDER,
+  BORDER_RADIUS_PILL,
   BORDER_RADIUS_SM,
   CORAL,
   CYAN,
   EYEBROW_ON_LIGHT,
+  FONT_SIZE_LABEL,
   FONT_WEIGHT_HEADLINE,
   FONT_WEIGHT_LABEL,
   GREEN,
@@ -179,11 +184,11 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   // scope-IDENTITY change via `useScopeAdapter` rather than a bespoke
   // `useEffect` keyed on a derived id. The adapter fires on mount and again
   // only when the `scope` identity changes (`scopeKey`), not on every render.
-  // Async cancellation is handled with a monotonically-increasing token: a
+  // Async cancellation is handled with a monotonically-increasing sequence: a
   // newer adapt run invalidates an in-flight fetch from an older scope.
-  const loadTokenRef = useRef(0);
+  const loadSeqRef = useRef(0);
   useScopeAdapter(scope, (nextScope) => {
-    const token = ++loadTokenRef.current;
+    const loadSeq = ++loadSeqRef.current;
     const nextDocId =
       nextScope.type === "documents" ? nextScope.documentIds[0] ?? "" : "";
     setXray(null);
@@ -198,7 +203,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
     void (async () => {
       const result = await getDocumentXray(nextDocId);
       // A newer scope took over while we awaited — drop this stale result.
-      if (loadTokenRef.current !== token) return;
+      if (loadSeqRef.current !== loadSeq) return;
       if (result.isSuccess && result.response) {
         setXray(result.response);
       } else {
@@ -214,8 +219,156 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   const loading = !xray && !error;
   const highlightPage =
     highlightBbox && typeof targetPage === "number" ? targetPage : activePage;
-  const shouldRenderHighlight =
-    Boolean(highlightBbox) && highlightTier !== "ambient" && activePage === highlightPage;
+  // Render a region whenever we have a bbox on the active page. Tier controls
+  // PRECISION/EMPHASIS (below), not whether a source is shown at all: an answer
+  // should always reveal where it came from. `ambient` draws a soft, looser
+  // chunk-region ("approximate source area") rather than nothing — for this
+  // corpus the backend frequently returns ambient, so suppressing it made
+  // citations look broken (a click/auto-jump that highlighted nothing).
+  const shouldRenderHighlight = Boolean(highlightBbox) && activePage === highlightPage;
+
+  // Measure the page-image pane so the citation / lit-region overlays can be
+  // positioned in PX over the ACTUAL `object-fit: contain` content rect. The
+  // overlay used to be a percentage of a wrapper whose height didn't match the
+  // rendered image, so every highlight landed ~25% of the page height too high.
+  // Callback ref (not useEffect+ref): the pane mounts only after the
+  // loading/error early branches resolve.
+  const [paneSize, setPaneSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const paneResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const paneRef = useCallback((node: HTMLDivElement | null) => {
+    paneResizeObserverRef.current?.disconnect();
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const r = node.getBoundingClientRect();
+    setPaneSize({ w: r.width, h: r.height });
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr) setPaneSize({ w: cr.width, h: cr.height });
+    });
+    ro.observe(node);
+    paneResizeObserverRef.current = ro;
+  }, []);
+  const activeDims = pages.find((p) => p.pageNumber === activePage);
+  const contentRect = activeDims
+    ? containContentRect(paneSize.w, paneSize.h, activeDims.width, activeDims.height)
+    : null;
+  // px against the measured content rect once available; a one-frame percentage
+  // fallback (also the jsdom path, which has no layout) before the observer fires.
+  const overlayStyleFor = (bbox: NormalizedBbox): import("react").CSSProperties => {
+    if (contentRect) {
+      const r = overlayPxRect(bbox, contentRect);
+      return { position: "absolute", left: r.left, top: r.top, width: r.width, height: r.height };
+    }
+    return {
+      position: "absolute",
+      left: `${bbox.x * 100}%`,
+      top: `${bbox.y * 100}%`,
+      width: `${bbox.w * 100}%`,
+      height: `${bbox.h * 100}%`,
+    };
+  };
+
+  // ── Zoom & pan (add-pdf-zoom-pan) ───────────────────────────────────────
+  // Ephemeral view state, held locally and reset on navigation (NOT persisted).
+  // The transform layer scales the page image + overlays together, so the
+  // citation highlights stay aligned at any zoom.
+  const [zoom, setZoom] = useState(ZOOM_MIN);
+  const [pan, setPan] = useState<Vec2>({ x: 0, y: 0 });
+  // Stable key so the reset effect doesn't re-fire on every render if the
+  // parent passes a fresh `highlightBbox` object identity.
+  const highlightKey = highlightBbox
+    ? `${highlightBbox.x},${highlightBbox.y},${highlightBbox.w},${highlightBbox.h}`
+    : "none";
+  // Reset to Fit whenever the user navigates (page / document) or a citation is
+  // opened — every citation jump lands on the whole page with the highlight.
+  useEffect(() => {
+    setZoom(ZOOM_MIN);
+    setPan({ x: 0, y: 0 });
+  }, [activePage, documentId, highlightKey]);
+  // Apply a new zoom level (button/keyboard/wheel) and re-clamp the pan so the
+  // page can't end up dragged off-screen at the new scale.
+  const applyZoom = (nextZoom: number) => {
+    setZoom(nextZoom);
+    setPan((p) => clampPan(p, nextZoom, paneSize, contentRect));
+  };
+  const fitPage = () => {
+    setZoom(ZOOM_MIN);
+    setPan({ x: 0, y: 0 });
+  };
+  const atFit = zoom === ZOOM_MIN && pan.x === 0 && pan.y === 0;
+
+  // Latest interaction inputs, mirrored to a ref so the window/native listeners
+  // below can stay attached once and always read current values (no re-attach
+  // churn from contentRect's per-render identity).
+  const interactRef = useRef({ zoom, pan, paneSize, contentRect });
+  interactRef.current = { zoom, pan, paneSize, contentRect };
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; startPan: Vec2 } | null>(null);
+
+  // Ctrl/Cmd + wheel = zoom toward the cursor. Native non-passive listener so
+  // we can preventDefault (the browser's page-zoom). Re-attaches when the page
+  // image mounts (the stage only exists once xray resolves). A PLAIN wheel is
+  // intentionally ignored — the page never moves on a bare scroll.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const { zoom: z, pan: p, paneSize: ps, contentRect: cr } = interactRef.current;
+      const next = stepZoom(z, e.deltaY < 0 ? "in" : "out");
+      const rect = el.getBoundingClientRect();
+      const res = zoomAtPoint(z, next, { x: e.clientX - rect.left, y: e.clientY - rect.top }, p, ps);
+      setZoom(res.zoom);
+      setPan(clampPan(res.pan, res.zoom, ps, cr));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [activeImage]);
+
+  // Drag-to-pan (only when zoomed). Window listeners stay attached; they act
+  // only while a drag is armed (dragRef set on pointer-down over the stage).
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const { zoom: z, paneSize: ps, contentRect: cr } = interactRef.current;
+      setPan(
+        clampPan(
+          { x: d.startPan.x + (e.clientX - d.startX), y: d.startPan.y + (e.clientY - d.startY) },
+          z,
+          ps,
+          cr,
+        ),
+      );
+    };
+    const onUp = () => {
+      dragRef.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, []);
+
+  const onStagePointerDown = (e: import("react").PointerEvent<HTMLDivElement>) => {
+    if (interactRef.current.zoom <= ZOOM_MIN) return; // pan only when zoomed
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startPan: interactRef.current.pan };
+  };
+
+  const onViewerKeyDown = (e: import("react").KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      applyZoom(stepZoom(zoom, "in"));
+    } else if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      applyZoom(stepZoom(zoom, "out"));
+    } else if (e.key === "0") {
+      e.preventDefault();
+      fitPage();
+    }
+  };
 
   return (
     <Box
@@ -232,9 +385,18 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
       // assert the wiring without waiting on the async xray fetch the visible
       // overlay needs. The overlay itself renders only once an image resolves.
       data-scan-animation={showScanAnimation ? "true" : "false"}
+      tabIndex={0}
+      onKeyDown={onViewerKeyDown}
       sx={{
         display: "flex",
         flexDirection: "column",
+        // Fill the slot on BOTH axes. ScopedCanvas mounts the widget in a
+        // block 100%×100% Box (width fills implicitly), but Extract's
+        // single-pane `extract-doc-pane` is a `display:flex` row — without
+        // an explicit width the widget collapses to its content width
+        // (~196px) and the page renders in a skinny column. `width:100%`
+        // makes the widget container-agnostic. (2026-06-09)
+        width: "100%",
         height: "100%",
         overflow: "hidden",
         backgroundColor: WHITE,
@@ -255,6 +417,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
           2026-05-25). The page scales down to fit whichever pane
           dimension is the bottleneck. */}
       <Box
+        ref={paneRef}
         sx={{
           flex: 1,
           minHeight: 0,
@@ -299,13 +462,31 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
             )}
           </Box>
         ) : activeImage ? (
-          // clickable-citations Phase 4 — wrap the page image in a
-          // position:relative container so the bbox highlight overlay
-          // (absolute child) renders proportionally over the image.
-          // The container hugs the image's intrinsic fit-contain size,
-          // not the available pane area, so the overlay's percentages
-          // align with the visible page region.
-          <Box sx={{ position: "relative", display: "inline-block", maxWidth: "100%", maxHeight: "100%" }}>
+          // The page image fills the (measured) pane with object-fit:contain so
+          // it never overflows, and the citation/lit-region overlays are
+          // positioned in PX over the actual contained content rect via
+          // `overlayStyleFor` — the pane itself is the position:relative
+          // containing block (see `paneRef`). Previously the overlay was a % of
+          // a wrapper whose height didn't match the image, so highlights landed
+          // ~25% of the page height too high.
+          <>
+            {/* Transform stage — the page image AND its overlays scale/pan
+                together (so highlights stay aligned). Reset to Fit on nav. */}
+            <Box
+              ref={stageRef}
+              data-testid="pdf-viewer-stage"
+              data-zoom={String(zoom)}
+              data-pan={`${pan.x},${pan.y}`}
+              onPointerDown={onStagePointerDown}
+              sx={{
+                position: "absolute",
+                inset: 0,
+                transformOrigin: "center center",
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                cursor: zoom > ZOOM_MIN ? "grab" : "default",
+                touchAction: "none",
+              }}
+            >
             <Box
               component="img"
               data-testid="pdf-viewer-page-image"
@@ -313,41 +494,37 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
               alt={`${fileName || "document"} · page ${activePage}`}
               sx={{
                 display: "block",
-                // Fit-contain semantics: the image scales to the smaller
-                // of the available width / height while preserving its
-                // aspect ratio. No scroll, no overflow, no pan/zoom.
-                maxWidth: "100%",
-                maxHeight: "100%",
-                width: "auto",
-                height: "auto",
+                width: "100%",
+                height: "100%",
                 objectFit: "contain",
                 backgroundColor: WHITE,
               }}
             />
             {shouldRenderHighlight && highlightBbox && (
-              // Cite overlay — absolute-positioned tint atop the page
-              // image at the bbox-percent coords. Rendered via inline
-              // `style` (not `sx`) so the test can assert the four
-              // computed percentages directly against the style attr.
-              //
-              // WF-06b — the overlay's precision tracks the citation
-              // tier: `paraphrase` (verified, chunk-level) draws a
-              // more-translucent dashed box to read as lower-confidence;
-              // `exact` (and the legacy/no-tier default) draws the tight
-              // solid box. `ambient` suppresses the overlay entirely
-              // (guarded above) — the source chip is the only affordance.
+              // Cite overlay — absolute-positioned tint over the cited region.
+              // WF-06b — precision tracks the citation tier: `paraphrase`
+              // (verified, chunk-level) draws a more-translucent dashed box;
+              // `exact` (and legacy/no-tier) draws the tight solid box.
+              // `ambient` suppresses the overlay (guarded above).
               <Box
                 data-testid="pdf-viewer-highlight"
                 data-highlight-tier={highlightTier}
                 aria-hidden
                 style={{
-                  position: "absolute",
-                  left: `${highlightBbox.x * 100}%`,
-                  top: `${highlightBbox.y * 100}%`,
-                  width: `${highlightBbox.w * 100}%`,
-                  height: `${highlightBbox.h * 100}%`,
-                  backgroundColor: highlightTier === "paraphrase" ? `${CYAN}22` : `${CYAN}55`,
-                  border: highlightTier === "paraphrase" ? `1px dashed ${CYAN}` : `2px solid ${CYAN}`,
+                  ...overlayStyleFor(highlightBbox),
+                  // Emphasis by tier: exact (and legacy/no-tier) = tight solid
+                  // box; paraphrase = chunk-level dashed; ambient = faint dashed
+                  // "approximate source area".
+                  backgroundColor:
+                    highlightTier === "ambient"
+                      ? `${CYAN}1f`
+                      : highlightTier === "paraphrase"
+                        ? `${CYAN}33`
+                        : `${CYAN}55`,
+                  border:
+                    highlightTier === "exact" || highlightTier == null
+                      ? `2px solid ${CYAN}`
+                      : `1px dashed ${CYAN}`,
                   borderRadius: BORDER_RADIUS_SM,
                   pointerEvents: "none",
                 }}
@@ -368,11 +545,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                     data-color={region.color}
                     aria-hidden
                     style={{
-                      position: "absolute",
-                      left: `${region.x * 100}%`,
-                      top: `${region.y * 100}%`,
-                      width: `${region.w * 100}%`,
-                      height: `${region.h * 100}%`,
+                      ...overlayStyleFor(region),
                       backgroundColor: `${bg}55`,
                       border: `2px solid ${bg}`,
                       borderRadius: BORDER_RADIUS_SM,
@@ -382,7 +555,68 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                   />
                 );
               })}
-          </Box>
+            </Box>
+            {/* Zoom controls — inline (one caller, not extracted). Sit OUTSIDE
+                the transform stage so they don't scale/pan with the page. */}
+            <Box
+              data-testid="pdf-zoom-controls"
+              sx={{
+                position: "absolute",
+                bottom: 1,
+                right: 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 0.25,
+                px: 0.5,
+                py: 0.25,
+                borderRadius: BORDER_RADIUS_PILL,
+                border: `1px solid ${BORDER}`,
+                backgroundColor: alpha(WHITE, 0.92),
+              }}
+            >
+              <IconButton
+                size="small"
+                data-testid="pdf-zoom-out"
+                aria-label="Zoom out"
+                disabled={zoom <= ZOOM_MIN}
+                onClick={() => applyZoom(stepZoom(zoom, "out"))}
+                sx={{ color: NAVY }}
+              >
+                <Box component="span" sx={{ fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_HEADLINE, lineHeight: 1 }}>
+                  −
+                </Box>
+              </IconButton>
+              <Box
+                data-testid="pdf-zoom-level"
+                aria-live="polite"
+                sx={{ minWidth: 40, textAlign: "center", fontSize: FONT_SIZE_LABEL, color: NAVY }}
+              >
+                {Math.round(zoom * 100)}%
+              </Box>
+              <IconButton
+                size="small"
+                data-testid="pdf-zoom-in"
+                aria-label="Zoom in"
+                disabled={zoom >= ZOOM_MAX}
+                onClick={() => applyZoom(stepZoom(zoom, "in"))}
+                sx={{ color: NAVY }}
+              >
+                <Box component="span" sx={{ fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_HEADLINE, lineHeight: 1 }}>
+                  +
+                </Box>
+              </IconButton>
+              <IconButton
+                size="small"
+                data-testid="pdf-zoom-fit"
+                aria-label="Fit page"
+                disabled={atFit}
+                onClick={fitPage}
+                sx={{ color: NAVY }}
+              >
+                <Box component="span" sx={{ fontSize: FONT_SIZE_LABEL, lineHeight: 1 }}>⤢</Box>
+              </IconButton>
+            </Box>
+          </>
         ) : (
           // Loading state placeholder — neither error nor a real image
           // yet. The data-loading="true" attribute on the root carries

@@ -96,4 +96,43 @@ describe("groundedAnswerOverScope", () => {
     expect(result.citations).toHaveLength(2);
     expect(result.citations.every((c) => c.tier === "ambient")).toBe(true);
   });
+
+  it("ambient fallback drops empty/blank-text snippets and caps to the top few", async () => {
+    // The extract-indexed corpus surfaces low-relevance / empty-text chunks on
+    // the low-floor retry; an empty snippet still carries geometry, so the old
+    // fallback turned it into a citation with a bbox but no text → a
+    // "nonsensical" box. Drop blank snippets and cap the fallback count.
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: {
+            results: [
+              { documentId: "d1", pageNumber: 1, text: "first real snippet" },
+              { documentId: "d2", pageNumber: 1, text: "" }, // empty → dropped
+              { documentId: "d3", pageNumber: 1, text: "   " }, // blank → dropped
+              { documentId: "d4", pageNumber: 1, text: "second real snippet" },
+              { documentId: "d5", pageNumber: 1, text: "third real snippet" },
+              { documentId: "d6", pageNumber: 1, text: "fourth — capped out" },
+            ],
+          },
+        }),
+      ),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "Plain answer." } }] })),
+    };
+    const deps: GroundedAnswerDeps = {
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+    };
+
+    const result = await groundedAnswerOverScope("Q", scope, deps);
+    // Blank-text snippets (d2, d3) are dropped; the rest cap at 3 → d1, d4, d5.
+    expect(result.citations).toHaveLength(3);
+    expect(result.citations.map((c) => c.documentId)).toEqual(["d1", "d4", "d5"]);
+    // Every surviving ambient citation carries a non-empty snippet.
+    expect(result.citations.every((c) => (c.snippet ?? "").trim().length > 0)).toBe(true);
+  });
 });
