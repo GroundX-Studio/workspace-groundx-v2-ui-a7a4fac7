@@ -311,16 +311,41 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             window.dispatchEvent(new PopStateEvent("popstate"));
           }
           break;
+        // 2026-06-10 formerly-silent kinds — a live-canvas audit found these
+        // four dispatching (intent_log row written) with NO registered adapter
+        // in the production tree, i.e. silent no-ops. switchFrame was the
+        // critical gap: the middleware `suggest_intent` tool emits it, so the
+        // LLM could dispatch it and the canvas never moved. Each now routes to
+        // the SAME mutator the on-screen control calls (no parallel path),
+        // soft-failing in the steady tree like the other onboarding cases.
+        case "switchFrame":
+          if (onboardingSession) onboardingSession.advanceFrame(intent.frame);
+          break;
+        // SAME `pickScenario` the F1 Ingest picker calls (IngestView pairs it
+        // with a URL navigate; here state is canonical — pickScenario is
+        // idempotent on an already-active entity).
+        case "showSample":
+          if (onboardingSession) onboardingSession.pickScenario(intent.scenario);
+          break;
+        // Schema design surface is the Extract f3a frame. `schemaId` is
+        // currently single-schema-per-scenario, so the frame move alone is the
+        // whole behavior.
+        case "editSchema":
+          if (onboardingSession) onboardingSession.advanceFrame("f3a");
+          break;
+        // Mirrors jumpToPage (same push/swap doc-viewer surface, no
+        // highlight); the intent's page is optional → default to page 1.
+        case "openDocument":
+          if (chatStore) {
+            chatStore.gotoDocViewer({ documentId: intent.documentId, page: intent.page ?? 1 });
+          }
+          break;
         // ── adapter-registry-only kinds (no built-in side effect) ────────
         // These intents carry no orchestrator-built-in behavior; they are
         // handled by a `registerAdapter`-registered adapter (the
         // `adaptersRef.get(intent.kind)` call below). Listed explicitly so the
         // exhaustiveness check names them — a future kind dropping out of the
         // switch still fails the compile.
-        case "showSample":
-        case "openDocument":
-        case "editSchema":
-        case "switchFrame":
         case "submitSignup":
         case "wizardNext":
         case "wizardBack":

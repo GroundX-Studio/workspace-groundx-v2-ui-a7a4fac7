@@ -786,4 +786,113 @@ describe("CanvasOrchestratorContext", () => {
       }).not.toThrow();
     });
   });
+
+  // 2026-06-10 — the four previously adapter-registry-only kinds gained
+  // built-in handlers after a live-canvas audit found them dispatching
+  // (POST /api/intent logged) with NO registered adapter anywhere in the
+  // production tree — silent no-ops. switchFrame is the critical one: the
+  // middleware `suggest_intent` tool emits it, so the LLM could dispatch it
+  // and the canvas never moved. Each routes to the SAME mutator the
+  // on-screen control calls (no parallel path):
+  //   switchFrame   → OnboardingSession.advanceFrame(intent.frame)
+  //   showSample    → OnboardingSession.pickScenario(intent.scenario)
+  //   editSchema    → OnboardingSession.advanceFrame("f3a") (schema design surface)
+  //   openDocument  → ChatStore.gotoDocViewer (mirrors jumpToPage)
+  describe("formerly-silent kinds get built-in handlers (switchFrame / showSample / editSchema / openDocument)", () => {
+    const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+        <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </OnboardingSessionProvider>
+      </ChatStoreProvider>)
+    );
+    function useBoth() {
+      return { orchestrator: useCanvasOrchestrator(), session: useOnboardingSession() };
+    }
+
+    it("switchFrame advances the canvas to the dispatched frame (suggest_intent path)", () => {
+      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+      expect(result.current.session.state.currentFrame).toBe("f3");
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "switchFrame", frame: "f5" }, "agent");
+      });
+      expect(result.current.session.state.currentFrame).toBe("f5");
+    });
+
+    it("showSample activates the dispatched scenario", () => {
+      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "showSample", scenario: "loan" }, "user");
+      });
+      expect(result.current.session.state.scenario).toBe("loan");
+    });
+
+    it("editSchema advances the canvas to the schema design surface (f3a)", () => {
+      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "editSchema", schemaId: "schema-1" }, "user");
+      });
+      expect(result.current.session.state.currentFrame).toBe("f3a");
+    });
+
+    it("openDocument pushes a doc-viewer step (defaults to page 1)", () => {
+      const busWrapper = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<ChatStoreProvider ephemeral>
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </ChatStoreProvider>)
+      );
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      act(() => {
+        result.current.bus.dispatch({ kind: "openDocument", documentId: "doc-A" }, "user");
+      });
+      const session = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const current = session?.viewer.history[session.viewer.currentStep.stepIndex];
+      expect(current?.kind).toBe("doc-viewer");
+      if (current?.kind === "doc-viewer") {
+        expect(current.documentId).toBe("doc-A");
+        expect(current.page).toBe(1);
+      }
+    });
+
+    it("openDocument honors an explicit page", () => {
+      const busWrapper = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<ChatStoreProvider ephemeral>
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </ChatStoreProvider>)
+      );
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      act(() => {
+        result.current.bus.dispatch({ kind: "openDocument", documentId: "doc-B", page: 4 }, "user");
+      });
+      const session = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const current = session?.viewer.history[session.viewer.currentStep.stepIndex];
+      expect(current?.kind).toBe("doc-viewer");
+      if (current?.kind === "doc-viewer") {
+        expect(current.documentId).toBe("doc-B");
+        expect(current.page).toBe(4);
+      }
+    });
+
+    it("switchFrame / showSample / editSchema are no-ops (no throw) without an OnboardingSessionProvider", () => {
+      const plainWrapper = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
+      );
+      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
+      expect(() => {
+        act(() => {
+          result.current.dispatch({ kind: "switchFrame", frame: "f5" });
+          result.current.dispatch({ kind: "showSample", scenario: "utility" });
+          result.current.dispatch({ kind: "editSchema", schemaId: "s1" });
+        });
+      }).not.toThrow();
+    });
+  });
 });

@@ -745,8 +745,14 @@ new `CanvasIntent` kind without a handler fails type-checking (replacing the cha
 `if (intent.kind === …)` blocks that silently no-op'd an unhandled kind). Every `CanvasIntent` kind
 SHALL be named by a `case` in that switch: kinds with a built-in orchestrator side effect run it in
 their case; kinds routed only through the `registerAdapter` adapter registry (e.g. `submitSignup`,
-`wizardNext`/`wizardBack`/`wizardFinish`, `dismissWizard`, `closeDialog`, `showSample`, `openDocument`,
-`editSchema`, `switchFrame`) are explicit no-op cases so the exhaustiveness check still names them. The
+`wizardNext`/`wizardBack`/`wizardFinish`, `dismissWizard`, `closeDialog`) are explicit no-op cases so
+the exhaustiveness check still names them. `switchFrame`, `showSample`, `editSchema`, and
+`openDocument` SHALL be built-in cases (formerly adapter-registry-only, which left them silent no-ops
+on the live canvas — `switchFrame` is emitted by the middleware `suggest_intent` tool, so the LLM could
+dispatch it with no canvas movement): `switchFrame` → `OnboardingSession.advanceFrame(intent.frame)`;
+`showSample` → `OnboardingSession.pickScenario(intent.scenario)`; `editSchema` →
+`OnboardingSession.advanceFrame("f3a")`; `openDocument` → `ChatStore.gotoDocViewer` (page defaults
+to 1), mirroring `jumpToPage`. The onboarding-routed three soft-fail in the steady tree. The
 `registerAdapter` mechanism is RETAINED — it has live non-test callers (the SignUpWidget, DialogTitle,
 and OnboardingWizard adapters), and the `adaptersRef.get(intent.kind)` dispatch path runs after the
 switch unchanged.
