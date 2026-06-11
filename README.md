@@ -122,7 +122,7 @@ Deployment uses standard Kubernetes resources through Helm:
   is set and `PUBLIC_HOST` is not, hosts are derived as
   `<repo-name>.PUBLIC_DOMAIN` for `prod` and `<repo-name>-dev.PUBLIC_DOMAIN`
   for `dev`; `PUBLIC_HOSTS` may add comma- or whitespace-separated aliases such
-  as `dev.studio.groundx.ai` or `studio.groundx.ai`
+  as `devstudio.groundx.ai` or `studio.groundx.ai`
 - the workflow creates the namespace idempotently before `helm upgrade --install`
 
 Secrets are not workflow dispatch inputs. Shared credentials live as GitHub
@@ -173,7 +173,7 @@ For the shared AWS ALB path, set `PUBLIC_ACCESS=ingress`,
 the wildcard `*.groundx.ai` certificate ARN, and `ALB_GROUP_NAME` to a shared
 group such as `groundx-studio`. `AWS_REGION` may describe the EKS/RDS region, but
 ECR auth intentionally reads `ECR_AWS_REGION` to avoid mixing those concerns.
-Set `PUBLIC_HOSTS=dev.studio.groundx.ai` in the dev environment and
+Set `PUBLIC_HOSTS=devstudio.groundx.ai` in the dev environment and
 `PUBLIC_HOSTS=studio.groundx.ai` in prod when the generated workspace hostname
 should remain live alongside the branded alias.
 

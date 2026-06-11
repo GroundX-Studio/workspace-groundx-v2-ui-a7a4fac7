@@ -333,16 +333,16 @@ if (commandExists("helm")) {
       "--set-string",
       "publicHost=workspace-app.groundx.ai",
       "--set-literal",
-      "publicHosts=dev.studio.groundx.ai,studio.groundx.ai",
+      "publicHosts=devstudio.groundx.ai,studio.groundx.ai",
       "--set-string",
       "tlsSecretName=wildcard-studio-groundx-ai",
     ],
     { cwd: root, encoding: "utf8" },
   );
   assert(/host:\s*["']?workspace-app\.groundx\.ai["']?/.test(multiHostTemplate), "multi-host render must keep the primary public host");
-  assert(/host:\s*["']?dev\.studio\.groundx\.ai["']?/.test(multiHostTemplate), "multi-host render must include the dev studio alias");
+  assert(/host:\s*["']?devstudio\.groundx\.ai["']?/.test(multiHostTemplate), "multi-host render must include the dev studio alias");
   assert(/host:\s*["']?studio\.groundx\.ai["']?/.test(multiHostTemplate), "multi-host render must include the prod studio alias");
-  assert(/hosts:\s*\n\s*-\s*["']?workspace-app\.groundx\.ai["']?\s*\n\s*-\s*["']?dev\.studio\.groundx\.ai["']?\s*\n\s*-\s*["']?studio\.groundx\.ai["']?/.test(multiHostTemplate), "TLS hosts must cover the primary host and aliases");
+  assert(/hosts:\s*\n\s*-\s*["']?workspace-app\.groundx\.ai["']?\s*\n\s*-\s*["']?devstudio\.groundx\.ai["']?\s*\n\s*-\s*["']?studio\.groundx\.ai["']?/.test(multiHostTemplate), "TLS hosts must cover the primary host and aliases");
 
   const genericIngressTemplate = execFileSync(
     "helm",
