@@ -107,6 +107,7 @@ assert(ingress.includes(".Values.ingressAnnotations"), "Ingress must support gen
 assert(ingress.includes("alb.ingress.kubernetes.io/certificate-arn"), "Ingress must support ALB ACM certificate annotation");
 assert(ingress.includes("alb.ingress.kubernetes.io/group.name"), "Ingress must support shared ALB group annotation");
 assert(ingress.includes("alb.ingress.kubernetes.io/target-type"), "Ingress must support ALB IP targets for ClusterIP services");
+assert(ingress.includes(".Values.publicHosts"), "Ingress must support additional public host aliases");
 
 const workflow = read(".github/workflows/deploy.yml");
 assert(workflow.includes("branches:\n      - main"), "deploy workflow must run on merge/push to main");
@@ -130,6 +131,7 @@ assert(workflow.includes('public_host="${repo_k8s_name}-${DEPLOY_ENVIRONMENT}.${
 assert(workflow.includes('helm upgrade --install "${{ steps.deploy-vars.outputs.release_name }}"'), "Helm release must not be fixed across scaffold repos");
 assert(workflow.includes('--set-string middleware.existingSecret="${{ steps.deploy-vars.outputs.middleware_secret_name }}"'), "Helm must use the computed middleware secret name");
 assert(workflow.includes('--set-string publicHost="${{ steps.deploy-vars.outputs.public_host }}"'), "Helm must use the computed public host");
+assert(workflow.includes('--set-literal publicHosts="$PUBLIC_HOSTS_INPUT"'), "Helm must receive additional public host aliases without splitting commas");
 assert(workflow.includes('--set-json ingressAnnotations="$INGRESS_ANNOTATIONS_JSON_INPUT"'), "Helm must accept generic ingress annotations as JSON");
 assert(workflow.includes('--set-string acmCertificateArn="$ACM_CERTIFICATE_ARN_INPUT"'), "Helm must receive the ACM certificate ARN");
 assert(workflow.includes('--set-string albGroupName="$ALB_GROUP_NAME_INPUT"'), "Helm must receive the ALB group name");
@@ -145,6 +147,7 @@ assert(workflow.includes("secrets.FRONTEND_IMAGE_REPOSITORY"), "workflow must al
 assert(workflow.includes("secrets.MIDDLEWARE_IMAGE_REPOSITORY"), "workflow must allow middleware image repository from org secrets");
 assert(workflow.includes("secrets.K8S_NAMESPACE"), "workflow must allow namespace from org secrets");
 assert(workflow.includes("vars.PUBLIC_DOMAIN"), "workflow must allow default public hosts from an org public domain");
+assert(workflow.includes("vars.PUBLIC_HOSTS"), "workflow must allow additional public host aliases from org variables");
 assert(workflow.includes("vars.ACM_CERTIFICATE_ARN"), "workflow must allow ALB ACM certificate ARN from org variables");
 assert(workflow.includes("vars.ALB_GROUP_NAME"), "workflow must allow ALB group name from org variables");
 assert(workflow.includes("vars.INGRESS_ANNOTATIONS_JSON"), "workflow must allow generic ingress annotations from org variables");
@@ -314,6 +317,32 @@ if (commandExists("helm")) {
   assert(countRenderedKinds(prodTemplate, "Ingress") === 1, "public mode must render exactly one frontend Ingress");
   assert(/kind:\s*Ingress[\s\S]*name:\s*groundx-web-ui-frontend/.test(prodTemplate), "Ingress must target the frontend only");
   assert(!prodTemplate.includes("alb.ingress.kubernetes.io"), "generic Ingress render must not include ALB annotations by default");
+
+  const multiHostTemplate = execFileSync(
+    "helm",
+    [
+      "template",
+      "groundx-web-ui",
+      "deploy/helm/groundx-web-ui",
+      "--namespace",
+      "gx-prod",
+      "--set-string",
+      "environment=prod",
+      "--set-string",
+      "publicAccess=ingress",
+      "--set-string",
+      "publicHost=workspace-app.groundx.ai",
+      "--set-literal",
+      "publicHosts=dev.studio.groundx.ai,studio.groundx.ai",
+      "--set-string",
+      "tlsSecretName=wildcard-studio-groundx-ai",
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert(/host:\s*["']?workspace-app\.groundx\.ai["']?/.test(multiHostTemplate), "multi-host render must keep the primary public host");
+  assert(/host:\s*["']?dev\.studio\.groundx\.ai["']?/.test(multiHostTemplate), "multi-host render must include the dev studio alias");
+  assert(/host:\s*["']?studio\.groundx\.ai["']?/.test(multiHostTemplate), "multi-host render must include the prod studio alias");
+  assert(/hosts:\s*\n\s*-\s*["']?workspace-app\.groundx\.ai["']?\s*\n\s*-\s*["']?dev\.studio\.groundx\.ai["']?\s*\n\s*-\s*["']?studio\.groundx\.ai["']?/.test(multiHostTemplate), "TLS hosts must cover the primary host and aliases");
 
   const genericIngressTemplate = execFileSync(
     "helm",

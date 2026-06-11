@@ -37,7 +37,8 @@ choices:
 | Branch picker (built-in "Use workflow from" dropdown) | yes | the current branch |
 
 Everything else (cluster, ingress, image repos, ALB cert, namespace,
-public host/domain, TLS secrets) is GitHub `vars` / `secrets`.
+public host/domain, public host aliases, TLS secrets) is GitHub `vars` /
+`secrets`.
 
 (Three "Harness plumbing" passthrough inputs — `projectId`,
 `branch`, `commitSha` — also live in the dispatch form because

@@ -1,4 +1,31 @@
-{{- if and (eq .Values.publicAccess "ingress") .Values.publicHost }}
+{{- $hosts := list -}}
+{{- $seenHosts := dict -}}
+{{- with .Values.publicHost }}
+{{- $host := . | toString | trim -}}
+{{- if and $host (not (hasKey $seenHosts $host)) }}
+{{- $hosts = append $hosts $host -}}
+{{- $_ := set $seenHosts $host true -}}
+{{- end }}
+{{- end }}
+{{- $extraHosts := .Values.publicHosts | default list -}}
+{{- if kindIs "string" $extraHosts }}
+{{- range $raw := regexSplit "[,\\s]+" $extraHosts -1 }}
+{{- $host := $raw | toString | trim -}}
+{{- if and $host (not (hasKey $seenHosts $host)) }}
+{{- $hosts = append $hosts $host -}}
+{{- $_ := set $seenHosts $host true -}}
+{{- end }}
+{{- end }}
+{{- else }}
+{{- range $raw := $extraHosts }}
+{{- $host := $raw | toString | trim -}}
+{{- if and $host (not (hasKey $seenHosts $host)) }}
+{{- $hosts = append $hosts $host -}}
+{{- $_ := set $seenHosts $host true -}}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and (eq .Values.publicAccess "ingress") (gt (len $hosts) 0) }}
 {{- $isAlb := or (eq .Values.ingressClassName "alb") .Values.acmCertificateArn .Values.albGroupName }}
 {{- $annotations := dict }}
 {{- range $key, $value := .Values.ingressAnnotations }}
@@ -41,18 +68,22 @@ spec:
   {{- if .Values.tlsSecretName }}
   tls:
     - hosts:
-        - {{ .Values.publicHost | quote }}
+        {{- range $host := $hosts }}
+        - {{ $host | quote }}
+        {{- end }}
       secretName: {{ .Values.tlsSecretName }}
   {{- end }}
   rules:
-    - host: {{ .Values.publicHost | quote }}
+    {{- range $host := $hosts }}
+    - host: {{ $host | quote }}
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: {{ include "groundx-web-ui.fullname" . }}-frontend
+                name: {{ include "groundx-web-ui.fullname" $ }}-frontend
                 port:
-                  number: {{ .Values.frontend.service.port }}
+                  number: {{ $.Values.frontend.service.port }}
+    {{- end }}
 {{- end }}

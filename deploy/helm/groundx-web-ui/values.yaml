@@ -1,6 +1,7 @@
 environment: dev
 publicAccess: none
 publicHost: ""
+publicHosts: ""
 ingressAnnotations: {}
 acmCertificateArn: ""
 albGroupName: ""

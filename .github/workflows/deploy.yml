@@ -53,6 +53,7 @@ jobs:
       K8S_NAMESPACE_INPUT: ${{ vars.K8S_NAMESPACE || secrets.K8S_NAMESPACE || '' }}
       PUBLIC_ACCESS_INPUT: ${{ vars.PUBLIC_ACCESS || secrets.PUBLIC_ACCESS || '' }}
       PUBLIC_HOST_INPUT: ${{ vars.PUBLIC_HOST || secrets.PUBLIC_HOST || '' }}
+      PUBLIC_HOSTS_INPUT: ${{ vars.PUBLIC_HOSTS || secrets.PUBLIC_HOSTS || '' }}
       PUBLIC_DOMAIN_INPUT: ${{ vars.PUBLIC_DOMAIN || secrets.PUBLIC_DOMAIN || '' }}
       INGRESS_CLASS_NAME_INPUT: ${{ vars.INGRESS_CLASS_NAME || secrets.INGRESS_CLASS_NAME || '' }}
       INGRESS_ANNOTATIONS_JSON_INPUT: ${{ vars.INGRESS_ANNOTATIONS_JSON || '{}' }}
@@ -291,6 +292,7 @@ jobs:
             printf 'GROUNDX_DEPLOY_IMAGE_TAG=%s\n' "${{ steps.deploy-vars.outputs.image_tag }}"
             printf 'GROUNDX_DEPLOY_NAMESPACE=%s\n' "$K8S_NAMESPACE"
             append_optional_env 'GROUNDX_DEPLOY_PUBLIC_HOST' "${{ steps.deploy-vars.outputs.public_host }}"
+            append_optional_env 'GROUNDX_DEPLOY_PUBLIC_HOSTS' "$PUBLIC_HOSTS_INPUT"
             printf 'GROUNDX_DEPLOY_RELEASE_NAME=%s\n' "${{ steps.deploy-vars.outputs.release_name }}"
             append_optional_env 'LOG_LEVEL' "$LOG_LEVEL"
             printf 'APP_REPOSITORY_MODE=%s\n' "$APP_REPOSITORY_MODE"
@@ -348,6 +350,7 @@ jobs:
             --set-string environment="$DEPLOY_ENVIRONMENT" \
             --set-string publicAccess="${{ steps.deploy-vars.outputs.public_access }}" \
             --set-string publicHost="${{ steps.deploy-vars.outputs.public_host }}" \
+            --set-literal publicHosts="$PUBLIC_HOSTS_INPUT" \
             --set-string ingressClassName="$INGRESS_CLASS_NAME_INPUT" \
             --set-json ingressAnnotations="$INGRESS_ANNOTATIONS_JSON_INPUT" \
             --set-string acmCertificateArn="$ACM_CERTIFICATE_ARN_INPUT" \
