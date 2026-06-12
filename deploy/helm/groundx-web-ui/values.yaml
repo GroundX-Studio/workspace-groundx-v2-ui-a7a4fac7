@@ -34,6 +34,12 @@ middleware:
     repository: ghcr.io/example/groundx-web-ui/middleware
     tag: latest
     pullPolicy: Always
+  # The secret must carry the middleware's required env, including (always-on
+  # embedding citation verification — boot fails fast in production without
+  # them): EMBEDDINGS_BASE_URL + EMBEDDINGS_MODEL_ID. EMBEDDINGS_API_KEY is
+  # optional — keyless self-hosted providers (TEI / Ollama / vLLM serving an
+  # OpenAI-compatible /embeddings) are supported; point EMBEDDINGS_BASE_URL at
+  # the in-cluster service for on-prem/air-gapped deploys.
   existingSecret: groundx-web-ui-middleware
   service:
     port: 3001

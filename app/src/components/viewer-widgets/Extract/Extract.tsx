@@ -51,7 +51,7 @@ import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { track } from "@/lib/analytics";
-import type { ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
+import type { Citation, ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
 import { SchemaView } from "./SchemaView";
 
@@ -117,6 +117,28 @@ function mintTemplateId(): string {
 function primaryDocumentIdFromScope(scope: ContentScope): string | null {
   if (scope.type === "documents") return scope.documentIds[0] ?? null;
   return null;
+}
+
+function sameCitation(a: Citation, b: Citation): boolean {
+  const bboxA = a.bbox ?? null;
+  const bboxB = b.bbox ?? null;
+  const sameBbox =
+    bboxA === bboxB ||
+    Boolean(
+      bboxA &&
+        bboxB &&
+        bboxA.x === bboxB.x &&
+        bboxA.y === bboxB.y &&
+        bboxA.w === bboxB.w &&
+        bboxA.h === bboxB.h,
+    );
+  return (
+    a.documentId === b.documentId &&
+    a.page === b.page &&
+    (a.snippet ?? "") === (b.snippet ?? "") &&
+    (a.tier ?? "") === (b.tier ?? "") &&
+    sameBbox
+  );
 }
 
 /**
@@ -197,6 +219,11 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
     appendAgentMessage,
   } = useChatStore();
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  const selectField = useCallback((fieldId: string | null) => {
+    setSelectedFieldId(fieldId);
+    setSelectedCitation(null);
+  }, []);
   const [renderMode, setRenderMode] = useState<"table" | "json">("table");
   const handleRenderMode = (_event: SyntheticEvent, value: "table" | "json") => {
     if (value) setRenderMode(value);
@@ -235,11 +262,19 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
   // (jsdom) stay side-by-side.
   const useSideBySide = contentWidth === 0 || contentWidth >= SIDE_BY_SIDE_MIN_PX;
   // When stacked (single pane), surface the schema as soon as a field is
-  // selected (e.g. via a citation tap) so its provenance isn't hidden behind
-  // the document.
+  // selected so its provenance isn't hidden behind the document. Citation
+  // activations are the exception: those target the embedded document pane.
   useEffect(() => {
-    if (!useSideBySide && selectedFieldId) setActivePane("fields");
-  }, [useSideBySide, selectedFieldId]);
+    if (!useSideBySide && selectedFieldId && !selectedCitation) setActivePane("fields");
+  }, [useSideBySide, selectedFieldId, selectedCitation]);
+  const handleFieldCitationActivate = useCallback(
+    (fieldId: string, citation: Citation) => {
+      setSelectedFieldId(fieldId);
+      setSelectedCitation(citation);
+      if (!useSideBySide) setActivePane("document");
+    },
+    [useSideBySide],
+  );
 
   const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
   const { byId } = useScenarioRegistry();
@@ -414,7 +449,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
     if (!focus || !schema || selectedFieldId !== null) return;
     const category = schema.categories.find((c) => c.id === focus);
     const firstField = category?.fields[0];
-    if (firstField) setSelectedFieldId(firstField.id);
+    if (firstField) selectField(firstField.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema]);
 
@@ -476,6 +511,11 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
   const allFields = schema.categories.flatMap((c) => c.fields);
   const selectedField = selectedFieldId ? allFields.find((f) => f.id === selectedFieldId) ?? null : null;
   const selectedValue = selectedField ? valuesByFieldId.get(selectedField.id) : undefined;
+  const selectedCitations = selectedValue?.citations ?? [];
+  const activeCitation =
+    (selectedCitation && selectedCitations.find((c) => sameCitation(c, selectedCitation))) ??
+    selectedCitations[0] ??
+    null;
 
   const supportsJsonRender = scenario?.supportsJsonRender ?? false;
 
@@ -774,17 +814,13 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
             }}
           >
             {liveDocId ? (
-              (() => {
-                const firstCite = selectedField && selectedValue ? selectedValue.citations?.[0] : null;
-                return (
-                  <PdfViewerWidget
-                    scope={scope}
-                    role={role}
-                    targetPage={firstCite?.page ?? undefined}
-                    highlightBbox={firstCite?.bbox ?? null}
-                  />
-                );
-              })()
+              <PdfViewerWidget
+                scope={scope}
+                role={role}
+                targetPage={activeCitation?.page ?? undefined}
+                highlightBbox={activeCitation?.bbox ?? null}
+                highlightTier={activeCitation?.tier}
+              />
             ) : (
               <Stack spacing={1} sx={{ p: 2 }}>
                 <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
@@ -825,7 +861,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                   component="button"
                   type="button"
                   data-testid="extract-breadcrumb-collapse"
-                  onClick={() => setSelectedFieldId(null)}
+                  onClick={() => selectField(null)}
                   aria-label="Collapse to all fields"
                   sx={{
                     border: "none",
@@ -984,11 +1020,11 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                             key={n.id}
                             role="button"
                             tabIndex={0}
-                            onClick={() => setSelectedFieldId(n.id)}
+                            onClick={() => selectField(n.id)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                setSelectedFieldId(n.id);
+                                selectField(n.id);
                               }
                             }}
                             sx={{
@@ -1135,11 +1171,11 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                               fieldName: field.name,
                             });
                           }}
-                          onClick={() => setSelectedFieldId(field.id)}
+                          onClick={() => selectField(field.id)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
-                              setSelectedFieldId(field.id);
+                              selectField(field.id);
                             }
                           }}
                           sx={{
@@ -1217,7 +1253,18 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                               {citations.length > 0 && (
                                 <Stack direction="row" spacing={0.5}>
                                   {citations.map((c, idx) => (
-                                    <CiteChip key={`${field.id}-${idx}`} citation={c} index={idx + 1} />
+                                    <Box
+                                      key={`${field.id}-${idx}`}
+                                      component="span"
+                                      onClick={(event) => event.stopPropagation()}
+                                      onKeyDown={(event) => event.stopPropagation()}
+                                    >
+                                      <CiteChip
+                                        citation={c}
+                                        index={idx + 1}
+                                        onActivate={(citation) => handleFieldCitationActivate(field.id, citation)}
+                                      />
+                                    </Box>
                                   ))}
                                 </Stack>
                               )}

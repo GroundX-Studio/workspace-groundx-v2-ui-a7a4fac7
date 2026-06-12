@@ -26,7 +26,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { chatErrorToUserCopy } from "@/api/chatErrors";
 import type { ChatDispatchedIntent, ChatSuggestedAction, ProposedSchemaField } from "@/api/chatSessions";
-import type { Citation } from "@groundx/shared";
+import type { Citation, ToolActivity } from "@groundx/shared";
 import { useApi } from "@/contexts/ApiContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
@@ -59,6 +59,14 @@ export interface LiveTurn {
    * chat router (chips offered beneath the assistant bubble).
    */
   suggestedActions?: ChatSuggestedAction[];
+  /**
+   * agentic-tool-loop — `reply.toolActivity[]`: what the agent consulted
+   * server-side this turn (e.g. "Checked GroundX docs"), rendered as a muted
+   * annotation on the assistant bubble. Absent/empty = nothing to show.
+   */
+  toolActivity?: ToolActivity[];
+  /** False for local/system error turns that should not be saved into reports. */
+  pinToReport?: false;
 }
 
 /**
@@ -83,6 +91,15 @@ export interface ConversationOptions {
 export interface ConversationApi {
   liveTurns: LiveTurn[];
   sending: boolean;
+  /**
+   * Canvas↔chat coherence (2026-06-11) — `true` once the RT-01 history
+   * hydration has SETTLED (the listChatMessages fetch resolved, success or
+   * error). Consumers that must decide "is this thread genuinely empty?"
+   * (e.g. the onboarding Intro snapping the canvas to Understand before
+   * replaying its scripted scan narration) wait for this instead of racing
+   * the fetch — a returning user's history may still be in flight at mount.
+   */
+  hydrated: boolean;
   /**
    * 2026-05-30-unified-conversation-flow Phase 2 — flips `true` after the
    * FIRST real user `send()` of this hook instance and stays true. This is the
@@ -236,6 +253,9 @@ export function useConversation(
   // RT-01 hydration — the chat handler writes every turn to chat_messages;
   // without this the visible thread vanishes on refresh. Only seed when
   // liveTurns is still empty (the optimistic state wins any race).
+  // `hydrated` flips true once the fetch SETTLES (success or error) so
+  // consumers can distinguish "genuinely empty thread" from "still loading".
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     if (!chatSessionId) return;
     let cancelled = false;
@@ -250,6 +270,7 @@ export function useConversation(
             role: m.role as "user" | "assistant",
             content: m.content,
             citations: m.citations ?? [],
+            ...(m.errorCode ? { pinToReport: false as const } : {}),
           }));
         setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
       } catch (err) {
@@ -257,6 +278,8 @@ export function useConversation(
           route: "/api/chat-sessions/:id/messages",
           chatSessionId,
         });
+      } finally {
+        if (!cancelled) setHydrated(true);
       }
     })();
     return () => {
@@ -305,6 +328,7 @@ export function useConversation(
             id: `a-${Date.now()}`,
             role: "assistant",
             content: "No active chat session — please refresh and try again.",
+            pinToReport: false,
           },
         ]);
         return;
@@ -346,6 +370,7 @@ export function useConversation(
             proposedSchemaField: result.reply.proposedSchemaField,
             citations: result.reply.citations ?? [],
             suggestedActions: result.reply.suggestedActions ?? [],
+            toolActivity: result.reply.toolActivity ?? [],
           },
         ]);
         // core-data-model-hardening item 6 — mirror the assistant turn
@@ -386,7 +411,7 @@ export function useConversation(
         const mapped = chatErrorToUserCopy(err);
         setLiveTurns((cur) => [
           ...cur,
-          { id: `a-${Date.now()}`, role: "assistant", content: mapped.message },
+          { id: `a-${Date.now()}`, role: "assistant", content: mapped.message, pinToReport: false },
         ]);
       } finally {
         setSending(false);
@@ -395,5 +420,5 @@ export function useConversation(
     [api.chat, sending, chatSessionId, activeChatSession, enqueueFieldProposal, appendMessage, dispatchIntent],
   );
 
-  return { liveTurns, sending, firstUserMessageSent, send, handleSuggestedAction, seedTurns };
+  return { liveTurns, sending, hydrated, firstUserMessageSent, send, handleSuggestedAction, seedTurns };
 }

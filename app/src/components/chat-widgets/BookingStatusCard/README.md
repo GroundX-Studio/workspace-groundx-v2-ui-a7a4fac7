@@ -5,25 +5,25 @@
 
 The compact "BOOKING IN PROGRESS" chat surface that pairs with
 `viewer-widgets/BookCallView`. Mounted in the chat column while the
-Calendly iframe is active in the viewer pane.
+Calendly inline scheduler is active in the viewer pane.
 
 ## What it does
 
-Shows a green-bordered status card ("BOOKING IN PROGRESS / Book a 15-
-min engineer call / pick a time on the right →") plus supporting cards
+Shows a green-bordered status card ("BOOKING IN PROGRESS / Book a
+30-minute engineer call / Choose a time in the calendar.") plus
+supporting cards
 that:
 
-- Reassure the user that ESC / × from the Calendly UI returns them
-  here without losing session state
+- Reassure the user that ESC or Close booking returns them to the
+  current demo state without losing session state
 - Clarify "booking ≠ signing in" — magic-link is still available
 - Outline what the call will cover (document type / volume / accuracy,
   GroundX-fit, pilot scope)
-- Credibility blurb about the solutions engineer
 
-Listens for the `calendly.event_scheduled` postMessage event from the
-viewer's Calendly iframe. When fired (and origin-verified against
-`https://*.calendly.com`), commits the gate to `engineer-call` and
-swaps the chat card to a "Call booked" confirmation.
+The card does not listen to Calendly postMessages. `BookCallView` owns the
+Calendly embed lifecycle and trusted scheduled-event handling, then tells
+the shell through `onScheduled`; the shell commits the `engineer-call`
+gate.
 
 ## Props
 
@@ -45,8 +45,8 @@ roles.
 
 **None.** BookingStatusCard is available to both `anonymous` and
 `member` and locks no affordance by role (matrix
-`docs/agents/widget-access-matrix.md` §1 + §2). The back-to-sign-in
-pill clears `?bookCall=1` for every role; `role` is accepted only to
+`docs/agents/widget-access-matrix.md` §1 + §2). The close-booking
+control clears `?bookCall=1` for every role; `role` is accepted only to
 satisfy the widget contract.
 
 ## Scope
@@ -63,19 +63,19 @@ the URL, in tandem with the `BookCallView` viewer widget.
 
 ## Security note
 
-`TRUSTED_CALENDLY_ORIGINS = /^https:\/\/([a-z0-9-]+\.)?calendly\.com$/i`
-— anything else posting a message claiming to be Calendly is dropped.
-Without this guard a malicious page in an iframe could fire a fake
-`calendly.event_scheduled` to commit the gate.
+The Calendly trust guard lives with the viewer embed helper
+(`app/src/lib/calendlyEmbed.ts`) so the component that owns the third-party
+surface also owns `calendly.event_scheduled` verification. This card stays
+display-only and never commits gate state from `window.message` directly.
 
 ## Events
 
 - **`book_call` (LLM tool)** — this card is the chat-side surface of the
   `book_call` tool; activating it opens the Calendly booking surface
   (`BookCallView` in the viewer / `?bookCall=1`).
-- **Back control** — exposes a "back" affordance that returns the user to the
-  prior sign-in surface (local navigation only, no tool).
-- On a completed booking the card swaps to a "Call booked" confirmation surface.
+- **Close booking** — clears the booking URL param and returns the user to
+  whichever onboarding frame opened the scheduler (local navigation only,
+  no tool).
 
 No `on*` callback props: the card drives the flow through the `book_call` tool
 catalog, not lifted callbacks.
@@ -91,7 +91,7 @@ import { BookingStatusCard } from "@/components/chat-widgets/BookingStatusCard/B
 <BookingStatusCard role={role} scope={{ type: "none" }} />
 ```
 
-The viewer-side `BookCallView` (the Calendly iframe) is mounted in
+The viewer-side `BookCallView` (the Calendly inline scheduler) is mounted in
 parallel by the same shell.
 
 ## LLM tools
@@ -100,24 +100,24 @@ parallel by the same shell.
 (widget-llm-integration follow-up B.3, 2026-05-28):
 
 - `book_call()` — open the Calendly booking surface. Use when the
-  user signals they want a human-assisted path forward (uncertainty
-  about fit, complex documents, evaluation questions).
+  user signals they want a human-assisted path forward, to speak with a
+  team member, or to book a call with an engineer.
 
 Mutate-category routing surfaces this as a confirmable chip on
 `reply.suggestedActions[]`. The orchestrator handler sets
 `?bookCall=1` on the URL; the OnboardingShell already watches that
 param to mount `BookCallView` in the viewer + `BookingStatusCard`
-in the chat. The user clicks the chip to actually open the iframe —
+in the chat. The user clicks the chip to actually open the scheduler —
 no surprise context switches.
 
-The Calendly `event_scheduled` postMessage still commits the gate
-to `engineer-call`. That path is untouched by this upgrade.
+The viewer owns the Calendly `event_scheduled` postMessage and reports the
+trusted event to the shell through `onScheduled`.
 
 ## Tests
 
 `BookingStatusCard.test.tsx`. Covers: BOOKING IN PROGRESS rendering,
 availability with no affordance lock for both roles (`anonymous` +
-`member`), back-to-sign-in clears URL param, What-We'll-Cover bullets
+`member`), close-booking clears URL param, What-We'll-Cover bullets
 present, "doesn't sign you in" copy, widget-contract slot attribute
-(and that the retired `data-mode` attribute is gone), postMessage
-commits gate, untrusted-origin postMessage dropped.
+(and that the retired `data-mode` attribute is gone), and that Calendly
+postMessages do not mutate gate state from the chat card.

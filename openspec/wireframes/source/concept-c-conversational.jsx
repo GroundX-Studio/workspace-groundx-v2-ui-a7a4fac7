@@ -225,7 +225,7 @@ function ConceptC_Gate() {
                 <div className="wf-line dim" style={{ flex: 1 }} />
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'center' }}>
-                <div className="wf-btn coral wf-accent-bg" style={{ fontSize: 12 }}>📅 Book a 15-min demo</div>
+                <div className="wf-btn coral wf-accent-bg" style={{ fontSize: 12 }}>📅 Book a 30-min demo</div>
                 <div className="wf-btn ghost" style={{ fontSize: 12 }}>← keep exploring samples</div>
               </div>
             </div>

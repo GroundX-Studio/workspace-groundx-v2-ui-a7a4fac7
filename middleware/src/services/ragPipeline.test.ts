@@ -4,7 +4,7 @@ import type { GroundXClient, LlmClient } from "../types.js";
 import type { ChatRouterRequest } from "./chatRouterTypes.js";
 
 import * as groundedAnswerModule from "./groundedAnswer.js";
-import { runRagPipeline } from "./ragPipeline.js";
+import { callGroundedLlm, parseGroundedAnswer, runRagPipeline } from "./ragPipeline.js";
 
 /**
  * 2026-06-01-live-report-render §3 — behavior-parity for the `runRagPipeline`
@@ -77,5 +77,135 @@ describe("runRagPipeline migrated onto groundedAnswerOverScope", () => {
     expect(reply.citations[0].confidence).toBeGreaterThan(0);
 
     spy.mockRestore();
+  });
+});
+
+/**
+ * harden-citation-emission T1a — parser hardening (RED first).
+ *
+ * The multi-fence merge landed (scan-all, metadata-key stripping); these pin
+ * the RESIDUAL gaps: one-line fences, ```JSON casing, a bare trailing
+ * citations object, duplicate entries across merged blocks, numeric-string
+ * `page`, and parse-loss counters. The untagged-content-fence case is a PIN
+ * (green at birth) protecting the metadata-key strip criterion through the
+ * tolerant-pattern change.
+ */
+describe("parseGroundedAnswer hardening (harden-citation-emission)", () => {
+  const entry = '{"documentId":"d1","page":2,"quote":"City Sales Tax $3.27"}';
+
+  it("recovers citations from a ONE-LINE fence", () => {
+    const parsed = parseGroundedAnswer(`The tax was $3.27.\n\n\`\`\`json {"citations":[${entry}]} \`\`\``);
+    expect(parsed.structuredCitations).toHaveLength(1);
+    expect(parsed.cleanedAnswer).toBe("The tax was $3.27.");
+  });
+
+  it("recovers citations from an UPPERCASE fence tag (JSON)", () => {
+    const parsed = parseGroundedAnswer(`The tax was $3.27.\n\n\`\`\`JSON\n{"citations":[${entry}]}\n\`\`\``);
+    expect(parsed.structuredCitations).toHaveLength(1);
+  });
+
+  it("recovers a bare trailing un-fenced citations object", () => {
+    const parsed = parseGroundedAnswer(`The tax was $3.27.\n\n{"citations":[${entry}]}`);
+    expect(parsed.structuredCitations).toHaveLength(1);
+    expect(parsed.cleanedAnswer).toBe("The tax was $3.27.");
+  });
+
+  it("dedupes identical entries merged from two blocks", () => {
+    const block = `\`\`\`json\n{"citations":[${entry}]}\n\`\`\``;
+    const parsed = parseGroundedAnswer(`Answer.\n\n${block}\n\n${block}`);
+    expect(parsed.structuredCitations).toHaveLength(1);
+  });
+
+  it("keeps two same-quote entries with DIFFERENT answerSpans (dedup key includes answerSpan)", () => {
+    const a = '{"documentId":"d1","page":2,"quote":"Tax $3.27","answerSpan":"first claim"}';
+    const b = '{"documentId":"d1","page":2,"quote":"Tax $3.27","answerSpan":"second claim"}';
+    const parsed = parseGroundedAnswer(`Answer.\n\n\`\`\`json\n{"citations":[${a},${b}]}\n\`\`\``);
+    expect(parsed.structuredCitations).toHaveLength(2);
+  });
+
+  it("coerces a numeric-string page to a number", () => {
+    const parsed = parseGroundedAnswer(
+      `Answer.\n\n\`\`\`json\n{"citations":[{"documentId":"d1","page":"2","quote":"City Sales Tax $3.27"}]}\n\`\`\``,
+    );
+    expect(parsed.structuredCitations).toHaveLength(1);
+    expect(parsed.structuredCitations?.[0]).toMatchObject({ page: 2 });
+  });
+
+  it("counts parse-level losses on the parse result", () => {
+    // One malformed json block (unparseable) + one block whose only entry is
+    // invalid (no documentId) -> both counted, structuredCitations null.
+    const raw = [
+      "Answer.",
+      "",
+      "```json",
+      '{"citations":[{"page":2,"quote":"x',
+      "```",
+      "",
+      "```json",
+      '{"citations":[{"page":2}]}',
+      "```",
+    ].join("\n");
+    const parsed = parseGroundedAnswer(raw);
+    expect(parsed.structuredCitations).toBeNull();
+    // Cast: the field lands on ParsedRagAnswer in T3 (RED via undefined here,
+    // without failing tsc for the whole suite meanwhile).
+    expect((parsed as { parseLosses?: unknown }).parseLosses).toMatchObject({ malformedJson: 1, invalidEntries: 1 });
+  });
+
+  it("PIN: an untagged content fence stays in the body while citations are recovered", () => {
+    const raw = [
+      "Here is the config you asked for:",
+      "",
+      "```",
+      '{"redis": {"host": "localhost"}}',
+      "```",
+      "",
+      "```json",
+      `{"citations":[${entry}]}`,
+      "```",
+    ].join("\n");
+    const parsed = parseGroundedAnswer(raw);
+    expect(parsed.structuredCitations).toHaveLength(1);
+    expect(parsed.cleanedAnswer).toContain('"redis"');
+    expect(parsed.cleanedAnswer).not.toContain('"citations"');
+  });
+});
+
+// harden-citation-emission T3 — completion bounds (RED first). The grounded
+// call must carry an explicit output ceiling on EVERY round (the citations
+// fence is contractually LAST in the completion — an unbounded length cut
+// amputates exactly the citations), and a length-cut final round must be
+// visible, never silent.
+describe("callGroundedLlm completion bounds (harden-citation-emission)", () => {
+  it("sends max_completion_tokens on the request body", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const llmClient: LlmClient = {
+      forward: vi.fn(async (_path: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "Answer." }, finish_reason: "stop" }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    };
+    await callGroundedLlm("q", [], llmClient, "test-model");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].max_completion_tokens).toBe(4096);
+    // No temperature pin (adversarial review m4 — unmotivated).
+    expect(bodies[0]).not.toHaveProperty("temperature");
+  });
+
+  it("flags a length-cut final round as truncated without failing the turn", async () => {
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () =>
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: "Cut off answ" }, finish_reason: "length" }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    };
+    const res = await callGroundedLlm("q", [], llmClient, "test-model");
+    expect(res.answer).toBe("Cut off answ");
+    expect((res as { truncated?: boolean }).truncated).toBe(true);
   });
 });

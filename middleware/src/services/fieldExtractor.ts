@@ -22,6 +22,7 @@ import { logger } from "../lib/logger.js";
 import type { GroundXClient, LlmClient } from "../types.js";
 
 import { searchGroundX } from "./chatRouter.js";
+import { buildExtractorPrompt } from "./prompts/extractor.js";
 import type { ContentScope, ExtractFieldResult, TemplateFieldType } from "@groundx/shared";
 
 /** §4 #12 — the field-type union is single-sourced on `@groundx/shared`. */
@@ -67,8 +68,9 @@ export interface ExtractFieldDeps {
 
 /** Conservative cap on snippet text length the focused LLM sees. */
 const FIELD_SNIPPET_LIMIT = 4;
-/** Per-snippet character budget; the focused prompt is intentionally tight. */
-const FIELD_SNIPPET_CHARS = 400;
+// Per-snippet character budget (FIELD_SNIPPET_CHARS) moved to
+// prompts/extractor.ts with the prompt builder (chat-architecture-hardening
+// Task 2 — every model-facing prompt lives in services/prompts/).
 
 /**
  * Coerce the LLM's emitted value to the declared field type. Returns
@@ -103,49 +105,8 @@ function coerceValue(raw: unknown, type: SchemaFieldType): string | number | boo
   }
 }
 
-/**
- * Build the focused single-field extraction prompt. Tight + JSON-only
- * so the parser stays trivial. The LLM is allowed to return
- * `{value:null, confidence:0}` when the snippets don't contain the
- * answer — far better than fabricating.
- */
-function buildPrompt(
-  field: ExtractFieldRequest["field"],
-  snippets: Array<{ documentId: string; pageNumber?: number; text?: string; fileName?: string }>,
-  scopeHint?: ExtractFieldRequest["scopeHint"],
-): { system: string; user: string } {
-  const system =
-    "You are a field extractor. Read the snippets below and extract " +
-    "the value of ONE schema field. Respond ONLY with a single JSON " +
-    "object — no prose, no markdown fences, no commentary.\n\n" +
-    "Shape: {\"value\": <typed primitive or null>, \"confidence\": <0-1 float>, " +
-    "\"citation\": {\"documentId\": \"<doc>\", \"page\": <int>, \"quote\": \"<short verbatim>\"} | null }\n\n" +
-    "Rules:\n" +
-    "- If the snippets don't contain the value, return {\"value\": null, \"confidence\": 0, \"citation\": null}. Don't guess.\n" +
-    "- For NUMBER fields: a JSON number (not a string). Strip currency / thousands separators.\n" +
-    "- For DATE fields: ISO 8601 (`YYYY-MM-DD`) when the snippet supplies one; otherwise the verbatim snippet text.\n" +
-    "- For BOOLEAN fields: true or false.\n" +
-    "- For STRING fields: the shortest accurate phrase from the snippets.\n" +
-    "- citation.documentId MUST reference a snippet header below — anything else is dropped.\n" +
-    "- confidence: 0.9+ for direct quotes; 0.6–0.8 for inferred; <0.5 for hedged.";
-
-  const lines: string[] = [];
-  if (scopeHint?.fileName) lines.push(`Working on: ${scopeHint.fileName}`);
-  lines.push("", `Field: ${field.name} (${field.type})`, `Description: ${field.description}`, "", "Snippets:");
-  if (snippets.length === 0) {
-    lines.push("(none)");
-  } else {
-    snippets.forEach((s, i) => {
-      const header = s.fileName
-        ? `[${i + 1}] file="${s.fileName}" doc=${s.documentId} page=${s.pageNumber ?? "?"}`
-        : `[${i + 1}] doc=${s.documentId} page=${s.pageNumber ?? "?"}`;
-      lines.push(header);
-      lines.push((s.text ?? "").slice(0, FIELD_SNIPPET_CHARS));
-      lines.push("");
-    });
-  }
-  return { system, user: lines.join("\n") };
-}
+// Prompt construction moved to `prompts/extractor.ts#buildExtractorPrompt`
+// (chat-architecture-hardening Task 2).
 
 /**
  * Parse the LLM's JSON-only response. Lenient: a stray markdown fence
@@ -222,7 +183,7 @@ export async function extractField(
     logger.warn({ err }, "extractField: groundx search failed; falling back to empty snippets");
   }
 
-  const { system, user } = buildPrompt(request.field, snippets, request.scopeHint);
+  const { system, user } = buildExtractorPrompt(request.field, snippets, request.scopeHint);
   logger.info(
     {
       extractField: {

@@ -15,9 +15,12 @@ import type {
 import type { TemplateKind } from "@groundx/shared";
 
 /**
- * In-memory implementation of AppRepository. Used by the memory
- * repository mode (`APP_REPOSITORY_MODE=memory`) and tests. Mirrors the
- * table shape of MySqlAppRepository so the contract stays consistent.
+ * In-memory implementation of AppRepository — a TEST DOUBLE only,
+ * injected by vitest suites at the dependency seam. It is NOT a runtime
+ * mode: the former `APP_REPOSITORY_MODE=memory` runtime option was
+ * retired 2026-06-11 (chat history must never silently live in process
+ * RAM — a middleware restart was wiping it). Mirrors the table shape of
+ * MySqlAppRepository so the contract stays consistent.
  */
 export class MemoryAppRepository implements AppRepository {
   sessions = new Map<string, SessionRecord>();

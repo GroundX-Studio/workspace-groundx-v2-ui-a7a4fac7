@@ -39,7 +39,9 @@ const showExtraction: WidgetTool = {
       .optional()
       .describe("Optional extraction template id; defaults to the active draft template when omitted."),
   }),
-  availableSteps: ["extract-workbench", "doc-viewer", "interact-chat", "report"],
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (Task 7 mirrors the
+  // 2026-06-11 server-side decision: navigation tools move the user BETWEEN
+  // steps; gating them by the current step defeats their purpose).
 };
 
 export const tools: WidgetTool[] = [showExtraction];

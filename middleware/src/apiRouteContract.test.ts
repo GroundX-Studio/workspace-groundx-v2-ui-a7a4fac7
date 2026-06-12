@@ -1450,6 +1450,8 @@ describe("middleware API route contract", () => {
     const response = await request(app).get("/api/healthz").expect(200);
     expect(response.headers["content-security-policy"]).toMatch(/default-src 'self'/);
     expect(response.headers["content-security-policy"]).toMatch(/frame-src .*calendly\.com/);
+    expect(response.headers["content-security-policy"]).toMatch(/script-src .*assets\.calendly\.com/);
+    expect(response.headers["content-security-policy"]).toMatch(/style-src .*assets\.calendly\.com/);
     expect(response.headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
     expect(response.headers["x-powered-by"]).toBeUndefined();
   });

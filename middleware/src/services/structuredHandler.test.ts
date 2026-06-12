@@ -357,18 +357,48 @@ describe("runStructuredQuery", () => {
   });
 });
 
-describe("runHybridQuery", () => {
+
+// ── chat-architecture-hardening Task 3 — hybrid merged into the grounded seam ──
+//
+// Hybrid is the THIRD caller of `groundedAnswerOverScope` (chat, report,
+// hybrid). One grounded system prompt (with a WORKSPACE STATE private block),
+// the full citation-verification contract, no separate hybrid prompt, no
+// router-side hybrid search.
+describe("hybrid full-merge (grounded seam)", () => {
   let repo: MemoryAppRepository;
+  const now = new Date();
+
+  function fakeGroundx(results: Array<Record<string, unknown>>) {
+    const forward = vi.fn(async (path: string) => {
+      if (path.includes("/search")) {
+        return new Response(JSON.stringify({ search: { results } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    return { client: { forward }, forward };
+  }
+
+  function fakeLlm(content: string) {
+    const forward = vi.fn(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    return { client: { forward }, forward };
+  }
 
   beforeEach(async () => {
     repo = new MemoryAppRepository();
-    const now = new Date();
     await repo.upsertChatSession({
-      id: "chat-1",
-      onboardingSessionId: "onb-1",
+      id: "chat-h",
+      onboardingSessionId: "onb-h",
       ownerUserId: null,
       ownerAnonId: "anon-1",
-      title: "Onboarding",
+      title: "t",
       isOnboarding: true,
       activeEntityKey: "sample:utility",
       currentIntent: null,
@@ -377,7 +407,7 @@ describe("runHybridQuery", () => {
       archivedAt: null,
     });
     await repo.upsertChatSessionEntity({
-      chatSessionId: "chat-1",
+      chatSessionId: "chat-h",
       entityKey: "sample:utility",
       lastFrame: "f2",
       completedFramesJson: "[]",
@@ -385,201 +415,212 @@ describe("runHybridQuery", () => {
       extractedValuesJson: null,
       createdAt: now,
       lastVisitedAt: now,
-    });
+    } as Parameters<typeof repo.upsertChatSessionEntity>[0]);
   });
 
-  it("returns a tour-style reply that references the active entity + snippet preview", async () => {
-    const reply = await runHybridQuery(makeRequest({ newUserMessage: "explain this sample" }), {
+  it("builds ONE grounded system prompt with a WORKSPACE STATE block (no hybrid fork)", async () => {
+    const llm = fakeLlm("You're on the utility sample, partway through Understand.");
+    const gx = fakeGroundx([{ documentId: "d-1", text: "total is $123.45" }]);
+    const reply = await runHybridQuery(makeRequest({ newUserMessage: "where am I?" }), {
       repository: repo,
-      chatSessionId: "chat-1",
+      chatSessionId: "chat-h",
       groundxUsername: null,
       byoPagesLimit: 100,
-      ragSnippets: [
-        { documentId: "d-1", pageNumber: 3, text: "the utility bill total is $123.45" },
-        { documentId: "d-1", pageNumber: 4, text: "due date is the 15th" },
-      ],
+      llmClient: llm.client,
+      llmModelId: "m",
+      groundxClient: gx.client,
+      groundxApiKey: "k",
     });
     expect(reply.mode).toBe("hybrid");
-    expect(reply.answer).toMatch(/sample:utility/);
-    expect(reply.answer).toMatch(/utility bill total/);
-    expect(reply.citations).toHaveLength(2);
-    expect(reply.citations[0].documentId).toBe("d-1");
-    // Hybrid surfaces a "show me the extract" + "try a question"
-    // suggested-actions chip pair — same shape as the mock envelope
-    // had for parity.
+    const body = JSON.parse((llm.forward.mock.calls[0][1] as { body: string }).body);
+    const system = body.messages[0].content as string;
+    // The grounded builder, not a hybrid fork:
+    expect(system).toMatch(/^You are the user's analyst/);
+    expect(system).toContain("WORKSPACE STATE");
+    expect(system).toContain("sample:utility");
+    expect(system).not.toContain("tour-style answer");
+    // No tool advertising on the hybrid path.
+    expect(body.tools).toBeUndefined();
+    // Fixed-plan coherence (turn-router-extraction-appstate): the hybrid
+    // plan carries extractionContext: true, so the seam still attempts the
+    // primary doc's extraction fetch — the planner is never involved.
+    expect(
+      gx.forward.mock.calls.filter(([p]) => String(p).includes("/ingest/document/extract/")),
+    ).toHaveLength(1);
+  });
+
+  it("uncited hybrid answer carries ZERO citations and no show-source chip", async () => {
+    const llm = fakeLlm("Just a plain answer, no citations block.");
+    const gx = fakeGroundx([{ documentId: "d-1", text: "total is $123.45" }]);
+    const reply = await runHybridQuery(makeRequest({ newUserMessage: "where am I?" }), {
+      repository: repo,
+      chatSessionId: "chat-h",
+      groundxUsername: null,
+      byoPagesLimit: 100,
+      llmClient: llm.client,
+      llmModelId: "m",
+      groundxClient: gx.client,
+      groundxApiKey: "k",
+    });
+    expect(reply.citations).toEqual([]);
     expect(reply.suggestedActions.map((a) => a.key)).toEqual(["show-extract", "try-chat"]);
   });
 
-  it("returns a useful reply even when RAG returned no snippets", async () => {
-    const reply = await runHybridQuery(makeRequest({ newUserMessage: "what is this?" }), {
+  it("cited hybrid answer carries VERIFIED citations plus the show-source chip", async () => {
+    const llm = fakeLlm(
+      'The total is $123.45.\n\n```json\n{"citations":[{"documentId":"d-1","page":1,"quote":"total is $123.45","answerSpan":"total is $123.45"}]}\n```',
+    );
+    const gx = fakeGroundx([{ documentId: "d-1", text: "total is $123.45" }]);
+    const reply = await runHybridQuery(makeRequest({ newUserMessage: "what is the total?" }), {
       repository: repo,
-      chatSessionId: "chat-1",
+      chatSessionId: "chat-h",
       groundxUsername: null,
       byoPagesLimit: 100,
-      ragSnippets: [],
+      llmClient: llm.client,
+      llmModelId: "m",
+      groundxClient: gx.client,
+      groundxApiKey: "k",
     });
-    expect(reply.mode).toBe("hybrid");
-    expect(reply.answer).toMatch(/didn't find/i);
-    expect(reply.citations).toHaveLength(0);
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0].tier).toBeDefined();
+    expect(reply.suggestedActions.map((a) => a.key)).toEqual([
+      "show-source",
+      "show-extract",
+      "try-chat",
+    ]);
   });
 
-  // CF-05 — iterated prompt + real readers. When an LLM is wired,
-  // hybrid composes a tour-style answer from (a) the active entity,
-  // (b) recent viewer trail, (c) signed-in user's saved-schema count,
-  // (d) the RAG snippets. When the LLM is missing or fails, falls
-  // back to the hand-rolled answer (the previous behavior).
-  describe("CF-05 hybrid quality — iterated prompt", () => {
-    function makeLlm(content: string): {
-      client: { forward: ReturnType<typeof vi.fn> };
-      forward: ReturnType<typeof vi.fn>;
-    } {
-      const forward = vi.fn(async () =>
-        new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-      return { client: { forward }, forward };
-    }
-
-    it("calls the LLM with the active entity + snippets in the prompt", async () => {
-      const { client, forward } = makeLlm("Looks like you're partway through F2 on the utility bill.");
-      const reply = await runHybridQuery(
-        makeRequest({ newUserMessage: "explain this sample" }),
-        {
-          repository: repo,
-          chatSessionId: "chat-1",
-          groundxUsername: null,
-          byoPagesLimit: 100,
-          llmClient: client,
-          llmModelId: "tour-model",
-          ragSnippets: [
-            { documentId: "d-1", pageNumber: 3, text: "the utility bill total is $123.45" },
-          ],
-        },
-      );
-      expect(forward).toHaveBeenCalledTimes(1);
-      const body = JSON.parse((forward.mock.calls[0][1] as { body: string }).body);
-      expect(body.model).toBe("tour-model");
-      const promptText = JSON.stringify(body.messages);
-      // Active entity surfaced.
-      expect(promptText).toContain("sample:utility");
-      // Snippet surfaced.
-      expect(promptText).toContain("utility bill total is $123.45");
-      // Question surfaced.
-      expect(promptText).toContain("explain this sample");
-      // The answer is the LLM output, not the hand-rolled fallback.
-      expect(reply.answer).toBe("Looks like you're partway through F2 on the utility bill.");
-      expect(reply.mode).toBe("hybrid");
-      expect(reply.citations).toHaveLength(1);
+  it("missing groundx client still produces LLM prose (grounded seam, empty snippets)", async () => {
+    const llm = fakeLlm("You're on the utility sample.");
+    const reply = await runHybridQuery(makeRequest({ newUserMessage: "where am I?" }), {
+      repository: repo,
+      chatSessionId: "chat-h",
+      groundxUsername: null,
+      byoPagesLimit: 100,
+      llmClient: llm.client,
+      llmModelId: "m",
+      // no groundxClient/key
     });
+    expect(llm.forward).toHaveBeenCalledTimes(1);
+    expect(reply.answer).toBe("You're on the utility sample.");
+    expect(reply.citations).toEqual([]);
+  });
 
-    it("includes saved-schema count for signed-in users", async () => {
-      await repo.saveTemplate({
-        id: "sch-1",
-        kind: "extract",
-        groundxUsername: "alice@example.com",
-        name: "utility-bill-v2",
-        bodyJson: '{"categories":[]}',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-      const { client, forward } = makeLlm("OK");
-      await runHybridQuery(makeRequest({ newUserMessage: "what can I do" }), {
+  it("search failure degrades to LLM prose over empty snippets (no thrown turn)", async () => {
+    const llm = fakeLlm("Still here to help.");
+    const gx = { forward: vi.fn(async () => { throw new Error("search down"); }) };
+    const reply = await runHybridQuery(makeRequest({ newUserMessage: "where am I?" }), {
+      repository: repo,
+      chatSessionId: "chat-h",
+      groundxUsername: null,
+      byoPagesLimit: 100,
+      llmClient: llm.client,
+      llmModelId: "m",
+      groundxClient: gx,
+      groundxApiKey: "k",
+    });
+    expect(reply.answer).toBe("Still here to help.");
+    expect(reply.mode).toBe("hybrid");
+  });
+
+  it("no LLM client → deterministic SNIPPET-LESS structured fallback", async () => {
+    const gx = fakeGroundx([{ documentId: "d-1", text: "total is $123.45" }]);
+    const reply = await runHybridQuery(makeRequest({ newUserMessage: "where am I?" }), {
+      repository: repo,
+      chatSessionId: "chat-h",
+      groundxUsername: null,
+      byoPagesLimit: 100,
+      groundxClient: gx.client,
+      groundxApiKey: "k",
+    });
+    expect(reply.mode).toBe("hybrid");
+    expect(reply.answer).toMatch(/sample:utility/);
+    expect(reply.answer).not.toMatch(/123\.45/); // snippet-less shape
+    expect(reply.citations).toEqual([]);
+  });
+
+  it("grounded-seam LLM failure → deterministic snippet-less fallback (turn succeeds)", async () => {
+    const llm = { forward: vi.fn(async () => new Response("boom", { status: 503 })) };
+    const gx = fakeGroundx([{ documentId: "d-1", text: "total is $123.45" }]);
+    const reply = await runHybridQuery(makeRequest({ newUserMessage: "where am I?" }), {
+      repository: repo,
+      chatSessionId: "chat-h",
+      groundxUsername: null,
+      byoPagesLimit: 100,
+      llmClient: llm,
+      llmModelId: "m",
+      groundxClient: gx.client,
+      groundxApiKey: "k",
+    });
+    expect(reply.mode).toBe("hybrid");
+    expect(reply.answer).toMatch(/sample:utility/);
+    expect(reply.citations).toEqual([]);
+  });
+
+  it("hybrid never injects skill-pack content (fixed productKnowledge: false)", async () => {
+    const llm = fakeLlm("ok");
+    const gx = fakeGroundx([{ documentId: "d-1", text: "groundx eyelevel xray" }]);
+    await runHybridQuery(makeRequest({ newUserMessage: "what do you know about groundx xray?" }), {
+      repository: repo,
+      chatSessionId: "chat-h",
+      groundxUsername: null,
+      byoPagesLimit: 100,
+      llmClient: llm.client,
+      llmModelId: "m",
+      groundxClient: gx.client,
+      groundxApiKey: "k",
+    });
+    const body = JSON.parse((llm.forward.mock.calls[0][1] as { body: string }).body);
+    expect(body.messages[0].content).not.toContain("GROUNDX KNOWLEDGE");
+  });
+});
+
+// Carried over from the retired CF-05 suite: saved-schema count still reaches
+// the prompt (now inside the WORKSPACE STATE block).
+describe("hybrid workspace-state content", () => {
+  it("includes saved-schema count for signed-in users in WORKSPACE STATE", async () => {
+    const repo = new MemoryAppRepository();
+    const now = new Date();
+    await repo.upsertChatSession({
+      id: "chat-s",
+      onboardingSessionId: "onb-s",
+      ownerUserId: null,
+      ownerAnonId: "anon-1",
+      title: "t",
+      isOnboarding: true,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+    await repo.saveTemplate({
+      id: "sch-1",
+      kind: "extract",
+      groundxUsername: "alice@example.com",
+      name: "utility-bill-v2",
+      bodyJson: '{"categories":[]}',
+      createdAt: now,
+      updatedAt: now,
+    });
+    const forward = vi.fn(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await runHybridQuery(
+      { newUserMessage: "what can I do", currentEntityKey: null, conversationTail: { messageCount: 0, lastTurnContent: null }, recentViewerEvents: [], intent: null },
+      {
         repository: repo,
-        chatSessionId: "chat-1",
+        chatSessionId: "chat-s",
         groundxUsername: "alice@example.com",
         byoPagesLimit: 100,
-        llmClient: client,
-        llmModelId: "tour-model",
-        ragSnippets: [],
-      });
-      const body = JSON.parse((forward.mock.calls[0][1] as { body: string }).body);
-      const promptText = JSON.stringify(body.messages);
-      expect(promptText).toMatch(/1 saved schema/i);
-    });
-
-    it("does NOT call the LLM (and uses hand-rolled fallback) when llmClient is missing", async () => {
-      const reply = await runHybridQuery(makeRequest({ newUserMessage: "explain this sample" }), {
-        repository: repo,
-        chatSessionId: "chat-1",
-        groundxUsername: null,
-        byoPagesLimit: 100,
-        // no llmClient
-        ragSnippets: [
-          { documentId: "d-1", pageNumber: 3, text: "the utility bill total is $123.45" },
-        ],
-      });
-      expect(reply.mode).toBe("hybrid");
-      // Hand-rolled answer still references the active entity + snippet.
-      expect(reply.answer).toMatch(/sample:utility/);
-      expect(reply.answer).toMatch(/utility bill total/);
-    });
-
-    it("falls back to hand-rolled answer when the LLM call throws", async () => {
-      const llmClient = { forward: vi.fn(async () => { throw new Error("upstream blew up"); }) };
-      const reply = await runHybridQuery(
-        makeRequest({ newUserMessage: "tour me through this" }),
-        {
-          repository: repo,
-          chatSessionId: "chat-1",
-          groundxUsername: null,
-          byoPagesLimit: 100,
-          llmClient,
-          llmModelId: "tour-model",
-          ragSnippets: [
-            { documentId: "d-1", pageNumber: 3, text: "fallback snippet text" },
-          ],
-        },
-      );
-      expect(llmClient.forward).toHaveBeenCalled();
-      // Answer is the hand-rolled fallback, NOT a fabricated tour.
-      expect(reply.mode).toBe("hybrid");
-      expect(reply.answer).toMatch(/sample:utility/);
-      expect(reply.answer).toMatch(/fallback snippet text/);
-    });
-
-    it("falls back when LLM returns non-OK status (503 / 5xx)", async () => {
-      const llmClient = {
-        forward: vi.fn(async () => new Response("nope", { status: 503 })),
-      };
-      const reply = await runHybridQuery(
-        makeRequest({ newUserMessage: "tour please" }),
-        {
-          repository: repo,
-          chatSessionId: "chat-1",
-          groundxUsername: null,
-          byoPagesLimit: 100,
-          llmClient,
-          llmModelId: "tour-model",
-          ragSnippets: [],
-        },
-      );
-      expect(llmClient.forward).toHaveBeenCalled();
-      // Hand-rolled "no snippets" fallback.
-      expect(reply.answer).toMatch(/didn't find/i);
-    });
-
-    it("passes RAG snippet citations through to the response untouched", async () => {
-      const { client } = makeLlm("Answer.");
-      const reply = await runHybridQuery(
-        makeRequest({ newUserMessage: "Q" }),
-        {
-          repository: repo,
-          chatSessionId: "chat-1",
-          groundxUsername: null,
-          byoPagesLimit: 100,
-          llmClient: client,
-          llmModelId: "tour-model",
-          ragSnippets: [
-            { documentId: "d-1", pageNumber: 3, text: "alpha" },
-            { documentId: "d-2", pageNumber: 7, text: "beta" },
-          ],
-        },
-      );
-      expect(reply.citations).toHaveLength(2);
-      expect(reply.citations[0]).toMatchObject({ documentId: "d-1", page: 3 });
-      expect(reply.citations[1]).toMatchObject({ documentId: "d-2", page: 7 });
-    });
+        llmClient: { forward },
+        llmModelId: "m",
+      },
+    );
+    const body = JSON.parse((forward.mock.calls[0][1] as { body: string }).body);
+    expect(body.messages[0].content).toMatch(/1 saved schema/i);
   });
 });

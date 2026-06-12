@@ -82,7 +82,9 @@ describe("zodToJsonSchema → toOpenAiTools", () => {
   });
 
   it("throws on unsupported Zod types (clear error mode)", () => {
-    const schema = z.object({ anything: z.record(z.string(), z.string()) });
+    // ZodRecord/union/literal gained support in Task 7 (full-shape parity);
+    // a tuple is still unsupported and pins the clear-error mode.
+    const schema = z.object({ anything: z.tuple([z.string()]) });
     expect(() =>
       toOpenAiTools([
         {
@@ -94,7 +96,7 @@ describe("zodToJsonSchema → toOpenAiTools", () => {
           intentBuilder: () => ({}),
         },
       ]),
-    ).toThrow(/unsupported Zod type "ZodRecord"/);
+    ).toThrow(/unsupported Zod type "ZodTuple"/);
   });
 
   it("converts string z.min() into minLength", () => {
@@ -113,5 +115,40 @@ describe("zodToJsonSchema → toOpenAiTools", () => {
     ]);
     expect(out[0].function.parameters.properties?.name?.minLength).toBe(2);
     expect(out[0].function.parameters.properties?.name?.maxLength).toBe(50);
+  });
+});
+
+// Post-review hardening (chat-architecture-hardening follow-up): shapes the
+// converter previously got silently WRONG instead of throwing.
+describe("convertNode edge shapes", () => {
+  it("boolean literal converts with type boolean (not string)", () => {
+    const tools = toOpenAiTools([
+      {
+        name: "test_bool_literal",
+        description: "Test stub. Use when verifying boolean-literal conversion in the parity guard.",
+        category: "read",
+        inputSchema: z.object({ flag: z.literal(true).describe("Always true.") }),
+      } as never,
+    ]);
+    const prop = (tools[0].function.parameters.properties as Record<string, { type?: string; const?: unknown }>).flag;
+    expect(prop.type).toBe("boolean");
+    expect(prop.const).toBe(true);
+  });
+
+  it("inclusive .min(0) on an integer stays minimum 0; .positive() maps to minimum 1", () => {
+    const tools = toOpenAiTools([
+      {
+        name: "test_int_min",
+        description: "Test stub. Use when verifying integer minimum conversion in the parity guard.",
+        category: "read",
+        inputSchema: z.object({
+          zeroOk: z.number().int().min(0).describe("Zero allowed."),
+          positive: z.number().int().positive().describe("Strictly positive."),
+        }),
+      } as never,
+    ]);
+    const props = tools[0].function.parameters.properties as Record<string, { minimum?: number }>;
+    expect(props.zeroOk.minimum).toBe(0);
+    expect(props.positive.minimum).toBe(1);
   });
 });

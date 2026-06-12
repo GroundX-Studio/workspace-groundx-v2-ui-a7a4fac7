@@ -17,7 +17,6 @@ export const testEnv: AppEnv = {
   LOG_LEVEL: "silent",
   PORT: 3001,
   ALLOWED_ORIGIN: "http://localhost:5173",
-  APP_REPOSITORY_MODE: "memory",
   MYSQL_HOST: "localhost",
   MYSQL_PORT: 3306,
   MYSQL_DATABASE: "test",
@@ -33,6 +32,13 @@ export const testEnv: AppEnv = {
   LLM_AUTH_HEADER_NAME: "Authorization",
   LLM_AUTH_SCHEME: "Bearer",
   LLM_MODEL_ID: "model",
+  // wire-embedding-verification: provider configured in the fixture (the
+  // always-on production posture); key deliberately absent — keyless
+  // self-hosted providers are first-class.
+  EMBEDDINGS_BASE_URL: "https://embeddings.test/v1",
+  EMBEDDINGS_MODEL_ID: "embed-model",
+  EMBEDDINGS_VERIFY_THRESHOLD: 0.82,
+  EMBEDDINGS_TIMEOUT_MS: 2_000,
   LLM_CONTEXT_WINDOW_TOKENS: 16_000,
   COMPRESSION_TRIGGER_RATIO: 0.7,
   COMPRESSION_TARGET_TOKENS: 1_000,

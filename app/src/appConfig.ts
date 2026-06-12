@@ -61,6 +61,10 @@ export interface AppLegalConfig {
   termsUrl: string;
 }
 
+export interface AppCalendlyConfig {
+  url: string;
+}
+
 export interface AppOnboardingStepConfig {
   id: string;
   title: string;
@@ -86,6 +90,7 @@ export interface AppConfig {
     passwordReset: AppLogoConfig;
   };
   legal: AppLegalConfig;
+  calendly: AppCalendlyConfig;
   api: AppApiConfig;
   onboarding: AppOnboardingConfig;
   design: DeepPartial<AppDesignOverrides>;
@@ -98,6 +103,7 @@ export type AppConfigOverrides = Partial<
     };
     api: Partial<AppApiConfig>;
     legal: Partial<AppLegalConfig>;
+    calendly: Partial<AppCalendlyConfig>;
     onboarding: Partial<AppOnboardingConfig>;
     design: DeepPartial<AppDesignOverrides>;
   }
@@ -112,6 +118,9 @@ const numberFromEnv = (value: string | undefined, fallback: number): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+
+const stringFromEnv = (value: string | undefined, fallback = ""): string =>
+  value?.trim() || fallback;
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
   appName: "GroundX Studio",
@@ -135,6 +144,9 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   },
   legal: {
     termsUrl: "https://www.eyelevel.ai/product/terms-conditions",
+  },
+  calendly: {
+    url: stringFromEnv(import.meta.env.VITE_CALENDLY_URL),
   },
   onboarding: {
     enabled: true,
@@ -216,6 +228,11 @@ export const createAppConfig = (overrides: AppConfigOverrides = {}): AppConfig =
   legal: {
     ...DEFAULT_APP_CONFIG.legal,
     ...overrides.legal,
+  },
+  calendly: {
+    ...DEFAULT_APP_CONFIG.calendly,
+    ...overrides.calendly,
+    url: stringFromEnv(overrides.calendly?.url, DEFAULT_APP_CONFIG.calendly.url),
   },
   onboarding: {
     ...DEFAULT_APP_CONFIG.onboarding,

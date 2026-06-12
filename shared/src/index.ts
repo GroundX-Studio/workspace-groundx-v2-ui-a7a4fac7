@@ -629,6 +629,20 @@ export const toolFailureSchema = z.object({
 export type ToolFailure = z.infer<typeof toolFailureSchema>;
 
 /**
+ * agentic-tool-loop — one successfully server-executed tool call, surfaced to
+ * the user as a muted "what the agent consulted" annotation on the assistant
+ * message (`label` from the tool's `activityLabel`). OPTIONAL on the reply
+ * envelope (mirrors `_debug?`): the rag producer sets it; structured/hybrid
+ * producers — which never run a server tool — omit it. Failed executions land
+ * on `toolFailures`, never here.
+ */
+export const toolActivitySchema = z.object({
+  name: z.string(),
+  label: z.string(),
+});
+export type ToolActivity = z.infer<typeof toolActivitySchema>;
+
+/**
  * Dev-only diagnostic payload attached to chat replies in non-prod
  * environments. Present on `ChatReply` when `NODE_ENV !== "production"`. Lets
  * the browser DevTools console show exactly what the chat router asked
@@ -665,6 +679,29 @@ export const chatReplyDebugSchema = z.object({
       answerChars: z.number(),
     })
     .nullable(),
+  // harden-citation-emission U4 — the per-turn citation funnel. Lives HERE
+  // (not in middleware types): `ChatRouterDebug` is an alias of this schema's
+  // inference and the closed z.object strips unknown keys on parse, so any
+  // branch added elsewhere never reaches the wire. Optional: report + hybrid
+  // turns carry no debug accumulator.
+  citations: z
+    .object({
+      emitted: z.number(),
+      validSnippetForm: z.number(),
+      validExtractionForm: z.number(),
+      shipped: z.number(),
+      dropReasons: z.object({
+        parse: z.number(),
+        docId: z.number(),
+        page: z.number(),
+        path: z.number(),
+        value: z.number(),
+        branchNode: z.number(),
+        geometry: z.number(),
+      }),
+    })
+    .nullable()
+    .optional(),
 });
 export type ChatReplyDebug = z.infer<typeof chatReplyDebugSchema>;
 
@@ -674,9 +711,11 @@ export const chatReplySchema = z.object({
   answer: z.string(),
   citations: z.array(citationSchema),
   suggestedActions: z.array(suggestedActionSchema),
-  tools: z.array(z.object({ name: z.string(), arguments: z.record(z.unknown()) })),
   intents: z.array(dispatchedIntentSchema),
   toolFailures: z.array(toolFailureSchema),
+  // agentic-tool-loop — OPTIONAL (mirrors `_debug?`): the rag producer sets it
+  // (possibly `[]`); structured/hybrid producers omit it. App reads `?? []`.
+  toolActivity: z.array(toolActivitySchema).optional(),
   proposedSchemaField: proposedSchemaFieldSchema.nullable(),
   _debug: chatReplyDebugSchema.optional(),
 });

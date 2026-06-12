@@ -16,6 +16,7 @@
  * from a weak match — a quote that doesn't verify drops to `ambient`.
  */
 import { normalizeText } from "./citationGeometry.js";
+import { logger } from "../lib/logger.js";
 
 export type VerifyMethod = "exact" | "normalized" | "embedding" | "none";
 
@@ -26,8 +27,14 @@ export interface QuoteVerification {
   score: number;
 }
 
-/** Optional semantic similarity (cosine in [0,1]). Lexical-only when absent. */
-export type Embedder = (a: string, b: string) => number;
+/**
+ * Semantic similarity seam: best cosine in [0,1] of the quote vs the chunk's
+ * sentences (async — the live implementation is a batched HTTP embeddings
+ * call, see `quoteEmbedder.ts`). Lexical-only when absent. Implementations
+ * SHOULD resolve 0 on provider failure, but the never-fail invariant is
+ * enforced here regardless: a rejecting embedder yields unverified.
+ */
+export type Embedder = (quote: string, sentences: string[]) => Promise<number>;
 
 /** Quotes shorter than this are too generic to anchor — treated as unverified. */
 const MIN_QUOTE_LEN = 8;
@@ -37,10 +44,18 @@ const NORMALIZED_SCORE = 0.9;
 /**
  * Verify a claim's supporting quote against the cited chunk's text.
  * Gate order: exact substring → normalized substring (case/whitespace/
- * punctuation/currency stripped) → embedding similarity vs each sentence
- * (only if an embedder is supplied). Below threshold → unverified.
+ * punctuation/currency stripped) → embedding similarity vs the chunk's
+ * sentences (only if an embedder is supplied; threshold tunable via
+ * `embedThreshold`, env `EMBEDDINGS_VERIFY_THRESHOLD`). Below threshold,
+ * embedder absent, or embedder failure → unverified — verification is
+ * best-effort and MUST NOT fail the chat turn.
  */
-export function verifyQuote(quote: string, chunkText: string, embedder?: Embedder): QuoteVerification {
+export async function verifyQuote(
+  quote: string,
+  chunkText: string,
+  embedder?: Embedder,
+  embedThreshold: number = EMBED_THRESHOLD,
+): Promise<QuoteVerification> {
   const q = (quote ?? "").trim();
   const text = chunkText ?? "";
   if (q.length < MIN_QUOTE_LEN || !text) return { verified: false, method: "none", score: 0 };
@@ -53,9 +68,14 @@ export function verifyQuote(quote: string, chunkText: string, embedder?: Embedde
 
   if (embedder) {
     const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
-    let best = 0;
-    for (const s of sentences) best = Math.max(best, embedder(q, s));
-    if (best >= EMBED_THRESHOLD) return { verified: true, method: "embedding", score: best };
+    try {
+      const best = await embedder(q, sentences);
+      if (best >= embedThreshold) return { verified: true, method: "embedding", score: best };
+    } catch (err) {
+      // The seam holds the never-fail invariant: a rejecting embedder is an
+      // unverified result, never a failed turn.
+      logger.warn({ err }, "verifyQuote: embedder rejected; treating quote as unverified");
+    }
   }
 
   return { verified: false, method: "none", score: 0 };

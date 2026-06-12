@@ -400,7 +400,7 @@ function Responsive_Mobile() {
               <div className="wf-btn ghost" style={{ flex: 1, justifyContent: 'center', fontSize: 11 }}>Google</div>
             </div>
             <div style={{ height: 12 }} />
-            <div className="wf-btn coral wf-accent-bg" style={{ width: '100%', justifyContent: 'center', fontSize: 11 }}>📅 book 15-min engineer call</div>
+            <div className="wf-btn coral wf-accent-bg" style={{ width: '100%', justifyContent: 'center', fontSize: 11 }}>📅 book 30-min engineer call</div>
           </div>
           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 10, borderTop: '1px solid rgba(41,51,92,0.1)', background: '#fff' }}>
             <div style={{ textAlign: 'center', fontFamily: 'Kalam,cursive', fontSize: 11, color: 'var(--gx-navy)' }}>

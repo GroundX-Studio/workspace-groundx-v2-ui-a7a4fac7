@@ -92,7 +92,7 @@ export function derivePickViews(
  * scenario, the live schema, and the frame from context.
  */
 function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperienceComponentProps> {
-  const OnboardingIntro: FC<ChatExperienceComponentProps> = () => {
+  const OnboardingIntro: FC<ChatExperienceComponentProps> = ({ conversation }) => {
     const { scenarioId, thinkingScript } = config;
     const { advanceFrame, state: onboardingState } = useOnboardingSession();
     const { byId, state: registryState } = useScenarioRegistry();
@@ -124,6 +124,27 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
 
     // "Done." + Pick-a-view reveal — driven by the ThinkingStream's onDone.
     const [showDone, setShowDone] = useState<boolean>(thinkingScript.length === 0);
+
+    // Canvas↔chat coherence (2026-06-11): when the scripted scan narration is
+    // about to ANIMATE (fresh play, not a replay-restore) and the thread is
+    // GENUINELY empty (hydration settled, zero real turns), the canvas must
+    // show Understand — replaying "Reading <file> now…" over a resumed later
+    // frame (Interact/Integrate) is incoherent. A returning user with history
+    // is never yanked: the snap waits for `conversation.hydrated` and stands
+    // down if any real turn exists.
+    const [introWillPlay, setIntroWillPlay] = useState(false);
+    const snapFiredRef = useRef(false);
+    useEffect(() => {
+      if (snapFiredRef.current) return;
+      if (!introWillPlay || !conversation.hydrated) return;
+      if (conversation.liveTurns.length > 0) {
+        // Real history arrived — the intro replay is decoration above it.
+        snapFiredRef.current = true;
+        return;
+      }
+      snapFiredRef.current = true;
+      if (currentFrameRef.current !== "f2") advanceFrame("f2");
+    }, [introWillPlay, conversation.hydrated, conversation.liveTurns.length, advanceFrame]);
 
     return (
       <Box data-testid="onboarding-chat-conversation">
@@ -310,6 +331,7 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
               role={widgetRole}
               scope={{ type: "none" }}
               persistReplay
+              onWillPlay={() => setIntroWillPlay(true)}
               onDone={() => {
                 setShowDone(true);
                 // Auto-advance Understand (F2) → Extract (F3) when the

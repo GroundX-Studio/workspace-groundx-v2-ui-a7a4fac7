@@ -15,6 +15,7 @@ import Box from "@mui/material/Box";
 import IconButton from "@mui/material/IconButton";
 import InputBase from "@mui/material/InputBase";
 import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
 import { useState, type FC, type FormEvent, type ReactNode } from "react";
 
 import type { ChatSuggestedAction } from "@/api/chatSessions";
@@ -181,6 +182,20 @@ export function LiveTurnList({
                 <Markdown>{turn.content}</Markdown>
               </BotBubble>
             )}
+            {/* agentic-tool-loop — muted "what the agent consulted" annotation
+                (e.g. "Checked GroundX docs") when a server tool ran this turn. */}
+            {(turn.toolActivity?.length ?? 0) > 0 && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ pl: 0.25 }}
+                data-testid="chat-tool-activity"
+              >
+                {/* Distinct labels — the same tool consulted twice in one turn
+                    shows once (the wire array keeps one entry per call). */}
+                {[...new Set(turn.toolActivity!.map((a) => a.label))].join(" · ")}
+              </Typography>
+            )}
             {((turn.citations?.length ?? 0) > 0 || (turn.suggestedActions?.length ?? 0) > 0) && (
               <Stack
                 direction="row"
@@ -207,16 +222,15 @@ export function LiveTurnList({
                 scope={{ type: "none" }}
               />
             )}
-            {/* 📌 pin-to-report — carried on EVERY assistant turn (smart-report
-                Phase 5). Disabled + click-queued while this turn is still
-                streaming (the last turn during an in-flight send). */}
-            <PinToReportAction
-              role={role}
-              scope={{ type: "none" }}
-              turnId={turn.id}
-              turnText={turn.content}
-              streaming={sending && idx === liveTurns.length - 1}
-            />
+            {turn.pinToReport !== false && turn.content.trim().length > 0 && (
+              <PinToReportAction
+                role={role}
+                scope={{ type: "none" }}
+                turnId={turn.id}
+                turnText={turn.content}
+                streaming={sending && idx === liveTurns.length - 1}
+              />
+            )}
           </Stack>
         ),
       )}

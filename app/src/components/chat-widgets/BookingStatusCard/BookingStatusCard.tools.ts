@@ -10,8 +10,8 @@
  *     `BookCallView` in the viewer + `BookingStatusCard` in the chat.
  *
  * Mutate-category so the LLM surfaces a confirmable chip; the user
- * clicks to actually open the iframe (avoids surprise context
- * switches).
+ * clicks to actually open the scheduler in the viewer (avoids surprise
+ * context switches).
  */
 import { z } from "zod";
 
@@ -20,11 +20,12 @@ import type { WidgetTool } from "@/tools/types";
 const bookCall: WidgetTool = {
   name: "book_call",
   description:
-    "Open the Calendly booking surface for a 15-minute engineer call. " +
-    "Use when the user has signaled they want a human-assisted path " +
-    "forward — uncertainty about fit, complex documents, evaluation " +
-    "questions a sales engineer can answer. The user confirms by " +
-    "clicking the chip; the iframe is not opened automatically.",
+    "Open the Calendly booking surface for a 30-minute engineer call. " +
+    "Use when the user asks to speak with a team member or wants a " +
+    "human-assisted path forward: uncertainty about fit, complex " +
+    "documents, evaluation questions a sales engineer can answer. " +
+    "The user confirms by " +
+    "clicking the chip; the scheduler is not opened automatically.",
   category: "mutate",
   input: z.object({}),
   // §5 reachability — confirming this tool's chip opens the BookingStatusCard

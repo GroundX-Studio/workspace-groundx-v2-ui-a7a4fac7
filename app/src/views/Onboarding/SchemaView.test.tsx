@@ -269,6 +269,12 @@ const originalFetch = global.fetch;
 
 beforeEach(() => {
   __resetEnsuredChatSessions();
+  // Canvas↔chat coherence (2026-06-11): these suites mount MID-FLOW frames
+  // (f3a / f4) with an empty thread. Mid-flow implies the scripted Understand
+  // intro already played, so seed its doneness — otherwise the Intro's
+  // replay-snap (correctly) yanks the canvas back to f2 and unmounts the
+  // view under test.
+  window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
   getGroundXWorkflow.mockReset();
   getGroundXDocument.mockReset();
   getGroundXDocumentExtract.mockReset();

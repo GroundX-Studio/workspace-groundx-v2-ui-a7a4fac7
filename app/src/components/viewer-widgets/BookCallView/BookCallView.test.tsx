@@ -16,7 +16,7 @@
  * NOT renamed to `role`.
  */
 
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
@@ -31,52 +31,115 @@ const NONE_SCOPE: WidgetScope = { type: "none" };
 
 /** The two roles BookCallView is available to today (matrix: all roles). */
 const ROLES: WidgetRole[] = ["anonymous", "member"];
+const GROUNDX_ENGINEER_CALENDLY_URL =
+  "https://calendly.com/d/d3wn-ryv-rmr/30-minutes-with-a-groundx-engineer";
+
+const initInlineWidget = vi.fn();
+let originalMatchMedia: typeof window.matchMedia;
+
+function installCalendlyMock() {
+  (window as unknown as { Calendly?: { initInlineWidget: typeof initInlineWidget } }).Calendly = {
+    initInlineWidget,
+  };
+}
+
+function mockPhoneViewport() {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn((query: string) => ({
+      matches: query.includes("max-width") || query.includes("prefers-reduced-motion") || query.includes("reduce"),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })),
+  });
+}
 
 beforeEach(() => {
+  originalMatchMedia = window.matchMedia;
+  initInlineWidget.mockReset();
+  installCalendlyMock();
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: originalMatchMedia,
+  });
+  delete (window as unknown as { Calendly?: unknown }).Calendly;
+  document
+    .querySelectorAll('[data-calendly-embed-asset="true"]')
+    .forEach((node) => node.remove());
   vi.restoreAllMocks();
 });
 
 describe("BookCallView (viewer)", () => {
   describe.each(ROLES)("role=%s", (role) => {
-    it("renders the Calendly iframe with the configured URL", () => {
-      // VITE_CALENDLY_URL is read at module load; the vite-defined value
-      // for the test env is `https://calendly.com/benjamin-fletcher-ey`
-      // (see app/.env.local) which vitest exposes via import.meta.env.
-      // We accept any URL that starts with "https://calendly.com/" so a
-      // future per-deploy override doesn't break this contract test.
-      renderWithOnboardingProviders(<BookCallView role={role} scope={NONE_SCOPE} />, {
-        initialFrame: "f2",
-        initialScenario: UTILITY,
+    it("initializes Calendly's inline widget inside the owned viewer parent", async () => {
+      renderWithOnboardingProviders(
+        <BookCallView role={role} scope={NONE_SCOPE} calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL} />,
+        {
+          initialFrame: "f2",
+          initialScenario: UTILITY,
+        },
+      );
+      const parent = screen.getByTestId("book-call-calendly");
+      expect(parent).toBeInTheDocument();
+      expect(parent.tagName).not.toBe("IFRAME");
+      expect(parent).not.toHaveClass("calendly-inline-widget");
+      await waitFor(() => {
+        expect(initInlineWidget).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: GROUNDX_ENGINEER_CALENDLY_URL,
+            parentElement: parent,
+          }),
+        );
       });
-      const iframe = screen.getByTestId("book-call-calendly");
-      expect(iframe).toBeInTheDocument();
-      expect(iframe.tagName).toBe("IFRAME");
-      expect(iframe.getAttribute("src")).toMatch(/^https:\/\/calendly\.com\//);
     });
 
     it("falls back to an inline empty-state when VITE_CALENDLY_URL is unset", () => {
-      vi.stubEnv("VITE_CALENDLY_URL", "");
-      renderWithOnboardingProviders(<BookCallView role={role} scope={NONE_SCOPE} />, {
-        initialFrame: "f2",
-        initialScenario: UTILITY,
-      });
+      renderWithOnboardingProviders(
+        <BookCallView role={role} scope={NONE_SCOPE} calendlyUrl="" />,
+        {
+          initialFrame: "f2",
+          initialScenario: UTILITY,
+        },
+      );
       expect(screen.queryByTestId("book-call-calendly")).not.toBeInTheDocument();
       expect(screen.getByTestId("book-call-calendly-unset")).toBeInTheDocument();
-      vi.unstubAllEnvs();
+      expect(initInlineWidget).not.toHaveBeenCalled();
     });
 
-    it("iframe has an accessible title (WCAG 2.4.1)", () => {
-      renderWithOnboardingProviders(<BookCallView role={role} scope={NONE_SCOPE} />, {
-        initialFrame: "f2",
-        initialScenario: UTILITY,
-      });
-      const iframe = screen.getByTestId("book-call-calendly");
-      expect(iframe.getAttribute("title")).toMatch(/calendly|book.*call|schedule/i);
+    it("embed parent has an accessible label before Calendly injects its iframe", () => {
+      renderWithOnboardingProviders(
+        <BookCallView role={role} scope={NONE_SCOPE} calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL} />,
+        {
+          initialFrame: "f2",
+          initialScenario: UTILITY,
+        },
+      );
+      expect(screen.getByLabelText("Book a call · Calendly embed")).toBeInTheDocument();
+    });
+
+    it("shows a visible loading status outside the blank Calendly embed area", async () => {
+      renderWithOnboardingProviders(
+        <BookCallView role={role} scope={NONE_SCOPE} calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL} />,
+        {
+          initialFrame: "f2",
+          initialScenario: UTILITY,
+        },
+      );
+      await waitFor(() => expect(initInlineWidget).toHaveBeenCalled());
+      const loading = screen.getByTestId("book-call-calendly-loading");
+      const embed = screen.getByTestId("book-call-calendly");
+      expect(loading).toHaveTextContent(/loading booking calendar/i);
+      expect(embed).not.toContainElement(loading);
     });
 
     it("emits the widget-contract data attributes (slot + role)", () => {
@@ -94,20 +157,41 @@ describe("BookCallView (viewer)", () => {
   // affordance lock — the rendered surface is identical under both roles.
   it("renders identically under anonymous and member (no affordance lock)", () => {
     const { unmount } = renderWithOnboardingProviders(
-      <BookCallView role="anonymous" scope={NONE_SCOPE} />,
+      <BookCallView role="anonymous" scope={NONE_SCOPE} calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL} />,
       { initialFrame: "f2", initialScenario: UTILITY },
     );
-    const anonHasIframe = screen.queryByTestId("book-call-calendly") != null;
+    const anonHasEmbedParent = screen.queryByTestId("book-call-calendly") != null;
     unmount();
 
-    renderWithOnboardingProviders(<BookCallView role="member" scope={NONE_SCOPE} />, {
-      initialFrame: "f2",
-      initialScenario: UTILITY,
-    });
-    const memberHasIframe = screen.queryByTestId("book-call-calendly") != null;
+    renderWithOnboardingProviders(
+      <BookCallView role="member" scope={NONE_SCOPE} calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL} />,
+      {
+        initialFrame: "f2",
+        initialScenario: UTILITY,
+      },
+    );
+    const memberHasEmbedParent = screen.queryByTestId("book-call-calendly") != null;
 
-    expect(memberHasIframe).toBe(anonHasIframe);
-    expect(memberHasIframe).toBe(true);
+    expect(memberHasEmbedParent).toBe(anonHasEmbedParent);
+    expect(memberHasEmbedParent).toBe(true);
+  });
+
+  it("clears the app-owned loading status after Calendly's iframe loads", async () => {
+    initInlineWidget.mockImplementation(({ parentElement }: { parentElement: HTMLElement }) => {
+      const iframe = document.createElement("iframe");
+      parentElement.appendChild(iframe);
+      setTimeout(() => iframe.dispatchEvent(new Event("load")), 0);
+    });
+
+    renderWithOnboardingProviders(
+      <BookCallView role="anonymous" scope={NONE_SCOPE} calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL} />,
+      { initialFrame: "f2", initialScenario: UTILITY },
+    );
+
+    expect(screen.getByTestId("book-call-calendly-loading")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId("book-call-calendly-loading")).not.toBeInTheDocument();
+    });
   });
 
   it("reflects the required role prop on data-role", () => {
@@ -117,5 +201,54 @@ describe("BookCallView (viewer)", () => {
     });
     const root = document.querySelector('[data-widget="book-call-view"]');
     expect(root?.getAttribute("data-role")).toBe("anonymous");
+  });
+
+  it("uses an external calendar action on phone widths instead of forcing the inline iframe", () => {
+    mockPhoneViewport();
+    renderWithOnboardingProviders(
+      <BookCallView
+        role="anonymous"
+        scope={NONE_SCOPE}
+        calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL}
+      />,
+      { initialFrame: "f2", initialScenario: UTILITY },
+    );
+
+    expect(screen.getByTestId("book-call-calendly-mobile")).toBeInTheDocument();
+    expect(screen.queryByTestId("book-call-calendly")).not.toBeInTheDocument();
+    expect(screen.getByTestId("book-call-mobile-open")).toHaveAttribute(
+      "href",
+      GROUNDX_ENGINEER_CALENDLY_URL,
+    );
+    expect(initInlineWidget).not.toHaveBeenCalled();
+  });
+
+  it("fires onScheduled only for trusted Calendly event_scheduled messages", async () => {
+    const onScheduled = vi.fn();
+    renderWithOnboardingProviders(
+      <BookCallView
+        role="anonymous"
+        scope={NONE_SCOPE}
+        calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL}
+        onScheduled={onScheduled}
+      />,
+      { initialFrame: "f2", initialScenario: UTILITY },
+    );
+
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { event: "calendly.event_scheduled", payload: { event: { uri: "x" } } },
+        origin: "https://evil.example.com",
+      }),
+    );
+    expect(onScheduled).not.toHaveBeenCalled();
+
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { event: "calendly.event_scheduled", payload: { event: { uri: "x" } } },
+        origin: "https://calendly.com",
+      }),
+    );
+    await waitFor(() => expect(onScheduled).toHaveBeenCalledTimes(1));
   });
 });

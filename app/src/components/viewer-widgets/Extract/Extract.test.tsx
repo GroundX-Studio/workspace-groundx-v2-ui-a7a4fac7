@@ -6,6 +6,7 @@ import type { ContentScope, WidgetRole } from "@groundx/shared";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 import { loanTestScenario, utilityTestScenario } from "@/test/scenarioFixtures";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import type { ScenarioConfig } from "@/types/scenarios";
 
 import { Extract } from "./Extract";
@@ -101,6 +102,38 @@ describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () =>
     });
     expect(screen.getByTestId("extract-doc-pane")).toBeInTheDocument();
     expect(screen.getByTestId("pdf-viewer-widget")).toBeInTheDocument();
+  });
+
+  it("keeps field citation clicks inside the embedded Extract PDF pane", async () => {
+    const storeRef: { current: ReturnType<typeof useChatStore> | null } = { current: null };
+    const StoreProbe: FC = () => {
+      storeRef.current = useChatStore();
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <Extract role="member" scope={UTILITY_DOC_SCOPE} />
+        <StoreProbe />
+      </>,
+      {
+        initialFrame: "f3",
+        initialScenario: "utility",
+      },
+    );
+
+    const meterRow = screen.getByTestId("field-row-meter_kwh");
+    fireEvent.click(within(meterRow).getByTestId("cite-chip-1"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument();
+      expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-target-page", "2");
+    });
+    const store = storeRef.current;
+    expect(store?.state.activeSessionId).toBeTruthy();
+    if (!store?.state.activeSessionId) throw new Error("ChatStore probe did not mount");
+    const session = store.state.sessions.get(store.state.activeSessionId);
+    const pushedDocViewer = session?.viewer.history.some((step) => step.kind === "doc-viewer");
+    expect(pushedDocViewer).toBe(false);
   });
 
   it("holds the no-source state when the scope carries no document", () => {

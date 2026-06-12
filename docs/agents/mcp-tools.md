@@ -45,7 +45,7 @@ a separate terminal for completion status.
 deploy_config
   projectId=groundx-v2-ui
   environment=dev
-  variables={"PUBLIC_ACCESS": "ingress", "APP_REPOSITORY_MODE": "mysql"}
+  variables={"PUBLIC_ACCESS": "ingress"}
   secrets={"MYSQL_PASSWORD": "..."}
 ```
 

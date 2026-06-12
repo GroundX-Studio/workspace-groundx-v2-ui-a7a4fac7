@@ -22,19 +22,40 @@ last N migrations SHALL support rollback.
 - **THEN** every migration applies cleanly and the schema matches
   `mysqlRepository.ts`'s expected DDL
 
-### Requirement: Production deploys SHALL read/write against MySQL primary
+### Requirement: The runtime SHALL read/write against MySQL in every environment
 
-The production deploy SHALL set `APP_REPOSITORY_MODE=mysql` and wire
-`MYSQL_*` secrets via Helm. The in-memory repository MUST NOT be used
-in production. This requirement is BLOCKED on AWS RDS provisioning +
-Helm secret wiring (infra, not code).
+MySQL SHALL be the ONLY runtime repository. The former
+`APP_REPOSITORY_MODE` env knob (auto/memory/mysql) is RETIRED
+(2026-06-11): `loadEnv` SHALL expose no such field (a stray env var is
+ignored), `MYSQL_*` connection config SHALL be required in every
+environment, and a boot without it SHALL fail fast — chat history must
+never silently live in process RAM, where a middleware restart wipes
+it. Dev points `MYSQL_*` (via `middleware/.env.local`) at the shared
+dev database; production wires `MYSQL_*` secrets via Helm. The
+in-memory repository (`MemoryAppRepository`) SHALL survive only as a
+test double injected at the dependency seam by vitest suites — never
+selected by runtime configuration.
 
-#### Scenario: Production app reads/writes against MySQL
+#### Scenario: App reads/writes against MySQL
 
-- **GIVEN** a production deploy with `APP_REPOSITORY_MODE=mysql` and `MYSQL_*` env set
+- **GIVEN** a deploy (dev or production) with `MYSQL_*` env set
 - **WHEN** the app boots and serves the first chat POST
 - **THEN** the chat_session, chat_messages, and viewer_events rows
   appear in MySQL — not in any in-memory map
+
+#### Scenario: Boot without a database fails fast
+
+- **GIVEN** an environment missing `MYSQL_HOST` (or any `MYSQL_*` key)
+- **WHEN** the middleware boots
+- **THEN** `loadEnv` throws naming the missing key — the server never
+  starts on an in-memory repository
+
+#### Scenario: The retired knob is ignored
+
+- **GIVEN** a stray `APP_REPOSITORY_MODE=memory` env var
+- **WHEN** `loadEnv` parses the environment
+- **THEN** no such field appears in the parsed env and the runtime
+  repository is still MySQL
 
 ### Requirement: Retention sweep jobs SHALL prune old rows per the durable retention table
 

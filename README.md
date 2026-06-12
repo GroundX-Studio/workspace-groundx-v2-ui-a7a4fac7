@@ -34,7 +34,8 @@ Express middleware restarts through `tsx watch` on port `3001`. Frontend `/api` 
 proxy to the middleware during development.
 
 `npm run setup:env` writes root `.env.local` and `middleware/.env.local`, which are ignored
-by git. It does not write `app/.env.local` because browser code must never receive
+by git. Browser-safe frontend values can be copied from `app/.env.example` into ignored
+`app/.env` or `app/.env.local` for local development. Browser code must never receive
 GroundX, Partner, runner, provider, or LLM secrets. The Partner API key, LLM
 service/provider, LLM model ID, and LLM API key belong only in server-side env files.
 
@@ -43,10 +44,13 @@ mock mode. Supply real keys in the generated server-side env files to exercise t
 data path locally. Tests achieve deterministic behavior by injecting `Fake*` clients at
 the dependency seam (a standard test double), not via any runtime flag.
 
-Default local preview uses `APP_REPOSITORY_MODE=memory`; it must not require or contact
-MySQL. `npm run smoke:dev` intentionally runs with bogus MySQL env values while forcing
-memory mode, and passes only if the frontend, middleware, Vite `/api` proxy, mock
-Partner routes, mock GroundX routes, and mock LLM route all work without a database.
+MySQL is the ONLY runtime repository (the former `APP_REPOSITORY_MODE=memory` runtime
+option was retired 2026-06-11 — chat history must never silently live in process RAM,
+where a middleware restart wipes it). Local development points `MYSQL_*` in
+`middleware/.env.local` at the shared dev database; a boot without MySQL config fails
+fast. `npm run smoke:dev` passes only if the frontend, middleware (against the
+configured database), Vite `/api` proxy, Partner routes, GroundX routes, and LLM route
+all boot. The in-memory repository survives solely as a vitest-injected test double.
 
 ## Project Layout
 
@@ -55,10 +59,9 @@ app/          Vite React + MUI frontend
 middleware/   TypeScript Express middleware for sessions and GroundX proxying
 ```
 
-The default production stack is Vite React, MUI, Express middleware, and MySQL. Local
-development starts with in-memory app metadata so preview is immediate. Set
-`APP_REPOSITORY_MODE=mysql` and fill MySQL env values in `middleware/.env.local` when a
-feature needs a real local database.
+The stack is Vite React, MUI, Express middleware, and MySQL in every environment —
+dev and production use the same persistence path. Fill the `MYSQL_*` values in
+`middleware/.env.local` (the shared dev database) before starting the middleware.
 
 ## Commands
 
@@ -67,7 +70,7 @@ npm run dev       # hot-reload frontend + middleware
 npm run build     # build frontend and middleware
 npm test          # run frontend and middleware unit tests
 npm run test:e2e  # run frontend Playwright smoke tests
-npm run smoke:dev # verify memory-mode frontend, middleware, /api proxy, mocks, and LLM boot locally
+npm run smoke:dev # verify frontend, middleware (real DB), /api proxy, and LLM boot locally
 npm run verify:preview # canonical agent preview proof; currently aliases smoke:dev
 ```
 
@@ -85,12 +88,15 @@ secret manager, not browser code:
 - `LLM_MODEL_ID`
 - `LLM_API_KEY`
 - `SESSION_SECRET`
-- `APP_REPOSITORY_MODE=mysql`
 - `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`
 - `ALLOWED_ORIGIN`
 - optional runtime controls such as `LOG_LEVEL`, `BYO_PAGES_LIMIT`, rate limits,
   `METRICS_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `POSTHOG_API_KEY`,
   `POSTHOG_HOST`, `SENTRY_DSN`, `SSO_ENABLED`, and `DISABLE_AGENT_TURN_LOG`
+
+Frontend `VITE_*` values are public and are baked into the static Vite bundle at image
+build time. Set `VITE_CALENDLY_URL` as a GitHub environment variable or Docker build arg;
+Helm runtime values cannot change the already-built frontend bundle.
 
 The frontend should continue to call same-origin `/api`; do not add browser-visible
 GroundX, Partner, LLM, runner, GitHub, or GitLab keys.

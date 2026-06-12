@@ -144,4 +144,29 @@ describe("ScenarioRegistryProvider", () => {
     expect(screen.getByTestId("count")).toHaveTextContent("1");
     expect(listScenarios).toHaveBeenCalledTimes(1);
   });
+
+  it("retries the initial scenario load before showing the error state", async () => {
+    const listScenarios = vi.fn()
+      .mockRejectedValueOnce(new Error("Vite proxy could not reach middleware"))
+      .mockResolvedValueOnce({
+        bucketId: 28454,
+        scenarios: [
+          scenario("x", 1),
+        ],
+      });
+
+    renderWithApi(
+      <ScenarioRegistryProvider>
+        <Probe />
+      </ScenarioRegistryProvider>,
+      { scenario: { listScenarios } },
+    );
+
+    await waitFor(() => expect(listScenarios).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("status")).toHaveTextContent("loading");
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"), { timeout: 1500 });
+    expect(screen.getByTestId("count")).toHaveTextContent("1");
+    expect(listScenarios).toHaveBeenCalledTimes(2);
+  });
 });

@@ -40,10 +40,11 @@ Frame sequence (F-series):
 - **Tool-call wiring.** `chat-with-sources` widget contract names
   8 agent tools per `project_dev_contracts.md`; the chat router
   doesn't dispatch tool calls yet (TL-01..TL-08).
-- **MySQL in production use.** Schema + repository methods + BFF
-  endpoints all exist. Dev defaults `APP_REPOSITORY_MODE=memory`
-  so MySQL is bypassed; flip to `mysql` + provide `MYSQL_*` env
-  vars for prod. The idempotent migration
+- **MySQL in every environment.** Schema + repository methods + BFF
+  endpoints all exist. MySQL is the ONLY runtime repository
+  (retire-memory-repository-mode, 2026-06-11): `MYSQL_*` env vars are
+  required everywhere — dev points at the shared dev database via
+  `middleware/.env.local`. The idempotent migration
   (`ensureChatSessionsViewerColumns`) handles ALTER for existing
   deployments.
 

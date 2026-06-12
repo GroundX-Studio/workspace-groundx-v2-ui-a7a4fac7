@@ -188,7 +188,7 @@ function Widget_Gate() {
   return (
     <_AnatomyFrame
       title="Widget · sign-in gate panel"
-      sub="Rendered inline in chat whenever the user crosses a 🔒 boundary — Save, Export, BYO upload / connect / email, or hitting the free-tier ceiling. Three options: email magic link, SSO, or book a 15-min engineer call. Never blocks the canvas; the user can always dismiss and keep exploring."
+      sub="Rendered inline in chat whenever the user crosses a 🔒 boundary — Save, Export, BYO upload / connect / email, or hitting the free-tier ceiling. Three options: email magic link, SSO, or book a 30-min engineer call. Never blocks the canvas; the user can always dismiss and keep exploring."
     >
       <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 30, alignItems: 'flex-start' }}>
         <div style={{ position: 'relative' }}>
@@ -206,7 +206,7 @@ function Widget_Gate() {
               <div className="wf-line dim" style={{ flex: 1 }} />
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              <div className="wf-btn coral wf-accent-bg" style={{ flex: 1, justifyContent: 'center', fontSize: 11 }}>📅 book 15-min engineer call</div>
+              <div className="wf-btn coral wf-accent-bg" style={{ flex: 1, justifyContent: 'center', fontSize: 11 }}>📅 book 30-min engineer call</div>
             </div>
             <div className="wf-line dim" style={{ marginTop: 10, width: '100%' }} />
             <div style={{ fontFamily: 'Kalam,cursive', fontSize: 11, color: 'rgba(41,51,92,0.65)', marginTop: 6, textAlign: 'center' }}>
@@ -216,7 +216,7 @@ function Widget_Gate() {
         </div>
         <CalloutList columns={1} items={[
           { n: 1, title: 'option 1 · email magic link', body: 'sends a one-click link · returns to the same session with all work preserved. SSO is the secondary control on the same row.' },
-          { n: 2, title: 'option 2 · book 15-min engineer call', body: 'calendar embed, not a contact form. Coral background — high-intent path for enterprise buyers.' },
+          { n: 2, title: 'option 2 · book 30-min engineer call', body: 'calendar embed, not a contact form. Coral background — high-intent path for enterprise buyers.' },
           { n: 3, title: 'option 3 · keep exploring samples', body: 'low-friction exit. Critical invariant: the gate never blocks the canvas — the user can always dismiss and continue on the sample.' },
           { n: 4, title: 'trigger points', body: '🔒 Save (any artifact) · 🔒 Export (PDF / CSV / JSON / YAML) · BYO sign-up CTAs in F1 · hitting the free-tier ceiling (100 pages or 20 actions).' },
           { n: 5, title: 'F1 special case', body: 'tapping any "Sign up · …" CTA in the F1 BYO section triggers the F1 → F2 transition (nav + chat slide in) AND loads this gate inline in the new chat. Same panel, context-aware preamble ("upload your docs · sign up first").' },

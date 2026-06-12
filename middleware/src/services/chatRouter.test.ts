@@ -266,8 +266,27 @@ describe("routeChat", () => {
         ),
       ),
     };
+    // chat-architecture-hardening Task 3 — hybrid rides the grounded seam:
+    // one search (the seam's), the grounded system prompt with WORKSPACE
+    // STATE, and the full citation-verification contract.
+    const llmForward = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  'The snippet says hybrid snippet.\n\n```json\n{"citations":[{"documentId":"d-1","page":3,"quote":"hybrid snippet","answerSpan":"hybrid snippet"}]}\n```',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
     const reply = await routeChat(makeRequest({ newUserMessage: "explain this sample" }), {
-      llmClient: fakeLlm,
+      llmClient: { forward: llmForward },
+      llmModelId: "m",
       repository: repo,
       chatSessionId: "chat-1",
       groundxClient,
@@ -276,11 +295,21 @@ describe("routeChat", () => {
       byoPagesLimit: 100,
     });
     expect(reply.mode).toBe("hybrid");
-    expect(reply.answer).toMatch(/sample:utility/);
+    // The grounded builder's prompt, carrying the workspace state.
+    const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body);
+    expect(body.messages[0].content).toMatch(/^You are the user's analyst/);
+    expect(body.messages[0].content).toContain("WORKSPACE STATE");
+    expect(body.messages[0].content).toContain("sample:utility");
+    // Verified citation (quote matches the snippet verbatim) + chat-parity chip.
     expect(reply.citations).toHaveLength(1);
     expect(reply.citations[0].documentId).toBe("d-1");
-    // (WF-06 tiering is RAG-path scoped; hybrid tour-mode citations come from
-    // runHybridQuery and stay tier-less → the app defaults them to ambient.)
+    expect(reply.citations[0].tier).toBeDefined();
+    expect(reply.suggestedActions[0]?.key).toBe("show-source");
+    // The seam owns the ONLY search (no router-side double search).
+    const searchCalls = (groundxClient.forward as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => (c[0] as string).includes("/search"),
+    );
+    expect(searchCalls.length).toBeLessThanOrEqual(2); // initial + low-floor retry only
   });
 });
 
@@ -779,7 +808,16 @@ describe("CF-07 viewer-intent chip gating in runRagPipeline", () => {
   });
 
   it("no suggestedIntent block in the LLM answer → no chip; existing 'show-source' chip still present", async () => {
-    const { groundxClient, llmClient } = mkClients("Plain grounded answer about the bill.");
+    // The answer must genuinely CITE for the show-source chip to appear
+    // (no-invented-citations, 2026-06-11) — give it a citations block.
+    const citedAnswer = [
+      "The bill total is $214.07.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"d1","page":3,"quote":"the bill total is $214.07","answerSpan":"$214.07"}]}',
+      "```",
+    ].join("\n");
+    const { groundxClient, llmClient } = mkClients(citedAnswer);
     const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), {
       llmClient,
       groundxClient,
@@ -789,6 +827,172 @@ describe("CF-07 viewer-intent chip gating in runRagPipeline", () => {
     });
     expect(reply.suggestedActions.find((a) => a.key === "suggested-intent")).toBeUndefined();
     expect(reply.suggestedActions.find((a) => a.key === "show-source")).toBeDefined();
+  });
+
+  // GroundX skill knowledge (2026-06-11). "what do you know about groundx?"
+  // used to dead-end ("the snippets don't say anything about GroundX") because
+  // the prompt was snippets-only. The grounded call now retrieves the
+  // RELEVANT sections of the vendored groundx-agent-harness skill pack
+  // (middleware/assets/groundx-skills/) and injects them into the system
+  // prompt — no hard-coded product blurb. Document content claims stay
+  // snippets-only. The retriever is a dep so these tests pin the WIRING
+  // deterministically; the retrieval itself is pinned in groundxSkills.test.
+  describe("grounded prompt carries retrieved GroundX skill knowledge", () => {
+    it("injects retrieved skill sections for a GroundX question", async () => {
+      const { groundxClient, llmClient } = mkClients("GroundX is EyeLevel's document platform.");
+      const skillsRetrieve = vi.fn((q: string) =>
+        /groundx/i.test(q) ? "### [groundx-architecture] Pipeline\nX-Ray parses layout into semantic objects." : null,
+      );
+      await routeChat(makeRequest({ newUserMessage: "what do you know about groundx?" }), {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+        skillsRetrieve,
+      });
+      expect(skillsRetrieve).toHaveBeenCalledWith("what do you know about groundx?");
+      const body = JSON.parse((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
+      const system = body.messages.find((m: { role: string }) => m.role === "system").content as string;
+      expect(system).toContain("GROUNDX KNOWLEDGE");
+      expect(system).toContain("X-Ray parses layout into semantic objects.");
+      expect(system).toMatch(/questions about GroundX itself/i);
+      // Natural voice (2026-06-11): the model must speak AS the assistant that
+      // knows the product — never narrate its inputs ("from the docs I have
+      // here", "the guidance says", "the skill pack").
+      expect(system).toMatch(/as if you simply know/i);
+      expect(system).toMatch(/never mention or cite this material/i);
+      // The retired hard-coded capsule is GONE.
+      expect(system).not.toContain("ABOUT GROUNDX (product knowledge");
+    });
+
+    it("no relevant skill sections → no knowledge block (snippets-only prompt)", async () => {
+      const { groundxClient, llmClient } = mkClients("The total is $214.07.");
+      const skillsRetrieve = vi.fn(() => null);
+      await routeChat(makeRequest({ newUserMessage: "what is the total?" }), {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+        skillsRetrieve,
+      });
+      const body = JSON.parse((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
+      const system = body.messages.find((m: { role: string }) => m.role === "system").content as string;
+      expect(system).not.toContain("GROUNDX KNOWLEDGE");
+      expect(system).not.toContain("ABOUT GROUNDX (product knowledge");
+      // The internal-vocabulary ban is GLOBAL (every turn): users must never
+      // see "snippets" / "extracted fields" / "docs I have" in answers.
+      expect(system).toMatch(/never expose your internal materials/i);
+      expect(system).toMatch(/this document/i);
+    });
+  });
+
+  // RAG + raw extraction (2026-06-11). Search retrieves only the TOP-K
+  // matching chunks, so structured questions ("what is the meter number?",
+  // "how many meters?") miss when the matching chunk isn't retrieved. The
+  // grounded call now ALSO reads the document's full workflow-extraction
+  // output and hands it to the LLM alongside the snippets.
+  describe("grounded prompt includes the document's raw extraction", () => {
+    function mkClientsWithExtract(extractBody: unknown, extractStatus = 200) {
+      const groundxClient: GroundXClient = {
+        forward: vi.fn(async (path: string) => {
+          if (path.startsWith("/ingest/document/extract/")) {
+            return new Response(JSON.stringify(extractBody), {
+              status: extractStatus,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return jsonOk({
+            search: { results: [{ documentId: "d1", pageNumber: 3, text: "the bill total is $214.07" }] },
+          });
+        }),
+      };
+      const llmClient: LlmClient = {
+        forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "There are 2 meters." } }] })),
+      };
+      return { groundxClient, llmClient };
+    }
+
+    it("fetches the top snippet document's extraction and includes it in the LLM prompt", async () => {
+      const { groundxClient, llmClient } = mkClientsWithExtract({
+        invoice_number: "10295809",
+        meters: [{ meter_number: "91496726" }, { meter_number: "91496724" }],
+      });
+      const reply = await routeChat(makeRequest({ newUserMessage: "how many meters are there?" }), {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+      });
+      expect(reply.answer).toBe("There are 2 meters.");
+      // The extraction endpoint was called for the snippet's document.
+      const extractCall = (groundxClient.forward as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c: unknown[]) => String(c[0]).startsWith("/ingest/document/extract/d1"),
+      );
+      expect(extractCall).toBeDefined();
+      // The LLM request body carries the full extraction values.
+      const llmBody = String((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      expect(llmBody).toContain("91496724");
+      expect(llmBody).toContain("91496726");
+      expect(llmBody).toContain("EXTRACTED FIELDS");
+    });
+
+    it("caps a pathological extraction structurally at the prompt budget (_truncated marker)", async () => {
+      // harden-citation-emission U3 — the old char-slice (`…(truncated)`)
+      // emitted invalid JSON; the structural fit keeps valid JSON and a
+      // machine-readable marker, truncating the lone oversized scalar in place.
+      const huge = { blob: "y".repeat(20_000) };
+      const { groundxClient, llmClient } = mkClientsWithExtract(huge);
+      await routeChat(makeRequest({ newUserMessage: "Q" }), {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+      });
+      const llmBody = String((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      expect(llmBody).toContain("_truncated");
+      // The embedded extraction stays bounded (12k budget + marker), not 20k.
+      const extractionPortion = llmBody.split("EXTRACTED FIELDS")[1] ?? "";
+      expect(extractionPortion.length).toBeLessThan(14_000);
+    });
+
+    it("extraction fetch failure degrades gracefully (snippets-only prompt, no throw)", async () => {
+      const { groundxClient, llmClient } = mkClientsWithExtract({ error: "boom" }, 500);
+      const reply = await routeChat(makeRequest({ newUserMessage: "what is the total?" }), {
+        llmClient,
+        groundxClient,
+        groundxApiKey: "k",
+        samplesBucketId: 42,
+        llmModelId: "test-model",
+      });
+      expect(reply.answer).toBe("There are 2 meters.");
+      const llmBody = String((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      expect(llmBody).not.toContain("EXTRACTED FIELDS");
+    });
+  });
+
+  it("no citations on the reply → NO 'show all sources' chip (nothing to show)", async () => {
+    // Zero search hits → zero citations (no ambient fallback either). A
+    // "Show all sources" chip with no sources is a dead button — e.g. the
+    // small-talk path ("tell me a joke") used to render one.
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "Why did the bill meditate?" } }] })),
+    };
+    const reply = await routeChat(makeRequest({ newUserMessage: "tell me a joke" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+    });
+    expect(reply.citations).toHaveLength(0);
+    expect(reply.suggestedActions.find((a) => a.key === "show-source")).toBeUndefined();
   });
 
   it("malformed suggestedIntent JSON → no chip, no throw (defensive fallback)", async () => {
@@ -884,7 +1088,16 @@ describe("CF-06 token-budget guard in callGroundedLlm", () => {
       text: longText,
     }));
     const groundxClient: GroundXClient = {
-      forward: vi.fn(async () => jsonOk({ search: { results } })),
+      forward: vi.fn(async (path: string) => {
+        // RAG + raw extraction (2026-06-11): the grounded path also fetches
+        // /ingest/document/extract — 404 it here so this test measures the
+        // SNIPPET cap in isolation (the extraction block has its own
+        // EXTRACTION_PROMPT_CHARS cap, asserted in the extraction tests).
+        if (path.startsWith("/ingest/document/extract/")) {
+          return new Response("not found", { status: 404 });
+        }
+        return jsonOk({ search: { results } });
+      }),
     };
     const llmForward = vi.fn(async () =>
       jsonOk({ choices: [{ message: { content: "ok" } }] }),
@@ -1325,7 +1538,7 @@ describe("CF-06 structured citations wired into runRagPipeline", () => {
     expect(reply.citations[0].documentId).toBe("d1");
   });
 
-  it("when LLM emits NO citations block, falls back to the GroundX-derived citations", async () => {
+  it("when LLM emits NO citations block, the reply carries NO citations (no invented fallback)", async () => {
     const groundxClient: GroundXClient = {
       forward: vi.fn(async () =>
         jsonOk({
@@ -1350,8 +1563,10 @@ describe("CF-06 structured citations wired into runRagPipeline", () => {
       samplesBucketId: 42,
       llmModelId: "test-model",
     });
-    expect(reply.citations).toHaveLength(2);
-    expect(reply.citations.map((c) => c.documentId).sort()).toEqual(["d1", "d2"]);
+    // No invented citations (2026-06-11): omitting the block is the model's
+    // signal the answer didn't draw on the documents.
+    expect(reply.citations).toHaveLength(0);
+    expect(reply.suggestedActions.find((a) => a.key === "show-source")).toBeUndefined();
   });
 });
 
@@ -1695,6 +1910,53 @@ describe("Phase 5 — function-calling tool round-trip", () => {
     return { groundxClient, llmClient, llmForward };
   }
 
+  function mkToolOnlyThenProseClients(
+    llmAnswer: string,
+    toolCalls: { id?: string; name: string; arguments: Record<string, unknown> }[],
+    firstContent = "",
+  ): { groundxClient: GroundXClient; llmClient: LlmClient; llmForward: ReturnType<typeof vi.fn> } {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: {
+            results: [{ documentId: "doc-1", pageNumber: 1, text: "snippet text" }],
+          },
+        }),
+      ),
+    };
+    let callCount = 0;
+    const llmForward = vi.fn(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return jsonOk({
+          choices: [
+            {
+              message: {
+                content: firstContent,
+                tool_calls: toolCalls.map((tc, idx) => ({
+                  id: tc.id ?? `call_${idx}`,
+                  type: "function",
+                  function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+                })),
+              },
+            },
+          ],
+        });
+      }
+      return jsonOk({
+        choices: [
+          {
+            message: {
+              content: llmAnswer,
+            },
+          },
+        ],
+      });
+    });
+    const llmClient: LlmClient = { forward: llmForward };
+    return { groundxClient, llmClient, llmForward };
+  }
+
   it("LLM returns one valid tool_call → reply.intents[] carries the constructed CanvasIntent", async () => {
     const { groundxClient, llmClient } = mkClients("Sure, opening the doc.", [
       { name: "open_document", arguments: { documentId: "doc-abc", page: 5 } },
@@ -1713,6 +1975,81 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       intent: { kind: "highlightCitation", documentId: "doc-abc", page: 5 },
     });
     expect(reply.toolFailures).toEqual([]);
+  });
+
+  it("tool-only read replies ask the LLM for user-facing prose instead of using canned copy", async () => {
+    const prose = "The source says the relevant document section is available on page 5.";
+    const { groundxClient, llmClient, llmForward } = mkToolOnlyThenProseClients(prose, [
+      { name: "open_document", arguments: { documentId: "doc-abc", page: 5 } },
+    ]);
+    const reply = await routeChat(makeRequest({ newUserMessage: "show me doc-abc page 5" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+    });
+    expect(reply.intents).toHaveLength(1);
+    expect(reply.answer).toBe(prose);
+    expect(llmForward).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body) as Record<string, unknown>;
+    const repairBody = JSON.parse((llmForward.mock.calls[1][1] as { body: string }).body) as {
+      tools?: unknown;
+      messages?: Array<{ content?: string }>;
+    };
+    expect(Array.isArray(firstBody.tools)).toBe(true);
+    expect(repairBody.tools).toBeUndefined();
+    expect(repairBody.messages?.[repairBody.messages.length - 1]?.content).toMatch(/Do not call tools now/);
+  });
+
+  it("tool-only invalid replies still use LLM prose and surface toolFailures", async () => {
+    const prose = "I can still answer from the source text, but I couldn't open that citation automatically.";
+    const { groundxClient, llmClient, llmForward } = mkToolOnlyThenProseClients(prose, [
+      { name: "open_document", arguments: { documentId: 42 } },
+    ]);
+    const reply = await routeChat(makeRequest({ newUserMessage: "show me that source" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+    });
+    expect(reply.intents).toEqual([]);
+    expect(reply.toolFailures).toHaveLength(1);
+    expect(reply.answer).toBe(prose);
+    expect(llmForward).toHaveBeenCalledTimes(2);
+    const repairBody = JSON.parse((llmForward.mock.calls[1][1] as { body: string }).body) as {
+      tools?: unknown;
+    };
+    expect(repairBody.tools).toBeUndefined();
+  });
+
+  it("tool replies with only citation metadata are repaired after parsing without dropping citations", async () => {
+    const prose = "The cited source text is the relevant evidence for this page.";
+    const metadataOnly = [
+      "```json",
+      JSON.stringify({
+        citations: [{ documentId: "doc-1", page: 1, quote: "snippet text" }],
+      }),
+      "```",
+    ].join("\n");
+    const { groundxClient, llmClient, llmForward } = mkToolOnlyThenProseClients(
+      prose,
+      [{ name: "open_document", arguments: { documentId: "doc-abc", page: 5 } }],
+      metadataOnly,
+    );
+    const reply = await routeChat(makeRequest({ newUserMessage: "show me the source" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+    });
+    expect(reply.answer).toBe(prose);
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0]).toMatchObject({ documentId: "doc-1", page: 1 });
+    expect(reply.intents).toHaveLength(1);
+    expect(llmForward).toHaveBeenCalledTimes(2);
   });
 
   it("optional arg defaults are filled by the handler (open_document page → 1)", async () => {
@@ -1830,6 +2167,8 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       "dismiss_gate",
       "dismiss_wizard",
       "edit_report_section",
+      // agentic-tool-loop — server-executed product-docs lookup is universal.
+      "lookup_groundx_docs",
       "pin_to_report",
       "propose_report_section",
       "reject_report_section",
@@ -2052,5 +2391,313 @@ describe("Phase 8 — category-aware mutate-tool routing", () => {
       const chip = reply.suggestedActions.find((a) => a.key === "tool:accept_probe");
       expect(chip?.label).toMatch(/Mutate-category probe/);
     });
+  });
+});
+
+// chat-architecture-hardening Task 4 — the LLM turn router gates BOTH
+// retrievals. Probe-derived regression: "what is the meter number?" was
+// paying 3-4.5KB of irrelevant skill-authoring content per turn.
+describe("turn plan gates search + skill retrieval", () => {
+  function jsonOk2(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  function mkClients2(llmAnswer: string) {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk2({ search: { results: [{ documentId: "d1", pageNumber: 3, text: "meter 91496724" }] } }),
+      ),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk2({ choices: [{ message: { content: llmAnswer } }] })),
+    };
+    return { groundxClient, llmClient };
+  }
+
+  it("document plan {true,false}: NO skill content reaches the LLM (probe regression)", async () => {
+    const { groundxClient, llmClient } = mkClients2("The meter number is 91496724.");
+    const skillsRetrieve = vi.fn(() => "### [extraction-workflows] Authoring\nYAML schema guidance");
+    await routeChat(makeRequest({ newUserMessage: "what is the meter number?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      skillsRetrieve,
+      planTurn: async () => ({ documentSearch: true, productKnowledge: false }),
+    });
+    expect(skillsRetrieve).not.toHaveBeenCalled();
+    const body = JSON.parse((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
+    const system = body.messages.find((m: { role: string }) => m.role === "system").content as string;
+    expect(system).not.toContain("GROUNDX KNOWLEDGE");
+  });
+
+  it("product plan {false,true}: no GroundX search call, skill block present, zero citations", async () => {
+    const { groundxClient, llmClient } = mkClients2("GroundX is EyeLevel's document platform.");
+    const skillsRetrieve = vi.fn(() => "### [groundx-architecture] Pipeline\nX-Ray facts");
+    const reply = await routeChat(makeRequest({ newUserMessage: "what do you know about groundx?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      skillsRetrieve,
+      planTurn: async () => ({ documentSearch: false, productKnowledge: true }),
+    });
+    const searchCalls = (groundxClient.forward as ReturnType<typeof vi.fn>).mock.calls.filter((c) =>
+      (c[0] as string).includes("/search"),
+    );
+    expect(searchCalls).toHaveLength(0);
+    const body = JSON.parse((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
+    const system = body.messages.find((m: { role: string }) => m.role === "system").content as string;
+    expect(system).toContain("GROUNDX KNOWLEDGE");
+    expect(system).toContain("X-Ray facts");
+    expect(reply.citations).toEqual([]);
+    expect(reply.suggestedActions.find((a) => a.key === "show-source")).toBeUndefined();
+  });
+
+  it("planner-true bypasses the retriever entry bar (skillsRetrieve called with bypass)", async () => {
+    const { groundxClient, llmClient } = mkClients2("answer");
+    const skillsRetrieve = vi.fn(() => "### content");
+    await routeChat(makeRequest({ newUserMessage: "how does ingestion work here?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      skillsRetrieve,
+      planTurn: async () => ({ documentSearch: true, productKnowledge: true }),
+    });
+    expect(skillsRetrieve).toHaveBeenCalledWith("how does ingestion work here?", { bypassEntryBar: true });
+  });
+
+  it("no planTurn injected and no light client → fallback (retriever decides, search runs)", async () => {
+    const { groundxClient, llmClient } = mkClients2("answer");
+    const skillsRetrieve = vi.fn(() => null);
+    await routeChat(makeRequest({ newUserMessage: "what is the total?" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+      skillsRetrieve,
+    });
+    // Fallback path: search ran AND the retriever was consulted with its
+    // internal gate intact (no bypass argument).
+    const searchCalls = (groundxClient.forward as ReturnType<typeof vi.fn>).mock.calls.filter((c) =>
+      (c[0] as string).includes("/search"),
+    );
+    expect(searchCalls.length).toBeGreaterThan(0);
+    expect(skillsRetrieve).toHaveBeenCalledWith("what is the total?");
+  });
+});
+
+// chat-architecture-hardening Task 6 — TOOL NOTES tracks the step-FILTERED
+// catalog: guidance appears only for tools actually offered this turn.
+describe("generated TOOL NOTES section", () => {
+  function jsonOk3(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  function mk3() {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk3({ search: { results: [{ documentId: "d1", text: "t" }] } })),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk3({ choices: [{ message: { content: "a" } }] })),
+    };
+    return { groundxClient, llmClient };
+  }
+  async function systemFor(activeStepKind?: string) {
+    const { groundxClient, llmClient } = mk3();
+    await routeChat(makeRequest({ newUserMessage: "Q", ...(activeStepKind ? { activeStepKind } : {}) }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "m",
+      skillsRetrieve: () => null,
+      planTurn: async () => ({ documentSearch: true, productKnowledge: false }),
+    });
+    const body = JSON.parse((llmClient.forward as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
+    return body.messages.find((m: { role: string }) => m.role === "system").content as string;
+  }
+
+  it("guidance present for an offered tool; hand-written paragraphs gone", async () => {
+    const system = await systemFor("extract-workbench"); // propose_schema_field offered here
+    expect(system).toContain("TOOL NOTES");
+    expect(system).toContain("`propose_schema_field`:");
+    expect(system).not.toContain("ship via tools");
+  });
+
+  it("a tool absent from the step contributes NO notes", async () => {
+    const system = await systemFor("integrate"); // propose_schema_field not offered
+    expect(system).not.toContain("`propose_schema_field`:");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// turn-router-extraction-appstate Task 2 — planner-derived mode routing.
+// routeChat derives the mode from the RoutePlan's appState×documentSearch;
+// the keyword classifier survives ONLY as the intent-hint fast path and the
+// deterministic fallback (CLASSIFIER_DECIDES / planner failure).
+// ─────────────────────────────────────────────────────────────────────
+describe("routeChat — planner-derived mode (appState)", () => {
+  function jsonOk(payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  function ragClients() {
+    const groundxForward = vi.fn(async (path: string) => {
+      if (String(path).includes("/search")) {
+        return jsonOk({ search: { results: [{ documentId: "d1", pageNumber: 1, text: "total is $214.07" }] } });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const llmForward = vi.fn(async () => jsonOk({ choices: [{ message: { content: "An answer." } }] }));
+    return {
+      groundxForward,
+      llmForward,
+      deps: {
+        llmClient: { forward: llmForward },
+        groundxClient: { forward: groundxForward },
+        groundxApiKey: "k",
+        samplesBucketId: 28454,
+        llmModelId: "test-model",
+      },
+    };
+  }
+
+  async function repoFixture() {
+    const { MemoryAppRepository } = await import("../db/memoryRepository.js");
+    const repo = new MemoryAppRepository();
+    const now = new Date();
+    await repo.upsertChatSession({
+      id: "chat-r",
+      onboardingSessionId: "onb-r",
+      ownerUserId: null,
+      ownerAnonId: "anon-1",
+      title: "t",
+      isOnboarding: true,
+      activeEntityKey: "sample:utility",
+      currentIntent: null,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+    return repo;
+  }
+
+  it("appState:true + documentSearch:false → structured", async () => {
+    const { deps } = ragClients();
+    const planTurn = vi.fn(async () => ({
+      documentSearch: false, productKnowledge: false, extractionContext: false, appState: true,
+    }));
+    const res = await routeChat(
+      makeRequest({ newUserMessage: "how many pages do I have left on my plan?" }),
+      { ...deps, repository: await repoFixture(), chatSessionId: "chat-r", planTurn },
+    );
+    expect(res.mode).toBe("structured");
+    expect(planTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("appState:true + documentSearch:true → hybrid", async () => {
+    const { deps } = ragClients();
+    const planTurn = vi.fn(async () => ({
+      documentSearch: true, productKnowledge: false, extractionContext: true, appState: true,
+    }));
+    const res = await routeChat(
+      makeRequest({ newUserMessage: "what can I still do with this bill?" }),
+      { ...deps, repository: await repoFixture(), chatSessionId: "chat-r", planTurn },
+    );
+    expect(res.mode).toBe("hybrid");
+    expect(planTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("appState:false → rag, planner called EXACTLY once end-to-end (plan threaded to the seam)", async () => {
+    const { deps, groundxForward } = ragClients();
+    const planTurn = vi.fn(async () => ({
+      documentSearch: true, productKnowledge: false, extractionContext: false, appState: false,
+    }));
+    const res = await routeChat(
+      makeRequest({ newUserMessage: "what is the total amount due?" }),
+      { ...deps, planTurn },
+    );
+    expect(res.mode).toBe("rag");
+    expect(planTurn).toHaveBeenCalledTimes(1);
+    // The threaded plan governs the seam: extractionContext:false → no extract fetch.
+    // (Asserted below.)
+    const extractCalls = groundxForward.mock.calls.filter(([p]) => String(p).includes("/ingest/document/extract/"));
+    expect(extractCalls).toHaveLength(0);
+  });
+
+  it("a planner answer makes the keyword heuristics UNREACHABLE (no double-classification)", async () => {
+    const { deps } = ragClients();
+    // "what saved schemas do I have?" is a keyword-structured fixture; the
+    // planner says appState:false → rag. If the keywords still ran, this
+    // would route structured and throw (no repository deps here).
+    const planTurn = vi.fn(async () => ({
+      documentSearch: true, productKnowledge: false, extractionContext: true, appState: false as const,
+    }));
+    const res = await routeChat(
+      makeRequest({ newUserMessage: "what saved schemas do I have?" }),
+      { ...deps, planTurn },
+    );
+    expect(res.mode).toBe("rag");
+  });
+
+  it("CLASSIFIER_DECIDES sentinel → keyword classifier routes (byte-for-byte parity)", async () => {
+    const { deps } = ragClients();
+    const { FALLBACK_ROUTE_PLAN } = await import("./turnRouter.js");
+    const planTurn = vi.fn(async () => FALLBACK_ROUTE_PLAN);
+    // Keyword-structured fixture without repo deps → today's throwing behavior.
+    await expect(
+      routeChat(makeRequest({ newUserMessage: "what saved schemas do I have?" }), { ...deps, planTurn }),
+    ).rejects.toThrow(/structured/);
+    // Keyword-rag fixture routes rag.
+    const res = await routeChat(
+      makeRequest({ newUserMessage: "what is the total amount due?" }),
+      { ...deps, planTurn },
+    );
+    expect(res.mode).toBe("rag");
+  });
+
+  it("an explicit intent hint decides the mode WITHOUT a planner call for routing", async () => {
+    const { deps } = ragClients();
+    // A plan that would route structured if the planner were consulted for
+    // routing — the chat.sources hint must win regardless. The seam may
+    // still call the planner ONCE for its retrieval flags (hinted turns
+    // plan inside the seam, exactly as before this change).
+    const planTurn = vi.fn(async () => ({
+      documentSearch: false, productKnowledge: false, extractionContext: false, appState: true as const,
+    }));
+    const res = await routeChat(
+      makeRequest({ newUserMessage: "how many pages do I have left on my plan?", intent: "chat.sources" }),
+      { ...deps, planTurn },
+    );
+    expect(res.mode).toBe("rag");
+    expect(planTurn.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
+  it("planner-routed structured DEGRADES to rag with the fallback seam plan when session deps are missing", async () => {
+    const { deps, groundxForward } = ragClients();
+    const planTurn = vi.fn(async () => ({
+      documentSearch: false, productKnowledge: false, extractionContext: false, appState: true,
+    }));
+    const res = await routeChat(
+      makeRequest({ newUserMessage: "how many pages do I have left on my plan?" }),
+      { ...deps, planTurn }, // no repository / chatSessionId
+    );
+    expect(res.mode).toBe("rag");
+    // The degrade runs the FALLBACK seam plan (search ON), not the planner's documentSearch:false.
+    const searchCalls = groundxForward.mock.calls.filter(([p]) => String(p).includes("/search"));
+    expect(searchCalls.length).toBeGreaterThan(0);
   });
 });

@@ -845,6 +845,12 @@ export interface ChatStoreApi {
    * shown. No-op when there's no active highlight.
    */
   clearCitationHighlight: () => void;
+  /**
+   * show-all-sources toggle (2026-06-11) — clear the active doc-viewer
+   * step's `litRegions` (the multi-region "Show all sources" overlay).
+   * The page stays shown; only the regions are removed.
+   */
+  clearCitationRegions: () => void;
 }
 
 export interface NewViewerEventInput {

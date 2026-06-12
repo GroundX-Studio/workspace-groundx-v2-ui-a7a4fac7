@@ -76,7 +76,6 @@ try {
       "LLM_SERVICE=openai",
       "LLM_MODEL_ID=gpt-test",
       "LLM_API_KEY=test-llm-key",
-      "APP_REPOSITORY_MODE=memory",
       // GROUNDX_SAMPLES_BUCKET_ID is required for the onboarding
       // RAG flow — without it the chat router can't search the
       // samples bucket and every reply is "I don't have any snippets."

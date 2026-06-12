@@ -39,7 +39,7 @@ crosses ≥2 layers.
 
 | Concept | App type | Wire / middleware type | DB column(s) | Persisted JSON | Reconciled by |
 |---|---|---|---|---|---|
-| Citation | `Citation` (re-export `@groundx/shared`) | `Citation` (re-export `@groundx/shared`) | `chat_messages.citations_json` | array of `Citation` | one shared Zod schema; `parseCitations` sanitizes the hydrate boundary |
+| Citation | `Citation` (re-export `@groundx/shared`) | `Citation` (re-export `@groundx/shared`) | `chat_messages.citations_json` | array of `Citation` | one shared Zod schema; `parseCitations` sanitizes the hydrate boundary. Producers: snippet-quote verify loop AND extraction-sourced entries (2026-06-11-extraction-grounded-citations — model emits `{documentId, field, value}`; middleware validates against the real extract payload, resolves page/bbox via the WF-05 X-Ray field match, drops on geometry miss; same `Citation` shape on the wire) |
 | ContentScope | `ContentScope` (re-export) | `ContentScope` (`deriveRagContentScope` returns it) | `chat_session_entities.bucket_id` + `project_ids_json` + `group_id` + `document_ids_json` (decomposed) | — (columns, not a blob) | one shared Zod union; `compileScopeFilter` materializes the filter |
 | Template (Extract schema / Report template) | `Template` (re-export) + `api/templates.ts` | `Template` (re-export); `POST /api/templates` | `templates.{id,kind,body_json,…}` | `body_json` = `ExtractBody`\|`ReportBody` | one shared Zod schema; `parseTemplate` row-mapper sanitizer; `rowToTemplate` guards `kind` via `templateKindSchema` |
 | GeneratedResult (Extract value / Report section) | `ExtractedFieldValue` / `RenderedSection` (both `@groundx/shared`) | same | — (computed at render) | — | shared `GeneratedResult` base + `parseGeneratedResult` |
@@ -100,6 +100,13 @@ crosses ≥2 layers.
 | ScenarioRegistry / OnboardingSkill / Loading / MessageBar | states | — | plumbing |
 | SDK/entity contexts (Buckets, Documents, Groups, Projects, Workflows, ApiKeys, Search, Health, Auth) | each | CRUD returning `SdkActionResult<T>` | wrap GroundX entities |
 
+## Browser-safe app config
+
+| Object | Source | Key properties | Notes |
+|---|---|---|---|
+| `AppConfig` | `app/src/appConfig.ts` | `appName`, `logos`, `legal`, `calendly`, `api`, `onboarding`, `design` | Frontend-only config struct for public/browser-safe values. Values sourced from `VITE_*` are bundled into the browser and must never include secrets. |
+| `AppCalendlyConfig` | `app/src/appConfig.ts` | `url` | `DEFAULT_APP_CONFIG.calendly.url` reads `VITE_CALENDLY_URL`; empty string is valid and makes `BookCallView` render a labeled placeholder instead of loading Calendly. |
+
 ## Widget / tool layer
 
 | Object | Inheritance / composes | Key properties | Where used |
@@ -109,7 +116,7 @@ crosses ≥2 layers.
 | `WidgetTool<TSchema>` | generic declarative metadata | `name, description, input(Zod), category, availableIn?, availableSteps?, rendersWidget?` | `tools/types.ts`; collected only for parity/quality/reference checks and widget descriptors; app declarations do not execute handlers; `availableIn?: ToolMode[]` (migrating to `WidgetRole[]`); `rendersWidget?: "<slot>/<Name>"` (§5) binds a TOOL-triggered chat card to its mounted widget (reachability guard) |
 | `ToolCategory` / `ToolMode` | unions | `read\|mutate` / `onboarding\|steady` | tool confirmation model. Code TODAY ships `ToolMode` + `availableIn?: ToolMode[]` (`tools/types.ts:20,71`); these migrate to `WidgetRole` + `availableIn?: WidgetRole[]` (a source-of-truth Zod enum in `@groundx/shared`, tool visibility gated by `availableIn` only) via `widget-role-access` — NOT shipped. Build NEW tools against `WidgetRole`. |
 | App tool decl | `*.tools.ts` → `WidgetTool[]` | per widget | declarative metadata collected by tests/scripts; no production app registry |
-| `ServerTool<TSchema>` | — | `name, description, inputSchema, intentBuilder, availableIn?, rendersWidget?` | `SERVER_TOOL_CATALOG[]`; `rendersWidget?` mirrors the app binding (§5 reachability) |
+| `ServerTool<TSchema>` | — | `name, description, inputSchema, intentBuilder?, serverExecute?, activityLabel?, availableIn?, rendersWidget?` | `SERVER_TOOL_CATALOG[]`; `rendersWidget?` mirrors the app binding (§5 reachability). **agentic-tool-loop:** a tool is EITHER intent-routed (`intentBuilder`) OR server-EXECUTED (`serverExecute`+`activityLabel`, read-only, run inside the grounded tool-result loop, no app mirror → allowlisted server-only in `catalog-parity.test.ts`); the catalog-invariant test enforces exactly-one. `lookup_groundx_docs` is the first server-executed tool. |
 | `ViewerStepKind` | string union | same kinds as `ViewerStep` | server mirror |
 | `ALLOWED_VERBS` | const | verb prefixes | `check-tool-quality.mjs` |
 
@@ -138,7 +145,8 @@ crosses ≥2 layers.
 | citations hydrate projection | code | **VALIDATED (B1, 2026-05-29):** `app.ts` messages-hydrate now runs `citations_json` through `parseCitations` (`@groundx/shared`) — drops malformed, strips unknown keys; no longer ships `unknown[]` | guarded boundary |
 | union-typed DB columns | SQL | the 3 genuinely-closed unions — `chat_messages.role`, `viewer_events.action`/`source`, `intent_log.source` — are bare `VARCHAR` at the DB but **Zod-enum-COERCED** in the row mappers via `coerceEnum(schema, value, fallback)` (§4c, 2026-05-31): a corrupt value coerces to a safe in-union default, not blind-cast. `last_frame`/`entity_key`/`intent_kind` are FREE strings (open discriminators), correctly NOT coerced | row-mapper coercion is the union guard (no DB CHECK) |
 | bbox rectangle | shared `NormalizedBbox` | ✅ 2026-05-29 — all ~10 inline `{x,y,w,h}` app-side annotations (7 files) replaced with the shared `@groundx/shared` `NormalizedBbox`; mw `citationGeometry` re-exports it | single named type |
-| Services | functions | `chatRouter (1637 lines — overloaded), chatHandler, conversationCompressor, contextBundler, fieldExtractor, attribution, citationGeometry, toolCatalog, structuredHandler, zodToJsonSchema` | middleware |
+| Services | functions | `chatRouter (1637 lines — overloaded), chatHandler, conversationCompressor, contextBundler, fieldExtractor, attribution, citationGeometry, quoteEmbedder, toolCatalog, structuredHandler, zodToJsonSchema` | middleware |
+| embedding verification seam | deps + env | wire-embedding-verification (2026-06-11): `GroundedAnswerDeps.quoteEmbedder?: Embedder` (`(quote, sentences) => Promise<number>`, best cosine) + `embedThreshold?` — verifyQuote's THIRD gate, threaded composition-root → chat/report/hybrid (mirrors `wordMapFetch`/`skillsRetrieve`). Live impl `quoteEmbedder.ts` (batched OpenAI-compatible `/embeddings`, TTL+capped vector cache). Env `EMBEDDINGS_BASE_URL/_MODEL_ID` REQUIRED in prod (always-on, no flag); `_API_KEY` optional (keyless self-host); `_VERIFY_THRESHOLD` 0.82; `_TIMEOUT_MS` 2000 abort budget. Never-fail enforced IN `verifyQuote` (try/catch) | embedding match = `paraphrase` tier max |
 
 ## Shared wire contracts — `shared/` (`@groundx/shared`, B1 2026-05-29)
 

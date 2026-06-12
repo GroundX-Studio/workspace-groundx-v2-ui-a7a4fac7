@@ -63,6 +63,16 @@ function makeMessage(
   };
 }
 
+// retire-memory-repository-mode (2026-06-11): MYSQL_* is required in every
+// environment, so tests that load env minimally (to read Zod defaults) carry
+// connection placeholders. Values are never dialed — loadEnv only validates.
+const MINIMAL_MYSQL_ENV = {
+  MYSQL_HOST: "localhost",
+  MYSQL_DATABASE: "test",
+  MYSQL_USER: "test",
+  MYSQL_PASSWORD: "test",
+};
+
 describe("handleChatMessage — validation", () => {
   let repo: MemoryAppRepository;
   let llmClient: LlmClient;
@@ -487,17 +497,25 @@ describe("handleChatMessage — CF-15 EntitySession scope refs → RAG search", 
     groundxClient = { forward: groundxForward };
   });
 
-  function lastSearchBody(): Record<string, unknown> {
+  // RAG + raw extraction (2026-06-11): the grounded path may follow the
+  // search with an /ingest/document/extract fetch, so "last call" is no
+  // longer always the search — select the last SEARCH call explicitly.
+  function lastSearchCall(): unknown[] {
     expect(groundxForward).toHaveBeenCalled();
-    const lastCall = groundxForward.mock.calls.at(-1)!;
-    const init = lastCall[1] as { body: string };
+    const call = groundxForward.mock.calls
+      .filter((c: unknown[]) => String(c[0]).startsWith("/search"))
+      .at(-1);
+    expect(call).toBeDefined();
+    return call!;
+  }
+
+  function lastSearchBody(): Record<string, unknown> {
+    const init = lastSearchCall()[1] as { body: string };
     return JSON.parse(init.body);
   }
 
   function lastSearchPath(): string {
-    expect(groundxForward).toHaveBeenCalled();
-    const lastCall = groundxForward.mock.calls.at(-1)!;
-    return lastCall[0] as string;
+    return lastSearchCall()[0] as string;
   }
 
   it("EntitySession with projectIds:[P1,P2] → search body has filter: {projectId: {$in: [P1,P2]}}", async () => {
@@ -1076,8 +1094,10 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
         DEFAULT_MAX_SUMMARY_OUTPUT_TOKENS,
       } = await import("./chatHandler.js");
       const { loadEnv } = await import("../config/env.js");
-      // Load env with nothing set — Zod fills in every default.
-      const env = loadEnv({ NODE_ENV: "development", PORT: "3001" } as never);
+      // Load env with nothing tunable set — Zod fills in every default.
+      // (MYSQL_* is required in every environment since
+      // retire-memory-repository-mode, so the minimal env carries it.)
+      const env = loadEnv({ ...MINIMAL_MYSQL_ENV, NODE_ENV: "development", PORT: "3001" } as never);
       expect(env.LLM_CONTEXT_WINDOW_TOKENS).toBe(DEFAULT_CONTEXT_WINDOW);
       expect(env.COMPRESSION_TARGET_TOKENS).toBe(DEFAULT_COMPRESSION_TARGET_TOKENS);
       expect(env.MAX_ACTIVE_SUMMARIES_BEFORE_META).toBe(DEFAULT_MAX_ACTIVE_SUMMARIES_BEFORE_META);
@@ -1088,7 +1108,7 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
     it("pins shouldCompress's default trigger ratio to the env Zod default", async () => {
       const { DEFAULT_COMPRESSION_TRIGGER_RATIO } = await import("./contextBundler.js");
       const { loadEnv } = await import("../config/env.js");
-      const env = loadEnv({ NODE_ENV: "development", PORT: "3001" } as never);
+      const env = loadEnv({ ...MINIMAL_MYSQL_ENV, NODE_ENV: "development", PORT: "3001" } as never);
       expect(env.COMPRESSION_TRIGGER_RATIO).toBe(DEFAULT_COMPRESSION_TRIGGER_RATIO);
     });
   });
@@ -1111,8 +1131,9 @@ describe("handleChatMessage — CF-17 compression tunables", () => {
     );
     // The leaf-compaction LLM call should have included
     // max_completion_tokens=250 (gpt-5 family deprecated max_tokens). The live
-    // RAG turn also posts to /chat/completions, so select the call that carries
-    // the summarizer's max_completion_tokens (the RAG grounding call does not).
+    // RAG turn also posts to /chat/completions (and since
+    // harden-citation-emission carries its own max_completion_tokens=4096),
+    // so select the call whose ceiling is the summarizer's 250.
     const summarizerCall = (llmClient.forward as ReturnType<typeof vi.fn>).mock.calls.find((c) => {
       if (c[0] !== "/chat/completions") return false;
       try {

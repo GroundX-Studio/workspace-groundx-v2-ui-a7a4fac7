@@ -89,6 +89,63 @@ describe("ChatColumn", () => {
     if (typeof window !== "undefined") window.sessionStorage.clear();
   });
 
+  // Canvas↔chat coherence (2026-06-11). When the scripted Understand intro
+  // is about to ANIMATE (fresh sessionStorage, empty thread), the canvas must
+  // be on Understand — replaying the scan narration over a resumed later
+  // frame (Interact/Integrate) is incoherent. With real turns in the thread,
+  // a returning user is NOT yanked back.
+  describe("scripted-intro replay snaps the canvas to Understand", () => {
+    function FrameProbe() {
+      const { state } = useOnboardingSession();
+      return <div data-testid="frame-probe">{state.currentFrame}</div>;
+    }
+
+    it("resuming a later frame with an empty thread snaps back to f2 when the intro will play", async () => {
+      renderWithChatColumnApi(
+        <>
+          <ChatColumn role="anonymous" scope={{ type: "none" }} />
+          <FrameProbe />
+        </>,
+        { initialFrame: "f5", initialScenario: "utility" },
+      );
+      await waitFor(() => expect(screen.getByTestId("frame-probe")).toHaveTextContent("f2"));
+    });
+
+    it("does NOT snap when the intro is a replay-restore (doneness persisted)", async () => {
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
+      renderWithChatColumnApi(
+        <>
+          <ChatColumn role="anonymous" scope={{ type: "none" }} />
+          <FrameProbe />
+        </>,
+        { initialFrame: "f5", initialScenario: "utility" },
+      );
+      // The intro restores instantly (no animation) — the resumed frame stands.
+      await screen.findByTestId("onboarding-chat-bot-lead");
+      expect(screen.getByTestId("frame-probe")).toHaveTextContent("f5");
+    });
+
+    it("does NOT snap when the thread has real turns (returning user keeps their frame)", async () => {
+      listChatMessages.mockResolvedValue([
+        { id: "m1", role: "user", content: "what is the total?", citations: [] },
+        { id: "m2", role: "assistant", content: "$7,613.20.", citations: [] },
+      ]);
+      renderWithChatColumnApi(
+        <>
+          <ChatColumn role="anonymous" scope={{ type: "none" }} />
+          <FrameProbe />
+        </>,
+        { initialFrame: "f5", initialScenario: "utility" },
+      );
+      await screen.findByTestId("onboarding-chat-bot-lead");
+      // Give the (wrong) snap a beat to fire if it were going to.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      expect(screen.getByTestId("frame-probe")).toHaveTextContent("f5");
+    });
+  });
+
   // DBG-01 B (2026-05-28). The chat scroll container must reserve a
   // scrollbar gutter so the bar doesn't paint over the message bubbles.
   it("DBG-01 B: onboarding chat scroll container reserves a scrollbar gutter", () => {
@@ -372,7 +429,6 @@ describe("ChatColumn", () => {
           answer: "The bill total is $214.07.",
           citations: [],
           suggestedActions: [],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -422,6 +478,7 @@ describe("ChatColumn", () => {
           /couldn't reach the chat service/i,
         );
       });
+      expect(screen.queryByTestId("pin-to-report-action")).not.toBeInTheDocument();
     });
 
     // CF-08 — per-status copy in the catch site.
@@ -608,7 +665,6 @@ describe("ChatColumn", () => {
           answer: "fresh reply from server",
           citations: [],
           suggestedActions: [],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -655,7 +711,6 @@ describe("ChatColumn", () => {
             { documentId: "doc-A", page: 12, snippet: "due date March 15" },
           ],
           suggestedActions: [],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -693,7 +748,6 @@ describe("ChatColumn", () => {
           answer: "Tax is $42.",
           citations: [{ documentId: "doc-B", page: 3, snippet: "tax 42" }],
           suggestedActions: [],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -804,7 +858,6 @@ describe("ChatColumn", () => {
           answer: "Steady reply.",
           citations: [],
           suggestedActions: [],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -860,7 +913,6 @@ describe("ChatColumn", () => {
         answer: "Totals reconciled.",
         citations: [],
         suggestedActions: [],
-        tools: [],
         intents: [],
         toolFailures: [],
         proposedSchemaField: null,
@@ -952,7 +1004,6 @@ describe("ChatColumn", () => {
         answer: "Done.",
         citations: [],
         suggestedActions: [],
-        tools: [],
         intents: [],
         toolFailures: [],
         proposedSchemaField: null,
@@ -1019,7 +1070,6 @@ describe("ChatColumn", () => {
             { key: "show-source", label: "Show source" },
             { key: "open-samples", label: "Open samples" },
           ],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -1052,7 +1102,6 @@ describe("ChatColumn", () => {
           answer: "Steady reply with suggestions.",
           citations: [],
           suggestedActions: [{ key: "show-source", label: "Show source" }],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -1094,7 +1143,6 @@ describe("ChatColumn", () => {
               },
             },
           ],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -1153,7 +1201,6 @@ describe("ChatColumn", () => {
               detail: { intent: "show-extract", confidence: 0.91 },
             },
           ],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -1213,7 +1260,6 @@ describe("ChatColumn", () => {
               detail: { name: "book_call", arguments: {}, intent: { kind: "openBookCall" } },
             },
           ],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,
@@ -1245,7 +1291,6 @@ describe("ChatColumn", () => {
           answer: "",
           citations: [],
           suggestedActions: [{ key: "show-source", label: "Show source" }],
-          tools: [],
           intents: [],
           toolFailures: [],
           proposedSchemaField: null,

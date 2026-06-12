@@ -26,8 +26,12 @@ export default defineConfig({
         // there is no MOCK_MODE (2026-06-01-retire-mock-mode). The deterministic
         // e2e data is the seeded sample doc c3bfff49 in bucket 28454, which is
         // stable. The Partner key + GroundX base URL come from the environment
-        // (a CI secret in CI; .env.local locally). The repo stays in-memory.
-        `PORT=${middlewarePort} APP_REPOSITORY_MODE=memory METRICS_ENABLED=false npm --workspace @groundx/web-ui-scaffold-middleware run start`,
+        // (a CI secret in CI; .env.local locally). The repository is MySQL —
+        // the ONLY runtime repository (retire-memory-repository-mode,
+        // 2026-06-11): MYSQL_* comes from .env.local locally (the dev RDS) or
+        // a CI-provided database; the suite asserts live-stable structural
+        // invariants, never row-level fixture state, so a shared DB is fine.
+        `PORT=${middlewarePort} METRICS_ENABLED=false npm --workspace @groundx/web-ui-scaffold-middleware run start`,
       ].join(" && "),
       url: `${middlewareBaseUrl}/api/healthz`,
       reuseExistingServer: false,

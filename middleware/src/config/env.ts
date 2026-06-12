@@ -29,7 +29,12 @@ const envSchema = z.object({
   GROUNDX_DEPLOY_PUBLIC_HOST: z.string().optional(),
   GROUNDX_DEPLOY_RELEASE_NAME: z.string().optional(),
   ALLOWED_ORIGIN: z.string().optional(),
-  APP_REPOSITORY_MODE: z.enum(["auto", "memory", "mysql"]).default("auto"),
+  // 2026-06-11 retire-memory-repository-mode: APP_REPOSITORY_MODE is GONE.
+  // The runtime repository is ALWAYS MySQL — MYSQL_* below is required in
+  // every environment (enforced in superRefine). The in-memory repository
+  // survives only as an injected test double (`MemoryAppRepository` in
+  // vitest suites), never as a runtime mode: a dev boot without a database
+  // fails fast instead of silently storing chat history in RAM.
   MYSQL_HOST: z.string().optional(),
   MYSQL_PORT: z.coerce.number().int().positive().default(3306),
   MYSQL_DATABASE: z.string().optional(),
@@ -65,6 +70,27 @@ const envSchema = z.object({
   LLM_LIGHT_AUTH_HEADER_NAME: z.string().optional(),
   LLM_LIGHT_AUTH_SCHEME: z.string().optional(),
   LLM_LIGHT_MODEL_ID: z.string().optional(),
+  // wire-embedding-verification: the embeddings provider behind the third
+  // citation-verification gate (verifyQuote's embedding similarity). An
+  // OpenAI-compatible `/embeddings` endpoint; the configurable base URL is
+  // the on-prem/air-gap seam (TEI / Ollama / vLLM self-host it). base_url +
+  // model_id are REQUIRED in production (superRefine below) — the gate is
+  // always-on, no feature flag; dev/test boot without them and degrade to
+  // lexical-only verification at runtime (composition root logs a warning).
+  // API key is OPTIONAL EVERYWHERE: keyless self-hosted providers are
+  // first-class — the auth header is attached only when a key is set.
+  EMBEDDINGS_BASE_URL: z.string().url().optional(),
+  EMBEDDINGS_API_KEY: z.string().optional(),
+  EMBEDDINGS_MODEL_ID: z.string().optional(),
+  EMBEDDINGS_AUTH_HEADER_NAME: z.string().optional(),
+  EMBEDDINGS_AUTH_SCHEME: z.string().optional(),
+  // Cosine threshold at/above which an embedding match verifies a quote
+  // (tier `paraphrase`). Calibrate per embedding model without code change.
+  EMBEDDINGS_VERIFY_THRESHOLD: z.coerce.number().min(0.5).max(0.99).default(0.82),
+  // Per-call abort budget for the embeddings request. Deliberately tight:
+  // citation verification BLOCKS the chat reply, so a dead provider must
+  // cost ~2s, never the generic 30s UPSTREAM_TIMEOUT_MS.
+  EMBEDDINGS_TIMEOUT_MS: z.coerce.number().int().min(200).max(10_000).default(2_000),
   // LLM context window in tokens. Compression triggers at 70% of this.
   // Different models have wildly different windows (Claude Sonnet=200k,
   // GPT-4o=128k, GPT-3.5=16k) so the default is the conservative lower
@@ -117,10 +143,11 @@ const envSchema = z.object({
   // tests opt back into `true` to exercise the defense.
   CSRF_ENABLED: z.preprocess(parseBoolean, z.boolean()).default(true),
 }).superRefine((env, ctx) => {
-  const requiresMysql = env.NODE_ENV === "production" || env.APP_REPOSITORY_MODE === "mysql";
+  // MySQL is the ONLY runtime repository — connection config is required in
+  // every environment (retire-memory-repository-mode, 2026-06-11).
   for (const key of ["MYSQL_HOST", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD"] as const) {
-    if (requiresMysql && !env[key]) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when using MySQL` });
+    if (!env[key]) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required (MySQL is the only runtime repository)` });
     }
   }
   if (env.NODE_ENV === "production" && env.SESSION_SECRET === "dev-session-secret-change-before-production") {
@@ -157,6 +184,18 @@ const envSchema = z.object({
       path: ["LLM_MODEL_ID"],
       message: "LLM_MODEL_ID is required in production",
     });
+  }
+  // Embedding verification is always-on: the provider (base_url + model_id)
+  // is required in production. The API key is NOT required — keyless
+  // self-hosted embeddings endpoints are a supported deployment.
+  for (const key of ["EMBEDDINGS_BASE_URL", "EMBEDDINGS_MODEL_ID"] as const) {
+    if (env.NODE_ENV === "production" && !env[key]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} is required in production (embedding citation verification is always-on)`,
+      });
+    }
   }
 });
 

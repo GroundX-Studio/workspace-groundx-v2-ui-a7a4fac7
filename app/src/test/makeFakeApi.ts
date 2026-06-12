@@ -92,7 +92,6 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
         answer: "",
         citations: [],
         suggestedActions: [],
-        tools: [],
         intents: [],
         toolFailures: [],
         proposedSchemaField: null,

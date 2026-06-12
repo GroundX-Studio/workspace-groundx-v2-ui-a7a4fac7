@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
 import { useApi } from "@/contexts/ApiContext";
 import { readRegistryDemoOverride } from "@/lib/demoState";
@@ -7,6 +7,16 @@ import type { ScenarioConfig } from "@/types/scenarios";
 import type { ScenarioRegistryApi, ScenarioRegistryState } from "./types";
 
 const ScenarioRegistryContext = createContext<ScenarioRegistryApi | null>(null);
+const INITIAL_LOAD_ATTEMPTS = 4;
+const INITIAL_LOAD_RETRY_DELAY_MS = 750;
+
+interface LoadScenariosOptions {
+  attempts?: number;
+  retryDelayMs?: number;
+  shouldContinue?: () => boolean;
+}
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 interface ScenarioRegistryProviderProps {
   children: ReactNode;
@@ -40,6 +50,7 @@ export const ScenarioRegistryProvider: FC<ScenarioRegistryProviderProps> = ({
   forcedDemoState,
 }) => {
   const apiClient = useApi();
+  const loadGenerationRef = useRef(0);
   // forcedDemoState wins over initialScenarios. If neither is set, the
   // provider starts in `idle` and the useEffect kicks off the real fetch.
   const [state, setState] = useState<ScenarioRegistryState>(() => {
@@ -48,7 +59,15 @@ export const ScenarioRegistryProvider: FC<ScenarioRegistryProviderProps> = ({
     return { status: "idle", scenarios: [], bucketId: null, error: null };
   });
 
-  const refresh = useCallback(async () => {
+  const loadScenarios = useCallback(async ({
+    attempts = 1,
+    retryDelayMs = 0,
+    shouldContinue = () => true,
+  }: LoadScenariosOptions = {}) => {
+    const generation = loadGenerationRef.current + 1;
+    loadGenerationRef.current = generation;
+    const canCommit = () => loadGenerationRef.current === generation && shouldContinue();
+
     // In demo mode, refresh() re-asserts the forced state instead of
     // hitting the network. This means the Retry button in the F1 status
     // panel is still clickable and visible-state-stable when demoing.
@@ -57,21 +76,46 @@ export const ScenarioRegistryProvider: FC<ScenarioRegistryProviderProps> = ({
       return;
     }
     setState((previous) => ({ ...previous, status: "loading", error: null }));
-    try {
-      const { bucketId, scenarios } = await apiClient.scenario.listScenarios();
-      setState({ status: "ready", scenarios, bucketId, error: null });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load scenarios";
-      setState({ status: "error", scenarios: [], bucketId: null, error: message });
+
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const { bucketId, scenarios } = await apiClient.scenario.listScenarios();
+        if (!canCommit()) return;
+        setState({ status: "ready", scenarios, bucketId, error: null });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts) {
+          await delay(retryDelayMs);
+          if (!canCommit()) return;
+        }
+      }
     }
+
+    if (!canCommit()) return;
+    const message = lastError instanceof Error ? lastError.message : "Failed to load scenarios";
+    setState({ status: "error", scenarios: [], bucketId: null, error: message });
   }, [apiClient.scenario, forcedDemoState]);
+
+  const refresh = useCallback(async () => {
+    await loadScenarios();
+  }, [loadScenarios]);
 
   useEffect(() => {
     // Demo mode: never fetch.
     if (forcedDemoState) return;
     if (initialScenarios) return;
-    void refresh();
-  }, [forcedDemoState, initialScenarios, refresh]);
+    let active = true;
+    void loadScenarios({
+      attempts: INITIAL_LOAD_ATTEMPTS,
+      retryDelayMs: INITIAL_LOAD_RETRY_DELAY_MS,
+      shouldContinue: () => active,
+    });
+    return () => {
+      active = false;
+    };
+  }, [forcedDemoState, initialScenarios, loadScenarios]);
 
   // `all()` is the Catalog<ScenarioConfig> enumerate view over the
   // ready-state data; `byId` is the lookup view. The async status +

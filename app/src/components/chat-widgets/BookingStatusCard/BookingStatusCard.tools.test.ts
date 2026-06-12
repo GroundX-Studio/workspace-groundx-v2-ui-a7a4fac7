@@ -18,6 +18,7 @@ describe("BookingStatusCard tools", () => {
 
   it("description meets Phase 5b quality bar", () => {
     expect(/use when|triggers when/i.test(tools[0].description)).toBe(true);
+    expect(tools[0].description).toMatch(/team member/i);
     expect(tools[0].description.length).toBeGreaterThanOrEqual(40);
   });
 });

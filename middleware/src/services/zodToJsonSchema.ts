@@ -59,13 +59,25 @@ interface ZodDefLike {
   type?: z.ZodTypeAny;
   /** `ZodObject` unknown-key policy (`strip` | `strict` | `passthrough`). */
   unknownKeys?: string;
+  /** `ZodDiscriminatedUnion` / `ZodUnion` member schemas. */
+  options?: z.ZodTypeAny[];
+  /** `ZodLiteral` value. */
+  value?: unknown;
+  /** `ZodRecord` value schema. */
+  valueType?: z.ZodTypeAny;
 }
 
 function defOf(schema: z.ZodTypeAny): ZodDefLike {
   return schema._def as unknown as ZodDefLike;
 }
 
-function convertNode(schema: z.ZodTypeAny): JsonSchemaNode {
+/**
+ * Exported for the cross-package full-shape parity guard
+ * (app/src/tools/catalog-parity.test.ts) — both sides' Zod input schemas
+ * are rendered through THIS converter and compared as JSON-Schema
+ * (chat-architecture-hardening Task 7).
+ */
+export function convertNode(schema: z.ZodTypeAny): JsonSchemaNode {
   const def = defOf(schema);
   switch (def.typeName) {
     case "ZodOptional": {
@@ -96,14 +108,14 @@ function convertNode(schema: z.ZodTypeAny): JsonSchemaNode {
       // across providers, so we represent it as `minimum: 1` for
       // integers and `minimum: 0` for floats (the runtime Zod parse
       // is the source of truth — JSON Schema is a hint to the LLM).
-      if (checks.some((c) => c.kind === "min" && c.value === 0 && c.kind === "min")) {
-        // already covered by min above
-      }
-      // detect `.positive()`: Zod emits a `kind: "min", value: 0`
-      // entry with an inclusive flag we can't read here without
-      // touching internals. Treat any min===0 on an integer as
-      // positive-only → 1.
-      if (isInt && checks.some((c) => c.kind === "min" && c.value === 0)) {
+      // `.positive()` is `kind: "min", value: 0, inclusive: false`;
+      // `.min(0)` is the same with `inclusive: true` — read the flag so an
+      // inclusive zero floor stays 0 (post-review hardening: the old
+      // "any min===0 on an integer → 1" heuristic silently misread .min(0)).
+      const exclusiveZero = checks.some(
+        (c) => c.kind === "min" && c.value === 0 && (c as { inclusive?: boolean }).inclusive === false,
+      );
+      if (isInt && exclusiveZero) {
         node.minimum = 1;
       }
       if (def.description) node.description = def.description;
@@ -121,6 +133,37 @@ function convertNode(schema: z.ZodTypeAny): JsonSchemaNode {
         enum: def.values ?? [],
       };
       if (def.description) node.description = def.description;
+      return node;
+    }
+    case "ZodDiscriminatedUnion":
+    case "ZodUnion": {
+      // Task 7 (chat-architecture-hardening) - the shared `contentScopeSchema`
+      // is a discriminated union; render as `anyOf` (OpenAI accepts it).
+      const members = (def.options ?? []) as z.ZodTypeAny[];
+      const node: JsonSchemaNode = { anyOf: members.map((m) => convertNode(m)) } as JsonSchemaNode;
+      if (def.description) (node as { description?: string }).description = def.description;
+      return node;
+    }
+    case "ZodRecord": {
+      // Free-form keyed map (e.g. the ContentScope `filter`).
+      const node: JsonSchemaNode = {
+        type: "object",
+        additionalProperties: def.valueType ? convertNode(def.valueType) : true,
+      } as JsonSchemaNode;
+      if (def.description) (node as { description?: string }).description = def.description;
+      return node;
+    }
+    case "ZodLiteral": {
+      const literalType =
+        typeof def.value === "number" ? "number"
+        : typeof def.value === "boolean" ? "boolean"
+        : def.value === null ? "null"
+        : "string";
+      const node: JsonSchemaNode = {
+        type: literalType,
+        const: def.value,
+      } as JsonSchemaNode;
+      if (def.description) (node as { description?: string }).description = def.description;
       return node;
     }
     case "ZodArray": {

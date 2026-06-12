@@ -807,7 +807,7 @@ function Flow_Gate() {
   return (
     <div className="ab">
       <div className="ab-title">Flow · 6 · Gate · sign in (or book an engineer call)</div>
-      <div className="ab-sub">User taps the <b>"unlock everything →"</b> banner from F5 (or hits a metered ceiling, free · 100 pages). Gate opens inline in chat with three options: <b>email · SSO</b>, <b>book a 15-min engineer call</b>, or <b>keep exploring</b>. Canvas stays open behind; nothing is lost. After sign in: F7 welcome → F8 workspace setup → back here with full output unlocked.</div>
+      <div className="ab-sub">User taps the <b>"unlock everything →"</b> banner from F5 (or hits a metered ceiling, free · 100 pages). Gate opens inline in chat with three options: <b>email · SSO</b>, <b>book a 30-min engineer call</b>, or <b>keep exploring</b>. Canvas stays open behind; nothing is lost. After sign in: F7 welcome → F8 workspace setup → back here with full output unlocked.</div>
 
       <AppShell navState="full" navActive={null} accountState="loggedOut" chatWidth={360} focus="split">
         <>

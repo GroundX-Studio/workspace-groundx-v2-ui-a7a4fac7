@@ -34,7 +34,9 @@ const showIntegrate: WidgetTool = {
       "The ContentScope (documents / bucket+filter / group) the user is shipping — inherited from the surface the user transitioned from. The connectors list is scope-independent today, but the scope threads through for context.",
     ),
   }),
-  availableSteps: ["integrate", "doc-viewer", "extract-workbench", "interact-chat", "report"],
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (Task 7 mirrors the
+  // 2026-06-11 server-side decision: navigation tools move the user BETWEEN
+  // steps; gating them by the current step defeats their purpose).
 };
 
 export const tools: WidgetTool[] = [showIntegrate];

@@ -136,6 +136,15 @@ export interface HandleChatMessageDeps {
    */
   lightLlmModelId?: string;
   /**
+   * Embedding-similarity verification seam (wire-embedding-verification) —
+   * see `GroundedAnswerDeps.quoteEmbedder`. Built by the composition root
+   * from the `EMBEDDINGS_*` env block; absent -> lexical-only verification
+   * (dev-degrade; a warning is logged at boot).
+   */
+  quoteEmbedder?: import("./attribution.js").Embedder;
+  /** Embedding-gate threshold (env `EMBEDDINGS_VERIFY_THRESHOLD`). */
+  embedThreshold?: number;
+  /**
    * Legacy name for `lightLlmModelId`. Kept for back-compat callers
    * that wired `compressionModelId` before CF-16 introduced the
    * light/chat split; `lightLlmModelId` wins when both are set.
@@ -401,6 +410,13 @@ export async function handleChatMessage(
       rbacFilter: deps.rbacFilter,
       byoPagesLimit: deps.byoPagesLimit,
       llmModelId: deps.llmModelId,
+      // Turn-router seams (Task 4): the CF-16 light client plans each turn's
+      // retrieval; absent -> deterministic fallback inside the seam.
+      lightLlmClient: deps.lightLlmClient,
+      lightLlmModelId: deps.lightLlmModelId ?? deps.compressionModelId,
+      // wire-embedding-verification: the third verifyQuote gate.
+      quoteEmbedder: deps.quoteEmbedder,
+      embedThreshold: deps.embedThreshold,
     });
   } catch (err) {
     // Record the failure as an assistant message so the conversation

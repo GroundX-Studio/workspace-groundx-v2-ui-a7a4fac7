@@ -228,7 +228,7 @@ function ConceptA_Gate() {
             </div>
           </div>
           <Bubble who="gx">
-            …or <span className="wf-link">book a 15-min demo</span> ·
+            …or <span className="wf-link">book a 30-min demo</span> ·
             <span className="wf-link"> keep exploring</span> samples
           </Bubble>
           <div style={{ flex: 1 }} />

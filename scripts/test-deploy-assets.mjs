@@ -24,8 +24,10 @@ function countRenderedKinds(rendered, kind) {
 
 for (const file of [
   ".dockerignore",
+  ".gitignore",
   "Dockerfile.frontend",
   "Dockerfile.middleware",
+  "app/.env.example",
   "deploy/helm/groundx-web-ui/Chart.yaml",
   "deploy/helm/groundx-web-ui/values.yaml",
   "deploy/helm/groundx-web-ui/templates/frontend-deployment.yaml",
@@ -40,15 +42,44 @@ for (const file of [
 const frontendDockerfile = read("Dockerfile.frontend");
 assert(frontendDockerfile.includes("npm --workspace app run build"), "frontend image must build the Vite app");
 assert(frontendDockerfile.includes("/etc/nginx/templates/default.conf.template"), "frontend image must install nginx proxy template");
+assert(frontendDockerfile.includes("ARG VITE_CALENDLY_URL"), "frontend image build must accept the public Calendly URL as a build arg");
+assert(frontendDockerfile.includes("ENV VITE_CALENDLY_URL=$VITE_CALENDLY_URL"), "frontend build must expose the Calendly build arg to Vite");
 
 const dockerignore = read(".dockerignore");
 for (const pattern of ["node_modules", "app/dist", "middleware/dist", ".git", ".env.*"]) {
   assert(dockerignore.includes(pattern), `.dockerignore must exclude ${pattern}`);
 }
+const gitignore = read(".gitignore");
+const appEnvExample = read("app/.env.example");
+assert(!gitignore.includes("!app/.env"), "gitignore must not allow committing local app/.env files");
+assert(!dockerignore.includes("!app/.env"), "dockerignore must not include local app/.env files in image builds");
+assert(gitignore.includes(".env") && gitignore.includes(".env.*"), "gitignore must keep env files ignored");
+assert(dockerignore.includes(".env") && dockerignore.includes(".env.*"), "dockerignore must keep env files out of build context");
+assert(
+  appEnvExample.includes("VITE_CALENDLY_URL=https://calendly.com/d/d3wn-ryv-rmr/30-minutes-with-a-groundx-engineer"),
+  "app/.env.example must document the default public Calendly URL",
+);
+for (const line of appEnvExample.split(/\r?\n/)) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#")) continue;
+  const key = trimmed.split("=", 1)[0];
+  assert(key.startsWith("VITE_"), `app/.env.example may only document Vite public keys, found ${key}`);
+}
 
 const middlewareDockerfile = read("Dockerfile.middleware");
 assert(middlewareDockerfile.includes("npm --workspace middleware run build"), "middleware image must build TypeScript");
 assert(middlewareDockerfile.includes('"npm", "--workspace", "middleware", "run", "start"'), "middleware image must run the middleware start script");
+// groundx-knowledge-prompt — the runtime image must ship the vendored
+// GroundX skill pack (middleware/assets/groundx-skills) alongside dist;
+// without it retrieval silently degrades to a knowledge-free prompt.
+assert(
+  /COPY --from=build \/workspace\/middleware\/assets middleware\/assets/.test(middlewareDockerfile),
+  "middleware image must ship middleware/assets (vendored groundx-skills pack)",
+);
+assert(
+  existsSync(join(root, "middleware/assets/groundx-skills/MANIFEST.json")),
+  "vendored groundx-skills pack missing — run scripts/sync-groundx-skills.mjs",
+);
 
 // ── @groundx/shared workspace wiring (B1) — keep dev / prod / container
 // resolution intact. The shared wire-contract package must be built before
@@ -92,6 +123,8 @@ assert(
   /docker build/.test(ciWorkflow) && ciWorkflow.includes("Dockerfile.middleware") && ciWorkflow.includes("Dockerfile.frontend"),
   "CI must build BOTH Docker images (the container-build regression guard for the @groundx/shared wiring)",
 );
+assert(ciWorkflow.includes("vars.VITE_CALENDLY_URL"), "CI frontend image build must allow the public Calendly URL from GitHub variables");
+assert(ciWorkflow.includes("--build-arg VITE_CALENDLY_URL="), "CI frontend image build must pass the Calendly URL build arg");
 
 const nginxTemplate = read("deploy/nginx/default.conf.template");
 assert(nginxTemplate.includes("location /api/"), "nginx must proxy /api/*");
@@ -144,6 +177,9 @@ assert(
   "workflow must lowercase the middleware image repository before Docker build",
 );
 assert(workflow.includes("secrets.FRONTEND_IMAGE_REPOSITORY"), "workflow must allow frontend image repository from org secrets");
+assert(workflow.includes("VITE_CALENDLY_URL_INPUT"), "workflow must source the public Calendly URL for the frontend build");
+assert(workflow.includes("vars.VITE_CALENDLY_URL"), "workflow must allow the Calendly URL from GitHub variables");
+assert(workflow.includes("VITE_CALENDLY_URL=${{ env.VITE_CALENDLY_URL_INPUT }}"), "frontend image build must pass the Calendly URL build arg");
 assert(workflow.includes("secrets.MIDDLEWARE_IMAGE_REPOSITORY"), "workflow must allow middleware image repository from org secrets");
 assert(workflow.includes("secrets.K8S_NAMESPACE"), "workflow must allow namespace from org secrets");
 assert(workflow.includes("vars.PUBLIC_DOMAIN"), "workflow must allow default public hosts from an org public domain");

@@ -23,9 +23,6 @@ function setup(env = testEnv) {
 describe("middleware scaffold", () => {
   it("validates required environment", () => {
     expect(() => loadEnv({ NODE_ENV: "production", PORT: "3001" } as any)).toThrow();
-    const defaultDevEnv = loadEnv({ NODE_ENV: "development", PORT: "3001" } as any);
-    expect(defaultDevEnv.APP_REPOSITORY_MODE).toBe("auto");
-    expect(defaultDevEnv.MYSQL_HOST).toBeUndefined();
     expect(loadEnv({ ...testEnv, PORT: "3002" } as any).PORT).toBe(3002);
     // 2026-06-01-retire-mock-mode: the MOCK_MODE env field is gone. loadEnv
     // parses cleanly with no MOCK_MODE key, the schema exposes no MOCK_MODE
@@ -33,11 +30,19 @@ describe("middleware scaffold", () => {
     // a typed field) in every environment — including production.
     expect("MOCK_MODE" in loadEnv({ ...testEnv } as any)).toBe(false);
     expect("MOCK_MODE" in loadEnv({ ...testEnv, MOCK_MODE: "true" } as any)).toBe(false);
+    // 2026-06-11 retire-memory-repository-mode: the APP_REPOSITORY_MODE env
+    // field is gone — the runtime repository is ALWAYS MySQL (the in-memory
+    // repository survives only as an injected test double). loadEnv exposes
+    // no such field, a stray env var is ignored in every environment, and
+    // MYSQL_* connection config is required in EVERY environment — a dev
+    // boot without a database fails fast instead of silently running on RAM.
+    expect("APP_REPOSITORY_MODE" in loadEnv({ ...testEnv } as any)).toBe(false);
+    expect("APP_REPOSITORY_MODE" in loadEnv({ ...testEnv, APP_REPOSITORY_MODE: "memory" } as any)).toBe(false);
+    expect(() => loadEnv({ NODE_ENV: "development", PORT: "3001" } as any)).toThrow(/MYSQL_HOST/);
     expect(() =>
       loadEnv({
         NODE_ENV: "development",
         PORT: "3001",
-        APP_REPOSITORY_MODE: "mysql",
         SESSION_SECRET: "01234567890123456789012345678901",
       } as any),
     ).toThrow(/MYSQL_HOST/);
@@ -47,6 +52,25 @@ describe("middleware scaffold", () => {
     expect(() => loadEnv({ ...testEnv, NODE_ENV: "production", LLM_MODEL_ID: undefined } as any)).toThrow(
       /LLM_MODEL_ID/,
     );
+    // wire-embedding-verification: the embeddings provider is always-on —
+    // base_url + model_id are required in production (fail fast at boot)…
+    expect(() =>
+      loadEnv({ ...testEnv, NODE_ENV: "production", EMBEDDINGS_BASE_URL: undefined } as any),
+    ).toThrow(/EMBEDDINGS_BASE_URL/);
+    expect(() =>
+      loadEnv({ ...testEnv, NODE_ENV: "production", EMBEDDINGS_MODEL_ID: undefined } as any),
+    ).toThrow(/EMBEDDINGS_MODEL_ID/);
+    // …but the API key is NOT required (keyless self-hosted providers):
+    // production boots with base_url + model_id and no key.
+    expect(
+      loadEnv({ ...testEnv, NODE_ENV: "production", EMBEDDINGS_API_KEY: undefined } as any)
+        .EMBEDDINGS_MODEL_ID,
+    ).toBe("embed-model");
+    // Threshold + timeout bounds enforced; defaults applied when unset.
+    expect(loadEnv({ ...testEnv } as any).EMBEDDINGS_VERIFY_THRESHOLD).toBe(0.82);
+    expect(loadEnv({ ...testEnv } as any).EMBEDDINGS_TIMEOUT_MS).toBe(2000);
+    expect(() => loadEnv({ ...testEnv, EMBEDDINGS_VERIFY_THRESHOLD: "0.3" } as any)).toThrow();
+    expect(() => loadEnv({ ...testEnv, EMBEDDINGS_TIMEOUT_MS: "50" } as any)).toThrow();
     // SESSION_SECRET must be overridden in production — the dev default
     // gives signable session cookies and would be forgeable.
     expect(() =>

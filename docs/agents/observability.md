@@ -61,7 +61,6 @@ second line right after "GroundX middleware scaffold listening":
   "recognizedEnv": {
     "NODE_ENV": "production",
     "PORT": 3001,
-    "APP_REPOSITORY_MODE": "memory",
     "GROUNDX_PARTNER_API_KEY": "present",
     "LLM_API_KEY": "present",
     "MYSQL_HOST": "absent",
@@ -177,16 +176,20 @@ first Sentry-enabled deploy verifies the round trip.
 
 helmet's defaults are tightened in `app.ts`:
 
-- CSP: explicit allowlist per env. `script-src 'self'` + Fontshare
-  + Google Fonts + (when enabled) GA / Hotjar / Calendly origins.
+- CSP: explicit allowlist per env. `script-src 'self'` includes
+  Calendly's widget asset host plus Fontshare / Google Fonts and,
+  when enabled, GA / Hotjar origins.
+- `style-src` allows Calendly's widget stylesheet host for the inline
+  scheduler.
 - `frame-src` allows Calendly (the F6 "book a call" embed).
 - COOP same-origin, COEP same-origin.
 - HSTS 6 months + includeSubDomains.
 - Strict referrer-policy.
 
 CSP is built dynamically based on which analytics providers are
-enabled — don't hardcode external origins into the static
-helmet config.
+enabled. Calendly's official widget asset and frame origins are explicit
+because the viewer widget can load the scheduler when `VITE_CALENDLY_URL`
+is set; don't add new external origins outside the central Helmet config.
 
 ## PII scrubbing
 

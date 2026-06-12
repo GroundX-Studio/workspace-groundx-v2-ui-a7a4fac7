@@ -199,36 +199,6 @@ function serialize(state: ChatStoreState): string {
   return JSON.stringify(snapshot);
 }
 
-// Frame ordering for the rehydrate watermark below. f3a is "edit
-// schema" which is a side branch of f3 in the design; treat it as
-// equivalent to f3 for "highest reached" purposes.
-const FRAME_ORDER: Record<FFrame, number> = {
-  f1: 1,
-  f2: 2,
-  f3: 3,
-  f3a: 3,
-  f4: 4,
-  // f4a = Report builder, a side branch of the Report render frame f4 (mirrors
-  // f3/f3a) — same rank for "highest reached" purposes.
-  f4a: 4,
-  f5: 5,
-  f6: 6,
-  f7: 7,
-};
-
-function highestFrame(frames: ReadonlySet<FFrame>, fallback: FFrame): FFrame {
-  let best = fallback;
-  let bestRank = FRAME_ORDER[fallback];
-  for (const f of frames) {
-    const r = FRAME_ORDER[f] ?? 0;
-    if (r > bestRank) {
-      best = f;
-      bestRank = r;
-    }
-  }
-  return best;
-}
-
 function deserialize(raw: string): ChatStoreState | null {
   try {
     // localStorage is untrusted input — parse + validate at the boundary, never
@@ -247,20 +217,17 @@ function deserialize(raw: string): ChatStoreState | null {
     for (const s of parsed.sessions) {
       const entities = new Map<EntityKey, EntitySession>();
       for (const [key, entity] of s.entities) {
-        // Restore lastFrame to the HIGHEST frame ever reached
-        // (max of lastFrame ∪ completedFrames). Without this, a
-        // Pick-a-view pill click that downgrades from f5 → f3
-        // mid-session ends up restored as f3 on reload, even
-        // though the user actually progressed further. "Continue
-        // where I left off" requires the watermark, not the
-        // last-touched value.
-        const completedSet = new Set<FFrame>(entity.completedFrames);
-        const restoredLastFrame = highestFrame(completedSet, entity.lastFrame);
+        // Restore lastFrame VERBATIM — resume lands on the frame the
+        // user was actually on, even when they navigated "backwards"
+        // (f7 → f5) before reloading. An earlier "highest frame ever
+        // reached" watermark here caused the stale-resume bug: once f7
+        // entered completedFrames, every reload resumed f7 no matter
+        // where the user had moved since.
         entities.set(key, {
           kind: entity.kind,
           id: entity.id,
-          lastFrame: restoredLastFrame,
-          completedFrames: completedSet,
+          lastFrame: entity.lastFrame,
+          completedFrames: new Set<FFrame>(entity.completedFrames),
           createdAt: entity.createdAt,
           lastVisitedAt: entity.lastVisitedAt,
         });
@@ -1725,6 +1692,29 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
   }, []);
 
+  // show-all-sources toggle (2026-06-11) — clear the active doc-viewer step's
+  // litRegions (the multi-region "Show all sources" overlay). Mirror of
+  // `clearCitationHighlight` above; the page stays shown, only the regions go.
+  const clearCitationRegions = useCallback(() => {
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      const cur = current.viewer.currentStep.stepIndex;
+      const top = cur >= 0 ? current.viewer.history[cur] : null;
+      if (!top || top.kind !== "doc-viewer" || top.litRegions == null) return prev;
+      const nextHistory = current.viewer.history.slice();
+      nextHistory[cur] = { ...top, litRegions: undefined };
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        viewer: { ...current.viewer, history: nextHistory },
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+  }, []);
+
   const setSchemaFieldExtraction = useCallback(
     (fieldId: string, result: import("./types").SchemaFieldExtractionResult) => {
       setState((prev) => {
@@ -1815,6 +1805,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       gotoDocViewer,
       showCitationRegions,
       clearCitationHighlight,
+      clearCitationRegions,
     }),
     [
       newSession,
@@ -1853,6 +1844,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       gotoDocViewer,
       showCitationRegions,
       clearCitationHighlight,
+      clearCitationRegions,
     ],
   );
 

@@ -13,27 +13,52 @@
  *     mirroring here turns the test red.
  *   • Phase 7 backfill will hand-mirror every tool it touches and
  *     extend the expected set.
- *   • The longer-term shape (design.md §I) is a committed JSON
- *     manifest generated from the app-side files; that lands when
- *     the catalog grows past ~10 tools.
+ *   • Drift gate: the FULL-SHAPE cross-package parity guard in
+ *     `app/src/tools/catalog-parity.test.ts` (names, descriptions, roles,
+ *     category, availableSteps, input JSON-Schema via `zodToJsonSchema`,
+ *     rendersWidget reachability). NO committed manifest — gate-answered
+ *     2026-05-31, reaffirmed by chat-architecture-hardening Task 7: the app
+ *     catalog only resolves under Vite (`import.meta.glob`), so the in-suite
+ *     guard is the one loader that can see both sides.
  */
 import { z } from "zod";
 
-import { viewerStepKindSchema, type ViewerStepKind, type WidgetRole } from "@groundx/shared";
+import { contentScopeSchema, viewerStepKindSchema, type ViewerStepKind, type WidgetRole } from "@groundx/shared";
 
 export type { ViewerStepKind, WidgetRole };
 
 /**
- * Server-side tool descriptor. The `intentBuilder` produces the
- * `CanvasIntent` shape the app's orchestrator dispatches. The
- * `inputSchema` validates LLM-emitted args at the middleware boundary
- * (design.md §G).
+ * Context handed to a `serverExecute` executor (agentic-tool-loop). Carries
+ * the injectable deps an executor needs — built by the grounded loop from the
+ * seam's deps (`deps.skillsRetrieve ?? retrieveGroundxKnowledge`), so an
+ * executor NEVER closes over a module-level live dependency (that would defeat
+ * test injection). Future executor deps are added as members here.
+ */
+export interface ServerExecuteContext {
+  /** Vendored GroundX skill-pack retrieval (same type as `GroundedAnswerDeps.skillsRetrieve`). */
+  skillsRetrieve: (question: string, options?: { bypassEntryBar?: boolean }) => string | null;
+}
+
+/**
+ * Server-side tool descriptor. A tool is EITHER intent-routed (declares
+ * `intentBuilder` → the app dispatches the `CanvasIntent`) OR server-executed
+ * (declares `serverExecute` → the middleware runs it inside the grounded
+ * tool-result loop and feeds the string result back to the model). Exactly one
+ * of the two is present (catalog-invariant test). The `inputSchema` validates
+ * LLM-emitted args at the middleware boundary (design.md §G).
  */
 export interface ServerTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
   description: string;
   category: "read" | "mutate";
   inputSchema: TSchema;
+  /**
+   * Task 6 (chat-architecture-hardening) — extra usage guidance rendered
+   * into the grounded prompt's generated TOOL NOTES section, for tools whose
+   * `description` (already in the function spec) isn't enough. Declared WITH
+   * the tool; hand-written per-tool prompt paragraphs are forbidden.
+   */
+  promptGuidance?: string;
   /**
    * ViewerStep kinds where this tool is exposed to the LLM. Empty /
    * undefined → exposed in every step.
@@ -67,8 +92,28 @@ export interface ServerTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
    * card-triggering tools carry it.
    */
   rendersWidget?: string;
-  /** Builds the CanvasIntent shape from validated input. */
-  intentBuilder: (input: z.infer<TSchema>) => Record<string, unknown>;
+  /**
+   * Builds the CanvasIntent shape from validated input. OPTIONAL since
+   * agentic-tool-loop: a SERVER-EXECUTED tool (`serverExecute` present) has no
+   * intent — exactly one of `intentBuilder` / `serverExecute` is present
+   * (catalog-invariant test).
+   */
+  intentBuilder?: (input: z.infer<TSchema>) => Record<string, unknown>;
+  /**
+   * agentic-tool-loop — present ⇒ the middleware EXECUTES this tool inside the
+   * grounded tool-result loop and feeds the string result back to the model
+   * as a `role:"tool"` message. Mutually exclusive with `intentBuilder`: a
+   * server-executed tool never produces a `CanvasIntent`, never reaches the
+   * app, and MUST be `category: "read"`. Deps arrive via `ServerExecuteContext`
+   * (never a module-level closure).
+   */
+  serverExecute?: (input: z.infer<TSchema>, ctx: ServerExecuteContext) => Promise<string> | string;
+  /**
+   * agentic-tool-loop — the user-facing annotation text surfaced on the chat
+   * reply's `toolActivity[]` when this tool executes (e.g. "Checked GroundX
+   * docs"). REQUIRED when `serverExecute` is present (catalog-invariant test).
+   */
+  activityLabel?: string;
 }
 
 /**
@@ -160,21 +205,34 @@ const jumpToPage: ServerTool = {
  */
 const fieldTypeEnum = z
   .enum(["STRING", "NUMBER", "DATE", "BOOLEAN"])
-  .describe("Primitive type — must be one of STRING, NUMBER, DATE, BOOLEAN");
+  .describe("Primitive type. Must be one of STRING, NUMBER, DATE, BOOLEAN.");
 
 const proposeSchemaField: ServerTool = {
   name: "propose_schema_field",
   description:
     "Propose adding a new extraction-schema field. Use when the user asks to capture an additional value from the documents (add a field for total tax, track due date too). The card surfaces inline with the assistant bubble for the user to Accept or Reject.",
+  promptGuidance:
+    "When the user explicitly asks to add a schema field (\"add a field for X\", " +
+    "\"track Y too\", \"capture Z\"), call it with `{categoryId, name, type, " +
+    "description}`. Pick the best-fit existing category id from the user's " +
+    "surrounding context if one is visible; otherwise use a plausible " +
+    "snake_case id. Type must be one of STRING, NUMBER, DATE, BOOLEAN. The " +
+    "frontend renders an Accept/Reject card; write the conversational answer " +
+    "naturally (\"I can add a 'total tax' field…\") and let the tool call " +
+    "carry the structured payload.",
   category: "mutate",
   inputSchema: z.object({
     categoryId: z
       .string()
       .min(1)
-      .describe("Existing category id from the active scenario's extraction schema"),
-    name: z.string().min(1).max(80).describe("Snake_case field id, lowercase"),
+      .describe("Existing category id from the active scenario extraction schema (statement, meters)."),
+    name: z.string().min(1).max(80).describe("Snake_case field id, lowercase (total_tax, due_date)."),
     type: fieldTypeEnum,
-    description: z.string().min(1).max(200).describe("One-sentence description"),
+    description: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe("One-sentence description of what the field captures, in plain English."),
   }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
   // §5 reachability — mirror of the app-side ProposeSchemaFieldCard binding.
@@ -194,7 +252,7 @@ const acceptProposal: ServerTool = {
     "Accept a previously-proposed schema field on behalf of the user. Use when an agentic flow has high confidence the user wants the proposal applied (auto-accept above a confidence threshold). The user can always Reject the chip if they disagree.",
   category: "mutate",
   inputSchema: z.object({
-    proposalId: z.string().min(1).describe("Proposal id from the pending overlay queue"),
+    proposalId: z.string().min(1).describe("Proposal id (from the pending overlay queue) to accept."),
   }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
   intentBuilder: (input) => ({
@@ -209,7 +267,7 @@ const rejectProposal: ServerTool = {
     "Reject (dismiss) a previously-proposed schema field on behalf of the user. Use when an agentic flow determines the proposal does not fit the active scenario (the field duplicates an existing column).",
   category: "mutate",
   inputSchema: z.object({
-    proposalId: z.string().min(1).describe("Proposal id from the pending overlay queue"),
+    proposalId: z.string().min(1).describe("Proposal id (from the pending overlay queue) to reject."),
   }),
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
   intentBuilder: (input) => ({
@@ -229,7 +287,9 @@ const commitGate: ServerTool = {
   inputSchema: z.object({
     method: z
       .enum(["register", "sso", "engineer-call"])
-      .describe("Which gate-commit path: register / sso / engineer-call"),
+      .describe(
+        "Which gate-commit path: \"register\" for email sign-up, \"sso\" for SAML / Google / Microsoft, \"engineer-call\" for the Calendly booking path.",
+      ),
   }),
   intentBuilder: (input) => ({ kind: "commitGate", method: input.method }),
 };
@@ -296,6 +356,11 @@ const suggestIntent: ServerTool = {
     "another surface (\"open the extract to compare line items\", " +
     "\"check the report for the rollup\"). The chip surfaces the " +
     "suggestion; the user clicks to navigate.",
+  promptGuidance:
+    "When you've reasoned that the user might want to navigate to another " +
+    "canvas surface, call it with `{intent, reason, confidence}`. Use " +
+    "`show-extract` / `show-report` / `show-interact` for the intent label. " +
+    "Fire only at confidence > 0.8.",
   category: "mutate",
   inputSchema: z.object({
     intent: z
@@ -333,7 +398,7 @@ const suggestIntent: ServerTool = {
 const bookCall: ServerTool = {
   name: "book_call",
   description:
-    "Open the Calendly booking surface for a 15-minute engineer call. Use when the user has signaled they want a human-assisted path forward — uncertainty about fit, complex documents, evaluation questions a sales engineer can answer. The user confirms by clicking the chip; the iframe is not opened automatically.",
+    "Open the Calendly booking surface for a 30-minute engineer call. Use when the user asks to speak with a team member or wants a human-assisted path forward: uncertainty about fit, complex documents, evaluation questions a sales engineer can answer. The user confirms by clicking the chip; the scheduler is not opened automatically.",
   category: "mutate",
   inputSchema: z.object({}),
   // §5 reachability — mirror of the app-side BookingStatusCard binding.
@@ -348,13 +413,14 @@ const bookCall: ServerTool = {
 // canvas-dispatch verb is the canonical verb for ScopedViewerWidgets
 // (allowlisted once in the app's `check-tool-quality` this phase). The report
 // + Extract template-mutation tools are a SHARED family (same Template+Scope+
-// Results lifecycle). `scope` is the shared `ContentScope` — kept loose here
-// (`z.object({}).passthrough()`) because the server doesn't re-validate the
-// scope shape (the app + shared Zod own it); the drift guard only pins names.
+// Results lifecycle). `scope` is the shared `ContentScope` —
+// validated with the shared `contentScopeSchema` (Task 7: the full-shape
+// parity guard pins input schemas, so both sides declare the real union and
+// the LLM sees + is validated against it).
 
 const reportRenderAsEnum = z
   .enum(["PARAGRAPH", "BULLETS", "TABLE"])
-  .describe("How the section body renders: PARAGRAPH (¶) / BULLETS (•) / TABLE (▦).");
+  .describe("How the section body renders: PARAGRAPH paragraph, BULLETS bullet list, TABLE table.");
 
 const showExtraction: ServerTool = {
   name: "show_extraction",
@@ -364,17 +430,20 @@ const showExtraction: ServerTool = {
     "reasoned the structured-field view is the natural next surface for what they're analyzing.",
   category: "read",
   inputSchema: z.object({
-    scope: z
-      .object({})
-      .passthrough()
-      .describe("The ContentScope the workbench extracts over (documents / bucket+filter / group)."),
+    scope: contentScopeSchema.describe(
+      "The ContentScope (documents / bucket+filter / group) the workbench extracts over — inherited from the surface the user transitioned from.",
+    ),
     schema_id: z
       .string()
       .min(1)
       .optional()
       .describe("Optional extraction template id; defaults to the active draft template when omitted."),
   }),
-  availableSteps: ["extract-workbench", "doc-viewer", "interact-chat", "report"],
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
+  // Navigation tools move the user BETWEEN steps; gating them by the step the
+  // user is already on defeats their purpose ("go back to extractions" typed
+  // on the Integrate step used to get a RAG search because this tool was not
+  // offered there). Step-gating remains for step-LOCAL tools only.
   intentBuilder: (input) => ({
     kind: "showExtract",
     scope: (input as { scope: unknown }).scope,
@@ -395,12 +464,15 @@ const showIntegrate: ServerTool = {
     "Cursor), or get the API / SDK snippet for the content being analyzed.",
   category: "read",
   inputSchema: z.object({
-    scope: z
-      .object({})
-      .passthrough()
-      .describe("The ContentScope the user is shipping (documents / bucket+filter / group); scope-independent today but threaded for context."),
+    scope: contentScopeSchema.describe(
+      "The ContentScope (documents / bucket+filter / group) the user is shipping — inherited from the surface the user transitioned from. The connectors list is scope-independent today, but the scope threads through for context.",
+    ),
   }),
-  availableSteps: ["integrate", "doc-viewer", "extract-workbench", "interact-chat", "report"],
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
+  // Navigation tools move the user BETWEEN steps; gating them by the step the
+  // user is already on defeats their purpose ("go back to extractions" typed
+  // on the Integrate step used to get a RAG search because this tool was not
+  // offered there). Step-gating remains for step-LOCAL tools only.
   intentBuilder: (input) => ({
     kind: "showIntegrate",
     scope: (input as { scope: unknown }).scope,
@@ -415,17 +487,20 @@ const showSmartReportRender: ServerTool = {
     "rendered IC-brief is the natural next surface for what they're analyzing.",
   category: "read",
   inputSchema: z.object({
-    scope: z
-      .object({})
-      .passthrough()
-      .describe("The render-time ContentScope the report renders over (bucket+filter / documents / group)."),
+    scope: contentScopeSchema.describe(
+      "The render-time ContentScope (bucket+filter / documents / group) the report renders over — inherited from the surface the user transitioned from.",
+    ),
     template_id: z
       .string()
       .min(1)
       .optional()
       .describe("Optional report template id; defaults to the active draft template when omitted."),
   }),
-  availableSteps: ["report", "extract-workbench", "interact-chat", "doc-viewer"],
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
+  // Navigation tools move the user BETWEEN steps; gating them by the step the
+  // user is already on defeats their purpose ("go back to extractions" typed
+  // on the Integrate step used to get a RAG search because this tool was not
+  // offered there). Step-gating remains for step-LOCAL tools only.
   intentBuilder: (input) => ({
     kind: "showReport",
     templateId: (input as { template_id?: string }).template_id ?? "draft",
@@ -451,7 +526,11 @@ const showSmartReportEdit: ServerTool = {
       .optional()
       .describe("Optional section id to pre-select / expand in the builder's row list."),
   }),
-  availableSteps: ["report", "extract-workbench"],
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
+  // Navigation tools move the user BETWEEN steps; gating them by the step the
+  // user is already on defeats their purpose ("go back to extractions" typed
+  // on the Integrate step used to get a RAG search because this tool was not
+  // offered there). Step-gating remains for step-LOCAL tools only.
   intentBuilder: (input) => ({
     kind: "editTemplate",
     templateId: input.template_id,
@@ -597,7 +676,7 @@ const submitSignup: ServerTool = {
   inputSchema: z.object({
     first: z.string().min(1).describe("The first name."),
     last: z.string().min(1).describe("The last name."),
-    email: z.string().min(1).email().describe("The user's email address (the account login)."),
+    email: z.string().min(1).email().describe("The email address (the account login)."),
     password: z.string().min(8).describe("The chosen password — at least 8 characters."),
     confirmPassword: z
       .string()
@@ -670,6 +749,39 @@ const closeDialog: ServerTool = {
 };
 
 /**
+ * agentic-tool-loop — the first SERVER-EXECUTED tool. Unlike every other entry
+ * (which mirrors an app `*.tools.ts` and builds a `CanvasIntent`), this tool is
+ * run by the middleware inside the grounded tool-result loop: its executor
+ * retrieves the relevant sections of the vendored GroundX skill pack on demand
+ * and the result is fed back to the model as a `role:"tool"` message. It has NO
+ * `intentBuilder` (never reaches the app), NO app mirror (server-only —
+ * allowlisted in the parity guard), and declares `activityLabel` for the
+ * reply's `toolActivity[]`. Deps arrive via `ServerExecuteContext` — the
+ * executor never closes over the module-level retriever (test-injectable).
+ */
+const lookupGroundxDocs: ServerTool = {
+  name: "lookup_groundx_docs",
+  description:
+    "Look up GroundX product documentation (architecture, ingestion, search, X-Ray, " +
+    "buckets, workflows). Use when the user asks how GroundX works or about a product " +
+    "capability and the GROUNDX KNOWLEDGE section is absent or doesn't cover it.",
+  category: "read",
+  inputSchema: z.object({
+    query: z
+      .string()
+      .min(3)
+      .describe("What to look up, e.g. 'how does X-Ray chunking work'"),
+  }),
+  promptGuidance:
+    "Call only when this prompt has no GroundX product-knowledge background and the " +
+    "user asks how GroundX works. Never mention the tool or cite its result — speak " +
+    "from it as background.",
+  activityLabel: "Checked GroundX docs",
+  serverExecute: ({ query }, ctx) =>
+    ctx.skillsRetrieve(query, { bypassEntryBar: true }) ?? "No matching documentation sections.",
+};
+
+/**
  * The authoritative server catalog. Phase 7 backfill extends this
  * array as widgets are mirrored. The order here is stable (matches
  * the LLM's tool listing); duplicates fail the drift test.
@@ -711,6 +823,9 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   wizardFinish,
   dismissWizard,
   closeDialog,
+  // agentic-tool-loop — server-executed read tool (no app mirror; allowlisted
+  // server-only in the parity guard).
+  lookupGroundxDocs,
 ];
 
 /**

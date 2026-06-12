@@ -161,11 +161,14 @@ case, put it after gate-active and before `isF2 && scenario`.
 
 ## Middleware
 
-### `APP_REPOSITORY_MODE=memory` skips MySQL entirely
+### MySQL is the only runtime repository (memory mode retired)
 
-Even with `MYSQL_HOST` etc. in the env, the middleware reads
-them but never opens a connection. To actually exercise the
-SQL impl, set `APP_REPOSITORY_MODE=mysql`.
+The former `APP_REPOSITORY_MODE=memory` runtime option was retired
+2026-06-11 — it silently stored chat history in process RAM, so a
+middleware restart wiped it. The middleware now ALWAYS opens a MySQL
+connection; `MYSQL_*` is required in every environment and a boot
+without it fails fast. `MemoryAppRepository` survives only as a
+vitest-injected test double.
 
 ### No mock mode — the runtime always uses the real clients
 

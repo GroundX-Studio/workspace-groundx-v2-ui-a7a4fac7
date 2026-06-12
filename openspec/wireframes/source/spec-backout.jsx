@@ -38,7 +38,7 @@ function Flow_BackOut() {
                   <div className="wf-btn primary wf-accent-bg" style={{ flex: 1, justifyContent: 'center', fontSize: 12 }}>→ send link</div>
                   <div className="wf-btn ghost" style={{ fontSize: 11 }}>SSO</div>
                 </div>
-                <div className="wf-btn coral wf-accent-bg" style={{ width: '100%', justifyContent: 'center', fontSize: 11 }}>📅 book 15-min engineer call</div>
+                <div className="wf-btn coral wf-accent-bg" style={{ width: '100%', justifyContent: 'center', fontSize: 11 }}>📅 book 30-min engineer call</div>
               </div>
 
               <div style={{ marginTop: 8, fontFamily: 'Kalam,cursive', fontSize: 11, textAlign: 'center', color: 'var(--gx-navy)' }}>

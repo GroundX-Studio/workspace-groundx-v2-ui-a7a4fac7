@@ -116,7 +116,9 @@ const envLines = [
     "PORT=3001",
     "LOG_LEVEL=info",
     "ALLOWED_ORIGIN=http://localhost:5173",
-    "APP_REPOSITORY_MODE=memory",
+    // retire-memory-repository-mode (2026-06-11): MySQL is the ONLY runtime
+    // repository. MYSQL_* placeholders are written below — point them at the
+    // shared dev database before starting the middleware.
     `SESSION_SECRET=${randomBytes(32).toString("hex")}`,
     "GROUNDX_BASE_URL=https://api.groundx.ai/api/v1",
     `GROUNDX_PARTNER_API_KEY=${partnerApiKey}`,
@@ -129,6 +131,14 @@ const envLines = [
     "LLM_AUTH_HEADER_NAME=Authorization",
     "LLM_AUTH_SCHEME=Bearer",
     `LLM_MODEL_ID=${llmModelId}`,
+    "# MySQL is the ONLY runtime repository — fill these with the shared dev",
+    "# database connection before starting the middleware (boot fails fast",
+    "# without them; retire-memory-repository-mode, 2026-06-11).",
+    "MYSQL_HOST=",
+    "MYSQL_PORT=3306",
+    "MYSQL_DATABASE=",
+    "MYSQL_USER=",
+    "MYSQL_PASSWORD=",
     "",
   ].join("\n");
 

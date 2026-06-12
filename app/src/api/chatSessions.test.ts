@@ -104,7 +104,6 @@ describe("chat reply envelope wire twins (chat-wire-types-shared)", () => {
         { documentId: "doc-1", page: 1, snippet: "Total amount due $142.30", tier: "exact" },
       ],
       suggestedActions: [{ key: "show-source", label: "Show source", detail: { documentId: "doc-1" } }],
-      tools: [{ name: "show_source", arguments: { documentId: "doc-1" } }],
       intents: [
         { name: "show_source", arguments: { documentId: "doc-1" }, intent: { kind: "doc-viewer" } },
       ],
@@ -131,6 +130,13 @@ describe("chat reply envelope wire twins (chat-wire-types-shared)", () => {
       },
     });
     expect(parsed.success).toBe(true);
+  });
+
+  // 2026-06-11-retire-chatreply-tools-field — the always-empty `tools` array
+  // is retired from the envelope; tool calls travel on intents[] /
+  // suggestedActions[] / toolFailures[] only.
+  it("the reply envelope carries no `tools` field (retired)", () => {
+    expect("tools" in chatReplySchema.shape).toBe(false);
   });
 
   it("dispatchedIntentSchema + toolFailureSchema validate their wire shapes", () => {
@@ -239,7 +245,6 @@ describe("sendChatMessage", () => {
             answer: "Here's the answer.",
             citations: [],
             suggestedActions: [],
-            tools: [],
           },
           compressionRan: false,
         }),
@@ -267,7 +272,7 @@ describe("sendChatMessage", () => {
         json: async () => ({
           userMessageId: "m-u-1",
           assistantMessageId: "m-a-1",
-          reply: { mode: "rag", answer: "one", citations: [], suggestedActions: [], tools: [] },
+          reply: { mode: "rag", answer: "one", citations: [], suggestedActions: [] },
           compressionRan: false,
         }),
       })
@@ -277,7 +282,7 @@ describe("sendChatMessage", () => {
         json: async () => ({
           userMessageId: "m-u-2",
           assistantMessageId: "m-a-2",
-          reply: { mode: "rag", answer: "two", citations: [], suggestedActions: [], tools: [] },
+          reply: { mode: "rag", answer: "two", citations: [], suggestedActions: [] },
           compressionRan: false,
         }),
       });
@@ -311,7 +316,7 @@ describe("sendChatMessage", () => {
         json: async () => ({
           userMessageId: "m-u",
           assistantMessageId: "m-a",
-          reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [] },
+          reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [] },
           compressionRan: false,
         }),
       });
@@ -344,7 +349,7 @@ describe("sendChatMessage", () => {
         json: async () => ({
           userMessageId: "m-u",
           assistantMessageId: "m-a",
-          reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [], tools: [] },
+          reply: { mode: "rag", answer: "ok", citations: [], suggestedActions: [] },
           compressionRan: false,
         }),
       });
@@ -390,7 +395,7 @@ describe("sendChatMessage", () => {
         json: async () => ({
           userMessageId: "m-u",
           assistantMessageId: "m-a",
-          reply: { mode: "rag", answer: "x", citations: [], suggestedActions: [], tools: [] },
+          reply: { mode: "rag", answer: "x", citations: [], suggestedActions: [] },
           compressionRan: false,
         }),
       });
@@ -547,7 +552,6 @@ describe("sendChatMessage", () => {
               answer: "ok",
               citations: [],
               suggestedActions: [],
-              tools: [],
               intents: [],
               toolFailures: [],
               proposedSchemaField: null,

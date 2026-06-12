@@ -139,6 +139,56 @@ describe("ThinkingStream", () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  // Canvas↔chat coherence (2026-06-11): when the stream is about to ANIMATE
+  // from scratch (not a replay-restore), the host must be able to react —
+  // e.g. the onboarding Intro snaps the canvas back to Understand so the
+  // scan narration never plays over a later frame. `onWillPlay` fires once
+  // on mount IFF the reveal will actually animate.
+  it("fires onWillPlay once on mount when the reveal will animate", () => {
+    const onWillPlay = vi.fn();
+    render(
+      <ThinkingStream
+        notes={NOTES}
+        scenarioKey="utility"
+        role="anonymous"
+        scope={{ type: "none" }}
+        persistReplay
+        onWillPlay={onWillPlay}
+      />,
+    );
+    expect(onWillPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT fire onWillPlay on a replay-restore (doneness persisted)", () => {
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
+    const onWillPlay = vi.fn();
+    render(
+      <ThinkingStream
+        notes={NOTES}
+        scenarioKey="utility"
+        role="anonymous"
+        scope={{ type: "none" }}
+        persistReplay
+        onWillPlay={onWillPlay}
+      />,
+    );
+    expect(onWillPlay).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire onWillPlay when notes is empty (nothing to animate)", () => {
+    const onWillPlay = vi.fn();
+    render(
+      <ThinkingStream
+        notes={[]}
+        scenarioKey="utility"
+        role="anonymous"
+        scope={{ type: "none" }}
+        onWillPlay={onWillPlay}
+      />,
+    );
+    expect(onWillPlay).not.toHaveBeenCalled();
+  });
+
   it("renders nothing when notes is empty (fires onDone immediately)", () => {
     const onDone = vi.fn();
     render(

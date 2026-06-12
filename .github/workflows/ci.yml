@@ -90,4 +90,6 @@ jobs:
             -e "import('@groundx/shared').then((m) => { if (typeof m.parseCitations !== 'function') { console.error('shared did not resolve'); process.exit(1); } console.log('@groundx/shared OK'); }).catch((e) => { console.error(e); process.exit(1); })"
 
       - name: Build frontend image
-        run: docker build -f Dockerfile.frontend -t gx-frontend:ci .
+        env:
+          VITE_CALENDLY_URL: ${{ vars.VITE_CALENDLY_URL || '' }}
+        run: docker build -f Dockerfile.frontend --build-arg VITE_CALENDLY_URL="${VITE_CALENDLY_URL:-}" -t gx-frontend:ci .

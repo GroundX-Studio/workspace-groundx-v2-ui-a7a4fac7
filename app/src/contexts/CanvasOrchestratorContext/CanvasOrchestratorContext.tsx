@@ -6,6 +6,21 @@ import { useChatStoreOptional } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 
 import type { CanvasAdapter, CanvasIntent, CanvasOrchestratorApi, IntentSource, StampedIntent } from "./types";
+import { togglesOffOnRepeat } from "./togglesOffOnRepeat";
+
+/**
+ * The active doc-viewer step off the ChatStore's current viewer position, or
+ * null when no session is active / the top step isn't a doc-viewer. Shared by
+ * both citation toggles (Task 5).
+ */
+function activeDocViewerStep(chatStore: NonNullable<ReturnType<typeof useChatStoreOptional>>) {
+  const activeSession = chatStore.state.activeSessionId
+    ? chatStore.state.sessions.get(chatStore.state.activeSessionId)
+    : null;
+  const stepIdx = activeSession?.viewer.currentStep.stepIndex ?? -1;
+  const top = stepIdx >= 0 ? activeSession?.viewer.history[stepIdx] : null;
+  return top?.kind === "doc-viewer" ? top : null;
+}
 
 const CanvasOrchestratorContext = createContext<CanvasOrchestratorApi | null>(null);
 
@@ -123,20 +138,18 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             // add-citation-toggle — a USER click on the citation that's already
             // the active highlight clears it (click again to dismiss). The
             // automatic `agent` highlight always sets, never toggles.
-            const activeSession = chatStore.state.activeSessionId
-              ? chatStore.state.sessions.get(chatStore.state.activeSessionId)
-              : null;
-            const stepIdx = activeSession?.viewer.currentStep.stepIndex ?? -1;
-            const top = stepIdx >= 0 ? activeSession?.viewer.history[stepIdx] : null;
-            const activeDocViewer = top?.kind === "doc-viewer" ? top : null;
-            const matchesActiveHighlight =
-              source === "user" &&
-              activeDocViewer != null &&
-              activeDocViewer.documentId === intent.documentId &&
-              activeDocViewer.highlight != null &&
-              activeDocViewer.highlight.page === intent.page &&
-              JSON.stringify(activeDocViewer.highlight.bbox ?? null) ===
-                JSON.stringify(intent.bbox ?? null);
+            // (Task 5: shared togglesOffOnRepeat predicate; the compared slot
+            // here is the active {page, bbox} highlight.)
+            const activeDocViewer = activeDocViewerStep(chatStore);
+            const matchesActiveHighlight = togglesOffOnRepeat({
+              source,
+              activeDocViewer,
+              documentId: intent.documentId,
+              current: activeDocViewer?.highlight
+                ? { page: activeDocViewer.highlight.page, bbox: activeDocViewer.highlight.bbox ?? null }
+                : null,
+              incoming: { page: intent.page, bbox: intent.bbox ?? null },
+            });
             if (matchesActiveHighlight) {
               chatStore.clearCitationHighlight();
             } else {
@@ -155,11 +168,32 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // document. Distinct from highlightCitation (single region).
         case "showCitations":
           if (chatStore) {
-            chatStore.showCitationRegions({
+            // show-all-sources toggle (2026-06-11) — a USER re-click of "Show
+            // all sources" while those same regions are already lit CLEARS
+            // them (mirrors the highlightCitation toggle above). An
+            // agent-sourced dispatch always sets, never toggles.
+            // (Task 5: same shared predicate; the compared slot here is the
+            // lit-regions array, with empty mapped to null.)
+            const activeDocViewer = activeDocViewerStep(chatStore);
+            const matchesLitRegions = togglesOffOnRepeat({
+              source,
+              activeDocViewer,
               documentId: intent.documentId,
-              page: intent.page,
-              regions: intent.regions,
+              current:
+                activeDocViewer?.litRegions != null && activeDocViewer.litRegions.length > 0
+                  ? activeDocViewer.litRegions
+                  : null,
+              incoming: intent.regions,
             });
+            if (matchesLitRegions) {
+              chatStore.clearCitationRegions();
+            } else {
+              chatStore.showCitationRegions({
+                documentId: intent.documentId,
+                page: intent.page,
+                regions: intent.regions,
+              });
+            }
           }
           break;
         // widget-llm-integration Phase 4 — lighter-weight cousin of the

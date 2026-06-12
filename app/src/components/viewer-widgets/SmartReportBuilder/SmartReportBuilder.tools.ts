@@ -45,7 +45,9 @@ const showSmartReportEdit: WidgetTool = {
       .optional()
       .describe("Optional section id to pre-select / expand in the builder's row list."),
   }),
-  availableSteps: ["report", "extract-workbench"],
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (Task 7 mirrors the
+  // 2026-06-11 server-side decision: navigation tools move the user BETWEEN
+  // steps; gating them by the current step defeats their purpose).
 };
 
 const proposeReportSection: WidgetTool = {

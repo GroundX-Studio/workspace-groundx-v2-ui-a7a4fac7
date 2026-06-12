@@ -224,6 +224,20 @@ describe("renderReport — live Utility render (re-grounded off the former MOCK_
     }
   });
 
+  // Fixed-plan coherence (turn-router-extraction-appstate): the report plan
+  // carries extractionContext: true, so every section's grounded call still
+  // attempts the primary doc's extraction fetch — no planner is involved.
+  it("keeps fetching extraction context per section (fixed plan, no planner)", async () => {
+    const deps = utilityLiveDeps();
+    const result = await renderReport(baseRequest(), deps);
+    if ("gated" in result) throw new Error("expected a rendered report, got a gate");
+    const forward = deps.groundxClient!.forward as ReturnType<typeof vi.fn>;
+    const extractCalls = forward.mock.calls.filter(([p]) =>
+      String(p).includes("/ingest/document/extract/"),
+    );
+    expect(extractCalls.length).toBe(utilityTemplate.sections.length);
+  });
+
   it("renders the sample scope preview_only with the export formats", async () => {
     const result = await renderReport(baseRequest(), utilityLiveDeps());
     if ("gated" in result) throw new Error("expected a rendered report, got a gate");
@@ -392,6 +406,14 @@ describe("renderReport — §5 live per-section render (search → ground → ve
     // groundx may issue an extra X-Ray/retry round-trip per search).
     expect(groundxClient.forward).toHaveBeenCalled();
     expect(llmClient.forward).toHaveBeenCalledTimes(2);
+    // chat-architecture-hardening Task 4 — the report caller's turn plan is
+    // FIXED {documentSearch:true, productKnowledge:false}: report sections
+    // never inject GROUNDX KNOWLEDGE (skill-pack) content into the prompt.
+    for (const call of (llmClient.forward as ReturnType<typeof vi.fn>).mock.calls) {
+      const body = JSON.parse((call[1] as { body: string }).body);
+      const system = body.messages.find((m: { role: string }) => m.role === "system").content as string;
+      expect(system).not.toContain("GROUNDX KNOWLEDGE");
+    }
   });
 
   it("honors a section_ids subset in template order on the live path", async () => {

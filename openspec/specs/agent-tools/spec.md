@@ -169,6 +169,14 @@ role/mode. The middleware SHALL pass this filtered catalog to the LLM provider
 via native function-calling (OpenAI `tools` parameter / Anthropic `tools`
 parameter). The catalog SHALL NOT be injected into the system prompt narrative.
 
+Step-scoping applies to step-LOCAL tools only. **Canvas-NAVIGATION tools
+(`show_extraction`, `show_integrate`, `show_smart_report_render`,
+`show_smart_report_edit`) SHALL be universal — offered from EVERY step** —
+because navigation tools exist to move the user BETWEEN steps; gating them by
+the step the user is already on defeats their purpose (2026-06-11: "go back to
+extractions" typed on the Integrate step degraded to a RAG search because
+`show_extraction` was not offered there).
+
 #### Scenario: A doc-viewer step exposes doc-viewer tools
 
 - **GIVEN** the active ViewerStep is `doc-viewer`
@@ -176,6 +184,12 @@ parameter). The catalog SHALL NOT be injected into the system prompt narrative.
 - **THEN** it calls the server catalog filtering path for that step and role
 - **AND** the catalog includes tools admitted for `doc-viewer`
 - **AND** the catalog excludes tools scoped to other steps or unavailable roles.
+
+#### Scenario: Navigation tools are reachable from every step
+
+- **GIVEN** the active ViewerStep is ANY kind (including `integrate` and `ingest-picker`)
+- **WHEN** the chat handler builds the tool catalog for this turn
+- **THEN** the catalog includes all four canvas-navigation `show_*` tools
 
 ### Requirement: Tool invocations SHALL be validated against Zod and persisted to intent_log
 
@@ -364,29 +378,6 @@ future gate-open producer use to open the gate — there is no parallel path.
 - **WHEN** `{ kind: "openGate", trigger: "save" }` is dispatched
 - **THEN** the dispatch returns normally with no throw and no gate side effect.
 
-### Requirement: The app and server tool catalogs SHALL agree on tool names and roles
-
-The app and server tool catalogs SHALL agree on the set of tool names and each tool's `availableIn` role
-set, enforced by an automated guard rather than manual review. The app-side catalog
-(`app/src/tools/*.tools.ts`) and the middleware `SERVER_TOOL_CATALOG`
-(`middleware/src/services/toolCatalog.ts`) are the two sides. The guard SHALL be a
-cross-package NAME+role parity assertion where the packages can share one test cleanly, or a documented
-per-package check (e.g. a committed name+role manifest the other side asserts against) where they
-cannot. A tool present on one side but absent on the other, or with a divergent `availableIn`, SHALL
-fail the guard.
-
-#### Scenario: A tool added on one side without mirroring fails the guard
-
-- **GIVEN** a tool declared in an app `*.tools.ts` with `availableIn: ["member"]`
-- **WHEN** the middleware `SERVER_TOOL_CATALOG` omits it or mirrors it with a different `availableIn`
-- **THEN** the parity guard fails and names the mismatched tool.
-
-#### Scenario: Matched name + role sets pass
-
-- **GIVEN** every app tool has a server mirror with the same name and the same `availableIn` role set
-- **WHEN** the parity guard runs
-- **THEN** it passes.
-
 ### Requirement: View and primitive tool files SHALL be discoverable by the metadata collector and the quality scanner
 
 The app metadata collector/parity glob and the tool-quality scanner SHALL
@@ -466,17 +457,25 @@ primitive, with a server-catalog mirror. The primitive's close IconButton SHALL 
 ### Requirement: The app and server tool catalogs SHALL agree on declarative tool metadata
 
 The app's declarative tool metadata and middleware `SERVER_TOOL_CATALOG` SHALL
-agree on mirrored tool names, descriptions, role visibility, and chat-widget
-`rendersWidget` bindings. Server-only tools SHALL be explicitly allowlisted in
-the parity guard. A tool present on one side but absent on the other, a
-description drift, an unexpected role drift, or a dangling `rendersWidget`
-binding SHALL fail automated validation.
+agree on FULL tool shape — mirrored tool names, descriptions (verbatim),
+`category`, `availableSteps`, role visibility, chat-widget `rendersWidget`
+bindings, AND input schemas (compared as JSON-Schema via the middleware's
+`zodToJsonSchema` bridge) — enforced by the app-side cross-package parity guard
+(`app/src/tools/catalog-parity.test.ts`), which is the ONLY mechanism that can
+load both catalogs (the app catalog is assembled via Vite's `import.meta.glob`).
+There SHALL be no committed manifest artifact (gate-answered decision,
+2026-05-31, reaffirmed 2026-06-11): the live cross-package test IS the source of
+truth, and the `toolCatalog.ts` header SHALL document this instead of promising
+a future codegen manifest. Server-only tools SHALL be explicitly allowlisted in
+the parity guard. A tool present on one side but absent on the other, or any
+full-shape drift, SHALL fail automated validation naming the offending tool.
 
 #### Scenario: Mirrored metadata drift fails
 
 - **GIVEN** an app tool declaration named `open_document`
-- **WHEN** the server catalog omits it or changes its description
-- **THEN** the parity guard fails and names the mismatched tool.
+- **WHEN** the server catalog omits it, changes its description or category, or
+  narrows its input schema
+- **THEN** the parity guard fails and names the mismatched tool and field.
 
 #### Scenario: Server-only tool remains explicit
 
@@ -517,4 +516,28 @@ without coverage.
 - **GIVEN** a new tool with an `intentBuilder` is added to `SERVER_TOOL_CATALOG`
 - **WHEN** the parity guard runs and no corpus entry exercises it
 - **THEN** the guard fails, naming the uncovered tool
+
+### Requirement: Per-tool prompt guidance SHALL be declared with the tool, not in the prompt
+
+Tool usage guidance rendered into the grounded system prompt SHALL be generated
+from the step-filtered tool catalog — each entry's `description` plus an
+optional `ServerTool.promptGuidance` field for tools needing more than their
+description — as a single generated "TOOL NOTES" section. Hand-written per-tool
+paragraphs in prompt text are FORBIDDEN: guidance lives exactly once, on the
+tool declaration. A tool absent from the current step's filtered catalog SHALL
+contribute no guidance to that turn's prompt.
+
+#### Scenario: Guidance tracks the filtered catalog
+
+- **GIVEN** a chat turn on a step where `propose_schema_field` is offered
+- **WHEN** the grounded system prompt is assembled
+- **THEN** the TOOL NOTES section contains that tool's declared guidance
+- **AND** contains no entry for tools not offered on this step.
+
+#### Scenario: No duplicated hand-written guidance
+
+- **GIVEN** the prompts module
+- **WHEN** the grounded prompt source is inspected
+- **THEN** it contains no hand-written per-tool paragraph (the former
+  `propose_schema_field` / `suggest_intent` prose is gone).
 

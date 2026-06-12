@@ -205,6 +205,14 @@ export interface AppDependencies {
    * `index.ts` builds this from the `LLM_LIGHT_*` env block.
    */
   lightLlmClient?: LlmClient;
+  /**
+   * wire-embedding-verification: the live quote embedder (third verifyQuote
+   * gate) + its threshold. Built by `index.ts` from the `EMBEDDINGS_*` env
+   * block when configured; absent -> lexical-only citation verification
+   * (dev-degrade). Threaded to chat, report, and hybrid.
+   */
+  quoteEmbedder?: import("./services/attribution.js").Embedder;
+  embedThreshold?: number;
   scenarioRegistry: ScenarioRegistry;
 }
 
@@ -215,6 +223,8 @@ export function createApp({
   groundxClient,
   llmClient,
   lightLlmClient,
+  quoteEmbedder,
+  embedThreshold,
   scenarioRegistry,
 }: AppDependencies): Express {
   const app = express();
@@ -229,7 +239,7 @@ export function createApp({
   // own origin + the allowlisted analytics domains; deploy-tunable via env so
   // the browser can reach configured PostHog / Sentry / analytics hosts.
   const csp_connect_src: string[] = ["'self'"];
-  const csp_script_src: string[] = ["'self'"];
+  const csp_script_src: string[] = ["'self'", "https://assets.calendly.com"];
   const csp_frame_src: string[] = ["'self'", "https://calendly.com", "https://*.calendly.com"];
   const csp_img_src: string[] = ["'self'", "data:", "blob:"];
   if (env.POSTHOG_HOST) csp_connect_src.push(env.POSTHOG_HOST);
@@ -257,7 +267,7 @@ export function createApp({
           // fonts.googleapis.com / api.fontshare.com and the actual font
           // binaries come from fonts.gstatic.com / cdn.fontshare.com.
           "script-src": csp_script_src,
-          "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://api.fontshare.com"],
+          "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://api.fontshare.com", "https://assets.calendly.com"],
           "font-src": ["'self'", "data:", "https://fonts.gstatic.com", "https://cdn.fontshare.com"],
           "connect-src": csp_connect_src,
           "frame-src": csp_frame_src,
@@ -1330,6 +1340,8 @@ export function createApp({
             ...(groundxApiKey ? { groundxApiKey } : {}),
             rbacFilter: rbacFilterForProjects(reportAuthorizedProjects),
             ...(env.LLM_MODEL_ID ? { llmModelId: env.LLM_MODEL_ID } : {}),
+            ...(quoteEmbedder ? { quoteEmbedder } : {}),
+            ...(embedThreshold !== undefined ? { embedThreshold } : {}),
           },
         );
         res.status(200).json(result);
@@ -1442,6 +1454,8 @@ export function createApp({
         samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
         llmModelId: env.LLM_MODEL_ID ?? "model",
         lightLlmModelId: env.LLM_LIGHT_MODEL_ID,
+        quoteEmbedder,
+        embedThreshold,
         byoPagesLimit: env.BYO_PAGES_LIMIT,
         contextWindowTokens: env.LLM_CONTEXT_WINDOW_TOKENS,
         compressionTriggerRatio: env.COMPRESSION_TRIGGER_RATIO,

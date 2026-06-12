@@ -7,7 +7,7 @@
  * `viewer-widgets/BookCallView/BookCallView.test.tsx`.
  *
  * Tests the compact "BOOKING IN PROGRESS" chat surface that appears
- * while the BookCallView iframe is mounted in the viewer pane.
+ * while the BookCallView scheduler is mounted in the viewer pane.
  */
 
 import { screen, waitFor, act } from "@testing-library/react";
@@ -61,7 +61,7 @@ describe("BookingStatusCard (chat)", () => {
     expect(screen.getByTestId("book-call-back")).toBeInTheDocument();
   });
 
-  it("offers a back-to-sign-in affordance that clears ?bookCall=1", async () => {
+  it("offers a close-booking affordance that clears ?bookCall=1", async () => {
     const user = userEvent.setup();
     let urlSearch = "";
     const LocationProbe = () => {
@@ -84,6 +84,7 @@ describe("BookingStatusCard (chat)", () => {
     expect(urlSearch.includes("bookCall=1")).toBe(true);
     const back = screen.getByTestId("book-call-back");
     expect(back).toBeInTheDocument();
+    expect(back).toHaveTextContent(/close booking/i);
     await user.click(back);
     await waitFor(() => {
       expect(urlSearch.includes("bookCall=1")).toBe(false);
@@ -111,6 +112,17 @@ describe("BookingStatusCard (chat)", () => {
     expect(panel.textContent ?? "").toMatch(/doesn[''′]?t sign you in|still send a magic link|booking.*not.*sign/i);
   });
 
+  it("uses accurate booking copy without unsupported proof claims", () => {
+    renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
+      initialFrame: "f2",
+      initialScenario: UTILITY,
+    });
+    const text = screen.getByLabelText("Book a call · status").textContent ?? "";
+    expect(text).toMatch(/30-minute engineer call/i);
+    expect(text).toMatch(/choose a time in the calendar/i);
+    expect(text).not.toMatch(/15-min|on the right|AmLaw|sales rep|×|come back here/i);
+  });
+
   // Widget contract — slot attribute introspection. (The retired
   // `data-mode` attribute is gone: `mode` was cosmetic-only for this
   // widget and is dropped by 2026-05-30-widget-role-access Phase 2b.)
@@ -125,8 +137,8 @@ describe("BookingStatusCard (chat)", () => {
   });
 });
 
-describe("BookingStatusCard — postMessage from Calendly", () => {
-  it("commits the gate when Calendly fires calendly.event_scheduled", async () => {
+describe("BookingStatusCard — Calendly event ownership", () => {
+  it("does not listen for Calendly event_scheduled; the viewer widget owns scheduler events", async () => {
     renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
       initialFrame: "f2",
       initialScenario: UTILITY,
@@ -140,12 +152,10 @@ describe("BookingStatusCard — postMessage from Calendly", () => {
         }),
       );
     });
-    await waitFor(() => {
-      expect(screen.getByTestId("book-call-confirmed")).toBeInTheDocument();
-    });
+    expect(screen.queryByTestId("book-call-confirmed")).not.toBeInTheDocument();
   });
 
-  it("ignores postMessage from non-Calendly origins (security guard)", async () => {
+  it("still ignores non-Calendly messages because it has no Calendly listener", async () => {
     renderWithOnboardingProviders(<BookingStatusCard role="anonymous" scope={NONE_SCOPE} />, {
       initialFrame: "f2",
       initialScenario: UTILITY,

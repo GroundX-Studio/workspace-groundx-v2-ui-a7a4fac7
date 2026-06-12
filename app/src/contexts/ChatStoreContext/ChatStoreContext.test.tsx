@@ -289,6 +289,53 @@ describe("ChatStoreContext", () => {
       expect(active.entities.get("sample:utility" as never)?.lastFrame).toBe("f3");
     });
 
+    it("rehydrates lastFrame VERBATIM — a frame visited after a later one must resume, not the watermark", () => {
+      // Repro of the stale-resume bug (2026-06-11): the user reached f7
+      // hours ago (so f7 ∈ completedFrames), then moved the canvas back
+      // to f5. Reload must resume f5 — the frame the user was actually
+      // on — not the highest frame ever reached.
+      const persistedSessionId = "c-resume-verbatim";
+      const snapshot = {
+        version: 1,
+        ownerKey: "anon-test",
+        activeSessionId: persistedSessionId,
+        sessions: [
+          {
+            id: persistedSessionId,
+            title: "Onboarding",
+            createdAt: 1000,
+            updatedAt: 2000,
+            messages: [],
+            entities: [
+              [
+                "sample:utility",
+                {
+                  kind: "sample",
+                  id: "utility",
+                  lastFrame: "f5",
+                  completedFrames: ["f1", "f2", "f3", "f7"],
+                  createdAt: 1000,
+                  lastVisitedAt: 1500,
+                },
+              ],
+            ],
+            activeEntityKey: "sample:utility",
+            isOnboardingSession: true,
+            signupOpen: false,
+          },
+        ],
+      };
+      window.localStorage.setItem("groundx-onboarding.chat-store.v1", JSON.stringify(snapshot));
+
+      const wrap = ({ children }: { children: React.ReactNode }) => (
+        withChatStoreApi(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>)
+      );
+      const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
+
+      const active = result.current.state.sessions.get(persistedSessionId)!;
+      expect(active.entities.get("sample:utility" as never)?.lastFrame).toBe("f5");
+    });
+
     it("migrates the legacy entity-registry.v1 payload into a new onboarding session", () => {
       window.localStorage.setItem(
         "groundx-onboarding.entity-registry.v1",

@@ -145,7 +145,7 @@ export const OnboardingShell: FC = () => {
   const api = useApi();
   const { state: appMode } = useAppMode();
   const widgetRole = useWidgetRole();
-  const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate } = useOnboardingSession();
+  const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate, commitGate } = useOnboardingSession();
   const { state: scenarioRegistry, byId: scenarioById } = useScenarioRegistry();
   // ChatStore is read up here so the StepStrip pill state below can
   // derive from the active ViewerStep (citation clicks push a
@@ -153,6 +153,10 @@ export const OnboardingShell: FC = () => {
   // master-viewer-session). The same `chatStoreState` is used later
   // for overlay reads + canvas-content selection.
   const { state: chatStoreState, pushOverlay, popOverlay } = useChatStore();
+  const params = useParams<{ bucketId?: string; scenarioId?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const bookCallActive = new URLSearchParams(location.search).get("bookCall") === "1";
   const activeChatSessionEarly =
     chatStoreState.activeSessionId != null
       ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
@@ -178,7 +182,7 @@ export const OnboardingShell: FC = () => {
       ? "understand"
       : (latestViewerStepEarly && VIEWER_STEP_KIND_TO_STEP_ID[latestViewerStepEarly.kind]) ??
         FRAME_TO_STEP[session.currentFrame];
-  const isF1 = session.currentFrame === "f1";
+  const isF1 = session.currentFrame === "f1" && !bookCallActive;
 
   // -- URL ↔ surface sync ----------------------------------------
   //
@@ -196,10 +200,6 @@ export const OnboardingShell: FC = () => {
   // mutates the URL. The useEffect then re-derives state from the
   // new URL — no double-write, no loop, because session actions are
   // idempotent when invoked with the same target.
-  const params = useParams<{ bucketId?: string; scenarioId?: string }>();
-  const location = useLocation();
-  const navigate = useNavigate();
-
   // Refs to the latest session actions so the useEffect below has
   // stable references. The actions themselves are stable
   // (useCallback []), but pickScenario etc. depend on `registry`
@@ -363,10 +363,25 @@ export const OnboardingShell: FC = () => {
   // Book-a-call CTA). Lives on the same route as F2-F7 so all back-
   // button / reload semantics work out of the box: the URL is the
   // source of truth. When the param is present we override BOTH the
-  // canvas (Calendly iframe) and the gate chat (BookingStatusCard).
+  // canvas (Calendly scheduler) and the gate chat (BookingStatusCard).
   // The rest of the shell stays put — StepStrip remains visible on
   // top, the nav stays mounted in its compact/expanded state.
-  const bookCallActive = new URLSearchParams(location.search).get("bookCall") === "1";
+  const clearBookCallParam = useCallback(
+    (replace = false) => {
+      const nextParams = new URLSearchParams(location.search);
+      nextParams.delete("bookCall");
+      const nextSearch = nextParams.toString();
+      navigate(
+        { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : "" },
+        { replace },
+      );
+    },
+    [location.pathname, location.search, navigate],
+  );
+  const handleBookCallScheduled = useCallback(() => {
+    commitGate("engineer-call");
+    clearBookCallParam(true);
+  }, [clearBookCallParam, commitGate]);
 
   // `master-viewer-session` Phase 2 — gate-as-overlay. The sign-up
   // surface is now `viewer.overlays.find(o => o.kind === "sign-up")`.
@@ -511,7 +526,14 @@ export const OnboardingShell: FC = () => {
     // 2026-05-30-widget-role-access: gate/book-call canvas widgets are
     // anonymous-context (pre-signup) and not document-scoped → role
     // "anonymous" + scope { type: "none" } satisfy the widget contract.
-    if (bookCallActive) return <BookCallView role="anonymous" scope={{ type: "none" }} />;
+    if (bookCallActive)
+      return (
+        <BookCallView
+          role="anonymous"
+          scope={{ type: "none" }}
+          onScheduled={handleBookCallScheduled}
+        />
+      );
     // P1 (2026-05-29): the sign-up DOORS moved into the chat rail
     // (GateChatRail). The canvas now pitches the value prop instead of
     // hosting the account form. See GateValueProp + GateChatRail.
@@ -531,6 +553,7 @@ export const OnboardingShell: FC = () => {
     );
   }, [
     bookCallActive,
+    handleBookCallScheduled,
     signupSurfaceActive,
     effectiveStepKind,
     canvasScope,
@@ -628,20 +651,17 @@ export const OnboardingShell: FC = () => {
         window.open("https://docs.groundx.ai", "_blank", "noopener,noreferrer");
         return;
       }
-      // Book a call CTA → Calendly. URL is env-driven so on-prem /
-      // demo deploys can point at their own calendar. When unset, we
-      // skip the open (the previous hardcoded `calendly.com/groundx/30min`
-      // returns a 404 today). UI-08 / airgap-audit Gap 2 carries the
-      // long-term wire-up (gate_event + per-deploy URL).
+      // Book a call CTA → the same URL-backed viewer path as the
+      // `book_call` tool. The scheduler URL itself is browser-safe
+      // app config consumed by BookCallView; the nav should never open
+      // a parallel new-tab path.
       if (key === "call") {
-        const calendlyUrl = import.meta.env.VITE_CALENDLY_URL as string | undefined;
-        if (calendlyUrl) {
-          window.open(calendlyUrl, "_blank", "noopener,noreferrer");
-        } else {
-          console.warn(
-            "[OnboardingShell] Book-a-call clicked but VITE_CALENDLY_URL is unset. Set the env to wire this CTA.",
-          );
-        }
+        const params = new URLSearchParams(location.search);
+        params.set("bookCall", "1");
+        navigate(
+          { pathname: location.pathname, search: `?${params.toString()}` },
+          { replace: false },
+        );
         return;
       }
       // Settings is in-app for signed-in users — client-side route.
@@ -651,7 +671,7 @@ export const OnboardingShell: FC = () => {
       }
       // support, anything else: no-op for now.
     },
-    [navigate],
+    [location.pathname, location.search, navigate],
   );
 
   // The chat + canvas split that lives in the right-of-nav slot for

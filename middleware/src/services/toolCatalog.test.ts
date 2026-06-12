@@ -52,6 +52,8 @@ const EXPECTED_NAMES = [
   "wizard_finish",
   "dismiss_wizard",
   "close_dialog",
+  // agentic-tool-loop — server-executed read tool (no app mirror; server-only).
+  "lookup_groundx_docs",
 ].sort();
 
 describe("server tool catalog", () => {
@@ -94,6 +96,31 @@ describe("server tool catalog", () => {
     expect(getServerTool("nonexistent_tool")).toBeUndefined();
   });
 
+  // agentic-tool-loop — a tool is EITHER intent-routed or server-executed, never
+  // both and never neither; a server-executed tool is read-only and carries the
+  // user-facing activity label surfaced on reply.toolActivity[].
+  it("every tool declares exactly one of intentBuilder / serverExecute", () => {
+    for (const tool of SERVER_TOOL_CATALOG) {
+      const hasIntent = typeof tool.intentBuilder === "function";
+      const hasServerExec = typeof tool.serverExecute === "function";
+      expect(
+        hasIntent !== hasServerExec,
+        `${tool.name} must declare exactly one of intentBuilder / serverExecute`,
+      ).toBe(true);
+    }
+  });
+
+  it("every serverExecute tool is read-category and declares an activityLabel", () => {
+    for (const tool of SERVER_TOOL_CATALOG) {
+      if (typeof tool.serverExecute !== "function") continue;
+      expect(tool.category, `${tool.name} serverExecute must be category:read`).toBe("read");
+      expect(
+        (tool.activityLabel?.length ?? 0) > 0,
+        `${tool.name} serverExecute must declare a non-empty activityLabel`,
+      ).toBe(true);
+    }
+  });
+
   it("toolsForStep filters by availableSteps", () => {
     // doc-viewer step exposes: PdfViewer's 2 tools + ProposeSchemaFieldCard's
     // 3 + the unscoped (universal) tools suggest_intent + commit_gate /
@@ -109,6 +136,8 @@ describe("server tool catalog", () => {
         "dismiss_gate",
         "dismiss_wizard",
         "jump_to_page",
+        // agentic-tool-loop — server-executed product-docs lookup is universal.
+        "lookup_groundx_docs",
         "open_document",
         // smart-report Phase 5 — pin + render are reachable from the doc-viewer.
         "pin_to_report",
@@ -123,6 +152,9 @@ describe("server tool catalog", () => {
         // onboarding-shell-shared-view Phase 3b — show_integrate is reachable
         // from the doc-viewer (the user can ask to ship/integrate).
         "show_integrate",
+        // 2026-06-11 — canvas-navigation tools are universal; the builder is
+        // now reachable from anywhere ("edit the report" from the doc-viewer).
+        "show_smart_report_edit",
         "show_smart_report_render",
         // tool-system-completion — sign-up submit is universal (no step filter).
         "submit_signup",
@@ -144,6 +176,8 @@ describe("server tool catalog", () => {
       "dismiss_gate",
       "dismiss_wizard",
       "edit_report_section",
+      // agentic-tool-loop — server-executed product-docs lookup is universal.
+      "lookup_groundx_docs",
       "pin_to_report",
       "propose_report_section",
       "reject_report_section",
@@ -159,6 +193,35 @@ describe("server tool catalog", () => {
       "wizard_finish",
       "wizard_next",
     ]);
+  });
+
+  // Canvas-NAVIGATION tools are universal (2026-06-11). Step-gating makes
+  // sense for step-LOCAL tools (proposals need their workbench context), but
+  // navigation tools exist to move BETWEEN steps — gating them by where the
+  // user already is defeats their purpose. Live failure that exposed this:
+  // "go back to extractions" typed on the Integrate step got a RAG search
+  // because `show_extraction` wasn't offered there.
+  it("every canvas-navigation show_* tool is available from EVERY step", () => {
+    const NAV_TOOLS = [
+      "show_extraction",
+      "show_integrate",
+      "show_smart_report_render",
+      "show_smart_report_edit",
+    ];
+    const ALL_STEPS = [
+      "ingest-picker",
+      "doc-viewer",
+      "extract-workbench",
+      "interact-chat",
+      "report",
+      "integrate",
+    ] as const;
+    for (const step of ALL_STEPS) {
+      const offered = toolsForStep(step).map((t) => t.name);
+      for (const nav of NAV_TOOLS) {
+        expect(offered, `${nav} must be offered on step "${step}"`).toContain(nav);
+      }
+    }
   });
 
   it("toolsForStep with undefined returns the full catalog", () => {

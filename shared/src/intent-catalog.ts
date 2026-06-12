@@ -90,7 +90,7 @@ export const intentCatalog: IntentCatalogEntry[] = [
   { kind: "rejectSchemaField", class: "ux-interaction", llm: { toolName: "reject_proposal", prompt: "No, reject the proposed field.", liveSingleTurn: false, liveNote: "needs a pending field proposal in context (multi-turn)" } },
   { kind: "commitGate", class: "ux-interaction", llm: { toolName: "commit_gate", prompt: "Sign me up with email and password now." } },
   { kind: "dismissGate", class: "ux-interaction", llm: { toolName: "dismiss_gate", prompt: "Not now, let me keep exploring instead of signing up." } },
-  { kind: "openBookCall", class: "ux-interaction", llm: { toolName: "book_call", prompt: "I'd like to book a call with an engineer." } },
+  { kind: "openBookCall", class: "ux-interaction", llm: { toolName: "book_call", prompt: "I'd like to speak with a team member and book a call with an engineer." } },
   { kind: "pinToReport", class: "ux-interaction", llm: { toolName: "pin_to_report", prompt: "Pin this answer to my report.", liveSingleTurn: false, liveNote: "needs a prior assistant answer/turn to pin (multi-turn)" } },
   { kind: "proposeReportSection", class: "ux-interaction", llm: { toolName: "propose_report_section", prompt: "Add an anomalies section to the report." } },
   { kind: "acceptReportSection", class: "ux-interaction", llm: { toolName: "accept_report_section", prompt: "Yes, accept the proposed report section.", liveSingleTurn: false, liveNote: "needs a pending report-section proposal in context (multi-turn)" } },

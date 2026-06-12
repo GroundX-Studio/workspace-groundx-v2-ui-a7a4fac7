@@ -117,11 +117,11 @@ const child = spawn("npm", ["run", "dev"], {
     LLM_SERVICE: process.env.LLM_SERVICE ?? "openai",
     LLM_MODEL_ID: process.env.LLM_MODEL_ID ?? "smoke-model",
     LLM_API_KEY: process.env.LLM_API_KEY ?? "smoke-llm-key",
-    APP_REPOSITORY_MODE: "memory",
-    MYSQL_HOST: "mysql.invalid.local",
-    MYSQL_DATABASE: "smoke_should_not_be_used",
-    MYSQL_USER: "smoke_should_not_be_used",
-    MYSQL_PASSWORD: "smoke_should_not_be_used",
+    // retire-memory-repository-mode (2026-06-11): MySQL is the ONLY runtime
+    // repository, so the smoke boot now exercises the real database path.
+    // MYSQL_* is deliberately NOT overridden here — the middleware's loadEnv
+    // reads it from the process env or middleware/.env.local (the dev RDS).
+    // A smoke run without a reachable database now fails fast BY DESIGN.
   },
   stdio: ["ignore", "pipe", "pipe"],
 });

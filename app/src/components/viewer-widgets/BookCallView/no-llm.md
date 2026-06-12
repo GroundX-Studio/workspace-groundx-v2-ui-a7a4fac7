@@ -2,12 +2,13 @@
 
 ## Why
 
-`BookCallView` is the Calendly iframe wrapper. The booking action
-happens INSIDE the iframe (a third-party origin); the widget has no
-in-app action of its own beyond mounting/unmounting the iframe based
-on `?bookCall=1` in the URL. Letting the LLM "drive" Calendly would
-require cross-origin scripting, which is correctly forbidden.
+`BookCallView` is the Calendly inline-widget wrapper. The booking action
+happens inside Calendly's third-party surface; the widget has no in-app
+action of its own beyond mounting/unmounting the scheduler based on
+`?bookCall=1` in the URL and reporting Calendly's trusted scheduled event
+to the host.
 
-Phase 7 may pair this with a `BookingStatusCard`-side `book_call()`
-tool that ROUTES the user here (i.e., adds `?bookCall=1`), but the
-viewer surface itself stays opt-out.
+The `BookingStatusCard`-side `book_call()` tool routes the user here
+(adds `?bookCall=1`), but the viewer surface itself stays opt-out for LLM
+tools. Letting the LLM "drive" Calendly would require cross-origin
+scripting, which is correctly forbidden.

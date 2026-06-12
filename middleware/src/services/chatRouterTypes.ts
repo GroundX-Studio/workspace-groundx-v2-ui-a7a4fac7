@@ -33,11 +33,15 @@ import {
   type ProposalEnvelopeProvenance,
   type ProposedSchemaField,
   type SuggestedAction,
+  type ToolActivity as SharedToolActivity,
   type ToolFailure as SharedToolFailure,
   type WidgetRole,
 } from "@groundx/shared";
 
 export type { Citation };
+// agentic-tool-loop — one successfully server-executed tool call, surfaced on
+// the chat reply's `toolActivity[]`. Re-export the ONE shared shape.
+export type ToolActivity = SharedToolActivity;
 // 2026-05-31-core-data-followups §4 #13 — the middleware `SuggestedAction` was a
 // byte-identical fork of the shared chip shape; re-export the ONE shared type so
 // the wire twin cannot drift. Local importers (`chatRouter`, `ragPipeline`) keep
@@ -221,6 +225,30 @@ export interface ChatRouterDeps {
     apiKey: string,
     documentId: string,
   ) => Promise<WordMap | null>;
+  /**
+   * GroundX skill-pack retrieval seam (2026-06-11) — see
+   * `GroundedAnswerDeps.skillsRetrieve`. Threaded through to the grounded
+   * call; tests inject a fixture for deterministic prompt-wiring assertions.
+   */
+  skillsRetrieve?: (question: string, options?: { bypassEntryBar?: boolean }) => string | null;
+  /**
+   * Turn-router seams (chat-architecture-hardening Task 4; mode routing
+   * since turn-router-extraction-appstate): the light client + model the
+   * planner runs on, and an injectable `planTurn` for deterministic tests.
+   * `routeChat` consumes the RoutePlan's `appState` for mode derivation and
+   * strips it before threading the seam plan to `GroundedAnswerDeps`.
+   */
+  lightLlmClient?: LlmClient;
+  lightLlmModelId?: string;
+  planTurn?: (question: string) => Promise<import("./turnRouter.js").RoutePlan>;
+  /**
+   * Embedding-similarity verification seam (wire-embedding-verification) —
+   * see `GroundedAnswerDeps.quoteEmbedder`. Threaded to the grounded call;
+   * absent -> lexical-only verification (dev-degrade).
+   */
+  quoteEmbedder?: import("./attribution.js").Embedder;
+  /** Embedding-gate threshold (env `EMBEDDINGS_VERIFY_THRESHOLD`). */
+  embedThreshold?: number;
 }
 
 /**
@@ -311,17 +339,41 @@ export interface SuggestedIntent {
 }
 
 /**
- * CF-06 — structured citation entry the LLM emits in its JSON block
+ * CF-06 — snippet-sourced citation entry the LLM emits in its JSON block
  * to declare exactly which snippet(s) it used. The chatRouter
  * validates each entry's `documentId` against the snippet set it
  * actually sent the LLM, so the model can't invent references.
  */
-export interface StructuredCitation {
+export interface SnippetCitation {
   documentId: string;
   page: number;
   quote: string;
   /** WF-06 — the claim in the answer this quote supports (Bridge B). Optional. */
   answerSpan?: string;
+}
+
+/**
+ * Extraction-sourced citation entry (2026-06-11-extraction-grounded-
+ * citations) — emitted for claims grounded in the EXTRACTED FIELDS block,
+ * which has no snippet to quote. `field` is a path into the extraction JSON
+ * (`meters[0].meter_number`) and `value` is the value at that path, copied
+ * verbatim — the proof the claim is grounded. The chatRouter validates both
+ * against the REAL extraction payload it fetched; failures are dropped.
+ */
+export interface ExtractionCitation {
+  documentId: string;
+  field: string;
+  value: string | number | boolean;
+  answerSpan?: string;
+}
+
+/** The two citation entry forms the grounded model may emit, discriminated
+ * by shape (`page`+`quote` vs `field`+`value`). */
+export type StructuredCitation = SnippetCitation | ExtractionCitation;
+
+/** Shape discriminant for the extraction-sourced arm. */
+export function isExtractionCitation(c: StructuredCitation): c is ExtractionCitation {
+  return "field" in c;
 }
 
 export interface ParsedRagAnswer {
@@ -339,6 +391,13 @@ export interface ParsedRagAnswer {
    * card.
    */
   proposedSchemaField: ProposedSchemaField | null;
+  /**
+   * harden-citation-emission U2 — parse-level citation losses, feeding the
+   * U4 funnel: `malformedJson` counts ```json-TAGGED fences that failed
+   * JSON.parse (untagged/content fences are not losses); `invalidEntries`
+   * counts entries inside a citations array that failed arm validation.
+   */
+  parseLosses: { malformedJson: number; invalidEntries: number };
 }
 
 /**

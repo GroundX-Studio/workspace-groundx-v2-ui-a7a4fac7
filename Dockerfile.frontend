@@ -16,6 +16,8 @@ COPY shared shared
 RUN npm --workspace @groundx/shared run build
 COPY middleware middleware
 COPY app app
+ARG VITE_CALENDLY_URL=""
+ENV VITE_CALENDLY_URL=$VITE_CALENDLY_URL
 RUN npm --workspace app run build
 # OB-05 — drop sourcemaps from the runtime image. `vite build` emits
 # `.map` files alongside the bundles (mode "hidden" — no

@@ -46,7 +46,7 @@
 
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { useEffect, useState, type FC } from "react";
+import { useEffect, useRef, useState, type FC } from "react";
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import { BODY_TEXT, BORDER } from "@/constants";
@@ -101,6 +101,14 @@ export interface ThinkingStreamProps {
   persistReplay?: boolean;
   /** Fires once when the stream finishes (after DONE_REVEAL_DELAY_MS). */
   onDone?: () => void;
+  /**
+   * Fires once on mount IFF the reveal will actually ANIMATE from scratch
+   * (notes present and no persisted replay-doneness). A replay-restore or an
+   * empty notes list does NOT fire it. Canvas↔chat coherence hook
+   * (2026-06-11): the onboarding Intro uses this to snap the canvas back to
+   * Understand so the scan narration never plays over a later frame.
+   */
+  onWillPlay?: () => void;
 }
 
 export const ThinkingStream: FC<ThinkingStreamProps> = ({
@@ -110,6 +118,7 @@ export const ThinkingStream: FC<ThinkingStreamProps> = ({
   scope: _scope,
   persistReplay = false,
   onDone,
+  onWillPlay,
 }) => {
   const persist = persistReplay;
   const storageKey = `${STORAGE_KEY_PREFIX}${scenarioKey}`;
@@ -133,6 +142,20 @@ export const ThinkingStream: FC<ThinkingStreamProps> = ({
   const [showDone, setShowDone] = useState<boolean>(
     alreadyPlayed || notes.length === 0,
   );
+
+  // Fire onWillPlay once on mount IFF the reveal will actually animate
+  // (fresh play — not a replay-restore, not an empty script). See the
+  // prop doc: canvas↔chat coherence hook.
+  const willPlayFiredRef = useRef(false);
+  useEffect(() => {
+    if (willPlayFiredRef.current) return;
+    if (alreadyPlayed || notes.length === 0) return;
+    willPlayFiredRef.current = true;
+    onWillPlay?.();
+    // onWillPlay is intentionally omitted from the dep array — same
+    // inline-lambda contract as onDone below; fires once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alreadyPlayed, notes.length]);
 
   // Advance reveal one note at a time.
   useEffect(() => {

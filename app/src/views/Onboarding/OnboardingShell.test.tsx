@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChatStore } from "@/contexts/ChatStoreContext";
@@ -51,6 +51,12 @@ const NavigateProbe = ({ onReady }: { onReady: (navigate: (to: string) => void) 
   // call `nav("/onboarding")` from outside the component tree.
   const nav = useNavigate();
   onReady((to) => nav(to));
+  return null;
+};
+
+const LocationProbe = ({ onSnapshot }: { onSnapshot: (location: { pathname: string; search: string }) => void }) => {
+  const location = useLocation();
+  onSnapshot({ pathname: location.pathname, search: location.search });
   return null;
 };
 
@@ -526,6 +532,27 @@ describe("OnboardingShell", () => {
     }
   });
 
+  it("opens the Book a call CTA in the in-app viewer instead of a new tab", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    try {
+      renderWithOnboardingProviders(<OnboardingShell />, {
+        initialFrame: "f2",
+        initialScenario: "utility",
+      });
+
+      await user.click(screen.getByTestId("onboarding-nav-cta-call"));
+
+      await waitFor(() => {
+        expect(document.querySelector('[data-widget="book-call-view"]')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("book-call-chat-status")).toBeInTheDocument();
+      expect(openSpy).not.toHaveBeenCalled();
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
   it("activates the sample referenced by the URL params on mount", async () => {
     // URL contract: /onboarding/<bucketId>/<scenarioId> mounts with
     // that scenario active in the registry. The URL is the source of
@@ -572,6 +599,55 @@ describe("OnboardingShell", () => {
     });
     // Registry stays empty — signup is not an entity.
     expect(registrySnap.entityKeys).toEqual([]);
+  });
+
+  it("honors ?bookCall=1 on the bare onboarding route instead of masking it with the F1 picker", async () => {
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f1",
+      initialScenario: null,
+      initialUrl: "/onboarding?bookCall=1",
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-widget="book-call-view"]')).not.toBeNull();
+    });
+    expect(screen.getByLabelText("Book a call · status")).toBeInTheDocument();
+    expect(screen.queryByText(/connect your data to groundx/i)).not.toBeInTheDocument();
+  });
+
+  it("clears ?bookCall=1 and shows the call-requested state after Calendly confirms scheduling", async () => {
+    let locationSnapshot = { pathname: "", search: "" };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <LocationProbe onSnapshot={(next) => (locationSnapshot = next)} />
+      </>,
+      {
+        initialFrame: "f3",
+        initialScenario: "utility",
+        initialUrl: "/onboarding/28454/utility?bookCall=1",
+      },
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-widget="book-call-view"]')).not.toBeNull();
+    });
+    expect(locationSnapshot.search).toContain("bookCall=1");
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { event: "calendly.event_scheduled", payload: { event: { uri: "scheduled" } } },
+          origin: "https://calendly.com",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(locationSnapshot.search).not.toContain("bookCall=1");
+      expect(screen.getByTestId("gate-rail-committed")).toHaveTextContent(/call requested/i);
+    });
+    expect(screen.queryByLabelText("Book a call · status")).not.toBeInTheDocument();
   });
 
   // ── master-viewer-session Phase 2 — gate-as-overlay ──────────────
@@ -1064,6 +1140,11 @@ describe("OnboardingShell", () => {
     // orchestrator (the same intent `show_smart_report_edit` emits), which
     // routes to advanceFrame("f4a", { selectedReportSectionId }); the builder
     // pre-opens that section from session.selectedReportSectionId.
+    //
+    // Mid-flow premise (f4 with an empty thread) ⇒ seed the scripted-intro
+    // doneness, else the Intro's replay-snap (canvas↔chat coherence,
+    // 2026-06-11) correctly yanks the canvas back to f2.
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, {
       initialFrame: "f4",

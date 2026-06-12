@@ -48,7 +48,6 @@ const SAVE_CHIP_REPLY: SendChatMessageResult = {
         detail: { intent: { kind: "openGate", trigger: "save" } },
       },
     ],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,

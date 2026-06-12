@@ -471,6 +471,66 @@ describe("CanvasOrchestratorContext", () => {
       if (top?.kind === "doc-viewer") expect(top.highlight?.page).toBe(2); // still set
     });
 
+    // show-all-sources toggle (2026-06-11) — a USER re-click of "Show all
+    // sources" while those same regions are lit clears them (toggle off),
+    // mirroring the single-citation toggle above.
+    it("toggles the lit regions off when 'show all sources' is re-clicked by the user", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      const showAll = {
+        kind: "showCitations" as const,
+        documentId: "doc-A",
+        page: 1,
+        regions: [
+          { page: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.02, color: "green" as const },
+          { page: 2, x: 0.2, y: 0.3, w: 0.4, h: 0.02, color: "coral" as const },
+        ],
+      };
+      const topStep = () => {
+        const s = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+        return s ? s.viewer.history[s.viewer.currentStep.stepIndex] : null;
+      };
+
+      act(() => result.current.bus.dispatch(showAll, "user"));
+      let top = topStep();
+      expect(top?.kind).toBe("doc-viewer");
+      if (top?.kind === "doc-viewer") expect(top.litRegions?.length).toBe(2);
+
+      // Same regions, same user → cleared (toggle off); the page stays shown.
+      act(() => result.current.bus.dispatch(showAll, "user"));
+      top = topStep();
+      expect(top?.kind).toBe("doc-viewer");
+      if (top?.kind === "doc-viewer") expect(top.litRegions ?? []).toHaveLength(0);
+
+      // Click again → re-applied.
+      act(() => result.current.bus.dispatch(showAll, "user"));
+      top = topStep();
+      if (top?.kind === "doc-viewer") expect(top.litRegions?.length).toBe(2);
+    });
+
+    it("agent-sourced showCitations does NOT toggle off on an identical repeat", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      const showAll = {
+        kind: "showCitations" as const,
+        documentId: "doc-A",
+        page: 1,
+        regions: [{ page: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.02, color: "green" as const }],
+      };
+      act(() => result.current.bus.dispatch(showAll, "agent"));
+      act(() => result.current.bus.dispatch(showAll, "agent")); // repeat
+      const s = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+      const top = s?.viewer.history[s.viewer.currentStep.stepIndex];
+      expect(top?.kind).toBe("doc-viewer");
+      if (top?.kind === "doc-viewer") expect(top.litRegions?.length).toBe(1); // still lit
+    });
+
     // WF-06b — the citation tier rides the intent into the step's
     // highlight slot so the viewer pane can render at the right precision.
     it("threads the citation tier onto the doc-viewer step highlight slot", () => {

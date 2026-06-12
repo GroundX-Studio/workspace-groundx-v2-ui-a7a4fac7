@@ -365,6 +365,9 @@ export interface RenderReportDeps {
   llmModelId?: string;
   /** Server-derived RBAC / tenant filter (NEVER client-supplied). */
   rbacFilter?: Record<string, unknown>;
+  /** Embedding verification seam — see `GroundedAnswerDeps.quoteEmbedder`. */
+  quoteEmbedder?: import("./attribution.js").Embedder;
+  embedThreshold?: number;
 }
 
 /** {var} token regex (literal variables only, #12). */
@@ -531,6 +534,8 @@ export async function renderReport(
     llmClient: deps.llmClient,
     llmModelId: deps.llmModelId,
     ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
+    ...(deps.quoteEmbedder ? { quoteEmbedder: deps.quoteEmbedder } : {}),
+    ...(deps.embedThreshold !== undefined ? { embedThreshold: deps.embedThreshold } : {}),
   };
 
   // section_ids subset: render only those sections, IN TEMPLATE ORDER. `null`
@@ -546,7 +551,12 @@ export async function renderReport(
   for (const section of liveSections) {
     // The section question comes from the PERSISTED template — never the
     // client request (one source of truth).
-    const grounded = await groundedAnswerOverScope(section.question, request.scope, groundedDeps);
+    // Task 4 — FIXED turn plan: report sections always search, never inject
+    // product knowledge (intentional change: the old default let the skill
+    // pack leak into report prose).
+    const grounded = await groundedAnswerOverScope(section.question, request.scope, groundedDeps, {
+      turnPlan: { documentSearch: true, productKnowledge: false, extractionContext: true },
+    });
     sections.push(
       degradeSection(
         {

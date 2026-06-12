@@ -492,7 +492,7 @@ function Atlas_Gate() {
             <TouchBtn full>Google</TouchBtn>
           </div>
           <div style={{ height: 8 }} />
-          <TouchBtn full kind="coral">📅 book 15-min engineer call</TouchBtn>
+          <TouchBtn full kind="coral">📅 book 30-min engineer call</TouchBtn>
           <div style={{ textAlign: 'center', fontFamily: 'Kalam,cursive', fontSize: 11, color: 'var(--gx-navy)', marginTop: 10 }}>
             <span className="wf-link">← keep exploring</span>
           </div>

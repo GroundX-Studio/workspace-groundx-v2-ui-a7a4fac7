@@ -39,7 +39,9 @@ const showSmartReportRender: WidgetTool = {
       .optional()
       .describe("Optional report template id; defaults to the active draft template when omitted."),
   }),
-  availableSteps: ["report", "extract-workbench", "interact-chat", "doc-viewer"],
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (Task 7 mirrors the
+  // 2026-06-11 server-side decision: navigation tools move the user BETWEEN
+  // steps; gating them by the current step defeats their purpose).
 };
 
 export const tools: WidgetTool[] = [showSmartReportRender];

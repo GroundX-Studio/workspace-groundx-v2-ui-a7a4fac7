@@ -36,8 +36,10 @@ import type { WidgetRole } from "@groundx/shared";
 
 // Tools that live ONLY on the server (no widget owns them). They have no app
 // mirror by design — `suggest_intent` is the server-side canvas-navigation
-// suggestion (the app resolves the kebab label against scenario context).
-const SERVER_ONLY = new Set(["suggest_intent"]);
+// suggestion (the app resolves the kebab label against scenario context);
+// `lookup_groundx_docs` (agentic-tool-loop) is server-EXECUTED — the middleware
+// runs it inside the grounded tool-result loop and it never reaches the app.
+const SERVER_ONLY = new Set(["suggest_intent", "lookup_groundx_docs"]);
 
 // The single source-of-truth role map (matrix §3). Any tool NOT listed here is
 // all-roles (no `availableIn`). Adding a role-restricted tool means adding a
@@ -239,5 +241,88 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
         `server-only tool(s) declare a rendersWidget binding but are not enumerated in CARD_TOOL_BINDINGS: ${unenumerated.join(", ")}`,
       ).toEqual([]);
     });
+  });
+});
+
+// ── chat-architecture-hardening Task 7 — FULL-SHAPE parity ─────────────────
+//
+// Upgrades the guard from name+role+description+rendersWidget to the FULL
+// tool shape: `category`, `availableSteps`, and the Zod input schema (both
+// sides rendered to JSON-Schema via the middleware's own converter). NO
+// committed manifest — the gate-answered 2026-05-31 decision stands: this
+// cross-package in-suite test is the only loader that can see both catalogs
+// (the app side is assembled via Vite's `import.meta.glob`).
+import { convertNode } from "../../../middleware/src/services/zodToJsonSchema";
+import { SERVER_TOOL_CATALOG as FULL_SERVER_CATALOG } from "../../../middleware/src/services/toolCatalog";
+import { collectAppToolSpecs as collectAgain } from "./appToolSpecs";
+
+describe("app↔server tool-catalog parity (FULL SHAPE)", () => {
+  const appTools = collectAgain(
+    import.meta.glob(
+      [
+        "../components/chat-widgets/*/*.tools.ts",
+        "../components/viewer-widgets/*/*.tools.ts",
+        "../views/**/*.tools.ts",
+        "../components/primitives/**/*.tools.ts",
+      ],
+      { eager: true },
+    ),
+  );
+  const serverByName = new Map(FULL_SERVER_CATALOG.map((t) => [t.name, t]));
+
+  it("every app tool's category matches its server mirror", () => {
+    const mismatches: string[] = [];
+    for (const tool of appTools) {
+      const server = serverByName.get(tool.name);
+      if (!server) continue; // missing-mirror covered by the name guard
+      if (server.category !== tool.category) {
+        mismatches.push(`${tool.name}: app category=${tool.category} server category=${server.category}`);
+      }
+    }
+    expect(mismatches, `category drifted app↔server:\n${mismatches.join("\n")}`).toEqual([]);
+  });
+
+  it("every app tool's availableSteps matches its server mirror", () => {
+    const mismatches: string[] = [];
+    for (const tool of appTools) {
+      const server = serverByName.get(tool.name);
+      if (!server) continue;
+      const appSteps = [...(tool.availableSteps ?? [])].sort();
+      const serverSteps = [...(server.availableSteps ?? [])].sort();
+      if (JSON.stringify(appSteps) !== JSON.stringify(serverSteps)) {
+        mismatches.push(
+          `${tool.name}: app availableSteps=${JSON.stringify(appSteps)} server=${JSON.stringify(serverSteps)}`,
+        );
+      }
+    }
+    expect(mismatches, `availableSteps drifted app↔server:\n${mismatches.join("\n")}`).toEqual([]);
+  });
+
+  it("every app tool's input schema matches its server mirror as JSON-Schema", () => {
+    const mismatches: string[] = [];
+    for (const tool of appTools) {
+      const server = serverByName.get(tool.name);
+      if (!server) continue;
+      let appJson: unknown;
+      let serverJson: unknown;
+      try {
+        appJson = convertNode(tool.input);
+      } catch (err) {
+        mismatches.push(`${tool.name}: app input schema not convertible — ${String(err)}`);
+        continue;
+      }
+      try {
+        serverJson = convertNode(server.inputSchema);
+      } catch (err) {
+        mismatches.push(`${tool.name}: server input schema not convertible — ${String(err)}`);
+        continue;
+      }
+      if (JSON.stringify(appJson) !== JSON.stringify(serverJson)) {
+        mismatches.push(
+          `${tool.name}: input schema drifted\n  app:    ${JSON.stringify(appJson)}\n  server: ${JSON.stringify(serverJson)}`,
+        );
+      }
+    }
+    expect(mismatches, `input schemas drifted app↔server (field: input):\n${mismatches.join("\n")}`).toEqual([]);
   });
 });

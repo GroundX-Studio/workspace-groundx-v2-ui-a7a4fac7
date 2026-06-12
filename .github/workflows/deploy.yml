@@ -62,6 +62,7 @@ jobs:
       FRONTEND_IMAGE_REPOSITORY_INPUT: ${{ vars.FRONTEND_IMAGE_REPOSITORY || secrets.FRONTEND_IMAGE_REPOSITORY || '' }}
       MIDDLEWARE_IMAGE_REPOSITORY_INPUT: ${{ vars.MIDDLEWARE_IMAGE_REPOSITORY || secrets.MIDDLEWARE_IMAGE_REPOSITORY || '' }}
       IMAGE_TAG_INPUT: ${{ vars.IMAGE_TAG || secrets.IMAGE_TAG || '' }}
+      VITE_CALENDLY_URL_INPUT: ${{ vars.VITE_CALENDLY_URL || secrets.VITE_CALENDLY_URL || '' }}
       TLS_SECRET_NAME_INPUT: ${{ vars.TLS_SECRET_NAME || secrets.TLS_SECRET_NAME || '' }}
       IMAGE_PULL_SECRET_NAME_INPUT: ${{ vars.IMAGE_PULL_SECRET_NAME || secrets.IMAGE_PULL_SECRET_NAME || '' }}
       HELM_RELEASE_NAME_INPUT: ${{ vars.HELM_RELEASE_NAME || secrets.HELM_RELEASE_NAME || '' }}
@@ -81,7 +82,6 @@ jobs:
       MIDDLEWARE_SECRET_NAME_INPUT: ${{ vars.MIDDLEWARE_SECRET_NAME || secrets.MIDDLEWARE_SECRET_NAME || '' }}
       MIDDLEWARE_NODE_ENV: ${{ vars.MIDDLEWARE_NODE_ENV || secrets.MIDDLEWARE_NODE_ENV || 'production' }}
       LOG_LEVEL: ${{ vars.LOG_LEVEL || secrets.LOG_LEVEL || '' }}
-      APP_REPOSITORY_MODE: ${{ vars.APP_REPOSITORY_MODE || secrets.APP_REPOSITORY_MODE || 'mysql' }}
       ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN || secrets.ALLOWED_ORIGIN || '' }}
       GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || secrets.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
       GROUNDX_SAMPLES_BUCKET_ID: ${{ vars.GROUNDX_SAMPLES_BUCKET_ID || secrets.GROUNDX_SAMPLES_BUCKET_ID || '' }}
@@ -90,6 +90,16 @@ jobs:
       LLM_MODEL_ID: ${{ vars.LLM_MODEL_ID || secrets.LLM_MODEL_ID || '' }}
       LLM_AUTH_HEADER_NAME: ${{ vars.LLM_AUTH_HEADER_NAME || secrets.LLM_AUTH_HEADER_NAME || 'Authorization' }}
       LLM_AUTH_SCHEME: ${{ vars.LLM_AUTH_SCHEME || secrets.LLM_AUTH_SCHEME || 'Bearer' }}
+      # wire-embedding-verification: always-on embedding citation verification.
+      # base_url + model_id are REQUIRED in production (middleware fails fast
+      # at boot without them); api_key is optional (keyless self-hosted
+      # providers are supported).
+      EMBEDDINGS_BASE_URL: ${{ vars.EMBEDDINGS_BASE_URL || secrets.EMBEDDINGS_BASE_URL || '' }}
+      EMBEDDINGS_MODEL_ID: ${{ vars.EMBEDDINGS_MODEL_ID || secrets.EMBEDDINGS_MODEL_ID || '' }}
+      EMBEDDINGS_AUTH_HEADER_NAME: ${{ vars.EMBEDDINGS_AUTH_HEADER_NAME || secrets.EMBEDDINGS_AUTH_HEADER_NAME || '' }}
+      EMBEDDINGS_AUTH_SCHEME: ${{ vars.EMBEDDINGS_AUTH_SCHEME || secrets.EMBEDDINGS_AUTH_SCHEME || '' }}
+      EMBEDDINGS_VERIFY_THRESHOLD: ${{ vars.EMBEDDINGS_VERIFY_THRESHOLD || secrets.EMBEDDINGS_VERIFY_THRESHOLD || '' }}
+      EMBEDDINGS_TIMEOUT_MS: ${{ vars.EMBEDDINGS_TIMEOUT_MS || secrets.EMBEDDINGS_TIMEOUT_MS || '' }}
       BYO_PAGES_LIMIT: ${{ vars.BYO_PAGES_LIMIT || secrets.BYO_PAGES_LIMIT || '' }}
       RATE_LIMIT_AUTH_PER_MIN: ${{ vars.RATE_LIMIT_AUTH_PER_MIN || secrets.RATE_LIMIT_AUTH_PER_MIN || '' }}
       RATE_LIMIT_API_PER_MIN: ${{ vars.RATE_LIMIT_API_PER_MIN || secrets.RATE_LIMIT_API_PER_MIN || '' }}
@@ -224,6 +234,8 @@ jobs:
           file: Dockerfile.frontend
           push: true
           tags: ${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
+          build-args: |
+            VITE_CALENDLY_URL=${{ env.VITE_CALENDLY_URL_INPUT }}
 
       - name: Build and push middleware image
         uses: docker/build-push-action@v6
@@ -277,6 +289,11 @@ jobs:
               printf '%s=%s\n' "$key" "$value"
             fi
           }
+          append_env() {
+            key="$1"
+            value="$2"
+            printf '%s=%s\n' "$key" "$value"
+          }
           session_secret="$SESSION_SECRET"
           if [ -z "$session_secret" ]; then
             session_secret="$(kubectl -n "$K8S_NAMESPACE" get secret "$MIDDLEWARE_SECRET_NAME" -o jsonpath='{.data.SESSION_SECRET}' 2>/dev/null | base64 --decode || true)"
@@ -295,18 +312,24 @@ jobs:
             append_optional_env 'GROUNDX_DEPLOY_PUBLIC_HOSTS' "$PUBLIC_HOSTS_INPUT"
             printf 'GROUNDX_DEPLOY_RELEASE_NAME=%s\n' "${{ steps.deploy-vars.outputs.release_name }}"
             append_optional_env 'LOG_LEVEL' "$LOG_LEVEL"
-            printf 'APP_REPOSITORY_MODE=%s\n' "$APP_REPOSITORY_MODE"
             append_optional_env 'ALLOWED_ORIGIN' "$ALLOWED_ORIGIN"
             printf 'GROUNDX_BASE_URL=%s\n' "$GROUNDX_BASE_URL"
-            printf 'GROUNDX_PARTNER_API_KEY=%s\n' "$GROUNDX_PARTNER_API_KEY"
+            append_env 'GROUNDX_PARTNER_API_KEY' "$GROUNDX_PARTNER_API_KEY"
             append_optional_env 'GROUNDX_ANON_API_KEY' "$GROUNDX_ANON_API_KEY"
             append_optional_env 'GROUNDX_SAMPLES_BUCKET_ID' "$GROUNDX_SAMPLES_BUCKET_ID"
-            printf 'LLM_SERVICE=%s\n' "$LLM_SERVICE"
+            append_env 'LLM_SERVICE' "$LLM_SERVICE"
             append_optional_env 'LLM_BASE_URL' "$LLM_BASE_URL"
-            printf 'LLM_API_KEY=%s\n' "$LLM_API_KEY"
-            printf 'LLM_AUTH_HEADER_NAME=%s\n' "$LLM_AUTH_HEADER_NAME"
-            printf 'LLM_AUTH_SCHEME=%s\n' "$LLM_AUTH_SCHEME"
-            printf 'LLM_MODEL_ID=%s\n' "$LLM_MODEL_ID"
+            append_env 'LLM_API_KEY' "$LLM_API_KEY"
+            append_env 'LLM_AUTH_HEADER_NAME' "$LLM_AUTH_HEADER_NAME"
+            append_env 'LLM_AUTH_SCHEME' "$LLM_AUTH_SCHEME"
+            append_env 'LLM_MODEL_ID' "$LLM_MODEL_ID"
+            append_env 'EMBEDDINGS_BASE_URL' "$EMBEDDINGS_BASE_URL"
+            append_env 'EMBEDDINGS_MODEL_ID' "$EMBEDDINGS_MODEL_ID"
+            append_optional_env 'EMBEDDINGS_API_KEY' "$EMBEDDINGS_API_KEY"
+            append_optional_env 'EMBEDDINGS_AUTH_HEADER_NAME' "$EMBEDDINGS_AUTH_HEADER_NAME"
+            append_optional_env 'EMBEDDINGS_AUTH_SCHEME' "$EMBEDDINGS_AUTH_SCHEME"
+            append_optional_env 'EMBEDDINGS_VERIFY_THRESHOLD' "$EMBEDDINGS_VERIFY_THRESHOLD"
+            append_optional_env 'EMBEDDINGS_TIMEOUT_MS' "$EMBEDDINGS_TIMEOUT_MS"
             append_optional_env 'BYO_PAGES_LIMIT' "$BYO_PAGES_LIMIT"
             append_optional_env 'RATE_LIMIT_AUTH_PER_MIN' "$RATE_LIMIT_AUTH_PER_MIN"
             append_optional_env 'RATE_LIMIT_API_PER_MIN' "$RATE_LIMIT_API_PER_MIN"
@@ -319,12 +342,12 @@ jobs:
             append_optional_env 'SENTRY_DSN' "$SENTRY_DSN"
             append_optional_env 'SSO_ENABLED' "$SSO_ENABLED"
             append_optional_env 'DISABLE_AGENT_TURN_LOG' "$DISABLE_AGENT_TURN_LOG"
-            printf 'SESSION_SECRET=%s\n' "$session_secret"
-            printf 'MYSQL_HOST=%s\n' "$MYSQL_HOST"
-            printf 'MYSQL_PORT=%s\n' "$MYSQL_PORT"
-            printf 'MYSQL_DATABASE=%s\n' "$MYSQL_DATABASE"
-            printf 'MYSQL_USER=%s\n' "$MYSQL_USER"
-            printf 'MYSQL_PASSWORD=%s\n' "$MYSQL_PASSWORD"
+            append_env 'SESSION_SECRET' "$session_secret"
+            append_env 'MYSQL_HOST' "$MYSQL_HOST"
+            append_env 'MYSQL_PORT' "$MYSQL_PORT"
+            append_env 'MYSQL_DATABASE' "$MYSQL_DATABASE"
+            append_env 'MYSQL_USER' "$MYSQL_USER"
+            append_env 'MYSQL_PASSWORD' "$MYSQL_PASSWORD"
           } > "$secret_file"
           kubectl -n "$K8S_NAMESPACE" create secret generic "$MIDDLEWARE_SECRET_NAME" \
             --from-env-file="$secret_file" \
@@ -334,6 +357,7 @@ jobs:
           GROUNDX_PARTNER_API_KEY: ${{ secrets.GROUNDX_PARTNER_API_KEY }}
           GROUNDX_ANON_API_KEY: ${{ secrets.GROUNDX_ANON_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          EMBEDDINGS_API_KEY: ${{ secrets.EMBEDDINGS_API_KEY }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}

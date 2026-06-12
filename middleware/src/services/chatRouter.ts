@@ -1,10 +1,11 @@
 /**
  * Three-mode chat router (per project_llm_runtime.md).
  *
- * Routes an incoming user message to the right pipeline based on a
- * DETERMINISTIC classifier — not an LLM call. The classification reads
- * the bundled 3-axis context (current entity, conversation tail,
- * recent viewer events) and picks one of:
+ * Routes an incoming user message to the right pipeline. Since
+ * turn-router-extraction-appstate the mode comes from, in order: an
+ * explicit UI intent hint (deterministic, free, authoritative) → the light-
+ * LLM RoutePlan's `appState`×`documentSearch` derivation → the keyword
+ * classifier (`classifyChatMode`) as the deterministic fallback. Modes:
  *
  *   - "rag"        — user asks about doc content. GroundX search →
  *                    grounded prompt → LLM.
@@ -28,15 +29,23 @@
  */
 
 import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
-import { classifyChatMode } from "./chatClassifier.js";
+import { classifyChatMode, modeFromIntent } from "./chatClassifier.js";
 import { searchGroundX } from "./groundxSearch.js";
 import { runRagPipeline } from "./ragPipeline.js";
 import {
+  CLASSIFIER_DECIDES,
+  FALLBACK_ROUTE_PLAN,
+  FALLBACK_TURN_PLAN,
+  planTurn,
+  type RoutePlan,
+  type TurnPlan,
+} from "./turnRouter.js";
+import {
   ChatRouteNotImplementedError,
+  type ChatMode,
   type ChatRouterDeps,
   type ChatRouterRequest,
   type ChatRouterResponse,
-  type GroundXSearchResult,
 } from "./chatRouterTypes.js";
 
 import type { ContentScope } from "@groundx/shared";
@@ -81,10 +90,53 @@ export { parseGroundedAnswer, buildSnippetBlock } from "./ragPipeline.js";
  * tests inject fake clients at the dependency seam.
  */
 export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps): Promise<ChatRouterResponse> {
-  const mode = classifyChatMode(request);
+  // turn-router-extraction-appstate — planner-derived mode routing.
+  // 1. An explicit UI intent hint is authoritative, deterministic, and free:
+  //    it picks the mode WITHOUT a planner call. A hinted rag turn plans its
+  //    retrieval inside the grounded seam exactly as before (still at most
+  //    one planner call per turn).
+  // 2. Otherwise the RoutePlan's appState×documentSearch derives the mode;
+  //    the seam plan (appState stripped) threads to the rag path so the seam
+  //    never plans a second time.
+  // 3. The CLASSIFIER_DECIDES sentinel (planner absent/failed) routes via
+  //    the deterministic keyword classifier — byte-for-byte the pre-flag
+  //    behavior. The keyword heuristics never run when the planner answered.
+  const hinted = modeFromIntent(request);
+  let mode: ChatMode;
+  let threadedPlan: TurnPlan | undefined;
+  if (hinted) {
+    mode = hinted;
+  } else {
+    const routePlan: RoutePlan = deps.planTurn
+      ? await deps.planTurn(request.newUserMessage)
+      : deps.lightLlmClient && deps.lightLlmModelId
+        ? await planTurn(request.newUserMessage, {
+            lightLlmClient: deps.lightLlmClient,
+            lightLlmModelId: deps.lightLlmModelId,
+          })
+        : FALLBACK_ROUTE_PLAN;
+    const { appState, ...seamPlan } = routePlan;
+    if (appState === CLASSIFIER_DECIDES) {
+      mode = classifyChatMode(request);
+      threadedPlan = seamPlan;
+    } else if (appState) {
+      mode = routePlan.documentSearch ? "hybrid" : "structured";
+      if (!deps.repository || !deps.chatSessionId) {
+        // Planner-routed structured/hybrid without session deps DEGRADES to
+        // rag on the deterministic seam fallback (search ON — never the
+        // planner's documentSearch:false, which would ground the answer in
+        // nothing). Keyword/intent-routed turns keep the throwing behavior.
+        mode = "rag";
+        threadedPlan = FALLBACK_TURN_PLAN;
+      }
+    } else {
+      mode = "rag";
+      threadedPlan = seamPlan;
+    }
+  }
 
   if (mode === "rag") {
-    return runRagPipeline(request, deps);
+    return runRagPipeline(request, deps, threadedPlan ? { turnPlan: threadedPlan } : undefined);
   }
 
   // Structured + hybrid: lightweight live wiring via structuredHandler.
@@ -107,37 +159,26 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
   if (mode === "structured") {
     return runStructuredQuery(request, structuredDeps);
   }
-  // Hybrid: layer structured context onto a thin RAG search. If the
-  // RAG side isn't configured, hybrid still produces a useful response
-  // (just without grounded snippets).
-  let snippets: GroundXSearchResult[] = [];
-  if (deps.groundxClient && deps.groundxApiKey) {
-    const scope: ContentScope | null =
-      deps.contentScope ??
-      (deps.samplesBucketId != null
-        ? { type: "bucket", bucketId: deps.samplesBucketId }
-        : null);
-    try {
-      snippets = await searchGroundX(
-        request.newUserMessage,
-        scope,
-        deps.groundxClient,
-        deps.groundxApiKey,
-        { rbacFilter: deps.rbacFilter },
-      );
-    } catch (err) {
-      // Hybrid is best-effort on the RAG side — log + continue with
-      // empty snippets rather than 502 the whole request.
-      // eslint-disable-next-line no-console
-      console.warn("hybrid mode: RAG search failed, proceeding without snippets", err);
-    }
-  }
+  // Hybrid (chat-architecture-hardening Task 3): the grounded seam owns the
+  // ONLY search — the former router-side hybrid search is deleted (no double
+  // search). The handler composes workspace state into the seam's
+  // structuredContext block and applies the citation contract.
+  const scope: ContentScope | null =
+    deps.contentScope ??
+    (deps.samplesBucketId != null
+      ? { type: "bucket", bucketId: deps.samplesBucketId }
+      : null);
   return runHybridQuery(request, {
     ...structuredDeps,
-    ragSnippets: snippets,
-    // CF-05: chat-profile LLM composes the tour-style answer. Hybrid
-    // is user-facing — quality matters more than cost.
+    // CF-05: chat-profile LLM composes the answer. Hybrid is user-facing —
+    // quality matters more than cost.
     llmClient: deps.llmClient,
     llmModelId: deps.llmModelId,
+    groundxClient: deps.groundxClient,
+    groundxApiKey: deps.groundxApiKey,
+    contentScope: scope,
+    ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
+    ...(deps.quoteEmbedder ? { quoteEmbedder: deps.quoteEmbedder } : {}),
+    ...(deps.embedThreshold !== undefined ? { embedThreshold: deps.embedThreshold } : {}),
   });
 }

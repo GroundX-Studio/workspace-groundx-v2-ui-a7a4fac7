@@ -12,18 +12,22 @@
  * readers. Real readers for "saved schemas" / "projects" land when
  * those tables exist (project_database.md).
  *
- * Hybrid mode (P0 #4) builds on this: it merges the structured
- * answer + a small RAG snippet block into a tour-style response.
+ * Hybrid mode builds on this via the shared grounded seam: workspace
+ * state becomes the WORKSPACE STATE private block on the grounded prompt
+ * (chat-architecture-hardening Task 3).
  */
 
 import type {
   AppRepository,
   ChatSessionEntityRecord,
   ChatSessionRecord,
+  GroundXClient,
   GroundXPartnerClient,
   LlmClient,
 } from "../types.js";
 import type { ChatRouterRequest, ChatRouterResponse } from "./chatRouter.js";
+import { groundedAnswerOverScope } from "./groundedAnswer.js";
+import type { ContentScope } from "@groundx/shared";
 
 export type StructuredQueryKind =
   | "pages_remaining"
@@ -129,7 +133,6 @@ async function answerPagesRemaining(deps: StructuredHandlerDeps): Promise<ChatRo
       `is queryable I'll show "X of ${deps.byoPagesLimit} pages used."`,
     citations: [],
     suggestedActions: [{ key: "open-settings", label: "Open settings" }],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -152,7 +155,6 @@ async function answerOnboardingState(deps: StructuredHandlerDeps): Promise<ChatR
       { key: "show-extract", label: "Show me the extract" },
       { key: "open-samples", label: "Pick another sample" },
     ],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -170,7 +172,6 @@ async function answerCurrentEntity(deps: StructuredHandlerDeps): Promise<ChatRou
       answer: "You haven't picked an entity yet. Pick a sample on the start screen to begin.",
       citations: [],
       suggestedActions: [{ key: "open-samples", label: "Open samples" }],
-      tools: [],
       intents: [],
       toolFailures: [],
     proposedSchemaField: null,
@@ -183,8 +184,9 @@ async function answerCurrentEntity(deps: StructuredHandlerDeps): Promise<ChatRou
       `Last frame: \`${active.lastFrame ?? "f1"}\`. ` +
       `${safeCount(active.completedFramesJson)} frames completed so far.`,
     citations: [],
-    suggestedActions: [{ key: "show-source", label: "Show all sources" }],
-    tools: [],
+    // No citations on this structured status reply → no "Show all sources"
+    // chip (a sources chip with zero sources is a dead button, 2026-06-11).
+    suggestedActions: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -204,7 +206,6 @@ async function answerSavedSchemas(deps: StructuredHandlerDeps): Promise<ChatRout
       answer: "You haven't saved any extraction schemas yet. Build one in F4 and pin it.",
       citations: [],
       suggestedActions: [{ key: "open-schema-builder", label: "Open schema builder" }],
-      tools: [],
       intents: [],
       toolFailures: [],
     proposedSchemaField: null,
@@ -218,7 +219,6 @@ async function answerSavedSchemas(deps: StructuredHandlerDeps): Promise<ChatRout
       lines.join("\n"),
     citations: [],
     suggestedActions: [{ key: "open-schema-builder", label: "Open schema builder" }],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -258,7 +258,6 @@ async function answerMyProjects(deps: StructuredHandlerDeps): Promise<ChatRouter
       answer: "You don't have any projects in your workspace yet.",
       citations: [],
       suggestedActions: [{ key: "open-workspace", label: "Open workspace" }],
-      tools: [],
       intents: [],
       toolFailures: [],
     proposedSchemaField: null,
@@ -272,7 +271,6 @@ async function answerMyProjects(deps: StructuredHandlerDeps): Promise<ChatRouter
       lines.join("\n"),
     citations: [],
     suggestedActions: [{ key: "open-workspace", label: "Open workspace" }],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -312,7 +310,6 @@ async function answerApiKeys(deps: StructuredHandlerDeps): Promise<ChatRouterRes
       answer: "You don't have any API keys yet. Create one from the workspace settings.",
       citations: [],
       suggestedActions: [{ key: "open-api-keys", label: "Manage API keys" }],
-      tools: [],
       intents: [],
       toolFailures: [],
     proposedSchemaField: null,
@@ -333,7 +330,6 @@ async function answerApiKeys(deps: StructuredHandlerDeps): Promise<ChatRouterRes
       `\n\nFull key values aren't shown here — manage them in workspace settings.`,
     citations: [],
     suggestedActions: [{ key: "open-api-keys", label: "Manage API keys" }],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -346,7 +342,6 @@ function signInNudge(subject: string): ChatRouterResponse {
     answer: `Sign in to see ${subject}. I can show ${subject} once your session is authenticated.`,
     citations: [],
     suggestedActions: [{ key: "open-signin", label: "Sign in" }],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -361,7 +356,6 @@ function upstreamErrorReply(subject: string): ChatRouterResponse {
       `(I don't make up an answer when the upstream is down.)`,
     citations: [],
     suggestedActions: [],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -377,7 +371,6 @@ function answerUnknownStructuredQuery(question: string): ChatRouterResponse {
       `"pages remaining", "current view", "saved schemas", or "my projects".`,
     citations: [],
     suggestedActions: [{ key: "open-settings", label: "Open settings" }],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
@@ -385,48 +378,55 @@ function answerUnknownStructuredQuery(question: string): ChatRouterResponse {
 }
 
 // ── Hybrid handler ─────────────────────────────────────────────────
+//
+// chat-architecture-hardening Task 3 — hybrid is the THIRD caller of the
+// shared `groundedAnswerOverScope` seam (chat, report, hybrid). The former
+// `HYBRID_SYSTEM_PROMPT` fork + `composeTourAnswer` are DELETED: one grounded
+// system prompt, with the workspace state passed as a `structuredContext`
+// private block. Hybrid replies gain the full citation-verification contract.
+
+const HYBRID_RECENT_VIEWER_EVENTS = 5;
 
 export interface HybridHandlerDeps extends StructuredHandlerDeps {
   /**
-   * RAG snippets to fold into the response. The hybrid pipeline runs
-   * a thin RAG search first, then layers the structured context on
-   * top. Caller passes the snippets already collected so this stays
-   * pure / synchronous after the search step.
-   */
-  ragSnippets: Array<{ documentId: string; pageNumber?: number; text?: string }>;
-  /**
-   * CF-05: LLM client used to compose the tour-style answer. Optional
-   * — when missing OR when the call fails, the handler falls back to
-   * the deterministic hand-rolled answer (the previous behavior).
-   * Chat-side profile per CF-16: hybrid mode is user-facing and
-   * deserves the quality model, not the light one.
+   * Chat-profile LLM (CF-16: hybrid is user-facing — quality model). When
+   * missing (or the grounded call fails) the handler returns the
+   * deterministic structured fallback.
    */
   llmClient?: LlmClient;
-  /** Provider model id for the tour-prompt LLM call. */
+  /** Provider model id for the grounded call. */
   llmModelId?: string;
+  /**
+   * GroundX client + key for the seam's internal search. Optional — when
+   * absent the grounded call runs over EMPTY snippets (LLM prose preserved).
+   * The router-side hybrid search is gone; the seam's search is the only one.
+   */
+  groundxClient?: GroundXClient;
+  groundxApiKey?: string;
+  /** ContentScope for the seam's search (router-derived). */
+  contentScope?: ContentScope | null;
+  /** Server-derived RBAC filter (never client-supplied). */
+  rbacFilter?: Record<string, unknown>;
+  /** Embedding verification seam — see `GroundedAnswerDeps.quoteEmbedder`. */
+  quoteEmbedder?: import("./attribution.js").Embedder;
+  embedThreshold?: number;
 }
 
-const HYBRID_SNIPPET_CHARS = 400;
-const HYBRID_RECENT_VIEWER_EVENTS = 5;
-const HYBRID_SYSTEM_PROMPT =
-  "You are giving a tour-style answer to a GroundX user. Use the structured " +
-  "context (what they're looking at, where they are in onboarding, what " +
-  "they've saved) PLUS the document snippets below. Be concise (3–4 short " +
-  "sentences). Mention the active entity. Cite snippets by quoting short " +
-  "phrases verbatim. If neither the structured context nor the snippets " +
-  "answer the question, say so plainly — don't make anything up.";
-
 /**
- * Hybrid mode: combine structured app-state context with grounded
- * snippets to produce a tour-style answer. CF-05 closure:
+ * Hybrid mode: grounded answer over the scope with a WORKSPACE STATE private
+ * block (active entity, onboarding frame, saved-schema count, viewer trail).
  *
- *   1. Read real structured context — active entity, recent viewer
- *      trail, signed-in user's saved-schema count.
- *   2. If an LLM client is wired, compose a tour-style answer via
- *      a focused chat-completion call. Otherwise (or on failure)
- *      fall back to the deterministic hand-rolled formatter.
- *   3. Citations always come straight from the input snippets — the
- *      LLM doesn't get to invent them.
+ * Envelope (pinned by the merge): `mode: "hybrid"`; the existing
+ * `show-extract` / `try-chat` chips; a `show-source` chip ONLY when the reply
+ * carries verified citations (chat parity); `tools: undefined` on the LLM
+ * call (no tool advertising / tool-call routing on this path). Hybrid's turn
+ * plan is FIXED — no skill-pack injection (`productKnowledge: false`).
+ *
+ * Degraded paths (mirrors the pre-merge split):
+ *   - no groundx client / search failure → grounded seam over empty snippets;
+ *   - no LLM client or model id / grounded LLM failure → deterministic
+ *     SNIPPET-LESS structured fallback (accepted change: the router search
+ *     that fed the old snippet preview is deleted).
  */
 export async function runHybridQuery(
   request: ChatRouterRequest,
@@ -438,73 +438,23 @@ export async function runHybridQuery(
     ? entities.find((e) => e.entityKey === session.activeEntityKey)
     : undefined;
 
-  // Signed-in users: pull their saved-schema count so the tour can
-  // reference it ("you have 3 saved schemas — want me to apply one?").
+  // Signed-in users: saved-schema count so the answer can reference it
+  // ("you have 3 saved schemas — want me to apply one?").
   let savedSchemaCount = 0;
   if (deps.groundxUsername) {
     const rows = await deps.repository.listTemplates(deps.groundxUsername, "extract");
     savedSchemaCount = rows.length;
   }
 
-  // Recent viewer trail — tells the tour where the user has been.
+  // Recent viewer trail — where the user has been.
   const allEvents = await deps.repository.listViewerEvents(deps.chatSessionId);
   const recentEvents = allEvents.slice(0, HYBRID_RECENT_VIEWER_EVENTS);
-
-  const citations = deps.ragSnippets.map((s) => ({
-    documentId: s.documentId,
-    page: s.pageNumber ?? 1,
-    snippet: s.text ? s.text.slice(0, 600) : undefined,
-  }));
-  const suggestedActions = [
-    { key: "show-extract", label: "Show me the extract" },
-    { key: "try-chat", label: "Try a question about the sample" },
-  ];
-
-  // Try the LLM-composed tour first; fall back on any failure.
-  if (deps.llmClient && deps.llmModelId) {
-    try {
-      const composed = await composeTourAnswer(request, deps, active, savedSchemaCount, recentEvents);
-      if (composed != null) {
-        return { mode: "hybrid", answer: composed, citations, suggestedActions, tools: [], intents: [], toolFailures: [], proposedSchemaField: null };
-      }
-    } catch {
-      // Fall through to hand-rolled.
-    }
-  }
-
-  const sample = active?.entityKey ?? "this sample";
-  const snippetCount = deps.ragSnippets.length;
-  const snippetPreview = deps.ragSnippets
-    .slice(0, 2)
-    .map((s) => `"${truncate(s.text ?? "", 120)}" (doc ${s.documentId}, p${s.pageNumber ?? "?"})`)
-    .join("; ");
-
-  const answer =
-    `You're looking at ${sample}. ` +
-    (snippetCount > 0
-      ? `Recent snippets I pulled to answer "${truncate(request.newUserMessage, 60)}": ${snippetPreview}. ` +
-        `I can pull more if you ask a specific question.`
-      : `I didn't find document snippets that match your question. ` +
-        `Try asking about a specific value, page, or field on the canvas.`);
-
-  return { mode: "hybrid", answer, citations, suggestedActions, tools: [], intents: [], toolFailures: [], proposedSchemaField: null };
-}
-
-async function composeTourAnswer(
-  request: ChatRouterRequest,
-  deps: HybridHandlerDeps,
-  active: ChatSessionEntityRecord | undefined,
-  savedSchemaCount: number,
-  recentEvents: Array<{ action: string; entityKey: string | null }>,
-): Promise<string | null> {
-  if (!deps.llmClient || !deps.llmModelId) return null;
 
   const contextLines: string[] = [];
   if (active) {
     contextLines.push(`Active entity: ${active.entityKey}`);
     contextLines.push(`Last frame: ${active.lastFrame ?? "f1"}`);
-    const completed = safeCount(active.completedFramesJson);
-    contextLines.push(`Frames completed: ${completed}`);
+    contextLines.push(`Frames completed: ${safeCount(active.completedFramesJson)}`);
   } else {
     contextLines.push("No active entity yet.");
   }
@@ -519,40 +469,64 @@ async function composeTourAnswer(
     const trail = recentEvents.map((e) => `${e.action}@${e.entityKey ?? "-"}`).join(" → ");
     contextLines.push(`Recent viewer trail: ${trail}`);
   }
-  const structuredBlock = contextLines.join("\n");
+  const structuredContext = contextLines.join("\n");
 
-  const snippetBlock =
-    deps.ragSnippets.length > 0
-      ? deps.ragSnippets
-          .map(
-            (s, i) =>
-              `[${i + 1}] doc=${s.documentId} page=${s.pageNumber ?? "?"}\n${(s.text ?? "").slice(0, HYBRID_SNIPPET_CHARS)}`,
-          )
-          .join("\n\n")
-      : "(no snippets found)";
+  const baseActions = [
+    { key: "show-extract", label: "Show me the extract" },
+    { key: "try-chat", label: "Try a question about the sample" },
+  ];
 
-  const userBlock =
-    `Structured context:\n${structuredBlock}\n\n` +
-    `Document snippets:\n${snippetBlock}\n\n` +
-    `Question: ${request.newUserMessage}`;
+  if (deps.llmClient && deps.llmModelId) {
+    try {
+      const grounded = await groundedAnswerOverScope(
+        request.newUserMessage,
+        deps.contentScope ?? null,
+        {
+          llmClient: deps.llmClient,
+          llmModelId: deps.llmModelId,
+          ...(deps.groundxClient ? { groundxClient: deps.groundxClient } : {}),
+          ...(deps.groundxApiKey ? { groundxApiKey: deps.groundxApiKey } : {}),
+          ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
+          ...(deps.quoteEmbedder ? { quoteEmbedder: deps.quoteEmbedder } : {}),
+          ...(deps.embedThreshold !== undefined ? { embedThreshold: deps.embedThreshold } : {}),
+        },
+        {
+          structuredContext,
+          // tools deliberately NOT passed: no tool advertising or tool-call
+          // routing on the hybrid path (any emitted calls would be dropped).
+          searchSoftFail: true,
+          // FIXED turn plan (Task 4): the mode classifier already routed the
+          // turn; workspace-state questions never inject the skill pack.
+          turnPlan: { documentSearch: true, productKnowledge: false, extractionContext: true },
+        },
+      );
+      if (grounded.body.trim().length > 0) {
+        return {
+          mode: "hybrid",
+          answer: grounded.body,
+          citations: grounded.citations,
+          suggestedActions:
+            grounded.citations.length > 0
+              ? [{ key: "show-source", label: "Show all sources" }, ...baseActions]
+              : baseActions,
+          intents: [],
+          toolFailures: [],
+          proposedSchemaField: null,
+        };
+      }
+    } catch {
+      // Grounded-seam LLM failure → deterministic fallback below.
+    }
+  }
 
-  const response = await deps.llmClient.forward("/chat/completions", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: deps.llmModelId,
-      messages: [
-        { role: "system", content: HYBRID_SYSTEM_PROMPT },
-        { role: "user", content: userBlock },
-      ],
-    }),
-  });
-  if (!response.ok) return null;
-  const payload = (await response.json().catch(() => null)) as
-    | { choices?: Array<{ message?: { content?: string } }> }
-    | null;
-  const answer = payload?.choices?.[0]?.message?.content?.trim();
-  return answer && answer.length > 0 ? answer : null;
+  // Deterministic SNIPPET-LESS structured fallback (no LLM client/model id,
+  // or the grounded call failed). No prompt is involved on this path.
+  const sample = active?.entityKey ?? "this sample";
+  const answer =
+    `You're looking at ${sample}. ` +
+    `Ask a specific question about a value, page, or field on the canvas and I'll pull the answer from the document.`;
+
+  return { mode: "hybrid", answer, citations: [], suggestedActions: baseActions, intents: [], toolFailures: [], proposedSchemaField: null };
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -563,7 +537,6 @@ function frank(message: string): ChatRouterResponse {
     answer: message,
     citations: [],
     suggestedActions: [],
-    tools: [],
     intents: [],
     toolFailures: [],
     proposedSchemaField: null,
