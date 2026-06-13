@@ -11,11 +11,26 @@
  * Idempotent: re-inserts (UPSERT) the same stable id on every boot, so it never
  * duplicates and always reconciles to the canonical shape.
  */
+import { SAMPLE_REPORT_TEMPLATE_ID } from "@groundx/shared";
+
+import { reportTemplateToSaveInput, type ReportTemplate } from "../services/reportRenderer.js";
 import type { AppRepository } from "../types.js";
 
 /** Stable, unique project id for the seeded Utility sample. Real UUID, namespaced. */
 export const SAMPLE_PROJECT_ID = "proj_c7701da7-0e08-482a-a496-df9dfe991613";
 export const SAMPLE_PROJECT_NAME = "Utility Bill (sample)";
+
+/**
+ * report-default-template — the reserved owner of the seeded default report
+ * template. `templates.groundx_username` is NOT NULL and there is no public flag
+ * on the row, so a template's "public/sample" status IS this sentinel owner. It
+ * must never collide with a real GroundX username (those are UUIDs / emails),
+ * hence the bracketed sentinel. SERVER-ONLY — the access-scoped read endpoint
+ * returns a template to anon iff its owner === this value; the client never sees
+ * it. (The template id itself is `SAMPLE_REPORT_TEMPLATE_ID` in `@groundx/shared`,
+ * shared with the client onboarding bootstrap.)
+ */
+export const SAMPLE_TEMPLATE_OWNER = "[sample-report-template-owner]";
 
 /**
  * Scenario-slug → real project id, for the seeded sample projects. The scope
@@ -50,5 +65,74 @@ export async function seedSampleProject(
     principalUsername: null,
     role: "viewer",
     createdAt: now,
+  });
+}
+
+/**
+ * report-default-template — the seeded default report template for onboarding.
+ *
+ * ONE real `kind:"report"` row, owned by the `SAMPLE_TEMPLATE_OWNER` sentinel
+ * (its public/sample marker, since the row has no public flag). The body is
+ * produced via the SERVER serialization (`reportTemplateToSaveInput`) so a
+ * `getTemplate` → `reportTemplateFromRecord` round-trip yields the same authored
+ * questions the live render runs — NO hardcoded answers, NO client fixture.
+ * Idempotent (saveTemplate UPSERTs by id). Its absence must never break
+ * onboarding (the render degrades to the no-template empty state).
+ *
+ * Sections are the THREE T1-verified-groundable sections for the City of Windom
+ * bill (account_activity dropped — the bill has no balance-forward / payment
+ * activity; Anomalies/Recommendation dropped — would fabricate).
+ */
+const SAMPLE_REPORT_TEMPLATE: ReportTemplate = {
+  id: SAMPLE_REPORT_TEMPLATE_ID,
+  name: "Utility Bill Summary",
+  format: "",
+  sections: [
+    {
+      id: "billing_summary",
+      name: "billing_summary",
+      renderAs: "PARAGRAPH",
+      question:
+        "Summarize this utility bill: the customer / addressee, the utility company, " +
+        "the statement date, the service period, the total amount due, and the payment " +
+        "due date. State only what the bill shows.",
+      variables: [],
+    },
+    {
+      id: "charges_by_service",
+      name: "charges_by_service",
+      renderAs: "TABLE",
+      question:
+        "Break down the total charges by utility service (electric, water, sewer, " +
+        "irrigation). For each service, give the combined amount across all of its " +
+        "meters. Use only amounts stated on the bill.",
+      variables: [],
+    },
+    {
+      id: "service_accounts",
+      name: "service_accounts",
+      renderAs: "TABLE",
+      question:
+        "List each metered service account on the bill: the meter id, the utility " +
+        "type, the rate plan, the usage (with its unit), and the total charges for " +
+        "that meter.",
+      variables: [],
+    },
+  ],
+};
+
+export async function seedSampleReportTemplate(
+  repository: Pick<AppRepository, "saveTemplate">,
+): Promise<void> {
+  const now = new Date();
+  const input = reportTemplateToSaveInput(SAMPLE_REPORT_TEMPLATE);
+  await repository.saveTemplate({
+    id: input.id,
+    kind: input.kind,
+    groundxUsername: SAMPLE_TEMPLATE_OWNER, // the public/sample marker (see §C predicate)
+    name: input.name,
+    bodyJson: JSON.stringify(input.body),
+    createdAt: now,
+    updatedAt: now,
   });
 }

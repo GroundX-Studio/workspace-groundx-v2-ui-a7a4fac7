@@ -75,11 +75,10 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
   });
 
   // ──────────────────────────────────────────────────────────────────────
-  // Gate / BYO / provenance steps — re-grounded to the CURRENT flow
-  // (2026-06-02-onboarding-flow-test-hardening). The sign-up gate is no longer
-  // opened by a removed `advance-to-f6` pill: an anonymous user clicking the
-  // Extract "unlock" banner (`extract-unlock-banner`) fires `openGate("save")`.
-  // The provenance peek lists citations as "page N" pills, not `cite-chip-*`.
+  // Gate / BYO / provenance steps — re-grounded to the CURRENT flow. The
+  // sign-up gate is a viewer overlay in the same chat session, not a chat-side
+  // GateChatRail. An anonymous user clicking the Extract "unlock" banner
+  // (`extract-unlock-banner`) fires `openGate("save")`.
   // ──────────────────────────────────────────────────────────────────────
   test("F4 citation peek opens when a cited field row is clicked", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
@@ -132,9 +131,10 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // (the removed `advance-to-f6` affordance). Save itself is disabled until
     // there are unsaved edits, so the banner is the reliable anon trigger.
     await page.getByTestId("extract-unlock-banner").click({ timeout: 15_000 });
-    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
-    await page.getByTestId("gate-rail-dismiss").click();
-    await expect(page.getByTestId("gate-rail-preamble")).toBeHidden();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
+    await expect(page.getByTestId("conversation-flow")).toBeVisible();
+    await page.getByTestId("viewer-frame-close").click();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeHidden();
   });
 
   test("F6 magic-link sign-in commits the gate (signed-in card)", async ({ page }) => {
@@ -158,21 +158,18 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // (the removed `advance-to-f6` affordance). Save itself is disabled until
     // there are unsaved edits, so the banner is the reliable anon trigger.
     await page.getByTestId("extract-unlock-banner").click({ timeout: 15_000 });
-    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
 
-    // The gate is now a magic-link / SSO offer (not the old first/last/email/
-    // password form). Demo magic-link: entering an email + Send commits the gate
-    // client-side via the register method. (`gate-rail-email` is a MUI TextField,
-    // so the testid is on the wrapper — target the inner <input>.)
-    await page.getByTestId("gate-rail-email").locator("input").fill("pat@example.com");
-    await page.getByTestId("gate-rail-send-magic-link").click();
+    // Demo magic-link: entering an email + Send commits the gate client-side.
+    await page.getByTestId("sign-up-viewer-email").fill("pat@example.com");
+    await page.getByTestId("sign-up-viewer-send-magic-link").click();
 
     // Committed card replaces the offer on success — the gate is now signed in.
-    await expect(page.getByTestId("gate-rail-committed")).toBeVisible();
+    await expect(page.getByTestId("signup-celebration")).toBeVisible();
     await expect(page.getByText(/WELCOME/i)).toBeVisible();
     // The register-method committed card invites continuing to Integrate. The
     // body copy also names the action, so assert the real CTA by stable testid.
-    await expect(page.getByTestId("gate-rail-continue-integrate")).toBeVisible();
+    await expect(page.getByTestId("sign-up-viewer-continue-integrate")).toBeVisible();
   });
 
   test("F6 gate: Send with an empty email is a no-op (gate stays open)", async ({ page }) => {
@@ -183,35 +180,30 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // preempts. Generous timeout covers the live stream duration.
     await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
     await page.getByTestId("extract-unlock-banner").click({ timeout: 15_000 });
-    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
 
-    // The magic-link gate has no inline register-error affordance (commitGate is
-    // a client-side state flip; the old SignUpWidget `signup-error` form is
-    // gone). The real guard is: Send with an EMPTY email does nothing
-    // (handleSendMagicLink early-returns) — the gate stays open, not committed.
-    await page.getByTestId("gate-rail-send-magic-link").click();
-    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
-    await expect(page.getByTestId("gate-rail-committed")).toHaveCount(0);
+    // Send with an EMPTY email does not commit the gate. The viewer surfaces a
+    // validation error and stays open.
+    await page.getByTestId("sign-up-viewer-send-magic-link").click();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
+    await expect(page.getByTestId("signup-error")).toBeVisible();
+    await expect(page.getByTestId("signup-celebration")).toHaveCount(0);
   });
 
-  test("BYO tile in F1 mounts the gate surface (magic-link rail)", async ({ page }) => {
-    // ARCH-05B (2026-05-26): clicking BYO navigates to /onboarding/signup, which
-    // opens the session-level gate. The shell mounts the `GateChatRail` (now a
-    // magic-link / SSO offer) in the chat slot — NOT the old SignUpWidget form.
-    // The picker is gone — the user is on the sign-up surface.
+  test("BYO tile in F1 mounts sign-in in the viewer and preserves chat", async ({ page }) => {
+    // Clicking BYO navigates to /onboarding/signup and opens sign-in as a viewer
+    // overlay while the normal ConversationFlow remains mounted.
     await page.getByTestId("byo-pdf").click();
-    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
-    await expect(page.getByTestId("gate-rail-email")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("gate-rail-send-magic-link")).toBeVisible();
-    await expect(page.getByTestId("onboarding-frame-f1")).toBeHidden();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
+    await expect(page.getByTestId("sign-up-viewer-email")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("sign-up-viewer-send-magic-link")).toBeVisible();
+    await expect(page.getByTestId("conversation-flow")).toBeVisible();
   });
 
-  test("ARCH-05B regression: canvas swaps off the sample while the gate is open, then restores", async ({ page }) => {
-    // The motivating bug for the ARCH-05 split: before the fix the canvas kept
-    // rendering the previous frame view behind a chat-side gate. Now opening the
-    // gate swaps the canvas OFF the sample (to the "Why GroundX" value-prop
-    // panel); dismissing restores the frame view. (The gate is the magic-link
-    // rail now, not the old SignUpWidget form.)
+  test("sign-in overlays the sample viewer, inerting the underlay, then restores", async ({ page }) => {
+    // The sign-in gate is now a viewer overlay. The sample viewer remains as the
+    // underlay but is aria-hidden/inert while sign-in is active; closing sign-in
+    // returns to the same Extract workbench.
     await page.getByTestId("sample-utility").click();
     // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
     // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
@@ -223,24 +215,20 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
 
     // Anon gate-open via the Extract unlock banner (the removed `advance-to-f6`).
     await page.getByTestId("extract-unlock-banner").click({ timeout: 15_000 });
-    // During gate-open: the gate rail is up and the canvas content swaps OFF the
-    // sample (the value-prop panel renders inside the persistent frame wrapper),
-    // so the Extract workbench is gone. (We assert `extract-workbench`, not the
-    // `onboarding-frame-f3` wrapper, which stays mounted and hosts the swap.)
-    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
-    await expect(page.getByTestId("extract-workbench")).toBeHidden();
+    // During gate-open: sign-in is an overlay and the sample workbench underlay
+    // is hidden from assistive tech and interaction.
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
+    await expect(page.getByTestId("book-call-viewer-underlay")).toHaveAttribute("aria-hidden", "true");
+    await expect(page.getByTestId("book-call-viewer-underlay")).toHaveAttribute("inert", "");
 
-    // Dismiss: the canvas restores the sample. Save opens the gate over F3
-    // without advancing the frame, so the Extract workbench returns.
-    await page.getByTestId("gate-rail-dismiss").click();
+    // Dismiss: the same sample viewer is interactive again.
+    await page.getByTestId("viewer-frame-close").click();
     await expect(page.getByTestId("extract-workbench")).toBeVisible();
   });
 
   // NOTE: the former "ESC keyboard dismiss (LC5 path #2)" test was removed. The
-  // sign-up gate was redesigned from a modal form to a non-modal chat-rail
-  // magic-link/SSO offer, which is dismissed via the "Keep exploring" link
-  // (`gate-rail-dismiss`, asserted below) — ESC is not a dismiss path for a
-  // chat-rail surface. LC5 (state-machines doc) updated to match the redesign.
+  // sign-up gate is now a viewer overlay and is dismissed via the visible
+  // Close sign-in control, not ESC.
 
   test("F6 gate honors 'keep exploring' link dismiss (LC5 back-out)", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
@@ -253,9 +241,9 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // (the removed `advance-to-f6` affordance). Save itself is disabled until
     // there are unsaved edits, so the banner is the reliable anon trigger.
     await page.getByTestId("extract-unlock-banner").click({ timeout: 15_000 });
-    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
-    await page.getByTestId("gate-rail-dismiss").click();
-    await expect(page.getByTestId("gate-rail-preamble")).toBeHidden();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
+    await page.getByTestId("viewer-frame-close").click();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeHidden();
   });
 });
 
@@ -322,7 +310,7 @@ test.describe("F1–F7 axe a11y @desktop-only", () => {
     await expectAxeClean(page, "F5");
   });
 
-  test("F6 gate card is axe-clean", async ({ page }) => {
+  test("F6 sign-in viewer overlay is axe-clean", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
     // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
     // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
@@ -333,7 +321,7 @@ test.describe("F1–F7 axe a11y @desktop-only", () => {
     // (the removed `advance-to-f6` affordance). Save itself is disabled until
     // there are unsaved edits, so the banner is the reliable anon trigger.
     await page.getByTestId("extract-unlock-banner").click({ timeout: 15_000 });
-    await expect(page.getByTestId("gate-rail-preamble")).toBeVisible();
+    await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
     await expectAxeClean(page, "F6");
   });
 });

@@ -1,6 +1,10 @@
 /**
- * OnboardingNav — the shared left-rail nav used across F2+ frames
- * (F1 hides the nav entirely; see OnboardingShell.hideNav).
+ * AppNav — the shared left-rail nav primitive for authenticated product
+ * routes and the onboarding overlay. `OnboardingNav` below is the
+ * compatibility wrapper that supplies onboarding labels, test ids, and the
+ * original onboarding localStorage key.
+ *
+ * In onboarding, F1 hides the nav entirely; see OnboardingShell.hideNav.
  *
  * Per wireframe (spec-primitives.jsx · MiniNav): two width modes —
  *
@@ -56,14 +60,27 @@ import {
   WHITE,
 } from "@/constants";
 
-const STORAGE_KEY = "groundx-onboarding.nav-collapsed.v1";
+const ONBOARDING_STORAGE_KEY = "groundx-onboarding.nav-collapsed.v1";
+const PRODUCT_STORAGE_KEY = "groundx.product.nav-collapsed.v1";
+
+type AppNavStorageScope = "onboarding" | "product";
+
+function storageKeyForScope(scope: AppNavStorageScope): string {
+  return scope === "onboarding" ? ONBOARDING_STORAGE_KEY : PRODUCT_STORAGE_KEY;
+}
+
+export const APP_NAV_WIDTH_COLLAPSED = ONBOARDING_NAV_WIDTH_COLLAPSED;
+export const APP_NAV_WIDTH_FULL = ONBOARDING_NAV_WIDTH_FULL;
 
 /** State hook for the collapsed/expanded toggle, persisted in localStorage. */
-export function useOnboardingNavCollapsed(): [boolean, (next: boolean) => void] {
+export function useAppNavCollapsed(
+  scope: AppNavStorageScope = "product",
+): [boolean, (next: boolean) => void] {
+  const storageKey = storageKeyForScope(scope);
   const [collapsed, setCollapsedState] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     try {
-      return window.localStorage.getItem(STORAGE_KEY) === "true";
+      return window.localStorage.getItem(storageKey) === "true";
     } catch {
       return false;
     }
@@ -72,28 +89,35 @@ export function useOnboardingNavCollapsed(): [boolean, (next: boolean) => void] 
   // Re-write to localStorage whenever the in-memory value changes.
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, collapsed ? "true" : "false");
+      window.localStorage.setItem(storageKey, collapsed ? "true" : "false");
     } catch {
       // localStorage may be disabled (Safari private mode, etc.). Silent — the
       // in-memory state still works for the current session.
     }
-  }, [collapsed]);
+  }, [collapsed, storageKey]);
 
   return [collapsed, setCollapsedState];
 }
 
-export type OnboardingNavAccountState = "loggedOut" | "free" | "paid";
+/** State hook for onboarding surfaces; preserves the original storage key. */
+export function useOnboardingNavCollapsed(): [boolean, (next: boolean) => void] {
+  return useAppNavCollapsed("onboarding");
+}
 
-export type OnboardingNavItemKey =
+export type AppNavAccountState = "loggedOut" | "free" | "paid";
+export type OnboardingNavAccountState = AppNavAccountState;
+
+export type AppNavItemKey =
   | "workspaces"
   | "projects"
   | "call"
   | "docs"
   | "support"
   | "settings";
+export type OnboardingNavItemKey = AppNavItemKey;
 
 interface NavItemSpec {
-  key: OnboardingNavItemKey;
+  key: AppNavItemKey;
   label: string;
   initial: string;
   disabled?: boolean;
@@ -110,7 +134,7 @@ interface NavItemSpec {
  * disabled hint so users see "what's there once signed in"; signed-in
  * users get enabled items.
  */
-function topItemsFor(state: OnboardingNavAccountState): NavItemSpec[] {
+function topItemsFor(state: AppNavAccountState): NavItemSpec[] {
   const disabled = state === "loggedOut";
   return [
     { key: "workspaces", label: "Workspaces", initial: "W", disabled },
@@ -122,7 +146,7 @@ function topItemsFor(state: OnboardingNavAccountState): NavItemSpec[] {
  * Bottom-section items. The CTA flips between "Book a call" (free/loggedOut)
  * and "Get support" (paid).
  */
-function bottomItemsFor(state: OnboardingNavAccountState): NavItemSpec[] {
+function bottomItemsFor(state: AppNavAccountState): NavItemSpec[] {
   const cta: NavItemSpec =
     state === "paid"
       ? {
@@ -147,12 +171,14 @@ function bottomItemsFor(state: OnboardingNavAccountState): NavItemSpec[] {
   return items;
 }
 
-export interface OnboardingNavProps {
-  accountState: OnboardingNavAccountState;
-  activeKey?: OnboardingNavItemKey;
+export interface AppNavProps {
+  accountState: AppNavAccountState;
+  ariaLabel?: string;
+  activeKey?: AppNavItemKey;
   collapsed: boolean;
+  logoAriaLabel?: string;
   onToggleCollapsed: () => void;
-  onItemClick?: (key: OnboardingNavItemKey) => void;
+  onItemClick?: (key: AppNavItemKey) => void;
   /**
    * Fired when the brand mark / logo is clicked. The shell wires this
    * to `navigate("/onboarding")` in onboarding context and `"/"`
@@ -160,22 +186,28 @@ export interface OnboardingNavProps {
    * for surfaces that don't want a home affordance).
    */
   onLogoClick?: () => void;
+  testIdPrefix?: string;
 }
 
-export const OnboardingNav: FC<OnboardingNavProps> = ({
+export interface OnboardingNavProps extends AppNavProps {}
+
+export const AppNav: FC<AppNavProps> = ({
   accountState,
+  ariaLabel = "Product navigation",
   activeKey,
   collapsed,
+  logoAriaLabel = "Go to product home",
   // `onToggleCollapsed` is accepted for back-compat with existing
   // call sites (OnboardingShell + SteadyShell) but no longer wired —
   // the chevron toggle was removed 2026-05-25.
   onToggleCollapsed: _onToggleCollapsed,
   onItemClick,
   onLogoClick,
+  testIdPrefix = "app-nav",
 }) => {
   const topItems = topItemsFor(accountState);
   const bottomItems = bottomItemsFor(accountState);
-  const width = collapsed ? ONBOARDING_NAV_WIDTH_COLLAPSED : ONBOARDING_NAV_WIDTH_FULL;
+  const width = collapsed ? APP_NAV_WIDTH_COLLAPSED : APP_NAV_WIDTH_FULL;
 
   const handleClick = (item: NavItemSpec) => {
     if (item.disabled) return;
@@ -184,16 +216,16 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
 
   const renderRow = (item: NavItemSpec): ReactNode => {
     const isActive = item.key === activeKey && !item.disabled;
-    if (item.cta) return renderCta(item, collapsed, handleClick);
+    if (item.cta) return renderCta(item, collapsed, handleClick, testIdPrefix);
     return collapsed
-      ? renderCompactRow(item, isActive, handleClick)
-      : renderExpandedRow(item, isActive, handleClick);
+      ? renderCompactRow(item, isActive, handleClick, testIdPrefix)
+      : renderExpandedRow(item, isActive, handleClick, testIdPrefix);
   };
 
   return (
     <Box
-      data-testid="onboarding-nav"
-      aria-label="Onboarding navigation"
+      data-testid={testIdPrefix}
+      aria-label={ariaLabel}
       sx={{
         width,
         flexShrink: 0,
@@ -223,10 +255,10 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
         // a button-equivalent (role=button + tabIndex + key handler);
         // when `onLogoClick` isn't provided the handler short-circuits
         // and the element is effectively non-interactive (back-compat).
-        data-testid="onboarding-nav-logo-button"
+        data-testid={`${testIdPrefix}-logo-button`}
         role="button"
         tabIndex={onLogoClick ? 0 : -1}
-        aria-label="Back to onboarding home"
+        aria-label={logoAriaLabel}
         onClick={onLogoClick}
         onKeyDown={(event) => {
           if (!onLogoClick) return;
@@ -256,7 +288,7 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
         {collapsed ? (
           <Box
             aria-hidden
-            data-testid="onboarding-nav-logo"
+            data-testid={`${testIdPrefix}-logo`}
             sx={{
               width: 22,
               height: 22,
@@ -277,7 +309,7 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
             component="img"
             src="/assets/logos/groundx-studio-color.png"
             alt="GroundX Studio"
-            data-testid="onboarding-nav-logo"
+            data-testid={`${testIdPrefix}-logo`}
             sx={{ height: 26, width: "auto", display: "block" }}
           />
         )}
@@ -299,6 +331,15 @@ export const OnboardingNav: FC<OnboardingNavProps> = ({
   );
 };
 
+export const OnboardingNav: FC<OnboardingNavProps> = (props) => (
+  <AppNav
+    {...props}
+    ariaLabel={props.ariaLabel ?? "Onboarding navigation"}
+    logoAriaLabel={props.logoAriaLabel ?? "Back to onboarding home"}
+    testIdPrefix="onboarding-nav"
+  />
+);
+
 // ──────────────────────────────────────────────────────────────────────────
 // Row renderers
 // ──────────────────────────────────────────────────────────────────────────
@@ -307,13 +348,14 @@ function renderExpandedRow(
   item: NavItemSpec,
   isActive: boolean,
   onClick: (item: NavItemSpec) => void,
+  testIdPrefix: string,
 ): ReactNode {
   return (
     <Box
       key={item.key}
       role="button"
       tabIndex={item.disabled ? -1 : 0}
-      data-testid={`onboarding-nav-item-${item.key}`}
+      data-testid={`${testIdPrefix}-item-${item.key}`}
       aria-disabled={item.disabled || undefined}
       title={item.disabled ? "Sign in to use" : undefined}
       onClick={() => onClick(item)}
@@ -355,13 +397,14 @@ function renderCompactRow(
   item: NavItemSpec,
   isActive: boolean,
   onClick: (item: NavItemSpec) => void,
+  testIdPrefix: string,
 ): ReactNode {
   return (
     <Box
       key={item.key}
       role="button"
       tabIndex={item.disabled ? -1 : 0}
-      data-testid={`onboarding-nav-item-${item.key}`}
+      data-testid={`${testIdPrefix}-item-${item.key}`}
       aria-disabled={item.disabled || undefined}
       title={item.disabled ? "Sign in to use" : item.label}
       onClick={() => onClick(item)}
@@ -397,6 +440,7 @@ function renderCta(
   item: NavItemSpec,
   collapsed: boolean,
   onClick: (item: NavItemSpec) => void,
+  testIdPrefix: string,
 ): ReactNode {
   if (collapsed) {
     return (
@@ -404,7 +448,7 @@ function renderCta(
         key={item.key}
         role="button"
         tabIndex={0}
-        data-testid={`onboarding-nav-cta-${item.key}`}
+        data-testid={`${testIdPrefix}-cta-${item.key}`}
         title={item.label}
         onClick={() => onClick(item)}
         onKeyDown={(event) => {
@@ -437,7 +481,7 @@ function renderCta(
       key={item.key}
       role="button"
       tabIndex={0}
-      data-testid={`onboarding-nav-cta-${item.key}`}
+      data-testid={`${testIdPrefix}-cta-${item.key}`}
       onClick={() => onClick(item)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {

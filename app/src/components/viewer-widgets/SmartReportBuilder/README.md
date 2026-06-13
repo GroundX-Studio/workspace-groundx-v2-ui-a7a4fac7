@@ -3,6 +3,17 @@
 **Slot:** `viewer-widgets` · **Frame:** `f4a` / spec `S3a` · **Status:** Phase 4
 (2026-05-29-smart-report-screen)
 
+## Viewer chrome
+
+Policy: `framed`
+
+Content mode: `padded-scroll`
+
+`ScopedCanvas` wraps SmartReportBuilder in `ViewerWidgetFrame`. The widget
+owns builder-local controls including row edit/close, section menus,
+render, Save/export, and variable editing. Row-level Close/Edit buttons are
+content controls, not pane close/back chrome.
+
 ## What it does
 
 Renders the Report **builder** surface (f4a): the F3a schema-editor chrome,
@@ -13,10 +24,12 @@ list with an inline section editor, the `⋮` row menu, and the
 Reports are **schemas for questions**: the template is an ordered list of
 sections, each `name + renderAs + question + instructions + variables`. The
 inline editor exposes exactly those fields. The builder is a
-**ScopedViewerWidget** — it takes a real `ContentScope` (which template's
-sections to seed from) and adapts on scope change; v1 seeds rows from the
-client-side demo fixture (`getReportFixture`); the live template read lands with the
-authored-question template read (ticketed). The `↻ render` control re-runs the
+**ScopedViewerWidget** — it takes a real `ContentScope` and adapts on scope
+change. There is NO client-side fixture seed (the locked no-seed decision): with
+nothing pinned the builder seeds ZERO base rows and is pinned-drafts-only (the
+overlay). Real base rows come from a saved/default template via
+`getReportTemplate(reportOverlay.templateId)` (the `report-default-template`
+change). The `↻ render` control re-runs the
 template over the current scope through the render endpoint (`renderReport`)
 and advances to the render surface (f4).
 
@@ -92,20 +105,22 @@ sections share the report's single render-time scope.
 ## How to mount
 
 ```tsx
-import { SmartReportBuilder } from "@/components/viewer-widgets/SmartReportBuilder/SmartReportBuilder";
+import { ScopedCanvas } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 
-<SmartReportBuilder
-  role={role}
+<ScopedCanvas
   scope={{
     type: "bucket",
     bucketId: 28454,
     filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
   }}
+  step={{ kind: "report" }}
+  role={role}
+  reportSurface="builder"
 />
 ```
 
-Mounted by `ReportBuilderView` (the f4a thin layout wrapper). The onboarding
-view passes the active scenario's scope + the auth-derived role.
+Mounted by `<ScopedCanvas>` through the report viewer descriptor. Thin route or
+frame wrappers pass the active scope, role, and `reportSurface="builder"`.
 
 ## LLM tools
 

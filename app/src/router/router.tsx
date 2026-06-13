@@ -1,7 +1,8 @@
-import { FC } from "react";
+import { FC, useEffect, type ReactNode } from "react";
 import { Outlet, createBrowserRouter, Navigate } from "react-router-dom";
 
 import { AppInitialization } from "@/AppInitialization";
+import { useAppMode } from "@/contexts/AppModeContext";
 import { OnboardingProvider } from "@/contexts/OnboardingContext/OnboardingProvider";
 import { Banned } from "@/views/Banned/Banned";
 import { Health } from "@/views/_scaffold/Health/Health";
@@ -29,11 +30,28 @@ export const ROUTER_FUTURE_FLAGS = {
   v7_startTransition: true,
 } as const;
 
+const ProductRouteModeBoundary: FC<{ children: ReactNode }> = ({ children }) => {
+  const { state, promoteToSignedIn, flipToSteady } = useAppMode();
+
+  useEffect(() => {
+    if (state.authState !== "signed-in") promoteToSignedIn();
+    if (state.mode !== "steady") flipToSteady();
+  }, [state.authState, state.mode, promoteToSignedIn, flipToSteady]);
+
+  if (state.authState !== "signed-in" || state.mode !== "steady") {
+    return <>Loading...</>;
+  }
+
+  return <>{children}</>;
+};
+
 export const ProductRouteLayout: FC = () => (
   <AppInitialization>
-    <OnboardingProvider>
-      <Outlet />
-    </OnboardingProvider>
+    <ProductRouteModeBoundary>
+      <OnboardingProvider>
+        <Outlet />
+      </OnboardingProvider>
+    </ProductRouteModeBoundary>
   </AppInitialization>
 );
 

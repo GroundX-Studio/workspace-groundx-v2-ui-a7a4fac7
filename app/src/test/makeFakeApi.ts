@@ -2,7 +2,6 @@ import { vi } from "vitest";
 
 import type { ContentScope } from "@groundx/shared";
 import { realApi, type Api } from "@/api/client";
-import { getReportFixture } from "@/widgets/reportFixtures";
 
 /**
  * One injected test fake for the whole `Api` surface.
@@ -120,10 +119,13 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
   if (name === "renderReport") {
     const input = args[0] as { templateId?: string; scope?: ContentScope } | undefined;
     const scope = input?.scope ?? { type: "documents", documentIds: [] };
-    const report = getReportFixture(scope);
+    // No client-side fixture (the locked no-seed decision). The fake returns the
+    // graceful no-template/empty render. `report-default-template` extends this
+    // to return the seeded template's sections when `templateId` is the seeded
+    // default (so the utility onboarding render shows real content).
     return {
       gated: false,
-      report: report ?? {
+      report: {
         reportId: "rr-test-empty",
         templateId: input?.templateId ?? "rt-test-empty",
         scope,

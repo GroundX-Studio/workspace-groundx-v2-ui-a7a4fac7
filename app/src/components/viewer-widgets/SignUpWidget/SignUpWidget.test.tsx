@@ -1,8 +1,7 @@
 /**
  * ARCH-05A (2026-05-26): SignUpWidget is the viewer-slot half of the
- * sign-up surface. The chat-side half is `GateChatRail`. Together
- * they replace the monolithic `GateView` that crammed form fields,
- * preamble, dismiss links, AND book-a-call into the chat column.
+ * sign-up surface. It owns the visible sign-in affordances while the
+ * chat column keeps ConversationFlow mounted.
  *
  * The motivating bug: today the gate opens on top of whatever was in
  * the viewer (an F2 sample doc, the F1 ingest picker). The user sees
@@ -44,12 +43,13 @@
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 const promoteToSignedIn = vi.fn();
 const commitGate = vi.fn();
+const dismissGate = vi.fn();
+const advanceFrame = vi.fn();
 
 vi.mock("@/contexts/AppModeContext", () => ({
   useAppMode: () => ({
@@ -70,14 +70,14 @@ vi.mock("@/contexts/OnboardingSessionContext", () => ({
   useOnboardingSession: () => ({
     state: { gate: mockGate, currentFrame: "f6" },
     commitGate,
-    dismissGate: vi.fn(),
-    advanceFrame: vi.fn(),
+    dismissGate,
+    advanceFrame,
   }),
 }));
 
 import { withApiProvider } from "@/test/withApiProvider";
 
-import { SignUpWidget } from "./SignUpWidget";
+import { SignUpWidget, type SignUpWidgetProps } from "./SignUpWidget";
 
 const mockedRegister = vi.fn();
 const mockedClaim = vi.fn();
@@ -85,9 +85,13 @@ const mockedCaptureException = vi.fn();
 
 const NONE_SCOPE: WidgetScope = { type: "none" };
 
-const renderWidget = (role: WidgetRole = "anonymous", scope: WidgetScope = NONE_SCOPE): ReturnType<typeof render> =>
+const renderWidget = (
+  role: WidgetRole = "anonymous",
+  scope: WidgetScope = NONE_SCOPE,
+  props: Partial<Omit<SignUpWidgetProps, "role" | "scope">> = {},
+): ReturnType<typeof render> =>
   render(
-    withApiProvider(<SignUpWidget role={role} scope={scope} />, {
+    withApiProvider(<SignUpWidget role={role} scope={scope} {...props} />, {
       auth: { register: mockedRegister },
       chat: { claimAnonymousChat: mockedClaim },
       telemetry: { captureException: mockedCaptureException },
@@ -110,6 +114,8 @@ describe("SignUpWidget", () => {
   beforeEach(() => {
     promoteToSignedIn.mockReset();
     commitGate.mockReset();
+    dismissGate.mockReset();
+    advanceFrame.mockReset();
     mockedRegister.mockReset();
     mockedClaim.mockReset();
     mockedCaptureException.mockReset();
@@ -118,12 +124,42 @@ describe("SignUpWidget", () => {
 
   it("renders the four required form fields", () => {
     renderWidget();
+    expect(screen.getByTestId("sign-up-viewer-surface")).toBeInTheDocument();
+    expect(screen.queryByTestId("sign-up-viewer-close")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sign-up-viewer-book-call")).toBeInTheDocument();
+    expect(screen.getByTestId("sign-up-viewer-email")).toBeInTheDocument();
+    expect(screen.getByTestId("sign-up-viewer-send-magic-link")).toBeInTheDocument();
     expect(screen.getByTestId("signup-first-input")).toBeInTheDocument();
     expect(screen.getByTestId("signup-last-input")).toBeInTheDocument();
     expect(screen.getByTestId("signup-email-input")).toBeInTheDocument();
     expect(screen.getByTestId("signup-password-input")).toBeInTheDocument();
     expect(screen.getByTestId("signup-confirm-input")).toBeInTheDocument();
     expect(screen.getByTestId("signup-submit")).toBeInTheDocument();
+  });
+
+  it("exposes the book-call content action without owning frame close chrome", () => {
+    const onBookCall = vi.fn();
+    renderWidget("anonymous", NONE_SCOPE, { onBookCall });
+
+    fireEvent.click(screen.getByTestId("sign-up-viewer-book-call"));
+
+    expect(onBookCall).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("sign-up-viewer-close")).not.toBeInTheDocument();
+  });
+
+  it("commits via the viewer magic-link control", () => {
+    renderWidget();
+    fireEvent.change(screen.getByTestId("sign-up-viewer-email"), {
+      target: { value: "pat@example.com" },
+    });
+    fireEvent.click(screen.getByTestId("sign-up-viewer-send-magic-link"));
+    expect(commitGate).toHaveBeenCalledWith("register");
+  });
+
+  it("commits via the viewer SSO control", () => {
+    renderWidget();
+    fireEvent.click(screen.getByTestId("sign-up-viewer-sso"));
+    expect(commitGate).toHaveBeenCalledWith("sso");
   });
 
   it("renders the same form under role 'anonymous' and 'member' (no role-locked affordance)", () => {
@@ -201,7 +237,10 @@ describe("SignUpWidget", () => {
   it("renders a celebration card (NOT the form) when gate.status === 'committed'", () => {
     mockGate = { status: "committed", method: "register" };
     renderWidget();
+    expect(screen.getByTestId("sign-up-viewer-surface")).toBeInTheDocument();
     expect(screen.getByTestId("signup-celebration")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("sign-up-viewer-continue-integrate"));
+    expect(advanceFrame).toHaveBeenCalledWith("f7");
     // Form fields must be gone — the user already submitted; showing
     // the filled form behind a "Welcome!" card in chat would be odd.
     expect(screen.queryByTestId("signup-first-input")).not.toBeInTheDocument();

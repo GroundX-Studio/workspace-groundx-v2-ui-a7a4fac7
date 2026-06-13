@@ -1,6 +1,6 @@
 /**
- * GateValueProp — the canvas half of the F6 gate (P1, 2026-05-29).
- * Presentational pitch surface; the sign-up doors live in GateChatRail.
+ * GateValueProp — legacy canvas half of the retired F6 gate.
+ * Presentational pitch surface; live sign-in now uses SignUpWidget.
  *
  * Migrated to the role+scope widget contract in 2026-05-30-widget-role-access
  * Phase 2b. GateValueProp's matrix row (docs/agents/widget-access-matrix.md):

@@ -1,7 +1,7 @@
 /**
- * ARCH-05A (2026-05-26): GateChatRail is the chat-slot half of the
- * sign-up surface. The viewer-side half is `SignUpWidget`. Together
- * they replace the monolithic `GateView`.
+ * ARCH-05A (2026-05-26): GateChatRail was the chat-slot half of the
+ * retired sign-up surface. The live route now uses `SignUpWidget` in the
+ * viewer and keeps `ConversationFlow` mounted in chat.
  *
  * What this widget owns:
  *   - The eyebrow + preamble that explains WHY the gate appeared

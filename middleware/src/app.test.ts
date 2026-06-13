@@ -9,6 +9,8 @@ import { SESSION_COOKIE } from "./middleware/session.js";
 import { authorizedProjectIds } from "./services/projectAccess.js";
 import { FakeGroundXClient, FakeLlmClient, FakePartnerClient, FakeScenarioRegistry, testEnv } from "./test/fakes.js";
 import type { GroundXClient, GroundXPartnerClient, LlmClient } from "./types.js";
+import { SAMPLE_REPORT_TEMPLATE_ID } from "@groundx/shared";
+import { SAMPLE_TEMPLATE_OWNER } from "./db/seedSampleProject.js";
 
 function setup(env = testEnv) {
   const repository = new MemoryAppRepository();
@@ -1488,6 +1490,169 @@ describe("POST /api/widgets/smart-report/reports (smart-report Phase 6 — Save)
       .post("/api/widgets/smart-report/reports")
       .send({ template: { id: "x" } })
       .expect(400, { error: "invalid_payload" });
+  });
+
+  // report-default-template T4b — write-side ownership guard. `saveTemplate`
+  // upserts on the id alone and overwrites the owner column, so without this a
+  // member could overwrite/hijack a row they don't own (e.g. the sample).
+  async function registerMember(app: ReturnType<typeof saveSetup>["app"]) {
+    const agent = request.agent(app);
+    await agent
+      .post("/api/auth/register")
+      .set("Authorization", `Basic ${Buffer.from("pat@example.com:secret").toString("base64")}`)
+      .send({ customer: { first: "Pat" } })
+      .expect(200);
+    return agent; // gx-user
+  }
+  async function seedOwned(
+    repository: ReturnType<typeof saveSetup>["repository"],
+    id: string,
+    owner: string,
+    name: string,
+  ) {
+    await repository.saveTemplate({
+      id,
+      kind: "report",
+      groundxUsername: owner,
+      name,
+      bodyJson: JSON.stringify({
+        sections: [
+          { id: "billing_summary", name: "billing_summary", renderAs: "PARAGRAPH", question: "Q", variables: [] },
+        ],
+      }),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  it("T4b: 403 when a member saves under the sentinel-owned sample id (no overwrite/hijack)", async () => {
+    const { app, repository } = saveSetup();
+    await seedOwned(repository, SAMPLE_REPORT_TEMPLATE_ID, SAMPLE_TEMPLATE_OWNER, "Utility Bill Summary");
+    const agent = await registerMember(app);
+    await agent
+      .post("/api/widgets/smart-report/reports")
+      .send({ template: { ...template, id: SAMPLE_REPORT_TEMPLATE_ID } })
+      .expect(403);
+    // Row unchanged: still sentinel-owned, original name.
+    const row = await repository.getTemplate(SAMPLE_REPORT_TEMPLATE_ID);
+    expect(row!.groundxUsername).toBe(SAMPLE_TEMPLATE_OWNER);
+    expect(row!.name).toBe("Utility Bill Summary");
+  });
+
+  it("T4b: 403 when a member saves under ANOTHER member's id", async () => {
+    const { app, repository } = saveSetup();
+    await seedOwned(repository, "rt-someone-else", "other-member", "Theirs");
+    const agent = await registerMember(app);
+    await agent
+      .post("/api/widgets/smart-report/reports")
+      .send({ template: { ...template, id: "rt-someone-else" } })
+      .expect(403);
+    const row = await repository.getTemplate("rt-someone-else");
+    expect(row!.groundxUsername).toBe("other-member");
+  });
+
+  it("T4b: 200 when a member overwrites their OWN existing template", async () => {
+    const { app, repository } = saveSetup();
+    const agent = await registerMember(app);
+    await agent
+      .post("/api/widgets/smart-report/reports")
+      .send({ template: { ...template, id: "rt-mine" } })
+      .expect(200);
+    await agent
+      .post("/api/widgets/smart-report/reports")
+      .send({ template: { ...template, id: "rt-mine", name: "Renamed" } })
+      .expect(200);
+    const row = await repository.getTemplate("rt-mine");
+    expect(row!.name).toBe("Renamed");
+    expect(row!.groundxUsername).toBe("gx-user");
+  });
+});
+
+// report-default-template T4 — the access-scoped template-read endpoint that the
+// builder uses to load a template's sections (and decide fork-on-edit via `owned`).
+describe("GET /api/widgets/smart-report/reports/template/:id (report-default-template T4)", () => {
+  const ROUTE = (id: string) => `/api/widgets/smart-report/reports/template/${id}`;
+
+  async function seedReportTemplate(
+    repository: ReturnType<typeof setup>["repository"],
+    id: string,
+    owner: string,
+  ) {
+    await repository.saveTemplate({
+      id,
+      kind: "report",
+      groundxUsername: owner,
+      name: "Test report template",
+      bodyJson: JSON.stringify({
+        sections: [
+          {
+            id: "billing_summary",
+            name: "billing_summary",
+            renderAs: "PARAGRAPH",
+            question: "Summarize the bill.",
+            variables: [],
+          },
+        ],
+      }),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  async function anonAgent(app: import("express").Express) {
+    const agent = request.agent(app);
+    await agent.post("/api/onboarding/session").expect(200);
+    return agent;
+  }
+  async function memberAgent(app: import("express").Express) {
+    const agent = request.agent(app);
+    await agent.post("/api/auth/login").send({ email: "pat@example.com", password: "secret" }).expect(200);
+    return agent; // FakePartnerClient logs in as "gx-user"
+  }
+
+  it("anon CAN read the sentinel-owned sample template (owned:false) with its sections", async () => {
+    const { app, repository } = setup();
+    await seedReportTemplate(repository, SAMPLE_REPORT_TEMPLATE_ID, SAMPLE_TEMPLATE_OWNER);
+    const agent = await anonAgent(app);
+    const res = await agent.get(ROUTE(SAMPLE_REPORT_TEMPLATE_ID)).expect(200);
+    expect(res.body.owned).toBe(false);
+    expect(res.body.template.sections.map((s: { name: string }) => s.name)).toEqual(["billing_summary"]);
+  });
+
+  it("anon CANNOT read a member-owned template by id (404 — no IDOR)", async () => {
+    const { app, repository } = setup();
+    await seedReportTemplate(repository, "rt-member", "some-member");
+    const agent = await anonAgent(app);
+    await agent.get(ROUTE("rt-member")).expect(404);
+  });
+
+  it("a member CAN read their OWN template (owned:true)", async () => {
+    const { app, repository } = setup();
+    await seedReportTemplate(repository, "rt-mine", "gx-user");
+    const agent = await memberAgent(app);
+    const res = await agent.get(ROUTE("rt-mine")).expect(200);
+    expect(res.body.owned).toBe(true);
+  });
+
+  it("a member CANNOT read ANOTHER member's template (404)", async () => {
+    const { app, repository } = setup();
+    await seedReportTemplate(repository, "rt-other", "other-member");
+    const agent = await memberAgent(app);
+    await agent.get(ROUTE("rt-other")).expect(404);
+  });
+
+  it("a member CAN read the sample template too (owned:false)", async () => {
+    const { app, repository } = setup();
+    await seedReportTemplate(repository, SAMPLE_REPORT_TEMPLATE_ID, SAMPLE_TEMPLATE_OWNER);
+    const agent = await memberAgent(app);
+    const res = await agent.get(ROUTE(SAMPLE_REPORT_TEMPLATE_ID)).expect(200);
+    expect(res.body.owned).toBe(false);
+  });
+
+  it("404 for a nonexistent template id", async () => {
+    const { app } = setup();
+    const agent = await anonAgent(app);
+    await agent.get(ROUTE("rt-does-not-exist")).expect(404);
   });
 });
 

@@ -11,9 +11,9 @@ describe("BookingStatusCard tools", () => {
     expect(tools[0].category).toBe("mutate");
   });
 
-  it("book_call takes no arguments and declares its rendered chat card", () => {
+  it("book_call takes no arguments and declares its suggested-action chip surface", () => {
     expect(tools[0].input.parse({})).toEqual({});
-    expect(tools[0].rendersWidget).toBe("chat-widgets/BookingStatusCard");
+    expect(tools[0].rendersWidget).toBe("chat-widgets/SuggestedActionChips");
   });
 
   it("description meets Phase 5b quality bar", () => {

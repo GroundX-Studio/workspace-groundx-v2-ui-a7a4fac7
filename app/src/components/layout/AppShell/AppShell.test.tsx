@@ -291,6 +291,15 @@ describe("AppShell", () => {
       expect(screen.getByTestId("chat")).toBeInTheDocument();
     });
 
+    it("can foreground the canvas in compact mode for URL-driven viewer flows", () => {
+      renderShell({ compact: true, compactInitialFocus: "focus-canvas" });
+
+      expect(screen.queryByTestId("chat")).not.toBeInTheDocument();
+      expect(screen.getByTestId("appshell-canvas")).toBeInTheDocument();
+      expect(screen.getByTestId("canvas")).toBeInTheDocument();
+      expect(screen.getByTestId("appshell-compact-view-toggle")).toHaveTextContent(/view chat/i);
+    });
+
     it("hides the nav from the inline flex row (it lives in the drawer)", () => {
       renderShell({ compact: true });
       // No <aside> — the nav slot isn't in the flex row in compact mode

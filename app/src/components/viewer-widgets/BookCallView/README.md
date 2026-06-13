@@ -5,6 +5,17 @@
 The Calendly inline scheduler that takes over the viewer pane for the F6a
 "Book a call with an engineer" flow.
 
+## Viewer chrome
+
+Policy: `framed`
+
+Content mode: `embed`
+
+`OnboardingShell` wraps BookCallView with `ViewerWidgetFrame`, which owns
+the Close booking action and the loading/status band. BookCallView owns only
+the Calendly embed lifecycle, trusted scheduled-event handling, unset-url
+placeholder, and mobile external-calendar fallback.
+
 ## What it does
 
 Reads `APP_CONFIG.calendly.url` (sourced from the browser-safe
@@ -23,10 +34,10 @@ Calendly's standard `data-url` embed path; this widget uses the advanced
 `Calendly.initInlineWidget({ url, parentElement })` API so React controls
 when the scheduler is mounted.
 
-The chat counterpart is `chat-widgets/BookingStatusCard` — when this
-widget is mounted in the viewer, that widget should be mounted in the
-chat so the user has a close-booking affordance + booking-progress
-status.
+The chat counterpart is the normal `ChatColumn` / `ConversationFlow`.
+When this widget is mounted as a viewer overlay, the active conversation
+stays mounted and booking narration arrives as ordinary assistant
+messages.
 
 ## Props
 
@@ -40,6 +51,8 @@ interface BookCallViewProps {
   calendlyUrl?: string;
   /** Called after a trusted Calendly scheduled-event postMessage. */
   onScheduled?: () => void;
+  /** Reports embed lifecycle so the host frame can place loading/status chrome. */
+  onEmbedStateChange?: (state: BookCallEmbedState) => void;
 }
 ```
 
@@ -73,11 +86,11 @@ Future steady-mode integration may activate from a settings menu.
 
 The inline F6 gate's "Book a call" button used to commit the gate
 directly to a non-functional `engineer-call` state. Now the button
-opens this widget in the viewer + `BookingStatusCard` in the chat, and
-the gate only commits when the user actually completes a booking
-(Calendly fires the `calendly.event_scheduled` postMessage). The shell
-then clears `?bookCall=1` so the call-requested state is visible
-immediately.
+opens this widget as a viewer overlay and leaves the current chat
+timeline in place. The gate only commits when the user actually
+completes a booking (Calendly fires the `calendly.event_scheduled`
+postMessage). The shell then clears `?bookCall=1` so the call-requested
+state is visible immediately.
 
 ## Events
 
@@ -103,11 +116,12 @@ import { BookCallView } from "@/components/viewer-widgets/BookCallView/BookCallV
   role={role}
   scope={{ type: "none" }}
   onScheduled={() => commitGate("engineer-call")}
+  onEmbedStateChange={setBookCallEmbedState}
 />
 ```
 
-The chat-side `BookingStatusCard` is mounted in parallel by the same
-shell so the user has a back-out affordance.
+The shell mounts this over the active viewer and keeps the current
+conversation flow mounted in the chat pane.
 
 ## LLM tools
 

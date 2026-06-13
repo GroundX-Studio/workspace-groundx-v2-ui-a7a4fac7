@@ -56,5 +56,12 @@ export const descriptor = defineScopedViewerWidget({
   id: "extract-workbench",
   kind: "extract-workbench",
   slot: "viewer-widgets",
+  viewerFrame: {
+    chromePolicy: "framed",
+    contentMode: "padded-scroll",
+    eyebrow: "Analyze",
+    title: "Extract",
+    subtitle: "Review structured fields and citations for the active scope.",
+  },
   tools,
 });

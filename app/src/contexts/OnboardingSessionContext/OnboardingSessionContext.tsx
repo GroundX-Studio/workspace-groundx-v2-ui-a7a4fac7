@@ -50,8 +50,9 @@ export function frameToStepStandalone(
     // kind (the render surface reads the active scenario's scope); f4 used
     // to mis-route to `extract-workbench` (the bug this change fixes).
     case "f4":
+      return { kind: "report", surface: "render" };
     case "f4a":
-      return { kind: "report" };
+      return { kind: "report", surface: "builder" };
     case "f5":
     case "f6":
       return { kind: "interact-chat", scenarioId: scenario ?? "unknown" };

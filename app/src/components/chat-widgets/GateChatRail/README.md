@@ -1,15 +1,16 @@
 # GateChatRail
 
-Chat-slot widget for the sign-up gate. The viewer-side companion is
-`viewer-widgets/SignUpWidget/`.
+Legacy chat-slot widget for the retired chat-side sign-up gate. The live
+sign-in path now renders `viewer-widgets/SignUpWidget/` as a viewer overlay
+and keeps `ConversationFlow` mounted in the chat column.
 
 ## What it does
 
-Renders the chat-side mirror of the sign-up gate: an eyebrow + per-
-trigger preamble + a book-a-call CTA + a "keep exploring" dismiss
-link while `gate.status === "open"`; a committed-state success card
-(varying by `method`) once the user signs up or books. The viewer-
-side `SignUpWidget` carries the form fields themselves.
+Historically rendered the chat-side mirror of the sign-up gate: an eyebrow +
+per-trigger preamble + a book-a-call CTA + a dismiss link while
+`gate.status === "open"`; a committed-state success card once the user signed
+up or booked. It is retained for archival tests/tool metadata and is not
+mounted by `ChatColumn` in the live onboarding route.
 
 ## Why split from `GateView`?
 
@@ -42,9 +43,9 @@ nav CTA is absent (2026-05-30-widget-role-access).
   - `byo` → "Bring your own data. Sign in to start uploading."
   - `threshold` → "You've reached the free-tier ceiling…"
 - **The book-a-call CTA** — sets `?bookCall=1` in the URL. The
-  OnboardingShell sees the param and swaps the viewer to the Calendly
-  embed (`BookCallView` widget); the sibling `BookingStatusCard`
-  widget takes over the chat column.
+  OnboardingShell sees the param and overlays the Calendly embed
+  (`BookCallView` widget) on the active viewer while the current chat
+  timeline remains mounted.
 - **The `← Keep exploring` dismiss link** — calls
   `dismissGate()` from `OnboardingSessionContext`. ESC also works
   (wired at the OnboardingShell level so focus doesn't matter).
@@ -57,9 +58,10 @@ nav CTA is absent (2026-05-30-widget-role-access).
 - **The form fields, validation, register call** — `SignUpWidget`
   in the viewer.
 - **The viewer-side Calendly embed** — `BookCallView` viewer widget.
-- **The composing/typing animation that precedes the gate appearing**
-  — that's `GateChatPanel` in `views/Onboarding/`, which mounts this
-  widget after the typing indicator finishes.
+- **The live sign-in form, close/back control, and book-a-call entry** —
+  those live on `SignUpWidget`.
+- **The composing/typing animation that preceded this legacy rail** —
+  that belonged to the legacy `GateChatPanel` composite.
 
 ## Gate-state render rules
 
@@ -74,7 +76,7 @@ nav CTA is absent (2026-05-30-widget-role-access).
 
 **None.** No affordance in this widget is locked or hidden by `role`
 today. The widget is **anonymous-only by AVAILABILITY** — the
-OnboardingShell mounts it only in the gate (anonymous) context, so a
+legacy gate host mounted it only in the gate (anonymous) context, so a
 signed-in `member` never sees it; that constraint is enforced at the
 mount site, not by a prop inside this widget. The `role` prop is
 present for the role+scope contract and for forward-looking roles
@@ -89,9 +91,9 @@ one of the four ScopedViewerWidgets that take a real `ContentScope`).
 
 ## Events
 
-- Book-a-call CTA → sets `?bookCall=1` on the URL (the
-  OnboardingShell sees the param and swaps the viewer to the
-  `BookCallView` widget).
+- Legacy book-a-call CTA → sets `?bookCall=1` on the URL (the
+  OnboardingShell sees the param and overlays the `BookCallView`
+  widget on the active viewer).
 - "← Keep exploring" link → calls `dismissGate()` from
   `OnboardingSessionContext`. ESC at the shell level fires the same
   action.
@@ -104,14 +106,13 @@ one of the four ScopedViewerWidgets that take a real `ContentScope`).
 ```tsx
 import { GateChatRail } from "@/components/chat-widgets/GateChatRail/GateChatRail";
 
-// OnboardingShell mounts this whenever gate.status !== "idle", and only
-// in the anonymous gate context (availability is enforced here).
+// Legacy-only example. The live route mounts SignUpWidget in the viewer and
+// keeps ConversationFlow in the chat column.
 <GateChatRail role="anonymous" scope={{ type: "none" }} />
 ```
 
-The composing animation that precedes the rail appearing lives in
-`components/chat-widgets/GateChatPanel/GateChatPanel.tsx` — it mounts the
-rail after the typing indicator finishes.
+The legacy composing animation that preceded the rail lived in
+`components/chat-widgets/GateChatPanel/GateChatPanel.tsx`.
 
 ## LLM tools
 

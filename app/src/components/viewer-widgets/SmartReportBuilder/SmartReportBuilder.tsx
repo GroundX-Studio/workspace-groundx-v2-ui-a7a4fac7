@@ -63,13 +63,12 @@ import {
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
-import type { SaveReportTemplateInput } from "@/api/smartReport";
+import type { ReportTemplateDefinition, SaveReportTemplateInput } from "@/api/smartReport";
 import { useApi } from "@/contexts/ApiContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import type { ReportSectionEdit, ReportSectionItem, ReportSectionRenderAs } from "@/contexts/ChatStoreContext";
-import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
-import { getReportFixture } from "@/widgets/reportFixtures";
 
 export interface SmartReportBuilderProps {
   /** REQUIRED render-time scope (a real `ContentScope` — ScopedViewerWidget). */
@@ -113,36 +112,31 @@ function humanizeName(name: string): string {
 }
 
 /**
- * Seed the base section rows for a scope from the client-side demo fixture.
- * The rendered fixture carries `name + renderAs`; the builder seeds a starter
- * `question` from the section name until the live template read (Phase 6)
- * supplies the authored question.
+ * The template identity (id + display name) for a from-scratch builder. No
+ * fixture identity — an "Untitled report" is minted (a fresh id) so a
+ * from-scratch template still persists. A loaded template overrides this (its
+ * own id when owned; a fresh forked id when NOT owned — see the load effect).
  */
-function baseRowsForScope(scope: ContentScope): BuilderSectionRow[] {
-  const report = getReportFixture(scope);
-  if (!report) return [];
-  return report.sections.map((s) => ({
-    id: s.sectionId,
-    name: s.name,
-    renderAs: s.renderAs,
-    question: `Answer the "${humanizeName(s.name)}" section for the selected scope.`,
-    instructions: [],
-    variables: [],
-  }));
+function mintUntitledIdentity(): { id: string; name: string } {
+  return { id: `rt-${Date.now()}`, name: "Untitled report" };
 }
 
 /**
- * The template identity (id + display name) the scope's fixture resolves to.
- * The template is scope-INDEPENDENT — the scope only selects which template to
- * seed. Defaults are minted for a scope without a fixture so a from-scratch
- * template still persists.
+ * Map a loaded template's section definition onto a `BuilderSectionRow`. The
+ * persisted `instructions` is a single string (one rule per line); the builder
+ * row carries them as an array, so split on newlines (Save re-joins).
  */
-function templateIdentityForScope(scope: ContentScope): { id: string; name: string } {
-  const report = getReportFixture(scope);
-  if (report) {
-    return { id: report.templateId, name: `${humanizeName(report.templateId.replace(/^rt-/, ""))}` };
-  }
-  return { id: `rt-${Date.now()}`, name: "Untitled report" };
+function templateSectionToRow(
+  section: ReportTemplateDefinition["sections"][number],
+): BuilderSectionRow {
+  return {
+    id: section.id,
+    name: section.name,
+    renderAs: section.renderAs,
+    question: section.question,
+    instructions: section.instructions ? section.instructions.split("\n") : [],
+    variables: section.variables,
+  };
 }
 
 /** Builder Save lifecycle (mirrors Extract's SaveStatus). */
@@ -150,21 +144,60 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, selectedSectionId }) => {
   const {
-    report: { renderReport, saveReportTemplate },
+    report: { renderReport, saveReportTemplate, getReportTemplate },
   } = useApi();
   const { addReportSection, editReportSection, removeReportSection, state: chatState } = useChatStore();
-  const { state: session, openGate, advanceFrame } = useOnboardingSession();
+  const onboardingSession = useOnboardingSessionOptional();
+  const openGate = onboardingSession?.openGate ?? (() => undefined);
+  const advanceFrame = onboardingSession?.advanceFrame ?? (() => undefined);
 
-  // ScopedViewerWidget adaptation: re-seed the base rows whenever the scope
-  // IDENTITY changes (via `useScopeAdapter` — load-bearing, not a no-op).
-  const [baseRows, setBaseRows] = useState<BuilderSectionRow[]>(() => baseRowsForScope(scope));
-  const [templateIdentity, setTemplateIdentity] = useState(() => templateIdentityForScope(scope));
+  // The active session's report overlay (the draft diff) + the template id it
+  // renders/edits. The template is scope-INDEPENDENT, so base rows are driven by
+  // `templateId` (below), NOT by the scope.
+  const overlay = chatState.activeSessionId
+    ? chatState.sessions.get(chatState.activeSessionId)?.reportOverlay
+    : undefined;
+  const templateId = overlay?.templateId;
+
+  const [baseRows, setBaseRows] = useState<BuilderSectionRow[]>([]);
+  const [templateIdentity, setTemplateIdentity] = useState(mintUntitledIdentity);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  useScopeAdapter(scope, (nextScope) => {
-    setBaseRows(baseRowsForScope(nextScope));
-    setTemplateIdentity(templateIdentityForScope(nextScope));
-    setSaveStatus("idle");
-  });
+  // A scope-identity change is a new render TARGET, not a new template — reset
+  // only the save status (the template + its rows are scope-independent).
+  useScopeAdapter(scope, () => setSaveStatus("idle"));
+
+  // Load the template's section definitions when a `templateId` is set (else a
+  // from-scratch empty draft). FORK-ON-EDIT (report-default-template §C2.2): a
+  // loaded template the caller does NOT own (the sentinel-owned sample) gets a
+  // FRESH minted identity so Save creates a member copy (copy-on-write) and never
+  // targets the original id; an owned template keeps its id.
+  useEffect(() => {
+    let cancelled = false;
+    if (!templateId) {
+      setBaseRows([]);
+      setTemplateIdentity(mintUntitledIdentity());
+      return;
+    }
+    void (async () => {
+      const result = await getReportTemplate(templateId);
+      if (cancelled) return;
+      if (!result) {
+        setBaseRows([]);
+        setTemplateIdentity(mintUntitledIdentity());
+        return;
+      }
+      setBaseRows(result.template.sections.map(templateSectionToRow));
+      setTemplateIdentity(
+        result.owned
+          ? { id: result.template.id, name: result.template.name }
+          : { id: `rt-${Date.now()}`, name: result.template.name },
+      );
+      setSaveStatus("idle");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [templateId, getReportTemplate]);
 
   // Sub-tab: Sections (the editor) vs Render (a preview hand-off, Phase 5/6).
   const [tab, setTab] = useState<"sections" | "render">("sections");
@@ -174,17 +207,13 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
   // back to `session.selectedReportSectionId` — set by the orchestrator's
   // editTemplate routing (advanceFrame("f4a", { selectedReportSectionId })),
   // which is the render→builder + `show_smart_report_edit` hand-off.
-  const effectiveSelectedSectionId = selectedSectionId ?? session.selectedReportSectionId ?? undefined;
+  const effectiveSelectedSectionId =
+    selectedSectionId ?? onboardingSession?.state.selectedReportSectionId ?? undefined;
   // Only one row's inline editor is open at a time (the F3a invariant). Seeded
   // from the effective selected section.
   const [openRowId, setOpenRowId] = useState<string | null>(effectiveSelectedSectionId ?? null);
 
   const canEdit = widgetRoleCanEdit(role);
-
-  // The active session's report overlay (the draft diff over the base rows).
-  const overlay = chatState.activeSessionId
-    ? chatState.sessions.get(chatState.activeSessionId)?.reportOverlay
-    : undefined;
 
   // Effective rows = base ⊕ overlay (added · removed · edited).
   const rows = useMemo<BuilderSectionRow[]>(() => {

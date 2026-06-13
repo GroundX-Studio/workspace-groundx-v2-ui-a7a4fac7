@@ -70,6 +70,18 @@ afterEach(() => {
 });
 
 describe("SteadyShell (/c/:sessionId)", () => {
+  it("uses product navigation semantics on the authenticated steady route", () => {
+    render(
+      <Harness initialUrl="/c/c-abc123">
+        <SteadyShell />
+      </Harness>,
+    );
+
+    expect(screen.getByLabelText("Product navigation")).toBeInTheDocument();
+    expect(screen.getByLabelText("Go to product home")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Onboarding navigation")).not.toBeInTheDocument();
+  });
+
   it("renders the steady shell chrome with the sessionId from the URL", () => {
     render(
       <Harness initialUrl="/c/c-abc123">
@@ -303,6 +315,36 @@ describe("SteadyShell (/c/:sessionId)", () => {
       const stub = screen.getByTestId("pdf-viewer-widget-stub");
       expect(stub.getAttribute("data-document-id")).toBe("doc-active");
       expect(stub.getAttribute("data-target-page")).toBe("2");
+    });
+
+    it("an active report-builder step mounts <ScopedCanvas> on the steady route", async () => {
+      let api: ReturnType<typeof useChatStore> | null = null;
+      let createdId = "";
+      let navigateFn: ReturnType<typeof useNavigate> | null = null;
+      function SeedAndRender() {
+        api = useChatStore();
+        navigateFn = useNavigate();
+        return null;
+      }
+      render(
+        <Harness initialUrl="/c/seed-report-builder">
+          <SeedAndRender />
+          <SteadyShell />
+        </Harness>,
+      );
+      expect(api).not.toBeNull();
+      expect(navigateFn).not.toBeNull();
+      act(() => {
+        createdId = api!.newSession({ title: "Report builder" });
+        navigateFn!(`/c/${createdId}`);
+        api!.pushStep({ kind: "report", surface: "builder", selectedSectionId: "anomalies" });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("scoped-canvas")).toHaveAttribute("data-canvas-kind", "report-builder");
+      });
+      expect(screen.getByTestId("smart-report-builder")).toBeInTheDocument();
+      expect(screen.queryByTestId("steady-shell-canvas-placeholder")).not.toBeInTheDocument();
     });
   });
 

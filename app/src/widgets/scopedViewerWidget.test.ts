@@ -43,6 +43,11 @@ function mkTool(name: string): WidgetTool {
 
 const openDoc = mkTool("open_document");
 const jumpToPage = mkTool("jump_to_page");
+const viewerFrame = {
+  chromePolicy: "edge-to-edge" as const,
+  contentMode: "edge-to-edge" as const,
+  title: "Document viewer",
+};
 
 const bucketScope: ContentScope = { type: "bucket", bucketId: 42 };
 const docsScope: ContentScope = { type: "documents", documentIds: ["doc-1"] };
@@ -53,6 +58,7 @@ describe("defineScopedViewerWidget — the base descriptor", () => {
       id: "pdf-viewer",
       kind: "doc-viewer",
       slot: "viewer-widgets",
+      viewerFrame,
       tools: [openDoc, jumpToPage],
     });
     expect(d.id).toBe("pdf-viewer");
@@ -73,6 +79,7 @@ describe("defineScopedViewerWidget — the base descriptor", () => {
         id: "pdf-viewer",
         kind: "doc-viewer",
         slot: "viewer-widgets",
+        viewerFrame,
         tools: [openDoc, jumpToPage],
       }),
     ).not.toThrow();
@@ -84,6 +91,7 @@ describe("defineScopedViewerWidget — the base descriptor", () => {
         id: "",
         kind: "doc-viewer",
         slot: "viewer-widgets",
+        viewerFrame,
         tools: [openDoc],
       }),
     ).toThrow(/id/i);
@@ -95,6 +103,7 @@ describe("defineScopedViewerWidget — the base descriptor", () => {
         id: "no-tools",
         kind: "doc-viewer",
         slot: "viewer-widgets",
+        viewerFrame,
         tools: [],
       }),
     ).toThrow(/tool/i);
@@ -105,6 +114,11 @@ describe("defineScopedViewerWidget — the base descriptor", () => {
       id: "smart-report-render",
       kind: "report",
       slot: "viewer-widgets",
+      viewerFrame: {
+        chromePolicy: "framed",
+        contentMode: "padded-scroll",
+        title: "Report",
+      },
       tools: [mkTool("show_smart_report_render")],
     });
     expect(d.tools[0].name).toBe("show_smart_report_render");

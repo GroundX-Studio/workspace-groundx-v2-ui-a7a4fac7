@@ -20,11 +20,11 @@ OnboardingShell                               <- root, mounted at /onboarding/*
 └── AppShell 3-pane
     ├── (nav slot empty; nav is shell-level above)
     ├── ChatColumn                            <- the chat-side narrative
-    │   - F2..F5 + scenario → F2ConversationFlow (header + bubbles + thinking + Pick-a-view + live chat input + CiteChips)
+    │   - F2..F5 + scenario → ConversationFlow with onboarding experience
+    │   - sign-up/book-call overlay active → ConversationFlow stays mounted
     │   - F2 BYO no scenario → ByoChatPlaceholder
     │   - F1 idle → IdleChatPlaceholder
-    │   - Gate active → GateChatPanel
-    │   - `mode="steady"` (mounted by SteadyShell) → SteadyConversationFlow
+    │   - steady sessions (mounted by SteadyShell) → bare ConversationFlow
     └── Canvas slot (driven by `viewer.currentStep.kind`)
         ├── `doc-viewer`         → UnderstandView (mounts PdfViewerWidget)
         ├── `extract-workbench`  → ExtractView (F3/F3a — schema-driven fields panel)
@@ -34,7 +34,7 @@ OnboardingShell                               <- root, mounted at /onboarding/*
 ```
 
 SteadyShell at `/c/:sessionId` mounts the same AppShell with
-`mode="steady"` widgets — ChatColumn + PdfViewerWidget (when
+steady widgets — ChatColumn + PdfViewerWidget (when
 `viewer.currentStep.kind === "doc-viewer"`).
 
 F1↔F2 transition: the nav doesn't animate (stable). Only the chat
@@ -202,8 +202,8 @@ repository: real SQL + transactions + CREATE TABLE on `createSchema`).
 
 | Want to | Add to |
 |---|---|
-| A new chat widget | `app/src/components/chat-widgets/<Name>/<Name>.tsx` + sibling `README.md` + `.test.tsx` + `mode: "onboarding" \| "steady"` prop (widget-contract enforced) |
-| A new viewer widget | `app/src/components/viewer-widgets/<Name>/<Name>.tsx` + sibling `README.md` + `.test.tsx` + `mode` prop |
+| A new chat widget | `app/src/components/chat-widgets/<Name>/<Name>.tsx` + sibling `README.md` + `.test.tsx` + required `role` / `scope` props (widget-contract enforced) |
+| A new viewer widget | `app/src/components/viewer-widgets/<Name>/<Name>.tsx` + sibling `README.md` + `.test.tsx` + required `role` / `scope` props + `## Viewer chrome` README policy |
 | A new brand primitive | `app/src/components/brand/<Name>/<Name>.tsx` + test (no widget-contract; just no-hardcoded-styles) |
 | A new ViewerStep kind | extend the discriminated union in `app/src/contexts/ChatStoreContext/types.ts` → wire into `OnboardingShell`'s canvas switch + `SteadyShell` if applicable → ensure the JSON round-trip carries it (no schema change needed; viewer_history_json is generic JSON) |
 | A new CanvasIntent | extend the discriminated union in `contexts/CanvasOrchestratorContext/types.ts` → register an adapter via `registerAdapter` OR add a built-in handler in `dispatch` |
@@ -223,13 +223,18 @@ Per `widget-contract.md`. When adding a widget under
 `components/chat-widgets/<Name>/` OR `components/viewer-widgets/<Name>/`:
 
 1. Sibling `README.md` documenting slot, props, locked affordances, events.
-2. Sibling `<Name>.test.tsx` covering mount in both modes + locked affordances absent under `mode="onboarding"`.
-3. `mode: "onboarding" | "steady"` prop on the consumer entry point.
+2. Sibling `<Name>.test.tsx` covering role/scope mount + locked affordances.
+3. Required `role: WidgetRole` and `scope: WidgetScope` props on the consumer entry point.
 4. Inputs are typed props — no implicit context reads if avoidable.
 5. Styling uses tokens from `@/constants` (no hex literals — `no-hardcoded-styles.test.ts` enforces).
 6. `data-testid` on the wrapper for test targeting.
 7. If the widget reads state, it reads from a context — never from
    the URL or localStorage directly. The context owner reads those.
+8. For viewer widgets, declare frame metadata in the production registry
+   descriptor or the onboarding overlay descriptor map. The host wraps viewer
+   content in `ViewerWidgetFrame`; widgets do not render pane close/back or
+   loading chrome.
 
-`widget-contract.test.ts` auto-discovers every widget directory and
-asserts (1)-(3) at test time. Skipping the contract → red test.
+`widget-contract.test.ts` and `viewer-widget-shell-contract.test.ts`
+auto-discover widget directories and assert these contracts at test time.
+Skipping the contract -> red test.

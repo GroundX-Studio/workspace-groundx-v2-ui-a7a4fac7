@@ -57,5 +57,12 @@ export const descriptor = defineScopedViewerWidget({
   id: "smart-report-render",
   kind: "report",
   slot: "viewer-widgets",
+  viewerFrame: {
+    chromePolicy: "framed",
+    contentMode: "padded-scroll",
+    eyebrow: "Report",
+    title: "Smart report",
+    subtitle: "Render a scoped, citation-backed brief from the active documents.",
+  },
   tools,
 });

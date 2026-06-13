@@ -155,5 +155,12 @@ export const descriptor = defineScopedViewerWidget({
   id: "smart-report-builder",
   kind: "report-builder",
   slot: "viewer-widgets",
+  viewerFrame: {
+    chromePolicy: "framed",
+    contentMode: "padded-scroll",
+    eyebrow: "Report",
+    title: "Report builder",
+    subtitle: "Edit report sections and review proposed changes for this scope.",
+  },
   tools,
 });

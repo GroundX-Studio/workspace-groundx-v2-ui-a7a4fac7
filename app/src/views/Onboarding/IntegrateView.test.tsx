@@ -47,7 +47,7 @@ describe("IntegrateView (F7)", () => {
     });
 
     expect(screen.getByText("Ship the same answer into your stack.")).toBeInTheDocument();
-    expect(screen.getByText(/The Loan sample becomes a live GroundX project/)).toBeInTheDocument();
+    expect(screen.getByText(/The Loan sample is ready to connect to the workflows around it/)).toBeInTheDocument();
     expect(screen.getByTestId("integrate-snippet")).toHaveTextContent("curl -X POST");
     expect(screen.getByTestId("plugin-claude")).toBeInTheDocument();
     expect(screen.getByTestId("plugin-openai")).toBeInTheDocument();

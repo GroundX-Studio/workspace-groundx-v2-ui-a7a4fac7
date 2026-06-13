@@ -8,13 +8,13 @@ the transitions + the rules that decide which surface mounts.
 | Frame | URL | Canvas content | Chat-column content |
 |---|---|---|---|
 | F1 | `/onboarding` | IngestView (sample picker + BYO) — mounted as overlay above the AppShell | IdleChatPlaceholder underneath |
-| F1 BYO sign-up | `/onboarding/signup` | `sign-up` overlay z-stacked on the current step (master-viewer-session Phase 2). Underlying canvas keeps its content | GateChatPanel |
-| F2 | `/onboarding/<bucketId>/<scenarioId>` | UnderstandView (PdfViewerWidget mount; reads doc-viewer ViewerStep when present) | F2ConversationFlow (header + bubbles + streaming notes + Pick-a-view pills + live chat input + CiteChips on assistant turns) |
-| F3 | (URL stays at F2's; frame state advances) | ExtractView (schema-driven fields panel + citation chips) — `?focus=<categoryId>` opens to a specific slice | F2ConversationFlow stays mounted (chat persists across F2→F5) |
-| F3a | (URL stays the same) | SchemaView — schema-agent loop: inline editor, ProposeCard above the field list, save → sign-in gate. Reached from F3's fields-panel hamburger menu (NOT a chat pill) | F2ConversationFlow with Schema-Agent header chip + earlier-turns compaction summary |
+| F1 BYO sign-up | `/onboarding/signup` | `sign-up` overlay z-stacked on the current step. Underlying canvas keeps its content | ConversationFlow in the same onboarding chat session |
+| F2 | `/onboarding/<bucketId>/<scenarioId>` | UnderstandView (PdfViewerWidget mount; reads doc-viewer ViewerStep when present) | ConversationFlow with the onboarding experience (header + bubbles + streaming notes + Pick-a-view pills + live chat input + CiteChips on assistant turns) |
+| F3 | (URL stays at F2's; frame state advances) | ExtractView (schema-driven fields panel + citation chips) — `?focus=<categoryId>` opens to a specific slice | ConversationFlow stays mounted (chat persists across F2→F5) |
+| F3a | (URL stays the same) | SchemaView — schema-agent loop: inline editor, ProposeCard above the field list, save → sign-in overlay. Reached from F3's fields-panel hamburger menu (NOT a chat pill) | ConversationFlow with Schema-Agent header chip + earlier-turns compaction summary |
 | F4 | — | retired; folded into F3a 2026-05-27 | — |
-| F5 | … | InteractView (chat-with-sources placeholder) | F2ConversationFlow continues |
-| F6 (gate active) | `/onboarding/signup` OR `/onboarding/<…>?gate=save\|export` | Underlying canvas (whatever step is active) stays mounted; `sign-up` overlay z-stacks on top | GateChatPanel takes over the chat column (legacy bridge — overlay model in viewer; chat side still on `gate.status` until Phase 6 close-out) |
+| F5 | … | InteractView (chat-with-sources placeholder) | ConversationFlow continues |
+| F6 (sign-in active) | `/onboarding/signup` OR an `openGate` intent from the active sample | Underlying canvas (whatever step is active) stays mounted; `sign-up` overlay z-stacks on top | ConversationFlow stays mounted; sign-in guidance appears as normal assistant messages |
 | F7 | … (post-sign-in) | IntegrateView (API snippets + plugin downloads — stub) | IdleChatPlaceholder |
 
 The URL is the **source of truth** for which surface mounts. The
@@ -96,20 +96,13 @@ seed.
 
 ## Chat-column narrative model
 
-`ChatColumn` is the single component for the chat side.
-Its dispatch (in order):
-
-1. Gate active (`open` / `committed`) → `<GateChatPanel />`.
-2. F2 + scenario picked → `<F2ConversationFlow />` (the wireframe
-   conversation: header + sample switcher + user bubble + bot lead
-   + streaming italic notes + Done + Pick-a-view pills).
-3. F1 → `<IdleChatPlaceholder />` ("Ask anything about the sample…").
-4. No scenario → `<ByoChatPlaceholder />` (defensive; in practice
-   the gate path covers this).
-5. Everything else (F3+) → `<IdleChatPlaceholder />`.
-
-Future F3+ specific conversations land in branches 5 — extend the
-dispatch, don't rewrite the whole component.
+`ChatColumn` is the single component for the chat side. It renders the
+shared `ConversationFlow`, optionally with the onboarding `ChatExperience`
+when an active sample is in the F2-F5/F4a journey. Blocking viewer overlays
+such as sign-in and Calendly do not replace the chat column; they keep the
+same conversation mounted and stream any guidance as ordinary assistant
+turns. The only non-chat states are the F1 idle placeholder and the defensive
+BYO placeholder before a sign-in overlay is active.
 
 ## Gate (F6)
 
@@ -120,11 +113,15 @@ Three doors (`commitGate(method)`):
 - `sso` — placeholder for OAuth.
 - `engineer-call` — Calendly book-a-call.
 
-Master-viewer-session Phase 2 changes: the gate is now a `sign-up`
-ViewerOverlay z-stacked on the current canvas step, not a canvas
-swap. The chat-side `GateChatPanel` still drives off the legacy
-`gate.status` slot during the transitional bridge — Phase 6 (deferred)
-reshapes it into a widget message and retires the slot.
+The gate is a `sign-up` ViewerOverlay z-stacked on the current canvas step,
+not a canvas or chat swap. `gate.status` remains lifecycle/analytics state
+and still powers commit/dismiss side effects, but it does not choose a
+separate chat surface. `OnboardingShell` wraps `SignUpWidget` in
+`ViewerWidgetFrame`, so the host owns Close sign-in / Back to samples chrome
+while the widget owns the identity form and Book a call content action.
+Calendly stacks above it when `?bookCall=1` is present and is also wrapped by
+the same frame; `BookCallView` reports embed lifecycle so the frame places the
+loading/status band above the blank embed area.
 
 Gate state machine in `OnboardingSessionContext`:
 
@@ -134,9 +131,9 @@ idle  →  open  →  committed
               dismissed  →  open  (re-trigger replays composing animation)
 ```
 
-GateChatPanel mounts an N-second typing indicator before the
-GateView card fades in (`COMPOSING_DELAY_MS` per trigger). Don't
-remove the delay — it's the "agent typing back" beat.
+Sign-in entry may append staggered assistant messages into
+`ConversationFlow`; those messages are normal chat turns, not a parallel gate
+panel.
 
 On commit, the `claimAnonymousChat(serializeChatPayload(...))`
 utility (in `app/src/api/`) is the hook the auth flow should call

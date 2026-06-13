@@ -40,10 +40,10 @@ Roles today: `anonymous` (uncommitted / pre-sign-up) · `member` (signed in).
 | SmartReportBuilder | ✅ | ✅ | **ScopedViewerWidget** (Report builder, f4a/S3a). Available to both roles; Save is sign-in-gated — anonymous Save opens the gate (`commitGate`), member Save persists (Phase 6); export is locked-for-anonymous (`widgetRoleCanEdit`), a DISABLED `🔒` affordance not a hidden control. Reuses the F3a schema-editor chrome; drives the `report`-kind `reportOverlay` sibling of the Extract schema overlay. (2026-05-29-smart-report-screen Phase 4) |
 | Integrate | ✅ | ✅ | **ScopedViewerWidget** (connectors / agent plugins + API snippets, f7). Available to both roles. The only locked affordance is the connector DOWNLOAD button, which is disabled-future (UI-02 agent-integration download pipeline) — an honest `aria-disabled` + title, not role-driven, not a hidden control, not faked. The SURFACE (the cards) is the real content. The same widget the authenticated experience uses (`feedback_no_onboarding_duplicates`). (2026-05-30-onboarding-shell-shared-view Phase 3b) |
 | PinToReportAction | ✅ | ✅ | chat-widget (`📌 pin to report`) on every assistant turn. Available to both roles; the only lock is DISABLED-mid-stream (queues the click) — not role-driven. Pins the turn's literal text as a report section via `pinToReport` (existing-or-new UX, no auto-create). (2026-05-29-smart-report-screen Phase 5) |
-| SignUpWidget | ✅ | ❌ | **anonymous only** (the sign-up *form*) — a member never sees the form. NUANCE: the widget also renders a committed-state *celebration* (`signup-celebration`) at the anon→member boundary (`gate.status === "committed"`), driven by gate-state not role; that transient is not "a member browsing the form". `commitGate` is gate-state, not role. |
-| GateChatPanel | ✅ | ❌ | **gate context** (anonymous) — the chat-column composite that dispatches gate-status → idle placeholder / typing indicator / GateChatRail; re-sourced from gate-state, not role. Moved into the chat-widget slot by 2026-05-31-dependency-direction-guard (was `views/Onboarding/`). |
-| GateChatRail | ✅ | ❌ | **gate context** (anonymous) — gate variant re-sourced from gate-state, not role |
-| GateValueProp | ✅ | ❌ | **gate context** (anonymous) — shown beside the gate |
+| SignUpWidget | ✅ | ❌ | **anonymous only** — live sign-in viewer overlay. Owns preamble, close/back, book-a-call, magic-link/SSO, form submit, and committed-state Continue. `commitGate` is gate-state, not role. |
+| GateChatPanel | ✅ | ❌ | Legacy gate chat composite retained in the tree, but not mounted by the live sign-in path. Live sign-in keeps `ChatColumn` on `ConversationFlow`. |
+| GateChatRail | ✅ | ❌ | Legacy gate rail retained for historical tests/tools; live sign-in controls moved to `SignUpWidget`. |
+| GateValueProp | ✅ | ❌ | Legacy gate-side pitch; live sign-in uses `SignUpWidget` as the viewer overlay. |
 
 ## 1b. Scope stance (required `scope: WidgetScope` per widget)
 
@@ -63,9 +63,9 @@ ScopedViewerWidgets take a real `ContentScope`; everything else declares `{ type
 | PinToReportAction | `{ type: "none" }` | operates on the draft report template + the source turn, not a doc set |
 | BookingStatusCard | `{ type: "none" }` | — |
 | BookCallView | `{ type: "none" }` | — |
-| GateValueProp | `{ type: "none" }` | — |
 | SignUpWidget | `{ type: "none" }` | — |
-| GateChatPanel | `{ type: "none" }` | gate is session-scoped, not document-scoped; forwards `{ type: "none" }` to GateChatRail |
+| GateValueProp | `{ type: "none" }` | legacy |
+| GateChatPanel | `{ type: "none" }` | legacy gate is session-scoped, not document-scoped |
 | GateChatRail | `{ type: "none" }` | — |
 
 > The raw single-id case is `{ type: "documents", documentIds: [id] }`. No widget takes a bare
@@ -82,10 +82,10 @@ added here and asserted by the owning widget's test.
 
 | Tool | widget | category | available to | reason |
 |---|---|---|---|---|
-| book_call | BookingStatusCard | mutate | all roles | anonymous may book a call |
-| commit_gate | GateChatRail | mutate | all roles | anonymous commits the gate = signs up |
-| dismiss_gate | GateChatRail | mutate | all roles | anonymous may dismiss |
-| save_to_account | GateChatRail | mutate | all roles | the chat-driven successor to the retired F5 Interact Save button — opens the sign-in gate (`openGate` `trigger:"save"`) so the user can save their analysis; surfaces as a confirmed `tool:save_to_account` chip, never auto-opened. (2026-05-31-shared-canvas-affordance-restoration) |
+| book_call | SuggestedActionChips -> BookCallView overlay | mutate | all roles | anonymous may book a call; the chip opens Calendly in the active viewer while chat stays mounted |
+| commit_gate | gate session / SignUpWidget | mutate | all roles | anonymous commits the gate = signs up |
+| dismiss_gate | gate session / SignUpWidget | mutate | all roles | anonymous may dismiss |
+| save_to_account | SuggestedActionChips -> SignUpWidget overlay | mutate | all roles | the chat-driven successor to the retired F5 Interact Save button — opens the sign-in viewer overlay (`openGate` `trigger:"save"`) so the user can save their analysis; surfaces as a confirmed `tool:save_to_account` chip, never auto-opened. |
 | propose_schema_field | ProposeSchemaFieldCard | mutate | all roles | core onboarding interaction for the anonymous user |
 | accept_proposal | ProposeSchemaFieldCard | mutate | all roles | "" |
 | reject_proposal | ProposeSchemaFieldCard | mutate | all roles | "" |
@@ -124,6 +124,6 @@ moving that input to its proper source — NOT renaming `mode`→`role` (which w
 - **ThinkingStream** — `persist = mode==="onboarding"` is replay/remount logic → drive from the widget's
   own replay concern (or the onboarding experience), not role.
 - **BookCallView** — `mode` toggles surrounding chrome (close button, breadcrumbs) → drive from layout/flow.
-- **SignUpWidget / GateChatRail / GateValueProp** — gate variant + `commitGate` side-effect → drive from
-  gate-state (already available via `useOnboardingSession`), not role. Availability (anonymous-only) is
-  enforced at the mount site.
+- **SignUpWidget** — gate variant + `commitGate` side-effect → drive from gate-state
+  (already available via `useOnboardingSession`), not role. Availability (anonymous-only)
+  is enforced at the mount site.

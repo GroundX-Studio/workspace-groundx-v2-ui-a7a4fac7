@@ -86,5 +86,10 @@ export const descriptor = defineScopedViewerWidget({
   id: "pdf-viewer",
   kind: "doc-viewer",
   slot: "viewer-widgets",
+  viewerFrame: {
+    chromePolicy: "edge-to-edge",
+    contentMode: "edge-to-edge",
+    title: "Document viewer",
+  },
   tools,
 });

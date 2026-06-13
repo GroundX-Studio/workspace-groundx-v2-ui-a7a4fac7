@@ -52,6 +52,21 @@ describe("scopedViewerWidgetRegistry (production singleton)", () => {
     }
   });
 
+  it("declares viewer-frame metadata for every built CanvasKind", () => {
+    for (const kind of canvasKindSchema.options as readonly CanvasKind[]) {
+      const mount = scopedViewerWidgetRegistry
+        .all()
+        .find((m) => m.descriptor.kind === kind);
+      expect(mount, `missing mount for ${kind}`).toBeDefined();
+      expect(mount!.descriptor.viewerFrame, `${kind} needs viewer frame metadata`).toEqual(
+        expect.objectContaining({
+          chromePolicy: expect.stringMatching(/^(framed|edge-to-edge|hostless-exception)$/),
+          contentMode: expect.stringMatching(/^(centered-panel|padded-scroll|edge-to-edge|embed)$/),
+        }),
+      );
+    }
+  });
+
   it("maps each declared kind to the expected widget id (via the catalog)", () => {
     const idForKind = (kind: CanvasKind) =>
       scopedViewerWidgetRegistry.all().find((m) => m.descriptor.kind === kind)!.descriptor.id;

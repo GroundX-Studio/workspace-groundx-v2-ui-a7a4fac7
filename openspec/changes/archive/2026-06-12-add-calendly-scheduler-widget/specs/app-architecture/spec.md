@@ -28,16 +28,17 @@ configured URL instead of mounting the inline iframe.
 
 `BookCallView` SHALL own trusted `calendly.event_scheduled` postMessage
 handling from `https://calendly.com` or a Calendly subdomain and expose the
-scheduled event to its host through a callback. The chat-side
-`BookingStatusCard` SHALL remain a status/back affordance and SHALL NOT own
-Calendly iframe events.
+scheduled event to its host through a callback. `BookingStatusCard` is a legacy
+contract-history widget only: the live `?bookCall=1` path SHALL NOT mount it,
+and it SHALL NOT own Calendly iframe events.
 
 #### Scenario: Book-call intent mounts the scheduler in the viewer
 
 - **GIVEN** the app dispatches `{ kind: "openBookCall" }`
 - **WHEN** the shell observes `?bookCall=1`
 - **THEN** it mounts `BookCallView` with `scope: { type: "none" }`
-- **AND** the chat column mounts `BookingStatusCard`.
+- **AND** the chat column keeps the normal conversation timeline mounted
+- **AND** any booking narration appears as ordinary assistant chat messages.
 
 #### Scenario: Nav CTA uses the same viewer path
 
@@ -59,7 +60,8 @@ Calendly iframe events.
 - **GIVEN** the user lands on `/onboarding?bookCall=1`
 - **WHEN** the shell renders
 - **THEN** the F1 picker overlay does not mask the booking surface
-- **AND** `BookCallView` and `BookingStatusCard` are visible.
+- **AND** `BookCallView` is visible as a viewer overlay
+- **AND** the normal chat timeline remains mounted.
 
 #### Scenario: Phone width uses the external Calendly action
 

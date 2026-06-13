@@ -33,6 +33,8 @@ export interface CreateChatSessionInput {
   activeEntityKey?: string | null;
 }
 
+export type ChatSessionEnsureMetadata = Omit<CreateChatSessionInput, "id">;
+
 // A chat-reply citation IS the shared `Citation` (`@groundx/shared`) — the
 // middleware end of this same wire already uses it (chatRouter `Citation`).
 // `bbox` (NormalizedBbox) is threaded end-to-end for CiteChip's viewer jump;
@@ -428,6 +430,7 @@ interface ListChatMessagesResponse {
  */
 export async function listChatMessages(
   chatSessionId: string,
+  sessionMeta?: ChatSessionEnsureMetadata,
   chatSessionEnsure: ChatSessionEnsureClient = legacyChatSessionEnsure,
 ): Promise<PersistedChatMessage[]> {
   // Self-trigger ensure-create + wait so this GET doesn't race past
@@ -435,9 +438,10 @@ export async function listChatMessages(
   // helpers — see ensureServerChatSession docstring.
   await chatSessionEnsure.ensureServerChatSession({
     id: chatSessionId,
-    onboardingSessionId: chatSessionId,
-    title: "Onboarding",
-    isOnboarding: true,
+    onboardingSessionId: sessionMeta?.onboardingSessionId ?? chatSessionId,
+    title: sessionMeta?.title ?? "Onboarding",
+    isOnboarding: sessionMeta?.isOnboarding ?? true,
+    activeEntityKey: sessionMeta?.activeEntityKey ?? null,
   });
   const res = await csrfFetch(`/api/chat-sessions/${encodeURIComponent(chatSessionId)}/messages`, {
     method: "GET",

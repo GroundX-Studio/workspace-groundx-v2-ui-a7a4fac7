@@ -51,5 +51,12 @@ export const descriptor = defineScopedViewerWidget({
   id: "integrate",
   kind: "integrate",
   slot: "viewer-widgets",
+  viewerFrame: {
+    chromePolicy: "framed",
+    contentMode: "padded-scroll",
+    eyebrow: "Integrate",
+    title: "Integrate",
+    subtitle: "Connect this GroundX scope to agents, apps, and API workflows.",
+  },
   tools,
 });

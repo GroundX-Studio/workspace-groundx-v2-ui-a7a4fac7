@@ -26,7 +26,7 @@ an editable affordance by role (widget-access-matrix §2 in
 
 | Surface | Onboarding-specific? | Notes |
 |---|---|---|
-| Sign-up flow | ✅ Yes | `GateView`, `GateChatPanel`, the auth forms |
+| Sign-up flow | ✅ Yes | `SignUpWidget` viewer overlay; legacy `GateChatPanel`/`GateChatRail` are not mounted by the live route |
 | Onboarding nav | ✅ Yes | `OnboardingNav.tsx` — the left rail with the locked-state CTAs |
 | F1 Ingest picker | ✅ Yes | `IngestView.tsx` — the scenario picker grid |
 | **PDF viewer (F2)** | ❌ No | production widget, real xray data |
@@ -75,8 +75,9 @@ de-duplication — it is what makes the app conform to **"one main view that loa
   overlay composes `makeOnboardingExperience(...)`; the authenticated nav rail's Workspaces/Projects
   entries (today disabled stubs in `OnboardingNav`) will compose Workspace/Project/document(+filter)
   experiences. No entry-context resolver.
-- **The signup gate is a widget** (`SignUpWidget`/`GateChatRail`/`GateValueProp`, anonymous-only), shown
-  by the onboarding surface — NOT a chat experience.
+- **The signup gate is a viewer overlay** (`SignUpWidget`, anonymous-only),
+  shown by the onboarding surface while `ConversationFlow` remains mounted —
+  NOT a separate chat experience.
 
 Conformance owners: chat → unified-conversation-flow; canvas widgets → core-data-model-hardening
 (`ScopedViewerWidget` base) + this fold; entry experiences (Workspace/Project/document) → follow-on.

@@ -74,6 +74,8 @@ export interface ScopedViewerWidgetComponentProps {
   highlightBbox?: NormalizedBbox | null;
   /** doc-viewer citation highlight — attribution tier (drives overlay precision). */
   highlightTier?: CitationTier;
+  /** report-builder hand-off — section row to open when the builder mounts. */
+  selectedSectionId?: string;
 }
 
 /**
@@ -129,7 +131,7 @@ function assertOneMountPerDeclaredKind(): void {
 assertOneMountPerDeclaredKind();
 
 /** The catalog mount for a declared `CanvasKind` (totality-guaranteed). */
-function mountForKind(kind: CanvasKind): ScopedViewerWidgetMount {
+export function mountForKind(kind: CanvasKind): ScopedViewerWidgetMount {
   const match = scopedViewerWidgetRegistry.all().find((m) => m.descriptor.kind === kind);
   // Unreachable given the construction-time assertion above; the throw keeps
   // the return type non-optional for the `<ScopedCanvas>` switch.

@@ -1,5 +1,5 @@
 /**
- * BookingStatusCard — LLM tool declarations.
+ * Book-call suggested-action tool declaration.
  *
  * widget-llm-integration follow-up B.3 (2026-05-28). One mutate-
  * category tool:
@@ -7,7 +7,8 @@
  *   • `book_call()` — open the Calendly booking surface. The
  *     orchestrator handler sets `?bookCall=1` on the URL; the
  *     OnboardingShell already watches that param to mount
- *     `BookCallView` in the viewer + `BookingStatusCard` in the chat.
+ *     `BookCallView` as a viewer overlay while the normal chat timeline
+ *     stays mounted.
  *
  * Mutate-category so the LLM surfaces a confirmable chip; the user
  * clicks to actually open the scheduler in the viewer (avoids surprise
@@ -28,10 +29,9 @@ const bookCall: WidgetTool = {
     "clicking the chip; the scheduler is not opened automatically.",
   category: "mutate",
   input: z.object({}),
-  // §5 reachability — confirming this tool's chip opens the BookingStatusCard
-  // (mounted by the OnboardingShell + CanvasOrchestrator when the book-call
-  // surface activates).
-  rendersWidget: "chat-widgets/BookingStatusCard",
+  // §5 reachability — confirming this tool's result surfaces as a
+  // suggested-action chip; clicking the chip opens the viewer overlay.
+  rendersWidget: "chat-widgets/SuggestedActionChips",
 };
 
 export const tools: WidgetTool[] = [bookCall];

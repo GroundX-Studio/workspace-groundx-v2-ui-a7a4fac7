@@ -206,22 +206,6 @@ re-render of that section only.
 - **THEN** that section's body is `—` with a "no support in docs" low-confidence warning
 - **AND** other sections render normally.
 
-### Requirement: The Report chapter SHALL ship on the Utility single-doc case via a fixture
-
-The render + builder surfaces SHALL be drivable by a MOCK_MODE **Utility** report fixture — a
-single-document IC-brief-style template (e.g. billing summary `PARAGRAPH`, charge breakdown `TABLE`,
-anomalies `BULLETS`, recommendation `PARAGRAPH`) scoped to the Utility bill — so the chapter ships on
-the current real use case without the live multi-doc seed (WF-10). The same surfaces SHALL serve a
-multi-document scope (Solar) once WF-10 lands, with no surface rework.
-
-#### Scenario: Utility report demos with no live multi-doc seed
-
-- **GIVEN** MOCK_MODE and the Utility scenario
-- **WHEN** the user reaches the Report chapter
-- **THEN** the render surface shows the single-doc IC-brief sections with cited bodies
-- **AND** the builder shows those sections as editable rows
-- **AND** no live multi-document seed is required.
-
 ### Requirement: SmartReport SHALL be a ScopedViewerWidget satisfying the widget contract
 
 The render, builder, and pin widgets SHALL be production widgets (no onboarding-specific duplicate)
@@ -285,85 +269,81 @@ the em-dash low-confidence degrade) are unchanged.
 
 ### Requirement: Report rendering SHALL treat a missing template as the legitimate new-customer starting state
 
-The render service SHALL treat a missing report template as the legitimate new-customer starting
-state — a brand-new authenticated customer legitimately has ZERO report templates (`Pin→template =
-NO auto`; the existing-or-new UX of the Template + Scope + Results model). The render service SHALL
-load the template by the render request's `template_id` via the shared `getTemplate` repo API; when
-no template exists for that id, `renderReport` SHALL return the graceful **no-template state** (no
-sections, complete, preview-only) — it SHALL NOT return an error and SHALL NOT fabricate or seed a
-render. The no-template state SHALL be DISTINGUISHABLE on the wire from an empty-doc-set render via a
-discriminator (e.g. `reason: "no_template"` vs `"empty_scope"`) so the surface shows the right copy —
-"create or pick a report template" vs "no documents match this scope" — rather than one ambiguous
-empty state (make-illegal-states-unrepresentable; two genuinely different user situations are not
-conflated). No sample report template SHALL be persisted/seeded by this
-change; the ABSENCE of a sample template SHALL never break the render service. The live render
-machinery (per-section search → ground → verify → cite) SHALL run ONLY when a real user-created
-template exists; the section questions then come from that persisted Template, never from the client
-request (one source of truth).
+The render service SHALL treat a missing report template as the legitimate
+new-customer starting state (`Pin→template = NO auto`). It SHALL load the
+template by the request's `template_id` via the shared `getTemplate` repo API;
+when none exists, `renderReport` SHALL return the graceful **no-template state**
+(no sections, `status:"complete"`, `preview_only:true`) — never an error, never
+a fabricated render — distinguishable on the wire from an empty-doc-set render
+via a discriminator (`reason:"no_template"` vs `"empty_scope"`). The live render
+machinery runs only when a real persisted template exists; section questions
+come from that Template, never the client request.
+
+The CLIENT SHALL mirror this: `SmartReportRender` SHALL resolve the template id
+from REAL report state (`reportOverlay.templateId`), NEVER from a client-side
+scope→fixture map; a `null` id SHALL show the empty state with no network call.
+Report navigation SHALL be template-aware: a present template id routes to the
+render surface, an absent one to the empty builder (existing-or-new UX). NO
+client-side fake report fixture SHALL exist (a guard test enforces this).
 
 #### Scenario: A new customer with no template renders the no-template state, not an error
 
-- **GIVEN** MOCK_MODE is OFF and no report template exists for the render request's `template_id` (the new-customer norm)
+- **GIVEN** no report template exists for the render request's `template_id`
 - **WHEN** a report is rendered
-- **THEN** the render service returns the graceful no-template state (empty render shape: no sections, `status: "complete"`, `preview_only: true`), never an error and never a fabricated/fixture render
-- **AND** no search or LLM call is made, and no sample template is seeded anywhere.
+- **THEN** the render service returns the graceful no-template state (no sections, `status:"complete"`, `preview_only:true`), never an error and never a fabricated render
+- **AND** no search or LLM call is made.
 
-#### Scenario: When a real template exists, its sections drive the live path
+#### Scenario: The client never invents a fixture template id
 
-- **GIVEN** MOCK_MODE is OFF and a real user-created `report`-kind Template exists for the request's `template_id`
-- **WHEN** the render service resolves the template by id
-- **THEN** `getTemplate` returns that Template and the live path fans each section's `question` from it
-- **AND** the section questions come from the persisted Template, never from the client request.
+- **GIVEN** the report surface mounts with no `reportOverlay.templateId`
+- **WHEN** it resolves what to render
+- **THEN** it shows the empty state with no `renderReport` network call
+- **AND** there is no client-side scope→fixture template routing in the codebase (enforced by a guard test).
+
+#### Scenario: Report navigation is template-aware
+
+- **GIVEN** the user activates the Report step
+- **WHEN** `reportOverlay.templateId` is present
+- **THEN** the render surface (f4) is shown
+- **AND** when it is absent, the empty builder (f4a) is shown.
 
 ### Requirement: Report rendering SHALL have a live multi-doc path, not only a fixture
 
-Report rendering SHALL have a **live** render path that produces real cited sections — not only the
-MOCK_MODE fixture. Outside MOCK_MODE, when a real user-created Template exists for the request's
-`template_id` (when none exists, the no-template state applies — see the no-template requirement
-above), for each template section (in template order, honoring any `section_ids` subset), the render
-service SHALL search the section's `question` (read from that server-persisted Template) over the
-resolved `ContentScope` doc set, run grounded LLM generation
-over the returned snippets, verify each citation against its source chunk via the WF-06b path
-(verify → tier → confidence), and emit a cited section. The live path SHALL reuse the established
-RAG search → grounded-generation → WF-06b-verification orchestration (the genuine second caller of
-that seam alongside `runRagPipeline`) rather than re-implement search, generation, or verification.
-The live path SHALL return the **same** `RenderReportResponse` shape the fixture path returns —
-ordered sections each carrying `name`, `render_as`, `body`, `cites`, optional `confidence`, and
-optional `warnings` — so the render surface and `CiteChip` are unchanged regardless of which path
-produced the report. The render service SHALL take its scope from the render REQUEST (Report's scope
-is a render-time input on the request per Template + Scope + Results), NOT from the chat session's
-active entity. Outside MOCK_MODE the render service SHALL require its live dependencies (GroundX
-client + API key + LLM client + model id) and SHALL throw a clear error when they are absent,
-mirroring the Extract and RAG required-deps guards. This requirement does NOT remove MOCK_MODE —
-after it is satisfied the render service works **both** with the fixture and live.
+Report rendering SHALL produce real cited sections via a **live** render path —
+there is NO fixture path (the client-side report fixture is removed) and no
+`MOCK_MODE`. When a real persisted Template exists for the request's
+`template_id` (else the no-template state applies), for each template section
+(in template order, honoring any `section_ids` subset) the render service SHALL
+search the section's `question` (read from that server-persisted Template) over
+the resolved `ContentScope` doc set, run grounded LLM generation, verify each
+citation via the WF-06b path (verify → tier → confidence), and emit a cited
+section, reusing the established RAG search → grounded-generation →
+WF-06b-verification orchestration rather than re-implementing it. The response
+SHALL be the `RenderReportResponse` shape (ordered sections each carrying
+`name`, `render_as`, `body`, `cites`, optional `confidence`, optional
+`warnings`). Scope comes from the render REQUEST, NOT the chat session's active
+entity. The render service SHALL require its live dependencies (GroundX client +
+API key + LLM client + model id) and SHALL throw a clear error when absent.
 
-#### Scenario: Live render returns cited sections without MOCK_MODE
+#### Scenario: Live render returns cited sections
 
-- **GIVEN** MOCK_MODE is OFF and the render service has a GroundX client, API key, LLM client, model id, and the resolved server-persisted Template
-- **WHEN** a report is rendered over a non-empty sample `ContentScope`
-- **THEN** each section's `question` (from the persisted Template) is searched over the resolved doc set, an LLM generates a grounded body, and each citation is verified (tier + confidence)
-- **AND** the response is the same `RenderReportResponse` shape as the fixture path (ordered sections with `name`, `render_as`, `body`, `cites`, `confidence?`, `warnings?`).
+- **GIVEN** the render service has a GroundX client, API key, LLM client, model id, and a resolved server-persisted Template
+- **WHEN** a report is rendered over a non-empty `ContentScope`
+- **THEN** each section's `question` is searched, an LLM generates a grounded body, and each citation is verified (tier + confidence)
+- **AND** the response is the `RenderReportResponse` shape (ordered sections with `name`, `render_as`, `body`, `cites`, `confidence?`, `warnings?`).
 
-#### Scenario: Live and fixture share one section degradation path
+#### Scenario: A section with no verified support degrades visibly
 
-- **GIVEN** the live render path and a section whose generated result has zero verified citations
-- **WHEN** that section renders
-- **THEN** it degrades to `—` with a `⚠ no support in docs` low-confidence flag, the same as the fixture path's no-source section
-- **AND** an unresolved `{variable}` keeps its placeholder and adds a "bind it" warning, the same as the fixture path.
+- **GIVEN** a section whose generated result has zero verified citations
+- **WHEN** it renders
+- **THEN** it degrades to `—` with a `⚠ no support in docs` flag
+- **AND** an unresolved `{variable}` keeps its placeholder and adds a "bind it" warning.
 
-#### Scenario: Live render still gates BYO and idles on empty scope
+#### Scenario: BYO gates and empty scope idles
 
-- **GIVEN** MOCK_MODE is OFF
 - **WHEN** the scope is a BYO scope
-- **THEN** the render returns the gate envelope (`gated: true`, `gate: "byo"`) before any search or LLM call is made
-- **AND** **WHEN** the scope resolves to an empty doc set
-- **THEN** the render returns the idle empty result (`sections: []`, `status: "complete"`, `preview_only: true`) without an LLM call.
-
-#### Scenario: Missing live deps throw a clear error
-
-- **GIVEN** MOCK_MODE is OFF and a sample scope that resolves to documents
-- **WHEN** the render service is invoked without a GroundX client, API key, or model id
-- **THEN** it throws a clear "live render requires …" error (the Extract / RAG required-deps guard), not a "not yet wired" placeholder.
+- **THEN** the render returns the gate envelope (`gated:true`, `gate:"byo"`) before any search/LLM call
+- **AND** when the scope resolves to an empty doc set, it returns the idle empty result (`sections:[]`, `status:"complete"`, `preview_only:true`) without an LLM call.
 
 ### Requirement: Smart Report product scopes SHALL use the canonical projectId filter
 
@@ -399,4 +379,45 @@ documented so it cannot enter product render paths.
   `filter.project`
 - **WHEN** the focused Smart Report scope guard runs
 - **THEN** the guard fails and names the stale file.
+
+### Requirement: Pin-to-report SHALL appear only on genuine document-answer turns, as a compact icon affordance
+
+The "pin to report" affordance SHALL be opt-IN: it SHALL render only on chat
+turns that are genuine document answers (the turn minted from a chat-router
+reply, and its persisted hydration), NEVER on agent narration, scripted
+intro/choreography beats, booking-status turns, gate preamble, or error turns.
+A turn SHALL carry a positive `pinnable` flag set only at the answer mint sites;
+the render gate SHALL be that flag, not an opt-out default.
+
+The affordance SHALL be a COMPACT per-answer actions control in the answer's
+existing affordance row (alongside the citation chips), NOT a separate
+full-width pill under every message. It SHALL be driven by an ACTION LIST so
+future per-answer actions are added by appending an item, not by restructuring:
+with a single action it SHALL render as one inline icon button; with two or more
+it SHALL render as a kebab (⋯) overflow menu — the same component keyed off the
+list length, with no call-site change. Pin-to-report is the sole action today.
+Every action SHALL be a real button with an accessible label, keyboard-focusable
+and operable on touch (NOT a hover-only reveal), styled with design tokens only.
+Activating pin SHALL use the existing pin mutation and show a transient
+confirmation on the control, not persistent body text.
+
+#### Scenario: A document answer shows a compact pin icon; narration shows nothing
+
+- **GIVEN** a chat with a real document-answer turn and an agent-narration turn ("I'm opening the engineer booking calendar")
+- **WHEN** the turns render
+- **THEN** the answer turn shows a compact pin-to-report icon button in its affordance row (not a full-width pill)
+- **AND** the narration turn shows no pin affordance at all.
+
+#### Scenario: The pin control is keyboard- and touch-operable
+
+- **GIVEN** the pin icon on an answer turn
+- **WHEN** a keyboard or touch user reaches it
+- **THEN** it is focusable and activatable (it is a real button with an aria-label), not a hover-only control.
+
+#### Scenario: Reloaded answers stay pinnable, reloaded narration does not
+
+- **GIVEN** a persisted assistant answer turn hydrated from the DB
+- **WHEN** the conversation rehydrates
+- **THEN** the hydrated answer shows the pin icon
+- **AND** in-memory agent-narration turns remain non-pinnable.
 

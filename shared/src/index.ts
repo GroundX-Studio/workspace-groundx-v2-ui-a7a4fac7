@@ -1217,3 +1217,17 @@ export const documentXrayResponseSchema = z.object({
   chunks: z.array(xrayChunkSchema),
 });
 export type DocumentXrayResponse = z.infer<typeof documentXrayResponseSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
+// report-default-template — the seeded default report template id.
+//
+// SINGLE SOURCE OF TRUTH for both the MIDDLEWARE seed (which upserts the one
+// `kind:"report"` row under this id) and the APP onboarding bootstrap (which
+// sets `reportOverlay.templateId` to it for the utility scenario so the live
+// render fills the real sample invoice). It lives in `@groundx/shared` — not in
+// middleware alongside `SAMPLE_PROJECT_ID` — because the app cannot import
+// middleware, and both sides must agree on the exact id the render endpoint
+// looks up. (The reserved owner sentinel that marks it public is server-only and
+// lives in the middleware seed.)
+// ──────────────────────────────────────────────────────────────────────
+export const SAMPLE_REPORT_TEMPLATE_ID = "rt-sample-utility-bill";

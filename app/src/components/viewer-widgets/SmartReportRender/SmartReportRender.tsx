@@ -32,10 +32,11 @@
  * SAME fetch on a scope-identity change. The live multi-doc fan-out is Phase 7
  * (BLOCKED on WF-10) — the same endpoint serves it with no surface rework.
  *
- * The template id the first paint renders is resolved from the scope via
- * `reportTemplateIdForScope` (demo routing: the Utility scope → the IC-brief
- * template). When the scope has no template, the surface shows the empty state
- * without a network round-trip.
+ * The template id the first paint renders is resolved from REAL report state
+ * (`reportOverlay.templateId` on the active chat session) — NEVER from a
+ * client-side scope→fixture map. When no template id is set (the new-customer
+ * norm, `Pin→template = NO auto`), the surface shows the empty state without a
+ * network round-trip.
  *
  * Per `widget-role-access`: `role: WidgetRole` is the authorization axis.
  * Export / Save are locked-for-anonymous (`widgetRoleCanEdit`); a sample-doc
@@ -48,7 +49,7 @@
 
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
-import { type FC, useCallback, useState } from "react";
+import { type FC, useCallback, useEffect, useRef, useState } from "react";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 import { widgetRoleCanEdit } from "@groundx/shared";
@@ -73,7 +74,6 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 import { useApi } from "@/contexts/ApiContext";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
-import { reportTemplateIdForScope } from "@/widgets/reportFixtures";
 import type { RenderedReport, RenderedReportSection } from "@/types/report";
 
 export interface SmartReportRenderProps {
@@ -150,6 +150,11 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
   const activeSession =
     chatState.activeSessionId != null ? chatState.sessions.get(chatState.activeSessionId) : undefined;
   const draftSectionCount = activeSession?.reportOverlay.addedFields.length ?? 0;
+  // The template id to render is the active session's REAL report state — never
+  // a client-side scope→fixture map. `null` (the new-customer norm) → the empty
+  // state with no network round-trip. (Onboarding sets this for the utility
+  // scenario in the `report-default-template` change; here it is simply absent.)
+  const overlayTemplateId = activeSession?.reportOverlay.templateId ?? null;
 
   // ── The one fetch path ──────────────────────────────────────────────
   // Initial paint AND ↻ re-render both call this — the surface has a single
@@ -160,7 +165,7 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
   const runRender = useCallback(
     async (renderScope: ContentScope, phase: "first-paint" | "rerender") => {
       const chatSessionId = chatState.activeSessionId;
-      const templateId = reportTemplateIdForScope(renderScope);
+      const templateId = overlayTemplateId;
       if (phase === "first-paint") {
         // No template for this scope (or no session yet) → empty state, no
         // network round-trip.
@@ -212,7 +217,7 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
         setFirstPaintState("error");
       }
     },
-    [chatState.activeSessionId, rerenderState, report, renderReport],
+    [chatState.activeSessionId, overlayTemplateId, rerenderState, report, renderReport],
   );
 
   // ScopedViewerWidget adaptation: route the FIRST paint — and any re-scope —
@@ -222,6 +227,24 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
   useScopeAdapter(scope, (nextScope) => {
     void runRender(nextScope, "first-paint");
   });
+
+  // The template id is read from report STATE, which can arrive AFTER mount —
+  // a pin sets it, or the onboarding bootstrap (report-default-template) sets it
+  // for the utility scenario. `useScopeAdapter` only drives first paint on mount
+  // + scope-identity change, so without this the surface would stay empty when
+  // the template id lands late. Re-run first paint when `overlayTemplateId`
+  // changes (the ref skips the mount value so the two triggers don't
+  // double-fire). Closes the report-default-template re-trigger concern.
+  const lastTemplateIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (lastTemplateIdRef.current === undefined) {
+      lastTemplateIdRef.current = overlayTemplateId;
+      return;
+    }
+    if (lastTemplateIdRef.current === overlayTemplateId) return;
+    lastTemplateIdRef.current = overlayTemplateId;
+    void runRender(scope, "first-paint");
+  }, [overlayTemplateId, scope, runRender]);
 
   // ↻ re-render — re-runs the template over the current scope and swaps in the
   // endpoint response (round-trip closed). Shares `runRender` with first paint.
@@ -315,8 +338,8 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
                     // The handler routes to the builder (f4a), which reads the
                     // in-memory `reportOverlay` draft; `templateId` is a required
                     // intent field but unused for an unsaved draft, so route by
-                    // the scope's template id when one applies, else a sentinel.
-                    templateId: reportTemplateIdForScope(scope) ?? "report-draft",
+                    // the active report state's template id when set, else a sentinel.
+                    templateId: overlayTemplateId ?? "report-draft",
                   },
                   "user",
                 )

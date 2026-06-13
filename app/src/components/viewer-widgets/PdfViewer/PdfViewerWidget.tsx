@@ -638,7 +638,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
             page-area level (not on the letterboxed image) so the dim overlay
             covers the FULL card. A darker tint reads as "processing"; the
             original thin beam sweeps top↔bottom (CSS `alternate`). */}
-        {activeImage && showScanAnimation && (
+        {showScanAnimation && (
           <>
             {/* Dimming veil — the doc reads as "not yet processed". Navy at
                 ~0.34 is dark enough to be unmistakable while keeping the page

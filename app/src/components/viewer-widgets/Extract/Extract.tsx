@@ -44,7 +44,7 @@ import {
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useApi } from "@/contexts/ApiContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
-import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useDocumentsContext } from "@/contexts/DocumentsContext";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
@@ -205,11 +205,10 @@ const SIDE_BY_SIDE_MIN_PX = 760;
 export const Extract: FC<ExtractProps> = ({ scope, role }) => {
   const api = useApi();
   const { state: appMode } = useAppMode();
-  const {
-    state: session,
-    advanceFrame,
-    openGate,
-  } = useOnboardingSession();
+  const onboardingSession = useOnboardingSessionOptional();
+  const session = onboardingSession?.state;
+  const advanceFrame = onboardingSession?.advanceFrame ?? (() => undefined);
+  const openGate = onboardingSession?.openGate ?? (() => undefined);
   const {
     state: chatState,
     pinSample,
@@ -276,7 +275,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
     [useSideBySide],
   );
 
-  const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
+  const scenarioId = appMode.scenario ?? session?.scenario ?? "utility";
   const { byId } = useScenarioRegistry();
   const scenario = byId(scenarioId);
 
@@ -354,7 +353,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
     : false;
 
   const isAuthed = appMode.authState === "signed-in";
-  const isDesignSurface = session.currentFrame === "f3a";
+  const isDesignSurface = session?.currentFrame === "f3a";
   const handleBack = useCallback(() => {
     advanceFrame("f3");
   }, [advanceFrame]);
@@ -395,7 +394,8 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
 
   const postCommitConsumedRef = useRef(false);
   useEffect(() => {
-    const gate = session.gate;
+    const gate = session?.gate;
+    if (!gate) return;
     if (gate.status !== "committed") {
       postCommitConsumedRef.current = false;
       return;
@@ -429,7 +429,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
         setSaveStatus("error");
       }
     })();
-  }, [api.template, session.gate, schema, overlay, advanceFrame, pushStep, appendAgentMessage]);
+  }, [api.template, session?.gate, schema, overlay, advanceFrame, pushStep, appendAgentMessage]);
 
   const valuesByFieldId = useMemo(() => {
     if (liveSchema) {
@@ -1536,7 +1536,8 @@ const PinnedSamplesRow: FC<PinnedSamplesRowProps> = ({
 // ── Fields-panel menu (F3a entry point) ─────────────────────────────────
 
 const FieldsPanelMenu: FC = () => {
-  const { advanceFrame } = useOnboardingSession();
+  const onboardingSession = useOnboardingSessionOptional();
+  const advanceFrame = onboardingSession?.advanceFrame ?? (() => undefined);
   const { state: appMode } = useAppMode();
   const isAuthed = appMode.authState === "signed-in";
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);

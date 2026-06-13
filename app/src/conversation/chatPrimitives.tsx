@@ -21,6 +21,7 @@ import { useState, type FC, type FormEvent, type ReactNode } from "react";
 import type { ChatSuggestedAction } from "@/api/chatSessions";
 import type { Citation, WidgetRole } from "@groundx/shared";
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { AnswerActions } from "@/components/conversation/AnswerActions/AnswerActions";
 import { PinToReportAction } from "@/components/chat-widgets/PinToReportAction/PinToReportAction";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
@@ -222,13 +223,25 @@ export function LiveTurnList({
                 scope={{ type: "none" }}
               />
             )}
-            {turn.pinToReport !== false && turn.content.trim().length > 0 && (
-              <PinToReportAction
-                role={role}
-                scope={{ type: "none" }}
-                turnId={turn.id}
-                turnText={turn.content}
-                streaming={sending && idx === liveTurns.length - 1}
+            {turn.pinnable === true && turn.content.trim().length > 0 && (
+              <AnswerActions
+                actions={[
+                  {
+                    id: "pin",
+                    label: "Pin to report",
+                    icon: "📌",
+                    node: (
+                      <PinToReportAction
+                        role={role}
+                        scope={{ type: "none" }}
+                        turnId={turn.id}
+                        turnText={turn.content}
+                        streaming={sending && idx === liveTurns.length - 1}
+                        variant="compact"
+                      />
+                    ),
+                  },
+                ]}
               />
             )}
           </Stack>

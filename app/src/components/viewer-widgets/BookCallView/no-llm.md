@@ -8,7 +8,7 @@ action of its own beyond mounting/unmounting the scheduler based on
 `?bookCall=1` in the URL and reporting Calendly's trusted scheduled event
 to the host.
 
-The `BookingStatusCard`-side `book_call()` tool routes the user here
-(adds `?bookCall=1`), but the viewer surface itself stays opt-out for LLM
+The `book_call()` suggested-action chip routes the user here (adds
+`?bookCall=1`), but the viewer surface itself stays opt-out for LLM
 tools. Letting the LLM "drive" Calendly would require cross-origin
 scripting, which is correctly forbidden.

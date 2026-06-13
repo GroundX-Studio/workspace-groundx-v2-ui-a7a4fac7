@@ -779,29 +779,79 @@ describe("CanvasOrchestratorContext", () => {
       expect(result.current.session.state.currentFrame).toBe("f7");
     });
 
-    it("showIntegrate is a no-op (no throw) without an OnboardingSessionProvider", () => {
-      const plainWrapper2 = ({ children }: { children: React.ReactNode }) => (
-        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
+    it("showExtract / showIntegrate push product viewer steps without an OnboardingSessionProvider", () => {
+      const productWrapper = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </ChatStoreProvider>)
       );
-      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper2 });
-      expect(() => {
-        act(() => {
-          result.current.dispatch({ kind: "showIntegrate", scope: { type: "bucket", bucketId: 1 } });
-        });
-      }).not.toThrow();
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() }),
+        { wrapper: productWrapper },
+      );
+
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showExtract", scope: { type: "bucket", bucketId: 1 }, schemaId: "schema-1" },
+          "agent",
+        );
+      });
+      let session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      expect(session.viewer.history[session.viewer.currentStep.stepIndex]).toEqual({
+        kind: "extract-workbench",
+        scenarioId: "utility",
+      });
+
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "showIntegrate", scope: { type: "bucket", bucketId: 1 } });
+      });
+      session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      expect(session.viewer.history[session.viewer.currentStep.stepIndex]).toEqual({ kind: "integrate" });
     });
 
-    it("showReport / editTemplate are no-ops (no throw) without an OnboardingSessionProvider", () => {
-      const plainWrapper = ({ children }: { children: React.ReactNode }) => (
-        withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
+    it("showReport / editTemplate push render and builder report steps without an OnboardingSessionProvider", () => {
+      const productWrapper = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </ChatStoreProvider>)
       );
-      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
-      expect(() => {
-        act(() => {
-          result.current.dispatch({ kind: "showReport", templateId: "draft", scope: { type: "bucket", bucketId: 1 } });
-          result.current.dispatch({ kind: "editTemplate", templateId: "draft" });
-        });
-      }).not.toThrow();
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() }),
+        { wrapper: productWrapper },
+      );
+
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showReport", templateId: "draft", scope: { type: "bucket", bucketId: 1 } },
+          "agent",
+        );
+      });
+      let session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      expect(session.viewer.history[session.viewer.currentStep.stepIndex]).toEqual({
+        kind: "report",
+        surface: "render",
+      });
+
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "editTemplate", templateId: "draft", selectedSectionId: "anomalies" },
+          "agent",
+        );
+      });
+      session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      expect(session.viewer.history[session.viewer.currentStep.stepIndex]).toEqual({
+        kind: "report",
+        surface: "builder",
+        selectedSectionId: "anomalies",
+      });
     });
   });
 

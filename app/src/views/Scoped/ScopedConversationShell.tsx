@@ -14,7 +14,7 @@
  * `/workspaces` → experience id `workspace`; `/projects` → `project`.
  */
 import Box from "@mui/material/Box";
-import { useEffect, useMemo, type FC } from "react";
+import { useEffect, useMemo, useState, type FC } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { ContentScope } from "@groundx/shared";
@@ -22,23 +22,28 @@ import type { ContentScope } from "@groundx/shared";
 import { isResolvedDocumentId } from "@/api/documentId";
 import { AppShell } from "@/components/layout/AppShell";
 import {
-  OnboardingNav,
-  useOnboardingNavCollapsed,
-  type OnboardingNavItemKey,
-} from "@/components/layout/OnboardingNav/OnboardingNav";
+  AppNav,
+  APP_NAV_WIDTH_COLLAPSED,
+  APP_NAV_WIDTH_FULL,
+  useAppNavCollapsed,
+  type AppNavItemKey,
+} from "@/components/layout/AppNav/AppNav";
 import { ScopedCanvas } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 import {
   FONT_SIZE_CAPTION,
   FONT_WEIGHT_LABEL,
-  ONBOARDING_NAV_WIDTH_COLLAPSED,
-  ONBOARDING_NAV_WIDTH_FULL,
   NAVY,
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
 import { chatExperienceRegistry } from "@/conversation/chatExperienceRegistry";
 import { ConversationFlow } from "@/conversation/ConversationFlow";
-import { selectActiveStep, useChatStore, type ViewerStep } from "@/contexts/ChatStoreContext";
+import {
+  scopeSessionKey,
+  selectActiveStep,
+  useChatStore,
+  type ViewerStep,
+} from "@/contexts/ChatStoreContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useWidgetRole } from "@/lib/widgetRole";
 
@@ -56,7 +61,7 @@ export interface ScopedConversationShellProps {
    */
   projectId?: string;
   /** Which nav entry is active (highlights the rail row). */
-  navActiveKey: OnboardingNavItemKey;
+  navActiveKey: AppNavItemKey;
   /** Human title for the ensure-created chat session. */
   sessionTitle: string;
 }
@@ -70,7 +75,8 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
   const navigate = useNavigate();
   const { state: registryState } = useScenarioRegistry();
   const { state: chatState, resolveSessionForScope } = useChatStore();
-  const [navCollapsed, setNavCollapsed] = useOnboardingNavCollapsed();
+  const [navCollapsed, setNavCollapsed] = useAppNavCollapsed();
+  const [resolvedSessionId, setResolvedSessionId] = useState<string | null>(null);
 
   const bucketId = registryState.status === "ready" && registryState.bucketId != null
     ? registryState.bucketId
@@ -102,14 +108,16 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
   // Select the per-scope chat session (ensure-created if absent). Re-opening
   // the same entry returns to its own conversation.
   const scopeSig = scope ? JSON.stringify(scope) : null;
+  const expectedScopeKey = useMemo(() => (scope ? scopeSessionKey(scope) : null), [scopeSig, scope]);
   useEffect(() => {
-    if (!scope) return;
-    resolveSessionForScope(scope, { title: sessionTitle });
+    if (!scope) {
+      setResolvedSessionId(null);
+      return;
+    }
+    setResolvedSessionId(resolveSessionForScope(scope, { title: sessionTitle }));
     // scopeSig is the stable scope identity; resolveSessionForScope is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeSig, sessionTitle]);
-
-  const activeSessionId = chatState.activeSessionId;
 
   // Canvas mount wiring — the SAME shared `<ScopedCanvas>` path OnboardingShell
   // uses (DL-5: this shell previously stubbed the canvas, so no viewer widget
@@ -117,7 +125,9 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
   // widget; the scope adapts by step kind.
   const widgetRole = useWidgetRole();
   const activeChatSession =
-    activeSessionId != null ? chatState.sessions.get(activeSessionId) : undefined;
+    resolvedSessionId != null ? chatState.sessions.get(resolvedSessionId) : undefined;
+  const scopedSessionReady =
+    Boolean(scope && expectedScopeKey && resolvedSessionId && activeChatSession?.scopeKey === expectedScopeKey);
   const latestViewerStep = selectActiveStep(activeChatSession);
 
   // A doc-viewer step (e.g. from a CiteChip / "Show source" dispatch) narrows
@@ -132,8 +142,10 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
     }
     return scope;
   }, [canvasStep, scope]);
+  const reportSurface: "render" | "builder" =
+    canvasStep.kind === "report" ? canvasStep.surface ?? "render" : "render";
 
-  const handleNavItemClick = (key: OnboardingNavItemKey) => {
+  const handleNavItemClick = (key: AppNavItemKey) => {
     if (key === "workspaces") return void navigate("/workspaces");
     if (key === "projects") return void navigate("/projects");
     if (key === "docs") return void window.open("https://docs.groundx.ai", "_blank", "noopener,noreferrer");
@@ -156,7 +168,13 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
       aria-label="Chat column"
     >
       {scope ? (
-        <ConversationFlow chatSessionId={activeSessionId} experience={experience} />
+        scopedSessionReady ? (
+          <ConversationFlow chatSessionId={resolvedSessionId} experience={experience} />
+        ) : (
+          <Box data-testid="scoped-session-loading" sx={{ color: NAVY, fontSize: FONT_SIZE_CAPTION, fontWeight: FONT_WEIGHT_LABEL }}>
+            Loading workspace
+          </Box>
+        )
       ) : (
         <Box data-testid="scoped-project-loading" sx={{ color: NAVY, fontSize: FONT_SIZE_CAPTION, fontWeight: FONT_WEIGHT_LABEL }}>
           Loading project
@@ -172,7 +190,7 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
       aria-label="Canvas"
     >
       {canvasScope ? (
-        <ScopedCanvas scope={canvasScope} step={canvasStep} role={widgetRole} reportSurface="render" />
+        <ScopedCanvas scope={canvasScope} step={canvasStep} role={widgetRole} reportSurface={reportSurface} />
       ) : (
         <Box data-testid="scoped-project-canvas-loading" sx={{ color: NAVY, fontSize: FONT_SIZE_CAPTION, fontWeight: FONT_WEIGHT_LABEL }}>
           Loading project
@@ -189,7 +207,7 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
     >
       <AppShell
         nav={
-          <OnboardingNav
+          <AppNav
             accountState="free"
             activeKey={navActiveKey}
             collapsed={navCollapsed}
@@ -201,7 +219,7 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
         chat={chatPane}
         canvas={canvasPane}
         initialChatWidth={420}
-        navWidth={navCollapsed ? ONBOARDING_NAV_WIDTH_COLLAPSED : ONBOARDING_NAV_WIDTH_FULL}
+        navWidth={navCollapsed ? APP_NAV_WIDTH_COLLAPSED : APP_NAV_WIDTH_FULL}
       />
     </Box>
   );

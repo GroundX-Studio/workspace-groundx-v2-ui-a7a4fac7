@@ -1,5 +1,5 @@
 import { act, screen, waitFor } from "@testing-library/react";
-import { useEffect, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChatStore } from "@/contexts/ChatStoreContext";
@@ -54,7 +54,7 @@ function Probe({ onFirstUserSend }: { onFirstUserSend?: () => void }) {
       </button>
       <ul>
         {conv.liveTurns.map((t) => (
-          <li key={t.id} data-testid={`probe-turn-${t.role}`}>
+          <li key={t.id} data-testid={`probe-turn-${t.role}`} data-pinnable={String(t.pinnable === true)}>
             {t.content}
             {(t.citations ?? []).map((c, i) => (
               <span key={i} data-testid="probe-citation">
@@ -283,5 +283,86 @@ describe("useConversation (durable engine)", () => {
         "Confidence climbed to 0.91.",
       );
     });
+    // report-pin-affordance — agent narration is NOT pinnable (opt-in: only
+    // genuine answers set `pinnable`).
+    expect(screen.getByTestId("probe-turn-assistant")).toHaveAttribute("data-pinnable", "false");
+  });
+
+  // report-pin-affordance — `pinnable` round-trip: it's set ONLY at the genuine
+  // answer mint sites (send-reply + DB-hydration of a non-error assistant turn),
+  // never on user / error / narration turns. (The gate reads `pinnable === true`.)
+  it("the sent answer turn is pinnable; the optimistic user turn is not", async () => {
+    sendChatMessage.mockResolvedValueOnce({
+      userMessageId: "u-1",
+      assistantMessageId: "a-1",
+      reply: {
+        mode: "rag",
+        answer: "The bill total is $214.07.",
+        citations: [],
+        suggestedActions: [],
+        intents: [],
+        toolFailures: [],
+        proposedSchemaField: null,
+      },
+      compressionRan: false,
+    });
+    renderWithConversationApi(<Probe />, { initialFrame: "f2", initialScenario: "utility" });
+    await waitFor(() => expect(screen.getByTestId("probe-session-id")).not.toHaveTextContent("none"));
+    await act(async () => {
+      screen.getByTestId("probe-send").click();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("probe-turn-assistant")).toHaveTextContent("$214.07"),
+    );
+    expect(screen.getByTestId("probe-turn-assistant")).toHaveAttribute("data-pinnable", "true");
+    expect(screen.getByTestId("probe-turn-user")).toHaveAttribute("data-pinnable", "false");
+  });
+
+  it("hydration marks a non-error assistant answer pinnable; user + error turns are not", async () => {
+    listChatMessages.mockResolvedValue([
+      { id: "m-u", role: "user", content: "What's the total?", citations: [] },
+      { id: "m-a", role: "assistant", content: "The total is $7,613.20.", citations: [] },
+      { id: "m-err", role: "assistant", content: "Something went wrong.", citations: [], errorCode: "rag_failed" },
+    ]);
+    renderWithConversationApi(<Probe />, { initialFrame: "f2", initialScenario: "utility" });
+    await waitFor(() => expect(screen.getByText("The total is $7,613.20.")).toBeInTheDocument());
+    const turns = screen.getAllByTestId(/probe-turn-/);
+    const answer = turns.find((t) => t.textContent?.includes("$7,613.20"));
+    const user = turns.find((t) => t.textContent?.includes("What's the total"));
+    const err = turns.find((t) => t.textContent?.includes("Something went wrong"));
+    expect(answer).toHaveAttribute("data-pinnable", "true");
+    expect(user).toHaveAttribute("data-pinnable", "false");
+    expect(err).toHaveAttribute("data-pinnable", "false");
+  });
+
+  it("hydrates scoped product sessions with non-onboarding ensure metadata", async () => {
+    function ScopedHydrationProbe() {
+      const { resolveSessionForScope } = useChatStore();
+      const [chatSessionId, setChatSessionId] = useState<string | null>(null);
+      useEffect(() => {
+        setChatSessionId(resolveSessionForScope({ type: "bucket", bucketId: 28454 }, { title: "Workspace" }));
+      }, [resolveSessionForScope]);
+      useConversation(chatSessionId, { title: "Workspace" });
+      return <div data-testid="probe-session-id">{chatSessionId ?? "none"}</div>;
+    }
+
+    renderWithConversationApi(<ScopedHydrationProbe />, {
+      initialFrame: "f1",
+      initialScenario: null,
+      initialAuthState: "signed-in",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("probe-session-id")).not.toHaveTextContent("none");
+      expect(listChatMessages).toHaveBeenCalled();
+    });
+    expect(listChatMessages.mock.calls[0][1]).toMatchObject({
+      title: "Workspace",
+      isOnboarding: false,
+      activeEntityKey: null,
+    });
+    expect(listChatMessages.mock.calls[0][1].onboardingSessionId).toBe(
+      screen.getByTestId("probe-session-id").textContent,
+    );
   });
 });

@@ -61,6 +61,7 @@ import { useEffect, useRef } from "react";
 
 import type { CanvasKind, ContentScope } from "@groundx/shared";
 
+import type { ViewerFrameDescriptor } from "@/components/layout/ViewerWidgetFrame/viewerFrameDescriptor";
 import type { WidgetTool } from "@/tools/types";
 
 /** The two widget slots (mirrors the widget-contract directory split). */
@@ -86,6 +87,8 @@ export interface ScopedViewerWidgetDescriptor {
   readonly kind: CanvasKind;
   /** Which widget slot the component lives under. */
   readonly slot: WidgetSlot;
+  /** Host-owned viewer chrome metadata consumed by ViewerWidgetFrame. */
+  readonly viewerFrame: ViewerFrameDescriptor;
   /**
    * The widget's canvas-dispatch tool SET — every LLM tool this widget
    * owns (e.g. PdfViewer's `open_document` + `jump_to_page`, the report
@@ -104,6 +107,7 @@ export interface ScopedViewerWidgetSpec {
   id: string;
   kind: CanvasKind;
   slot: WidgetSlot;
+  viewerFrame: ViewerFrameDescriptor;
   tools: readonly WidgetTool[];
 }
 
@@ -128,6 +132,7 @@ export function defineScopedViewerWidget(
     id: spec.id,
     kind: spec.kind,
     slot: spec.slot,
+    viewerFrame: Object.freeze({ ...spec.viewerFrame }),
     // Freeze the tools array so the descriptor's set is immutable.
     tools: Object.freeze([...spec.tools]),
   });

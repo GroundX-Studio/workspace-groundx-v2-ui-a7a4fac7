@@ -1,11 +1,13 @@
 # BookingStatusCard
 
-**Slot:** `chat-widgets` · **Status:** shipped (renamed from
-`BookCallChatPanel` in ARCH-03)
+**Slot:** `chat-widgets` · **Status:** legacy, kept for contract/history tests
+(renamed from `BookCallChatPanel` in ARCH-03)
 
-The compact "BOOKING IN PROGRESS" chat surface that pairs with
-`viewer-widgets/BookCallView`. Mounted in the chat column while the
-Calendly inline scheduler is active in the viewer pane.
+The compact "BOOKING IN PROGRESS" chat surface that originally paired
+with `viewer-widgets/BookCallView`. The current booking flow keeps the
+normal `ConversationFlow` mounted and opens `BookCallView` as a viewer
+overlay instead; this component is retained until the legacy chat-card
+contract can be retired deliberately.
 
 ## What it does
 
@@ -58,8 +60,9 @@ no-scope sentinel (matrix §1b). It takes no `documentId`/`bucketId`/
 
 ## Activation
 
-Mounted by the OnboardingShell whenever `?bookCall=1` is present in
-the URL, in tandem with the `BookCallView` viewer widget.
+Not mounted by the current OnboardingShell booking path. `?bookCall=1`
+now mounts `BookCallView` as a viewer overlay while the normal chat
+timeline stays in place.
 
 ## Security note
 
@@ -70,29 +73,29 @@ display-only and never commits gate state from `window.message` directly.
 
 ## Events
 
-- **`book_call` (LLM tool)** — this card is the chat-side surface of the
-  `book_call` tool; activating it opens the Calendly booking surface
-  (`BookCallView` in the viewer / `?bookCall=1`).
+- **`book_call` (LLM tool)** — now surfaces through
+  `SuggestedActionChips`; activating it opens the Calendly booking
+  surface (`BookCallView` overlay / `?bookCall=1`).
 - **Close booking** — clears the booking URL param and returns the user to
   whichever onboarding frame opened the scheduler (local navigation only,
   no tool).
 
-No `on*` callback props: the card drives the flow through the `book_call` tool
-catalog, not lifted callbacks.
+No `on*` callback props: this legacy card is display-only. The current
+flow is driven by the `book_call` tool catalog and viewer overlay host
+callbacks, not by this component.
 
 ## How to mount
 
 ```tsx
 import { BookingStatusCard } from "@/components/chat-widgets/BookingStatusCard/BookingStatusCard";
 
-// OnboardingShell mounts this in the chat column while ?bookCall=1
-// is present in the URL. `role` comes from useWidgetRole() (Phase 3);
-// `scope` is the no-scope sentinel for this chat-side card.
+// Legacy contract-only mount. The current OnboardingShell booking path
+// keeps ConversationFlow in the chat column.
 <BookingStatusCard role={role} scope={{ type: "none" }} />
 ```
 
-The viewer-side `BookCallView` (the Calendly inline scheduler) is mounted in
-parallel by the same shell.
+The viewer-side `BookCallView` (the Calendly inline scheduler) is now
+mounted as an overlay on the active viewer.
 
 ## LLM tools
 
@@ -105,10 +108,10 @@ parallel by the same shell.
 
 Mutate-category routing surfaces this as a confirmable chip on
 `reply.suggestedActions[]`. The orchestrator handler sets
-`?bookCall=1` on the URL; the OnboardingShell already watches that
-param to mount `BookCallView` in the viewer + `BookingStatusCard`
-in the chat. The user clicks the chip to actually open the scheduler —
-no surprise context switches.
+`?bookCall=1` on the URL; the OnboardingShell watches that param to
+mount `BookCallView` as a viewer overlay while the chat timeline stays
+mounted. The user clicks the chip to actually open the scheduler — no
+surprise context switches.
 
 The viewer owns the Calendly `event_scheduled` postMessage and reports the
 trusted event to the shell through `onScheduled`.

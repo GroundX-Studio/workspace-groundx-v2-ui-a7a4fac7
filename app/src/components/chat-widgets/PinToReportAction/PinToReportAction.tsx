@@ -30,6 +30,7 @@ import type { WidgetRole, WidgetScope } from "@groundx/shared";
 import {
   BODY_TEXT,
   BORDER,
+  BORDER_RADIUS_2X,
   BORDER_RADIUS_PILL,
   EYEBROW_ON_LIGHT,
   FONT_SIZE_LABEL,
@@ -51,6 +52,12 @@ export interface PinToReportActionProps {
   turnText: string;
   /** True while the turn is still streaming — dims + `aria-disabled`s the button and queues clicks. */
   streaming?: boolean;
+  /**
+   * report-pin-affordance — `"compact"` renders a single 📌 ICON button (hosted
+   * inside `AnswerActions` on the answer's affordance row) with a TRANSIENT
+   * confirmation; `"pill"` (default) is the legacy full-width labelled pill.
+   */
+  variant?: "pill" | "compact";
 }
 
 export const PinToReportAction: FC<PinToReportActionProps> = ({
@@ -60,11 +67,21 @@ export const PinToReportAction: FC<PinToReportActionProps> = ({
   turnId,
   turnText,
   streaming = false,
+  variant = "pill",
 }) => {
   const { pinToReport } = useChatStore();
   const [resolution, setResolution] = useState<PinResolution | null>(null);
   // A click that arrived mid-stream, waiting for streaming to end.
   const queuedRef = useRef(false);
+  const compact = variant === "compact";
+
+  // Compact confirmation is TRANSIENT (on the control, not persistent body
+  // text): auto-clear a moment after pinning. Pill keeps the persistent message.
+  useEffect(() => {
+    if (!compact || resolution === null) return;
+    const t = setTimeout(() => setResolution(null), 2500);
+    return () => clearTimeout(t);
+  }, [compact, resolution]);
 
   const doPin = useCallback(() => {
     const next = pinToReport({ turnId, text: turnText });
@@ -93,7 +110,7 @@ export const PinToReportAction: FC<PinToReportActionProps> = ({
       data-testid="pin-to-report-action"
       data-widget="pin-to-report-action"
       data-role={role}
-      sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5, flexWrap: "wrap" }}
+      sx={{ display: "flex", alignItems: "center", gap: compact ? 0.5 : 1, mt: compact ? 0 : 0.5, flexWrap: "wrap" }}
     >
       <Box
         component="button"
@@ -111,9 +128,10 @@ export const PinToReportAction: FC<PinToReportActionProps> = ({
           border: `1px solid ${BORDER}`,
           backgroundColor: WHITE,
           color: NAVY,
-          borderRadius: BORDER_RADIUS_PILL,
-          px: 1.5,
-          py: 0.5,
+          borderRadius: compact ? BORDER_RADIUS_2X : BORDER_RADIUS_PILL,
+          ...(compact
+            ? { display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 28, height: 28, px: 0.75 }
+            : { px: 1.5, py: 0.5 }),
           cursor: streaming ? "default" : "pointer",
           opacity: streaming ? 0.5 : 1,
           fontFamily: "inherit",
@@ -122,21 +140,24 @@ export const PinToReportAction: FC<PinToReportActionProps> = ({
           "&:focus-visible": { outline: `2px solid ${NAVY}` },
         }}
       >
-        📌 pin to report
+        {compact ? "📌" : "📌 pin to report"}
       </Box>
 
       {/* Existing-or-new prompt (NO silent auto-create). The resolution decides
-          which prompt to show; landing already happened into the draft. */}
+          which prompt to show; landing already happened into the draft. Compact
+          shows a short, TRANSIENT confirmation on the control. */}
       {resolution !== null ? (
         <Box
           data-testid={`pin-to-report-resolution-${resolution.mode}`}
           sx={{ color: resolution.mode === "single-existing" ? EYEBROW_ON_LIGHT : BODY_TEXT, fontSize: FONT_SIZE_LABEL }}
         >
-          {resolution.mode === "prompt-new-only"
-            ? "Pinned to a new report draft."
-            : resolution.mode === "single-existing"
-              ? "Pinned to your report."
-              : "Pick a report — or start a new one."}
+          {compact
+            ? "Pinned ✓"
+            : resolution.mode === "prompt-new-only"
+              ? "Pinned to a new report draft."
+              : resolution.mode === "single-existing"
+                ? "Pinned to your report."
+                : "Pick a report — or start a new one."}
         </Box>
       ) : null}
     </Box>

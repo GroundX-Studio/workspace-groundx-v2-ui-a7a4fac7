@@ -31,9 +31,10 @@ import type { CanvasKind, ContentScope, WidgetRole } from "@groundx/shared";
 
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Heading } from "@/components/primitives/Heading/Heading";
+import { ViewerWidgetFrame } from "@/components/layout/ViewerWidgetFrame/ViewerWidgetFrame";
 import { BORDER_RADIUS_CARD, NAVY, WARM_OFFWHITE, WHITE } from "@/constants";
 import type { ViewerStep } from "@/contexts/ChatStoreContext";
-import { componentForKind } from "@/widgets/scopedViewerWidgetRegistryProduction";
+import { mountForKind } from "@/widgets/scopedViewerWidgetRegistryProduction";
 
 export interface ScopedCanvasProps {
   /** The active content scope the mounted widget renders over. */
@@ -43,12 +44,12 @@ export interface ScopedCanvasProps {
   /** Widget-contract authorization role (`anonymous` | `member`). */
   role: WidgetRole;
   /**
-   * Disambiguates the `report` step kind between the render surface
-   * (`report` CanvasKind, default) and the builder (`report-builder`
-   * CanvasKind). The `ViewerStep` `report` kind alone can't tell the two
-   * apart (f4 vs f4a); the shell supplies this from its frame state.
+   * Legacy disambiguation for route-owned report frame state. A report
+   * ViewerStep can now carry `surface`; that payload wins when present.
    */
   reportSurface?: "render" | "builder";
+  /** Whether this canvas is the foreground viewer frame. */
+  active?: boolean;
 }
 
 /**
@@ -74,7 +75,7 @@ export function stepToCanvasKind(
     case "extract-workbench":
       return "extract-workbench";
     case "report":
-      return reportSurface === "builder" ? "report-builder" : "report";
+      return (step.surface ?? reportSurface) === "builder" ? "report-builder" : "report";
     case "integrate":
       return "integrate";
     case "ingest-picker":
@@ -93,7 +94,13 @@ export function stepToCanvasKind(
   }
 }
 
-export const ScopedCanvas: FC<ScopedCanvasProps> = ({ scope, step, role, reportSurface }) => {
+export const ScopedCanvas: FC<ScopedCanvasProps> = ({
+  scope,
+  step,
+  role,
+  reportSurface,
+  active = true,
+}) => {
   const kind = stepToCanvasKind(step, reportSurface);
 
   if (kind === null) {
@@ -135,21 +142,22 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({ scope, step, role, reportS
   // Direction-1: the registry guarantees a component for every declared
   // CanvasKind (construction-time totality + the `switch` below's `never`
   // default). The `switch` makes the resolution explicit + compiler-checked.
-  let Widget: ReturnType<typeof componentForKind>;
+  let mount: ReturnType<typeof mountForKind>;
   switch (kind) {
     case "doc-viewer":
     case "extract-workbench":
     case "report":
     case "report-builder":
     case "integrate":
-      Widget = componentForKind(kind);
+      mount = mountForKind(kind);
       break;
     default: {
       const _exhaustive: never = kind;
       void _exhaustive;
-      Widget = componentForKind("doc-viewer");
+      mount = mountForKind("doc-viewer");
     }
   }
+  const Widget = mount.component;
 
   // doc-viewer citation highlight — forward the cited page + bbox + tier off
   // the `doc-viewer` step arm to the PdfViewer mount so a `CiteChip` click
@@ -171,6 +179,10 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({ scope, step, role, reportS
           showScanAnimation: step.scanning ?? false,
         }
       : {};
+  const reportBuilderProps =
+    step.kind === "report" && step.selectedSectionId
+      ? { selectedSectionId: step.selectedSectionId }
+      : {};
 
   return (
     <Box
@@ -178,7 +190,13 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({ scope, step, role, reportS
       data-canvas-kind={kind}
       sx={{ height: "100%", width: "100%" }}
     >
-      <Widget scope={scope} role={role} {...docViewerHighlight} />
+      <ViewerWidgetFrame
+        widgetId={mount.descriptor.id}
+        active={active}
+        {...mount.descriptor.viewerFrame}
+      >
+        <Widget scope={scope} role={role} {...docViewerHighlight} {...reportBuilderProps} />
+      </ViewerWidgetFrame>
     </Box>
   );
 };

@@ -156,7 +156,7 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
     // catalogs + the filesystem, so this is not a parallel catalog.
     const CARD_TOOL_BINDINGS: Record<string, string> = {
       propose_schema_field: "chat-widgets/ProposeSchemaFieldCard",
-      book_call: "chat-widgets/BookingStatusCard",
+      book_call: "chat-widgets/SuggestedActionChips",
       save_to_account: "chat-widgets/SuggestedActionChips",
     };
 

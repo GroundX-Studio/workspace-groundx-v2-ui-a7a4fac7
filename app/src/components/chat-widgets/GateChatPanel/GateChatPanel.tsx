@@ -1,11 +1,9 @@
 /**
- * GateChatPanel — the chat-column body for F2 onwards.
+ * GateChatPanel — legacy chat-column body for the old gate flow.
  *
- * When the gate is idle, this is just the "Ask anything about the
- * sample…" placeholder. When the gate transitions to `"open"` (e.g. via
- * the F1 BYO Sign Up trigger or a save/export gate), the panel first
- * shows a typing indicator for a brief "composing" beat, then fades in
- * the GateView as if the AI bot just sent a chat message.
+ * The live sign-in path now keeps ConversationFlow mounted and renders
+ * SignUpWidget in the viewer overlay. This component remains for legacy
+ * tests/reference only.
  *
  * The animation is quiet per brand: a ~600ms typing pause, a subtle
  * 8px upward translate + opacity fade on the GateView mount. No bounce,
@@ -19,12 +17,12 @@
  *
  * 2026-05-31-dependency-direction-guard Phase 1 — moved here from
  * `views/Onboarding/GateChatPanel.tsx`. It is a pure chat-side composite
- * (it already mounts the `GateChatRail` chat-widget and is mounted by
- * `ChatColumn`), so it belongs in the chat-widget slot. Living in
+ * that mounts the `GateChatRail` chat-widget, so it belongs in the
+ * chat-widget slot. Living in
  * `views/` made `ChatColumn` (a widget) import a view, then the view
  * imported `GateChatRail` back out of `chat-widgets/` — a widget → view →
- * widget inversion the dependency-direction guard now forbids. No
- * behavior change: only the file home and import direction moved.
+ * widget inversion the dependency-direction guard now forbids. Current live
+ * routing must not import this component.
  */
 
 import Box from "@mui/material/Box";
@@ -198,12 +196,9 @@ export const GateChatPanel: FC<GateChatPanelProps> = ({ role, scope }) => {
     return <TypingIndicator trigger={trigger} />;
   }
 
-  // ARCH-05B (2026-05-26): mounts the new `GateChatRail` widget
-  // instead of the old `GateView` monolith. The form half of GateView
-  // now lives in `viewer-widgets/SignUpWidget`, which OnboardingShell
-  // mounts in the canvas slot whenever the gate is open. GateChatRail
-  // is the chat-side half (preamble, book-a-call CTA, dismiss,
-  // committed-state success card).
+  // Legacy ARCH-05B behavior: fade in GateChatRail instead of the old
+  // GateView monolith. Current live sign-in uses SignUpWidget in the viewer
+  // and leaves ConversationFlow mounted in chat.
   return (
     <motion.div
       key="gate-fade-in"

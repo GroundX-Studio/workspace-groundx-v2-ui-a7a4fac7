@@ -1,7 +1,7 @@
 import { createApp } from "./app.js";
 import { loadEnv } from "./config/env.js";
 import { MySqlAppRepository } from "./db/mysqlRepository.js";
-import { seedSampleProject } from "./db/seedSampleProject.js";
+import { seedSampleProject, seedSampleReportTemplate } from "./db/seedSampleProject.js";
 import { ScenarioRegistry } from "./scenarios/registry.js";
 import { FetchGroundXClient } from "./services/groundxClient.js";
 import { FetchGroundXPartnerClient } from "./services/groundxPartnerClient.js";
@@ -27,6 +27,11 @@ await repository.createSchema();
 if (env.GROUNDX_SAMPLES_BUCKET_ID != null) {
   await seedSampleProject(repository, env.GROUNDX_SAMPLES_BUCKET_ID);
 }
+
+// report-default-template — seed the default report template (a pure DB upsert,
+// no GroundX API, so it is NOT gated on the samples bucket). Idempotent; its
+// absence degrades the report render to the no-template empty state.
+await seedSampleReportTemplate(repository);
 
 // CF-16: build a separate light-side client only when LLM_LIGHT_* is
 // fully wired in env. Otherwise leave it undefined — chatHandler reuses

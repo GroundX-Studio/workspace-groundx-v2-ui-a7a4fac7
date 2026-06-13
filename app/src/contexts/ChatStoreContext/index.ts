@@ -1,5 +1,8 @@
 export {
   ChatStoreProvider,
+  scopeSessionKey,
+  scopeFromSessionKey,
+  titleForEnsure,
   useChatStore,
   useChatStoreActions,
   useChatStoreOptional,

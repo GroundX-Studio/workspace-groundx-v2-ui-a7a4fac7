@@ -90,29 +90,69 @@ The sign-up surface SHALL be represented as an entry in
 `ViewerSession.overlays` (kind `sign-up`, state `pending | done |
 dismissed`, optional `cause`). URL navigation to `/onboarding/signup`
 SHALL push the overlay; navigation away SHALL pop it. The overlay is
-the source of truth for the sign-up canvas swap.
+the source of truth for the sign-up viewer surface.
 
-The previous canvas-swap pattern in `OnboardingShell` — where
-`gateActive` caused `<SignUpWidget />` to replace the entire canvas —
-SHALL be replaced. `OnboardingShell` SHALL read the overlay stack
-first; the legacy `gate.status` slot remains as a transitional bridge
-for the chat-side `GateChatPanel` and intent-driven `openGate(...)`
-flows until a follow-up change retires it.
+The previous canvas/chat swap pattern in `OnboardingShell` and `ChatColumn`
+SHALL be retired. A sign-up overlay SHALL NOT cause `ChatColumn` to render
+`GateChatPanel`, `GateChatRail`, or any other replacement chat panel.
+`ChatColumn` SHALL keep the shared `ConversationFlow` mounted once the user
+enters the sign-in flow. `gate.status` MAY remain as lifecycle and analytics
+state, but it SHALL NOT choose the chat surface.
+
+`OnboardingShell` SHALL compute sign-in overlay activity and pass that state to
+the chat composition root explicitly. `ChatColumn` SHALL NOT rediscover sign-in
+state from `gate.status` or use `gate.status` as a flow mode.
+
+`OnboardingShell` SHALL render the current viewer step as an underlay and
+z-stack blocking overlays such as `sign-up` and `book-call` above it. The
+underlay SHALL be `aria-hidden` and inert while a blocking overlay is active.
+The active StepStrip pill SHALL remain derived from the viewer underlay while
+sign-in is active: F1-origin sign-up remains on Ingest, and sample-origin
+sign-up preserves the active sample step.
 
 #### Scenario: URL navigation to /onboarding/signup pushes a sign-up overlay
 
 - **GIVEN** the user is on F1 with no overlays
 - **WHEN** the user navigates to `/onboarding/signup`
 - **THEN** a `{ kind: "sign-up", state: "pending" }` overlay is pushed
-- **AND** `OnboardingShell.signupSurfaceActive` becomes true
-- **AND** `<SignUpWidget />` mounts on top of the (still-mounted) F1 picker
+- **AND** the AppShell chat/viewer split is visible
+- **AND** `<ConversationFlow />` mounts in the chat column
+- **AND** the sign-up viewer widget mounts over the F1/main underlay
+- **AND** the StepStrip remains on Ingest because no sample is active
+- **AND** no `GateChatPanel` or `GateChatRail` live panel mounts.
 
 #### Scenario: Navigating away from /onboarding/signup pops the overlay
 
 - **GIVEN** the sign-up overlay is present
 - **WHEN** the user navigates to `/onboarding`
 - **THEN** the sign-up overlay is popped
-- **AND** subsequent sample-pick navigates the canvas to F2 without the overlay blocking it — closing the user-reported "stuck signup screen" regression class
+- **AND** the F1 picker returns
+- **AND** the same `ChatSession` remains the active onboarding session.
+
+#### Scenario: Direct sample navigation from sign-up continues the session
+
+- **GIVEN** the user is on `/onboarding/signup`
+- **WHEN** the user navigates to `/onboarding/<bucketId>/utility`
+- **THEN** the sign-up overlay is popped before the Utility viewer step renders
+- **AND** the Utility sample activates in the same `ChatSession`
+- **AND** the normal onboarding `ConversationFlow` renders the Utility experience.
+
+#### Scenario: openGate opens sign-in in the active viewer
+
+- **GIVEN** a user is viewing a sample on Extract, Interact, Report, or Integrate
+- **WHEN** the app dispatches an `openGate` intent
+- **THEN** the active session gets a pending `sign-up` overlay
+- **AND** the existing viewer step remains under the overlay
+- **AND** the StepStrip stays on the existing viewer step's mapped pill
+- **AND** the chat column keeps the shared `ConversationFlow` mounted.
+
+#### Scenario: Blocking overlays hide the underlay from interaction
+
+- **GIVEN** the sign-up or book-call overlay is active
+- **WHEN** the viewer stack renders
+- **THEN** the viewer underlay is `aria-hidden`
+- **AND** the viewer underlay is inert
+- **AND** keyboard focus stays within the active overlay or chat controls.
 
 ### Requirement: CanvasOrchestrator SHALL expose explicit chat→viewer and viewer→chat channels
 
@@ -1100,3 +1140,259 @@ separate shared/type-only surface.
 - **THEN** the top-level `realApi.login/register/...` members still exist
 - **AND** the new `realApi.auth.*` group is the only auth surface used by migrated
   auth consumers
+
+### Requirement: Calendly scheduler SHALL be a session-scoped viewer widget
+
+The booking scheduler SHALL mount through the existing session-scoped
+`BookCallView` viewer widget, not as a duplicate content-scoped
+`ScopedViewerWidget`. The widget SHALL accept the standard `role:
+WidgetRole` and required `scope: WidgetScope` props and SHALL declare
+`scope: { type: "none" }` at mount sites because booking a call is not tied to
+a document, bucket, group, project, template, or generated result.
+
+The app SHALL expose one browser-safe Calendly configuration value at
+`APP_CONFIG.calendly.url`, sourced from `VITE_CALENDLY_URL`. `BookCallView`
+SHALL use that app config value by default instead of reading
+`import.meta.env` directly.
+
+`BookCallView` SHALL use Calendly's advanced inline embed API by loading
+`https://assets.calendly.com/assets/external/widget.js` and calling
+`Calendly.initInlineWidget({ url, parentElement })` with a real owned parent
+inside the viewer pane. When the URL is unset, it SHALL render an inline
+placeholder instead of a broken empty embed.
+
+At phone widths where Calendly's inline layout clips event details,
+`BookCallView` SHALL render an external Calendly action using the same
+configured URL instead of mounting the inline iframe.
+
+`BookCallView` SHALL own trusted `calendly.event_scheduled` postMessage
+handling from `https://calendly.com` or a Calendly subdomain and expose the
+scheduled event to its host through a callback. `BookingStatusCard` is a legacy
+contract-history widget only: the live `?bookCall=1` path SHALL NOT mount it,
+and it SHALL NOT own Calendly iframe events.
+
+#### Scenario: Book-call intent mounts the scheduler in the viewer
+
+- **GIVEN** the app dispatches `{ kind: "openBookCall" }`
+- **WHEN** the shell observes `?bookCall=1`
+- **THEN** it mounts `BookCallView` with `scope: { type: "none" }`
+- **AND** the chat column keeps the normal conversation timeline mounted
+- **AND** any booking narration appears as ordinary assistant chat messages.
+
+#### Scenario: Nav CTA uses the same viewer path
+
+- **GIVEN** the user clicks "Book a call" in the OnboardingNav
+- **WHEN** the handler runs
+- **THEN** the URL gains `bookCall=1`
+- **AND** the in-app booking viewer mounts
+- **AND** no new browser tab is opened.
+
+#### Scenario: Scheduled event commits the engineer-call gate
+
+- **GIVEN** `BookCallView` is mounted
+- **WHEN** Calendly posts `calendly.event_scheduled` from a trusted Calendly origin
+- **THEN** the shell commits the gate with method `engineer-call`
+- **AND** it clears `bookCall=1` so the call-requested state is visible.
+
+#### Scenario: Direct book-call URL mounts the booking surface
+
+- **GIVEN** the user lands on `/onboarding?bookCall=1`
+- **WHEN** the shell renders
+- **THEN** the F1 picker overlay does not mask the booking surface
+- **AND** `BookCallView` is visible as a viewer overlay
+- **AND** the normal chat timeline remains mounted.
+
+#### Scenario: Phone width uses the external Calendly action
+
+- **GIVEN** the viewer is rendered below the phone breakpoint
+- **WHEN** `BookCallView` has a configured Calendly URL
+- **THEN** it renders an "Open calendar" action with that URL
+- **AND** it does not initialize the inline Calendly iframe.
+
+#### Scenario: Untrusted scheduled event is ignored
+
+- **GIVEN** `BookCallView` is mounted
+- **WHEN** another origin posts `calendly.event_scheduled`
+- **THEN** the scheduled callback is not invoked.
+
+### Requirement: Viewer widget chrome SHALL be owned by a shared viewer frame
+
+Every live viewer widget mount SHALL be wrapped by a shared viewer frame that
+owns top-level viewer chrome: close/back controls, header/title metadata,
+loading/status bands, outer padding, scroll bounds, and content-mode treatment.
+Viewer widgets SHALL own product content and content-level callbacks only.
+
+The frame SHALL be composed by the viewer host (`OnboardingShell`, `SteadyShell`,
+`ScopedCanvas` / its adjacent frame host, or a future viewer composition root),
+not independently reinvented by each viewer widget. The frame SHALL accept a
+typed descriptor derived from the active `ViewerStep`, `ViewerOverlay`, or
+production `CanvasKind` registry entry.
+
+Production scoped viewer registry entries SHALL declare a viewer-frame
+descriptor or policy for each built `CanvasKind`. Overlay hosts SHALL declare
+equivalent descriptors for each live `ViewerOverlay` kind. A viewer widget
+mount that has no descriptor SHALL fail a drift guard.
+
+Descriptor ownership SHALL remain catalog/composition-root based. Production
+viewer descriptors SHALL live on the production scoped viewer registry entry.
+Overlay descriptors SHALL live in an explicit overlay descriptor map owned by
+the overlay host. Adapter helpers MAY convert a selected descriptor into frame
+props, but SHALL NOT inspect global route, auth, onboarding, or app-mode context
+to resolve which widget or descriptor is active.
+
+The descriptor source-of-truth SHALL be explicit:
+`app/src/components/layout/ViewerWidgetFrame/viewerFrameDescriptor.ts` owns shared
+types and pure adapters; `app/src/widgets/scopedViewerWidget.ts` owns the
+production descriptor shape; `app/src/widgets/scopedViewerWidgetRegistryProduction.ts`
+is the runtime production descriptor read path; and
+`app/src/views/Onboarding/viewerOverlayFrameDescriptors.ts` owns onboarding
+overlay descriptors. No other file SHALL define a competing map from
+`CanvasKind` or `ViewerOverlay` to viewer-frame policy.
+
+Viewer widgets SHALL NOT render their own top-level close/back/header chrome
+unless the widget README declares a `hostless-exception` and names the host that
+owns equivalent chrome. Exceptions SHALL be enforced by tests and SHALL NOT be
+used for convenience styling.
+
+The contract counts active foreground frames, not raw DOM nodes. Underlay
+frames MAY remain mounted while hidden by `aria-hidden` / inert overlay
+containers, but they SHALL mark `data-viewer-frame-active="false"`. Exactly one
+visible, non-inert frame SHALL mark `data-viewer-frame-active="true"` for the
+foreground viewer.
+
+#### Scenario: Sign-in and booking share the same viewer frame
+
+- **GIVEN** the sign-up overlay is active
+- **WHEN** the viewer renders
+- **THEN** one shared viewer frame is present
+- **AND** exactly one visible, non-inert viewer frame is active
+- **AND** the close/back action uses the standard frame handle
+- **AND** `SignUpWidget` renders content inside the frame without its own
+  top-level close/back chrome.
+
+- **GIVEN** the book-call overlay is active
+- **WHEN** the viewer renders
+- **THEN** one shared viewer frame is present
+- **AND** exactly one visible, non-inert viewer frame is active
+- **AND** the close/back action uses the same standard frame handle
+- **AND** `BookCallView` renders Calendly content inside the frame without its
+  own top-level close/back chrome.
+
+#### Scenario: ScopedCanvas-mounted widgets receive registry frame descriptors
+
+- **GIVEN** a production `ScopedCanvas` mount resolves a `doc-viewer`,
+  `extract-workbench`, `report`, `report-builder`, or `integrate` kind
+- **WHEN** the viewer content renders in onboarding, steady, workspace, or
+  project shells
+- **THEN** the resolved widget is wrapped by the shared viewer frame or by a
+  documented `hostless-exception`
+- **AND** the frame content mode comes from the production registry descriptor
+- **AND** the shell does not hand-roll an alternate header, gutter, or loading
+  layout around that widget.
+
+#### Scenario: Authenticated route proof uses a built viewer step
+
+- **GIVEN** a signed-in complete `/workspaces`, `/projects`, or `/c/:sessionId`
+  route is under test
+- **WHEN** the test or browser fixture activates viewer content
+- **THEN** the active `ViewerStep` resolves through `stepToCanvasKind(...)` to
+  a built `CanvasKind`
+- **AND** the route does not satisfy the requirement by rendering the default
+  `ingest-picker` or `scoped-canvas-unavailable` placeholder
+- **AND** the assertion proves a real registry-mounted widget body is wrapped by
+  the shared viewer frame.
+
+#### Scenario: Authenticated product routes are the base viewer-frame proof path
+
+- **GIVEN** a signed-in user with onboarding complete opens `/workspaces`,
+  `/projects`, or `/c/:sessionId`
+- **WHEN** the active viewer step resolves to a built production `CanvasKind`
+- **THEN** the route keeps the authenticated product shell mounted
+- **AND** the route renders one normal chat surface
+- **AND** the resolved viewer content is wrapped by the shared viewer frame or
+  by a documented `hostless-exception`
+- **AND** no anonymous sign-up overlay or onboarding-only viewer chrome is
+  mounted.
+
+#### Scenario: Signed-in onboarding overlays the product route
+
+- **GIVEN** a signed-in user with incomplete onboarding state opens
+  `/workspaces`, `/projects`, or `/c/:sessionId`
+- **WHEN** the onboarding wizard opens
+- **THEN** the current product route pathname is preserved
+- **AND** the wizard decorates the product shell instead of replacing it with a
+  parallel AppShell/chat/viewer hierarchy
+- **AND** if a wizard step hosts viewer-widget content, that content uses the
+  shared viewer frame contract.
+
+#### Scenario: Anonymous product routes do not get signed-in onboarding
+
+- **GIVEN** an anonymous user opens `/workspaces`, `/projects`, or
+  `/c/:sessionId`
+- **WHEN** auth routing resolves
+- **THEN** the existing auth redirect/gate behavior applies
+- **AND** the signed-in onboarding wizard does not open
+- **AND** anonymous onboarding viewer overlays are not mounted inside the
+  product route.
+
+#### Scenario: Stacked overlays keep only the foreground frame active
+
+- **GIVEN** sign-in is open over a sample viewer
+- **AND** book-call is opened from sign-in
+- **WHEN** the viewer stack renders
+- **THEN** any sample or sign-in underlay frame is inside an inert or
+  `aria-hidden` container and has `data-viewer-frame-active="false"`
+- **AND** the book-call frame has `data-viewer-frame-active="true"`
+- **AND** only the book-call frame close/back action is keyboard reachable.
+
+#### Scenario: Frame content modes preserve widget-specific layouts
+
+- **GIVEN** a sign-up form is mounted in the viewer
+- **WHEN** the frame renders with `centered-panel` content mode
+- **THEN** the form is centered within the standard viewer gutters
+- **AND** the close/back action remains in the frame chrome.
+
+- **GIVEN** a Calendly embed is mounted in the viewer
+- **WHEN** the frame renders with `embed` content mode
+- **THEN** the iframe region can fill the available content area
+- **AND** loading/status UI appears in the frame status band, not floating over
+  the loaded iframe.
+
+#### Scenario: Hostless exceptions are explicit and test-backed
+
+- **GIVEN** a viewer widget cannot use the shared frame because another
+  standardized host already owns equivalent chrome
+- **WHEN** the widget README declares `hostless-exception`
+- **THEN** the README names the owning host
+- **AND** a drift guard or widget test proves that the host chrome exists
+- **AND** the exception is not accepted silently.
+
+### Requirement: Viewer widgets SHALL declare a viewer chrome policy
+
+Every directory under `app/src/components/viewer-widgets/<Name>/` SHALL document
+its viewer chrome policy in its README under `## Viewer chrome`. The policy
+SHALL be one of:
+
+- `framed` - normal content inside the shared viewer frame;
+- `edge-to-edge inside ViewerWidgetFrame` - document, canvas, iframe, or
+  workbench content that fills the frame body while the frame still owns chrome;
+- `hostless-exception` - a documented exception naming the host that owns
+  equivalent chrome.
+
+The widget contract drift guard SHALL fail when the section is missing, when
+the policy is not one of the allowed values, or when the README policy
+contradicts the production registry descriptor for the widget's `CanvasKind`.
+
+#### Scenario: Missing viewer chrome policy fails the drift guard
+
+- **GIVEN** a viewer widget README lacks `## Viewer chrome`
+- **WHEN** the widget contract drift guard runs
+- **THEN** the test fails naming the widget directory
+- **AND** the error tells the author to choose one allowed policy.
+
+#### Scenario: A framed widget does not own top-level close chrome
+
+- **GIVEN** a viewer widget README declares `framed`
+- **WHEN** the widget contract drift guard scans the widget source
+- **THEN** undocumented top-level close/back handles fail the test
+- **AND** the error directs the author to move that chrome to the shared frame.

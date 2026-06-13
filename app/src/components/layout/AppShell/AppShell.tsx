@@ -109,6 +109,12 @@ export interface AppShellProps {
    * always reports `false`.
    */
   compact?: boolean;
+  /**
+   * Compact-only preferred pane. Use for URL/intent-driven flows that must
+   * foreground the viewer on mobile without changing desktop split mode.
+   * Undefined keeps compact's default chat-first behavior.
+   */
+  compactInitialFocus?: "focus-chat" | "focus-canvas";
 }
 
 const DEFAULT_NAV_WIDTH = 180;
@@ -173,6 +179,7 @@ export function AppShell({
   initialFocus = "split",
   navWidth: navWidthProp = DEFAULT_NAV_WIDTH,
   compact: compactProp,
+  compactInitialFocus,
 }: AppShellProps) {
   // ARCH-06A: stable per-mount id surfaced as `data-shell-instance` on
   // the root. Consumers (ARCH-06B's OnboardingShell test) assert this
@@ -197,10 +204,10 @@ export function AppShell({
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)", { noSsr: true });
   const motionTransition = reducedMotion ? MOTION_REDUCED : MOTION;
 
-  // Compact mode forces focus-chat as the initial mode so the chat
-  // pane fills the viewport. Desktop mode honors whatever the consumer
-  // asked for.
-  const effectiveInitialFocus = compact ? "focus-chat" : initialFocus;
+  // Compact mode defaults to focus-chat so the chat pane fills the viewport.
+  // URL/intent-driven viewer flows can opt into focus-canvas without changing
+  // the desktop split layout.
+  const effectiveInitialFocus = compact ? (compactInitialFocus ?? "focus-chat") : initialFocus;
   const { mode, setMode } = useFocusMode({ initial: effectiveInitialFocus });
 
   // Drag bounds: keep BOTH panes visible at minimum widths. Max is
@@ -267,8 +274,13 @@ export function AppShell({
     }
     if (lastCompactRef.current === compact) return;
     lastCompactRef.current = compact;
-    setMode(compact ? "focus-chat" : initialFocus);
-  }, [compact, initialFocus, setMode]);
+    setMode(compact ? (compactInitialFocus ?? "focus-chat") : initialFocus);
+  }, [compact, compactInitialFocus, initialFocus, setMode]);
+
+  useEffect(() => {
+    if (!compact || !compactInitialFocus) return;
+    setMode(compactInitialFocus);
+  }, [compact, compactInitialFocus, setMode]);
 
   // Compact-mode nav drawer state. Starts closed; the hamburger opens it.
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);

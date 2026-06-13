@@ -25,12 +25,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { chatErrorToUserCopy } from "@/api/chatErrors";
-import type { ChatDispatchedIntent, ChatSuggestedAction, ProposedSchemaField } from "@/api/chatSessions";
+import type {
+  ChatDispatchedIntent,
+  ChatSessionEnsureMetadata,
+  ChatSuggestedAction,
+  ProposedSchemaField,
+} from "@/api/chatSessions";
 import type { Citation, ToolActivity } from "@groundx/shared";
 import { useApi } from "@/contexts/ApiContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
-import { useChatStore } from "@/contexts/ChatStoreContext";
+import {
+  titleForEnsure,
+  useChatStore,
+  type ChatSession,
+} from "@/contexts/ChatStoreContext";
 import { litRegionsFromCitations } from "@/views/Onboarding/litRegions";
 
 /**
@@ -65,8 +74,14 @@ export interface LiveTurn {
    * annotation on the assistant bubble. Absent/empty = nothing to show.
    */
   toolActivity?: ToolActivity[];
-  /** False for local/system error turns that should not be saved into reports. */
-  pinToReport?: false;
+  /**
+   * report-pin-affordance — OPT-IN: `true` ONLY on genuine document-answer turns
+   * (the `send()` server reply + DB-hydration of a non-error assistant turn).
+   * The pin affordance renders iff `pinnable === true`, so agent narration,
+   * scripted intro/choreography, booking, and error turns (none of which set it)
+   * are never pinnable. Distinct from the `ChatStore.pinToReport` mutation.
+   */
+  pinnable?: boolean;
 }
 
 /**
@@ -189,6 +204,19 @@ export function dispatchReplyIntents(
   }
 }
 
+function ensureMetadataFromSession(
+  session: ChatSession | null,
+  fallbackTitle?: string,
+): ChatSessionEnsureMetadata | undefined {
+  if (!session) return undefined;
+  return {
+    onboardingSessionId: session.id,
+    title: titleForEnsure(session) || fallbackTitle || "Conversation",
+    isOnboarding: session.scopeKey ? false : session.isOnboardingSession,
+    activeEntityKey: session.activeEntityKey ?? null,
+  };
+}
+
 export function useConversation(
   chatSessionId: string | null,
   opts?: ConversationOptions,
@@ -196,6 +224,8 @@ export function useConversation(
   const api = useApi();
   const { state: chatState, enqueueFieldProposal, appendMessage } = useChatStore();
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
+  const chatStateRef = useRef(chatState);
+  chatStateRef.current = chatState;
   const { dispatch: dispatchIntent } = useCanvasOrchestrator();
 
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
@@ -261,7 +291,13 @@ export function useConversation(
     let cancelled = false;
     (async () => {
       try {
-        const messages = await api.chat.listChatMessages(chatSessionId);
+        const messages = await api.chat.listChatMessages(
+          chatSessionId,
+          ensureMetadataFromSession(
+            chatStateRef.current.sessions.get(chatSessionId) ?? null,
+            titleRef.current,
+          ),
+        );
         if (cancelled || messages.length === 0) return;
         const turns: LiveTurn[] = messages
           .filter((m) => m.role === "user" || m.role === "assistant")
@@ -270,7 +306,10 @@ export function useConversation(
             role: m.role as "user" | "assistant",
             content: m.content,
             citations: m.citations ?? [],
-            ...(m.errorCode ? { pinToReport: false as const } : {}),
+            // report-pin-affordance — opt-in: a hydrated NON-error ASSISTANT turn
+            // is a genuine persisted answer → pinnable. User turns and error
+            // turns never set it (so they're not pinnable).
+            ...(m.role === "assistant" && !m.errorCode ? { pinnable: true as const } : {}),
           }));
         setLiveTurns((cur) => (cur.length === 0 ? turns : cur));
       } catch (err) {
@@ -328,7 +367,7 @@ export function useConversation(
             id: `a-${Date.now()}`,
             role: "assistant",
             content: "No active chat session — please refresh and try again.",
-            pinToReport: false,
+            // Not pinnable (a local error turn, not a genuine answer).
           },
         ]);
         return;
@@ -338,9 +377,12 @@ export function useConversation(
       try {
         // widget-llm-integration Phase 5 — surface the user's current
         // ViewerStep kind so the LLM tool catalog is scoped.
-        const stepIdx = activeChatSession?.viewer.currentStep.stepIndex ?? -1;
+        const targetChatSession = chatSessionId
+          ? chatStateRef.current.sessions.get(chatSessionId)
+          : null;
+        const stepIdx = targetChatSession?.viewer.currentStep.stepIndex ?? -1;
         const activeStepKind =
-          stepIdx >= 0 ? activeChatSession?.viewer.history[stepIdx]?.kind ?? null : null;
+          stepIdx >= 0 ? targetChatSession?.viewer.history[stepIdx]?.kind ?? null : null;
         const scopeHint = scopeHintRef.current;
         const result = await api.chat.sendChatMessage({
           chatSessionId,
@@ -351,12 +393,14 @@ export function useConversation(
             // onboarding fork's `activeChatSession?.title ?? "Onboarding"`
             // precedence (and the steady fork's `"Steady chat"` label, which
             // a title-less steady session never overrode in practice).
-            title: activeChatSession?.title ?? titleRef.current ?? "Conversation",
+            title: targetChatSession?.title ?? titleRef.current ?? "Conversation",
             // Read from the session — NOT hardcoded. Onboarding sessions
             // carry isOnboardingSession:true; a bare chat session false.
-            isOnboarding: activeChatSession?.isOnboardingSession ?? true,
+            isOnboarding: targetChatSession?.scopeKey
+              ? false
+              : targetChatSession?.isOnboardingSession ?? titleRef.current === "Onboarding",
             onboardingSessionId: chatSessionId,
-            activeEntityKey: activeChatSession?.activeEntityKey ?? null,
+            activeEntityKey: targetChatSession?.activeEntityKey ?? null,
           },
           ...(scopeHint ? { scopeHint } : {}),
           activeStepKind,
@@ -371,6 +415,9 @@ export function useConversation(
             citations: result.reply.citations ?? [],
             suggestedActions: result.reply.suggestedActions ?? [],
             toolActivity: result.reply.toolActivity ?? [],
+            // report-pin-affordance — opt-in: the genuine server answer is the
+            // canonical pinnable turn.
+            pinnable: true,
           },
         ]);
         // core-data-model-hardening item 6 — mirror the assistant turn
@@ -411,7 +458,8 @@ export function useConversation(
         const mapped = chatErrorToUserCopy(err);
         setLiveTurns((cur) => [
           ...cur,
-          { id: `a-${Date.now()}`, role: "assistant", content: mapped.message, pinToReport: false },
+          // Not pinnable (an error turn, not a genuine answer).
+          { id: `a-${Date.now()}`, role: "assistant", content: mapped.message },
         ]);
       } finally {
         setSending(false);

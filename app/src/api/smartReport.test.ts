@@ -8,7 +8,7 @@ vi.mock("@/lib/sentry", () => ({
 import type { ContentScope, RenderedSection } from "@groundx/shared";
 import { ApiError } from "@groundx/shared";
 
-import { SmartReportApiError, renderReport, saveReportTemplate, type RenderedSectionWire } from "./smartReport";
+import { SmartReportApiError, getReportTemplate, renderReport, saveReportTemplate, type RenderedSectionWire } from "./smartReport";
 
 /**
  * generated-result drift guard (Report side, app) —
@@ -222,5 +222,44 @@ describe("saveReportTemplate (smart-report Phase 6 member persist)", () => {
     await expect(
       saveReportTemplate({ id: "x", name: "X", format: "f", sections: [] }),
     ).rejects.toMatchObject({ name: "SmartReportApiError", status: 401 });
+  });
+});
+
+describe("getReportTemplate (report-default-template T4 client read)", () => {
+  it("GETs the template by id and returns { template, owned }", async () => {
+    queueApiResponse({
+      template: {
+        id: "rt-sample-utility-bill",
+        name: "Utility Bill Summary",
+        format: "",
+        sections: [
+          { id: "billing_summary", name: "billing_summary", renderAs: "PARAGRAPH", question: "Summarize.", variables: [] },
+        ],
+      },
+      owned: false,
+    });
+    const result = await getReportTemplate("rt-sample-utility-bill");
+    const calls = apiFetchCalls();
+    expect(calls).toHaveLength(1);
+    const [path, init] = calls[0];
+    expect(path).toBe("/api/widgets/smart-report/reports/template/rt-sample-utility-bill");
+    expect((init as RequestInit).method).toBe("GET");
+    expect(result).not.toBeNull();
+    expect(result!.owned).toBe(false);
+    expect(result!.template.sections.map((s) => s.name)).toEqual(["billing_summary"]);
+  });
+
+  it("returns null on 404 (not found / not visible)", async () => {
+    queueApiResponse({ error: "template_not_found" }, 404);
+    const result = await getReportTemplate("rt-nope");
+    expect(result).toBeNull();
+  });
+
+  it("throws SmartReportApiError on a non-404 error", async () => {
+    queueApiResponse({ error: "boom" }, 500);
+    await expect(getReportTemplate("rt-x")).rejects.toMatchObject({
+      name: "SmartReportApiError",
+      status: 500,
+    });
   });
 });

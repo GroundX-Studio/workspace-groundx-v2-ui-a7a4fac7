@@ -2,9 +2,8 @@
  * BookCallView (viewer-widget) — F6a viewer surface.
  *
  * Split from the combined BookCallView.test.tsx in ARCH-03 (2026-05-26)
- * when widgets moved into slot-scoped directories. The chat-side
- * (BookingStatusCard) tests live alongside that widget at
- * `chat-widgets/BookingStatusCard/BookingStatusCard.test.tsx`.
+ * when widgets moved into slot-scoped directories. The current shell
+ * mounts this as a viewer overlay while normal chat stays mounted.
  *
  * Migrated to the role+scope widget contract in 2026-05-30-widget-role-access
  * Phase 2b. BookCallView's matrix row (docs/agents/widget-access-matrix.md):
@@ -22,7 +21,7 @@ import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
-import { BookCallView } from "./BookCallView";
+import { BookCallView, type BookCallEmbedState } from "./BookCallView";
 
 const UTILITY = "utility" as const;
 
@@ -127,7 +126,35 @@ describe("BookCallView (viewer)", () => {
       expect(screen.getByLabelText("Book a call · Calendly embed")).toBeInTheDocument();
     });
 
-    it("shows a visible loading status outside the blank Calendly embed area", async () => {
+    it("reports loading lifecycle to the frame without rendering a loader over the embed", async () => {
+      const states: BookCallEmbedState[] = [];
+      renderWithOnboardingProviders(
+        <BookCallView
+          role={role}
+          scope={NONE_SCOPE}
+          calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL}
+          onEmbedStateChange={(state) => states.push(state)}
+        />,
+        {
+          initialFrame: "f2",
+          initialScenario: UTILITY,
+        },
+      );
+      await waitFor(() => expect(initInlineWidget).toHaveBeenCalled());
+      const embed = screen.getByTestId("book-call-calendly");
+      expect(states).toContain("initializing");
+      expect(states).toContain("embedding");
+      expect(screen.queryByTestId("book-call-calendly-loading")).not.toBeInTheDocument();
+      expect(embed.querySelector('[data-testid="book-call-calendly-loading"]')).toBeNull();
+    });
+
+    it("keeps Calendly's iframe inside the frame body instead of cropping it upward", async () => {
+      initInlineWidget.mockImplementation(({ parentElement }: { parentElement: HTMLElement }) => {
+        const iframe = document.createElement("iframe");
+        iframe.title = "Select a Date & Time - Calendly";
+        parentElement.appendChild(iframe);
+      });
+
       renderWithOnboardingProviders(
         <BookCallView role={role} scope={NONE_SCOPE} calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL} />,
         {
@@ -135,11 +162,9 @@ describe("BookCallView (viewer)", () => {
           initialScenario: UTILITY,
         },
       );
-      await waitFor(() => expect(initInlineWidget).toHaveBeenCalled());
-      const loading = screen.getByTestId("book-call-calendly-loading");
-      const embed = screen.getByTestId("book-call-calendly");
-      expect(loading).toHaveTextContent(/loading booking calendar/i);
-      expect(embed).not.toContainElement(loading);
+
+      const iframe = await screen.findByTitle("Select a Date & Time - Calendly");
+      expect(iframe).toHaveStyle({ marginTop: "0px", height: "100%" });
     });
 
     it("emits the widget-contract data attributes (slot + role)", () => {
@@ -176,22 +201,28 @@ describe("BookCallView (viewer)", () => {
     expect(memberHasEmbedParent).toBe(true);
   });
 
-  it("clears the app-owned loading status after Calendly's iframe loads", async () => {
+  it("reports ready after Calendly's iframe loads", async () => {
     initInlineWidget.mockImplementation(({ parentElement }: { parentElement: HTMLElement }) => {
       const iframe = document.createElement("iframe");
       parentElement.appendChild(iframe);
       setTimeout(() => iframe.dispatchEvent(new Event("load")), 0);
     });
+    const states: BookCallEmbedState[] = [];
 
     renderWithOnboardingProviders(
-      <BookCallView role="anonymous" scope={NONE_SCOPE} calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL} />,
+      <BookCallView
+        role="anonymous"
+        scope={NONE_SCOPE}
+        calendlyUrl={GROUNDX_ENGINEER_CALENDLY_URL}
+        onEmbedStateChange={(state) => states.push(state)}
+      />,
       { initialFrame: "f2", initialScenario: UTILITY },
     );
 
-    expect(screen.getByTestId("book-call-calendly-loading")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.queryByTestId("book-call-calendly-loading")).not.toBeInTheDocument();
+      expect(states).toContain("ready");
     });
+    expect(screen.queryByTestId("book-call-calendly-loading")).not.toBeInTheDocument();
   });
 
   it("reflects the required role prop on data-role", () => {

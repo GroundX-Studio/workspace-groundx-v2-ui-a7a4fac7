@@ -32,6 +32,7 @@ import {
 } from "./services/reportRenderer.js";
 import { sendUpstreamResponse, UpstreamHttpError } from "./services/http.js";
 import { fetchDocumentXray } from "./services/xrayCache.js";
+import { SAMPLE_TEMPLATE_OWNER } from "./db/seedSampleProject.js";
 import type {
   AppRepository,
   ChatSessionRecord,
@@ -1351,6 +1352,43 @@ export function createApp({
     },
   );
 
+  // report-default-template — access-scoped template READ. The builder loads a
+  // template's section definitions by id (to seed its editable rows) and reads
+  // `owned` to decide fork-on-edit: a NOT-owned template (e.g. the sentinel-owned
+  // sample) Saves as a NEW member-owned copy, never overwriting the original.
+  // Access (no IDOR): anon may read ONLY the sentinel-owned sample; a member may
+  // read the sample OR their own; anything else → 404 (existence not leaked).
+  // Auth: `requireSession` (anon previews the sample, mirroring the render route).
+  app.get<{ id: string }>(
+    "/api/widgets/smart-report/reports/template/:id",
+    apiLimiter,
+    requireSession,
+    async (req, res, next) => {
+      try {
+        const record = await repository.getTemplate(req.params.id);
+        if (!record || record.kind !== "report") {
+          res.status(404).json({ error: "template_not_found" });
+          return;
+        }
+        const callerUsername = sessionUsername(req.session!);
+        const isSample = record.groundxUsername === SAMPLE_TEMPLATE_OWNER;
+        const isOwn = callerUsername != null && record.groundxUsername === callerUsername;
+        if (!isSample && !isOwn) {
+          res.status(404).json({ error: "template_not_found" });
+          return;
+        }
+        const template = reportTemplateFromRecord(record);
+        if (!template) {
+          res.status(404).json({ error: "template_not_found" });
+          return;
+        }
+        res.status(200).json({ template, owned: isOwn });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   // Save: persist a report Template via the shared `saveTemplate` repo API
   // (the same persistence Extract schemas use; reportTemplateToSaveInput is the
   // report-kind bridge). Sign-in gated (`requireAuthenticatedUser`) — anon Save
@@ -1383,6 +1421,17 @@ export function createApp({
           return;
         }
         const input = validated.data;
+        // report-default-template T4b — write-side ownership guard. `saveTemplate`
+        // upserts on the id alone and overwrites the owner column, so a member
+        // saving under an id owned by someone else (the sentinel-owned sample, or
+        // another member) would overwrite AND hijack it. Reject that: a member may
+        // write only a NEW id or one already theirs. (The builder forks-on-edit so
+        // it never sends a not-owned id; this is the boundary backstop.)
+        const existing = await repository.getTemplate(input.id);
+        if (existing && existing.groundxUsername !== groundxUsername) {
+          res.status(403).json({ error: "not_template_owner" });
+          return;
+        }
         const now = new Date();
         await repository.saveTemplate({
           id: input.id,

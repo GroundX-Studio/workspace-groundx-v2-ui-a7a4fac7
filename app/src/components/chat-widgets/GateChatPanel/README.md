@@ -1,18 +1,17 @@
 # GateChatPanel
 
-The chat-column body for the gate moment (F2 onward, and any save/export/
-threshold gate). A pure chat-side composite: it reads the onboarding
-session's `gate.status` and dispatches to one of three surfaces — the idle
-"ask anything" placeholder, a brief "GroundX is composing" typing
-indicator, or the `GateChatRail` chat-widget faded in like an agent reply.
+Legacy chat-column body for the old gate moment (F2 onward, and any
+save/export/threshold gate). The live sign-in path no longer mounts this
+component; `ChatColumn` keeps `ConversationFlow` mounted while
+`SignUpWidget` renders in the viewer overlay.
 
 2026-05-31-dependency-direction-guard Phase 1 moved this here from
-`views/Onboarding/GateChatPanel.tsx`. It already mounts a chat-widget
-(`GateChatRail`) and is mounted by a chat-widget (`ChatColumn`), so it
-belongs in the chat-widget slot. Its old home in `views/` forced a
+`views/Onboarding/GateChatPanel.tsx`. It mounts a chat-widget
+(`GateChatRail`), so it belongs in the chat-widget slot. Its old home in `views/` forced a
 widget → view → widget dependency inversion (`ChatColumn` imported a view,
 the view imported `GateChatRail` back out of `chat-widgets/`). The move is
-behavior-neutral; only the file home and import direction changed.
+preserved the historical component for tests/reference; current live routing
+does not import it.
 
 ## What it does
 
@@ -46,9 +45,9 @@ does not read or filter document/bucket/project content.
 
 ## Locked affordances
 
-None of its own. GateChatPanel is a dispatcher + composing-animation
-wrapper; the locked affordances live on the `GateChatRail` it composes
-(role-gated dismiss / book-a-call) and on the `SignUpWidget` form.
+None of its own. GateChatPanel is a legacy dispatcher +
+composing-animation wrapper; the historical affordances lived on the
+`GateChatRail` it composed and on the `SignUpWidget` form.
 
 ## Events
 
@@ -60,19 +59,19 @@ to `localStorage`.
 
 ## How to mount
 
-`ChatColumn` mounts it when the gate is active:
+Legacy-only example:
 
 ```tsx
 import { GateChatPanel } from "@/components/chat-widgets/GateChatPanel/GateChatPanel";
 
-if (gateActive) return <GateChatPanel role="anonymous" scope={{ type: "none" }} />;
+<GateChatPanel role="anonymous" scope={{ type: "none" }} />
 ```
 
-It must be rendered inside the onboarding session + ChatStore providers
-(the `OnboardingShell` tree).
+The live `ChatColumn` must not mount this component for sign-in; it renders
+`ConversationFlow` and receives explicit overlay booleans from
+`OnboardingShell`.
 
 ## LLM tools
 
-None — see `no-llm.md`. GateChatPanel is a status-driven dispatcher with no
-first-class LLM-drivable action; the gate flow is user-driven (Sign Up /
-dismiss / book-a-call) and the actionable surface is `GateChatRail`.
+None — see `no-llm.md`. GateChatPanel is a legacy status-driven dispatcher
+with no first-class LLM-drivable action.

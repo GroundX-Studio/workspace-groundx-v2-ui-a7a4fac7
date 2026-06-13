@@ -630,6 +630,28 @@ describe("ChatStoreContext", () => {
       });
     });
 
+    it("ensures scoped product sessions as non-onboarding even when they start from the shared store", async () => {
+      const { result } = renderHook(() => useChatStore(), { wrapper });
+      let workspaceId = "";
+      act(() => {
+        workspaceId = result.current.newSession({
+          title: "Workspace",
+          scopeKey: "scope:bucket:28454",
+        });
+      });
+
+      await waitFor(() => {
+        const matched = ensureServerChatSession.mock.calls.find((c) => c[0]?.id === workspaceId);
+        expect(matched).toBeDefined();
+        expect(matched![0]).toMatchObject({
+          id: workspaceId,
+          title: "Workspace",
+          isOnboarding: false,
+        });
+      });
+      expect(ensureAnonSession).not.toHaveBeenCalled();
+    });
+
     it("does not fire when ChatStoreProvider is mounted in ephemeral mode (tests opt out)", async () => {
       const ephemeralWrapper = ({ children }: { children: React.ReactNode }) => (
         withChatStoreApi(<ChatStoreProvider ephemeral>{children}</ChatStoreProvider>)

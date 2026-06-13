@@ -21,7 +21,6 @@ import {
   WHITE,
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
-import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 
 import { CODE_FOR, PLUGINS } from "./integrateConnectors";
 
@@ -68,8 +67,14 @@ export interface IntegrateProps {
 export const Integrate: FC<IntegrateProps> = ({ scope, role }) => {
   void scope; // scope-independent today; accepted for contract conformance.
   const { state: appMode } = useAppMode();
-  const { state: session } = useOnboardingSession();
-  const scenario = appMode.scenario ?? session.scenario ?? "utility";
+  const scenario = appMode.scenario;
+  const sampleLabel = scenario === "utility"
+    ? "Utility sample"
+    : scenario === "loan"
+      ? "Loan sample"
+      : scenario === "solar"
+        ? "Solar sample"
+        : "current GroundX scope";
   const [tab, setTab] = useState<"curl" | "python" | "typescript">("curl");
 
   const handleTab = (_event: SyntheticEvent, value: "curl" | "python" | "typescript") => setTab(value);
@@ -87,8 +92,7 @@ export const Integrate: FC<IntegrateProps> = ({ scope, role }) => {
         </Typography>
         <Typography variant="h4">Ship the same answer into your stack.</Typography>
         <Typography variant="body2" sx={{ color: BODY_TEXT }}>
-          The {scenario === "utility" ? "Utility" : scenario === "loan" ? "Loan" : "Solar"} sample becomes a live
-          GroundX project the moment you sign in.
+          The {sampleLabel} is ready to connect to the workflows around it.
         </Typography>
       </Stack>
 

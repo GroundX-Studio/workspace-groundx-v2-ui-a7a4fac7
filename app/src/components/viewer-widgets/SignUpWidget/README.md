@@ -1,15 +1,26 @@
 # SignUpWidget
 
-Viewer-slot widget that hosts the GroundX sign-up form. The chat-side
-companion is `chat-widgets/GateChatRail/`.
+Viewer-slot widget that hosts the GroundX sign-up surface while the
+active chat remains mounted in `ConversationFlow`.
+
+## Viewer chrome
+
+Policy: `framed`
+
+Content mode: `centered-panel`
+
+`OnboardingShell` wraps SignUpWidget with `ViewerWidgetFrame`, which owns
+Close sign-in / Back to samples chrome. SignUpWidget owns the identity form,
+magic-link/SSO shortcuts, Book a call content action, validation, submit
+pipeline, and post-commit Continue action.
 
 ## What it does
 
-Renders the sign-up form in the viewer pane while the gate is open.
-Owns: form field rendering + validation, the submit pipeline
-(register → claim → promote → commitGate), and the in-flight loading
-state. The chat-side rail carries the preamble, dismiss link, and
-book-a-call CTA.
+Renders sign-in in the viewer pane while the gate is open or the
+`/onboarding/signup` route is active. Owns: preamble copy, book-a-call,
+magic-link/SSO shortcuts, form field rendering + validation, the submit
+pipeline (register → claim → promote → commitGate), and the in-flight
+loading state.
 
 ## Why split from `GateView`?
 
@@ -20,10 +31,10 @@ viewer (canvas) kept rendering whatever surface the user had just
 left — a sample doc, the F1 picker, etc. Users saw a sample PDF
 behind a sign-up form. That was the ARCH-05 motivating bug.
 
-The fix: split the surface across the two slot widgets. Viewer hosts
-the form; chat hosts the preamble + dismiss + book-a-call. The
-OnboardingShell wires both whenever `gate.status === "open"` so the
-viewer flips to the form INSTEAD of leaving the sample in place.
+The current fix keeps the surface in the viewer slot. `OnboardingShell`
+renders `SignUpWidget` as a viewer overlay and passes `signInActive` to
+`ChatColumn`, so the chat remains the same `ConversationFlow` instead
+of switching to a separate gate chat.
 
 ## Props
 
@@ -31,6 +42,8 @@ viewer flips to the form INSTEAD of leaving the sample in place.
 | ------- | -------------------------- | :------: | ----------------------------------------------------------------------------------------------------------- |
 | `role`  | `WidgetRole`               |    ✅    | `"anonymous"` \| `"member"`. Widget-contract prop, forward-looking. Locks NO affordance here (see below).    |
 | `scope` | `WidgetScope`              |    ✅    | Always `{ type: "none" }` — sign-up is not document-scoped. Declared for the contract; never read.           |
+| `onBookCall` | `() => void`          |          | Host callback for opening the Calendly viewer overlay.                                                      |
+| `onContinueIntegrate` | `() => void` |          | Host callback for post-commit Continue. Defaults to `advanceFrame("f7")`.                                   |
 
 `WidgetRole` / `WidgetScope` come from `@groundx/shared`.
 
@@ -47,24 +60,9 @@ In this exact order on a happy-path submit:
 4. `commitGate("register")` (from `OnboardingSessionContext`) — only
    when a gate is **awaiting commit** (`gate.status === "open"` or
    `"dismissed"`); tells the gate state machine the user committed via
-   the register path so the `GateChatRail` shows the "WELCOME — YOU'RE
-   SIGNED IN" success card. When the gate is `idle`, register + promote
+   the register path so the committed state renders. When the gate is `idle`, register + promote
    still run but the gate is untouched. **Sourced from gate-state, not
    from `role`** — see "Locked affordances" below.
-
-## What this widget intentionally does NOT do
-
-- **The preamble** ("Bring your own data" / "Save your work") — lives
-  in `GateChatRail` because it explains *why* sign-up is happening
-  and that explanation is a chat concern, not a form concern.
-- **The book-a-call CTA** — lives in `GateChatRail` (chat-side
-  affordance per the wireframe).
-- **The "← keep exploring" dismiss link** — lives in `GateChatRail`
-  (chat-side, same reason).
-- **The committed-state success card with Continue-to-Integrate CTA**
-  — lives in `GateChatRail`. This widget shows the FORM. When
-  `gate.status === "committed"`, the OnboardingShell unmounts this
-  widget (the user doesn't need to re-see the form they just submitted).
 
 ## Scope
 
@@ -98,18 +96,23 @@ Note the two role concerns this widget does NOT mix up:
   commitGate. See § "Submit pipeline" above for the exact order +
   failure routing.
 - Validation failures stay local to the form; no host callback fires.
+- Magic-link and SSO shortcuts commit the gate in demo mode.
+- Book-a-call routes through `onBookCall` when provided.
 
 ## How to mount
 
 ```tsx
 import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
 
-// OnboardingShell mounts this in the viewer pane while gate.status === "open"
+// OnboardingShell mounts this as a viewer overlay while sign-in is active
 // (anonymous-only — availability is decided here, at the mount site).
-<SignUpWidget role="anonymous" scope={{ type: "none" }} />
+<SignUpWidget
+  role="anonymous"
+  scope={{ type: "none" }}
+  onBookCall={handleSignInBookCall}
+  onContinueIntegrate={handleSignInContinue}
+/>
 ```
-
-The chat-side `GateChatRail` is mounted in parallel by the same shell.
 
 ## LLM tools
 

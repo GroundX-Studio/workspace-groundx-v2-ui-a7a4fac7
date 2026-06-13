@@ -78,6 +78,7 @@ function installLiveExtract() {
 
 import { __resetEnsuredChatSessions } from "@/api/chatSessions";
 import { Extract } from "@/components/viewer-widgets/Extract/Extract";
+import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
@@ -158,6 +159,18 @@ const ExtractView: FC = () => {
     [docId],
   );
   return <Extract scope={scope} role={widgetRole} />;
+};
+
+const SignUpSurfaceHost: FC = () => {
+  const { state } = useOnboardingSession();
+  if (
+    state.gate.status !== "open" &&
+    state.gate.status !== "dismissed" &&
+    state.gate.status !== "committed"
+  ) {
+    return null;
+  }
+  return <SignUpWidget role="anonymous" scope={{ type: "none" }} />;
 };
 
 /**
@@ -771,12 +784,13 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   // ── f3a-save-signin-gate-handoff ─────────────────────────────────
 
-  it("anonymous Save → 401 opens the F6 gate inline with the save-schema preamble", async () => {
+  it("anonymous Save → 401 opens the sign-in viewer with the save-schema preamble", async () => {
     const user = userEvent.setup();
     saveTemplate.mockRejectedValueOnce(Object.assign(new Error("unauthenticated"), { status: 401 }));
     renderWithOnboardingProviders(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
+        <SignUpSurfaceHost />
         <ExtractView />
       </>,
       { initialFrame: "f3a", initialScenario: "utility", api: { template: { saveTemplate } } },
@@ -787,10 +801,12 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     });
     await user.click(screen.getByTestId("extract-topbar-save"));
     // The legacy `extract-topbar-status` no longer carries the "sign in"
-    // nudge — instead the F6 gate opens inline in chat with the
-    // cause-specific preamble.
-    const preamble = await screen.findByTestId("gate-rail-preamble");
-    expect(preamble).toHaveTextContent("Sign in to save this schema");
+    // nudge. The sign-in surface now opens in the viewer with the
+    // cause-specific preamble while chat remains mounted.
+    const surface = await screen.findByTestId("sign-up-viewer-surface");
+    expect(surface).toHaveTextContent("Sign in to save this schema");
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
   });
 
   it("anonymous Save → gate → commit retries the save and lands on F1 with the schema pre-attached", async () => {

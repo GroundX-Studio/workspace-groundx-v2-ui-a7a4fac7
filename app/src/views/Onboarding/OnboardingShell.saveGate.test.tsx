@@ -13,8 +13,8 @@
  * `OnboardingSession.openGate("save")` — opening the gate on the live canvas.
  *
  * This drives a real chat reply carrying the chip, clicks it, and asserts the
- * canvas swaps to the gate value-prop (the gate is open) — proving the path is
- * reachable on the live f5 surface with no per-frame view wiring.
+ * sign-in viewer overlay opens while the chat remains mounted — proving the
+ * path is reachable on the live f5 surface with no per-frame view wiring.
  */
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -68,8 +68,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("OnboardingShell — save_to_account chip opens the gate on the live f5 canvas", () => {
-  it("clicking the tool:save_to_account chip opens the sign-in gate (canvas → gate value-prop)", async () => {
+describe("OnboardingShell — save_to_account chip opens sign-in on the live f5 canvas", () => {
+  it("clicking the tool:save_to_account chip opens sign-in as a viewer overlay", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, {
       initialFrame: "f5",
@@ -81,7 +81,7 @@ describe("OnboardingShell — save_to_account chip opens the gate on the live f5
     });
 
     // Pre-condition: the gate is NOT open on the live Interact canvas.
-    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument();
 
     // Send a chat message → the mocked reply carries the save chip.
     const input = (await screen.findByTestId("chat-live-input")).querySelector("input")!;
@@ -90,8 +90,10 @@ describe("OnboardingShell — save_to_account chip opens the gate on the live f5
 
     // The save chip surfaces beneath the assistant turn…
     const chip = await screen.findByTestId("suggested-action-chip-tool:save_to_account");
-    // …and clicking it opens the sign-in gate on the live canvas.
+    // …and clicking it opens sign-in on the live viewer while chat stays mounted.
     await user.click(chip);
-    expect(await screen.findByTestId("gate-value-prop")).toBeInTheDocument();
+    expect(await screen.findByTestId("sign-up-viewer-surface")).toBeInTheDocument();
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
   });
 });

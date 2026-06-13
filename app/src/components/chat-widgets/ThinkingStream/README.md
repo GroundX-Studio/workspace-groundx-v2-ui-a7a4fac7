@@ -50,8 +50,8 @@ only), and a single-fire `onDone` callback.
   feed it parsed-progress events from the BFF. The widget is purely
   presentational + state-keeping.
 - **The "GroundX is thinking…" header / typing indicator.** Different
-  widget (`GateChatPanel`'s `TypingIndicator` for the gate; future
-  steady-mode upload progress shell). ThinkingStream picks up after
+  widget (legacy `GateChatPanel`'s `TypingIndicator` for the retired gate;
+  future steady-mode upload progress shell). ThinkingStream picks up after
   the typing indicator hands off.
 
 ## sessionStorage key shape

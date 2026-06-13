@@ -600,6 +600,45 @@ describe("listChatMessages (RT-01)", () => {
     expect(messages[1]).toMatchObject({ id: "m2", role: "assistant", content: "hello" });
   });
 
+  it("uses supplied product-session metadata when hydration self-ensures the row", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          chatSessionId: "chat-workspace",
+          ownerUserId: "acct-1",
+          ownerAnonId: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ messages: [] }),
+      });
+
+    const messages = await listChatMessages("chat-workspace", {
+      onboardingSessionId: "chat-workspace",
+      title: "Workspace",
+      isOnboarding: false,
+      activeEntityKey: null,
+    });
+
+    expect(messages).toEqual([]);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const [ensurePath, ensureInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(ensurePath).toBe("/api/chat-sessions");
+    expect(JSON.parse((ensureInit as RequestInit).body as string)).toMatchObject({
+      id: "chat-workspace",
+      onboardingSessionId: "chat-workspace",
+      title: "Workspace",
+      isOnboarding: false,
+      activeEntityKey: null,
+    });
+    const [messagesPath] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(messagesPath).toBe("/api/chat-sessions/chat-workspace/messages");
+  });
+
   it("URL-encodes the session id so prefixed ids (e.g. c-<uuid>) round-trip safely", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,

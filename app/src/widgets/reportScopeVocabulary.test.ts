@@ -13,8 +13,6 @@ const guarded = [
   "test/makeFakeApi.ts",
   "test/makeFakeApi.test.ts",
   "views/Onboarding/OnboardingShell.tsx",
-  "widgets/reportFixtures.ts",
-  "widgets/reportFixtures.test.ts",
 ];
 
 describe("Smart Report product scope vocabulary", () => {

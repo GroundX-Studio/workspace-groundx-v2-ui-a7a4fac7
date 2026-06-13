@@ -69,9 +69,12 @@ describe("makeFakeApi", () => {
       }),
     ).resolves.toMatchObject({
       gated: false,
+      // No client-side fixture (the locked no-seed decision): the fake returns
+      // the graceful no-template/empty render. `report-default-template` extends
+      // the fake to return the seeded default template's sections for utility.
       report: {
         templateId: "rt-utility-ic-brief",
-        sections: expect.arrayContaining([expect.objectContaining({ sectionId: "billing_summary" })]),
+        sections: [],
       },
     });
     await expect(

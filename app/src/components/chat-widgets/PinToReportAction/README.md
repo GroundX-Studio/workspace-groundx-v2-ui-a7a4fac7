@@ -4,12 +4,20 @@
 
 ## What it does
 
-Renders the `📌 pin to report` affordance carried on every assistant turn.
-Clicking it pins the turn's **literal text** (#12 — no auto-variable inference)
-as a report section via the ChatStore `pinToReport` action — the
-**existing-or-new** template UX (NO silent auto-create). The action returns a
-`PinResolution` (`prompt-new-only` / `single-existing` / `prompt-existing-or-new`)
-which the affordance surfaces as the existing-or-new prompt.
+Renders the `📌 pin to report` affordance. Clicking it pins the turn's **literal
+text** (#12 — no auto-variable inference) as a report section via the ChatStore
+`pinToReport` action — the **existing-or-new** template UX (NO silent
+auto-create). The action returns a `PinResolution` (`prompt-new-only` /
+`single-existing` / `prompt-existing-or-new`) which the affordance surfaces as a
+confirmation.
+
+**report-pin-affordance:** it is OPT-IN and COMPACT, not carried on every turn.
+It renders only on genuine answer turns (`LiveTurn.pinnable === true`), hosted by
+the internal `components/conversation/AnswerActions` control on the answer's
+affordance row — NOT a full-width pill, and never on agent narration / scripted /
+error turns. `variant="compact"` (the AnswerActions host) renders a single 📌
+icon button with a TRANSIENT confirmation; `variant="pill"` (default) is the
+legacy labelled pill.
 
 ## Props
 
@@ -25,6 +33,8 @@ interface PinToReportActionProps {
   turnText: string;
   /** True while the turn is still streaming — dims + `aria-disabled`s the button and queues clicks. */
   streaming?: boolean;
+  /** `"compact"` = a single 📌 icon button + transient confirmation (hosted in AnswerActions); `"pill"` (default) = the legacy labelled pill. */
+  variant?: "pill" | "compact";
 }
 ```
 

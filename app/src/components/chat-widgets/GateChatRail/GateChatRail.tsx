@@ -1,9 +1,9 @@
 /**
- * GateChatRail — chat-slot half of the sign-up surface.
+ * GateChatRail — legacy chat-slot half of the retired sign-up surface.
  *
- * The viewer-side half is `SignUpWidget`. Together they replace the
- * old `GateView` monolith. See `SignUpWidget/README.md` for the full
- * split rationale.
+ * The live sign-in path now uses `SignUpWidget` in the viewer overlay while
+ * `ConversationFlow` remains mounted in chat. This component remains for
+ * legacy tests/tool metadata.
  *
  * Renders:
  *   - When `gate.status === "open"`:
@@ -19,8 +19,8 @@
  *   - F6 (gate) wireframe: preamble per trigger; book-a-call CTA;
  *     dismiss link.
  *   - F6 committed (post-register) wireframe: WELCOME card + Continue.
- *   - F6a (book a call): handled by sibling `BookingStatusCard`
- *     widget; this rail just sets the URL param that triggers it.
+ *   - F6a (book a call): handled by the viewer-side `BookCallView`
+ *     overlay; this rail just sets the URL param that triggers it.
  */
 
 import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";

@@ -1,17 +1,31 @@
 # GateValueProp
 
-**Slot:** `viewer-widgets` · **Status:** shipped
+**Slot:** `viewer-widgets` · **Status:** legacy
 
-The **canvas (viewer-slot) half of the F6 sign-up gate**. Sibling to
-`chat-widgets/GateChatRail`, which owns the sign-up doors.
+The retired canvas value-prop companion for the old F6 sign-up gate. The live
+sign-in path now renders `SignUpWidget` as the viewer overlay and keeps
+`ConversationFlow` mounted in chat.
+
+## Viewer chrome
+
+Policy: `hostless-exception`
+
+Content mode: `centered-panel`
+
+Owner: OnboardingShell
+
+Host proof: `app/src/views/Onboarding/OnboardingShell.test.tsx`
+
+GateValueProp is a legacy reference widget retained for tests and historical
+context. It is not mounted by the live onboarding viewer host; the live owner
+is `OnboardingShell` wrapping `SignUpWidget` with `ViewerWidgetFrame`.
 
 ## What it does
 
-When the gate opens, the chat rail (`GateChatRail`) presents the three doors —
-email "send magic link" · SSO · book-a-call — and the canvas mounts this widget:
-an attractive, on-brand pitch of the GroundX value proposition. It replaced the
-old in-canvas account form (P1, 2026-05-29) so sign-up is a chat moment and the
-canvas reinforces *why* it's worth an account. Presentational only.
+Historically, when the gate opened, the chat rail (`GateChatRail`) presented
+the sign-in doors and the canvas mounted this value-prop pitch. It is retained
+for legacy tests/reference, not mounted by the live onboarding sign-in path.
+Presentational only.
 
 ## Props
 
@@ -35,11 +49,9 @@ for contract conformance. `role` is surfaced as `data-role` on the root.
 interactive controls, so there is nothing to lock by role; it renders
 identically under any role it is handed.
 
-Its matrix availability is **anonymous-only** (gate context — a signed-in
-`member` never sees the sign-up gate). Per the widget-access matrix,
-**availability is enforced at the MOUNT SITE** (OnboardingShell, driven by
-gate-state), NOT by a prop inside the widget. The `role` prop is carried
-only for widget-contract conformance and future roles.
+Its matrix availability is **legacy anonymous-only**. The live mount site uses
+`SignUpWidget`; this component keeps `role` only for widget-contract
+conformance and historical tests.
 
 ## Scope
 
@@ -49,23 +61,21 @@ scope required by the widget contract.
 
 ## Events
 
-None. The widget emits no events and takes no callbacks — the actionable gate
-affordances (commit / dismiss) live in the sibling `GateChatRail`.
+None. The widget emits no events and takes no callbacks.
 
 ## How to mount
 
-`OnboardingShell` mounts `<GateValueProp role={role} scope={{ type: "none" }} />`
-in the canvas slot whenever the sign-up surface is active
-(`gate.status === "open" | "committed"`), in place of the previous frame view.
-Because the mount is gated on the sign-up surface (an anonymous-only state),
-the **mount site enforces the anonymous-only availability** — the widget
-itself carries `role` only for contract conformance. `role` comes from the
-session (`useWidgetRole`); `scope` is always the explicit "none" scope.
+Legacy-only example:
+
+```tsx
+<GateValueProp role="anonymous" scope={{ type: "none" }} />
+```
+
+The live onboarding shell mounts `SignUpWidget` for sign-in instead.
 
 ## No LLM tools
 
-Presentational — no tools. See `no-llm.md`. The gate's `commit_gate` /
-`dismiss_gate` tools live on `GateChatRail`.
+Presentational — no tools. See `no-llm.md`.
 
 ## Copy
 

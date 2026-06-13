@@ -3,6 +3,17 @@
 **Slot:** `viewer-widgets` · **Frame:** `f3` / `f3a` / `f4` · **Status:** Phase 3a
 (2026-05-30-onboarding-shell-shared-view)
 
+## Viewer chrome
+
+Policy: `framed`
+
+Content mode: `padded-scroll`
+
+`ScopedCanvas` wraps Extract in `ViewerWidgetFrame`. The widget owns
+workbench-local controls, including field selection, pane tabs, Save/export,
+and the `extract-topbar-back` content action that moves Design back to
+Results. That back action is not viewer-frame close/back chrome.
+
 ## What it does
 
 The production **extraction workbench** — the live schema/values/geometry view

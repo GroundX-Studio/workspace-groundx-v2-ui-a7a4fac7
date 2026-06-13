@@ -210,6 +210,28 @@ describe("ChatColumn", () => {
     expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
   });
 
+  // REGRESSION (2026-06-12): the report BUILDER frame (f4a) was missing from
+  // the `isInScenarioJourney` frame whitelist, so the chat fell through to the
+  // static IdleChatPlaceholder on the builder — a viewer surface silently
+  // disabling the production chat. f4a is part of the Analyze journey (like f4,
+  // the render) and MUST keep the working conversation. Guards backsliding the
+  // brittle frame-enumeration.
+  it("on F4a (report builder), keeps the working conversation chat (not the idle placeholder)", () => {
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f4a", initialScenario: "utility" });
+    expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-live-input")).toBeInTheDocument();
+    expect(screen.queryByText(/Ask anything about the sample/i)).not.toBeInTheDocument();
+  });
+
+  // Sibling pin: the report RENDER frame (f4) already kept the chat; this pins
+  // that BOTH report surfaces (render f4 + builder f4a) keep it, so a future
+  // edit can't drop one.
+  it("on F4 (report render), keeps the working conversation chat", () => {
+    renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f4", initialScenario: "utility" });
+    expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-live-input")).toBeInTheDocument();
+  });
+
   it("on F2 with a scenario, renders the wireframe conversation chrome", () => {
     renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     // Wireframe markers: a header that shows the FILE NAME, the scenario
@@ -805,7 +827,7 @@ describe("ChatColumn", () => {
     });
   });
 
-  it("on F6 (gate open), the chat dispatches to GateChatPanel", () => {
+  it("keeps ConversationFlow mounted for sign-in instead of dispatching to GateChatPanel", async () => {
     function GateOpener() {
       const { openGate } = useOnboardingSession();
       return (
@@ -817,18 +839,16 @@ describe("ChatColumn", () => {
     renderWithChatColumnApi(
       <>
         <GateOpener />
-        <ChatColumn role="anonymous" scope={{ type: "none" }} />
+        <ChatColumn role="anonymous" scope={{ type: "none" }} signInActive />
       </>,
       { initialFrame: "f1", initialScenario: null },
     );
     act(() => {
       screen.getByTestId("open-gate-byo").click();
     });
-    expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
-    const hasGateIndicator =
-      screen.queryByTestId("gate-typing-indicator") !== null ||
-      screen.queryByTestId("gate-rail-preamble") !== null;
-    expect(hasGateIndicator).toBe(true);
+    expect(await screen.findByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-typing-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
   });
 
   // The steady chat (non-onboarding session) is the bare ConversationFlow:

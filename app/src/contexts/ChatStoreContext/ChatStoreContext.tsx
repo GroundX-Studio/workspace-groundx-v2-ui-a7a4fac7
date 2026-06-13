@@ -79,6 +79,65 @@ export function scopeSessionKey(scope: ContentScope): string {
       return "scope:unknown";
   }
 }
+
+/**
+ * Best-effort inverse for {@link scopeSessionKey}. Product deep links (`/c/:id`)
+ * may hydrate a scoped session without its route wrapper, so the steady shell
+ * needs a read site for the persisted scope key. Complex compiled filters are
+ * intentionally treated as unavailable instead of being guessed.
+ */
+export function scopeFromSessionKey(scopeKey: string | undefined): ContentScope | null {
+  if (!scopeKey) return null;
+  const [head, rawFilter] = scopeKey.split("|", 2);
+  let filter: ContentScope["filter"] | undefined;
+  if (rawFilter) {
+    try {
+      const parsed = JSON.parse(rawFilter) as unknown;
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed) &&
+        Object.values(parsed).every(
+          (value) => typeof value === "string" || (Array.isArray(value) && value.every((v) => typeof v === "string")),
+        )
+      ) {
+        filter = parsed as ContentScope["filter"];
+      } else {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+  if (head.startsWith("scope:bucket:")) {
+    const bucketId = Number(head.slice("scope:bucket:".length));
+    return Number.isFinite(bucketId) ? { type: "bucket", bucketId, ...(filter ? { filter } : {}) } : null;
+  }
+  if (head.startsWith("scope:group:")) {
+    const groupId = Number(head.slice("scope:group:".length));
+    return Number.isFinite(groupId) ? { type: "group", groupId, ...(filter ? { filter } : {}) } : null;
+  }
+  if (head.startsWith("scope:documents:")) {
+    const encoded = head.slice("scope:documents:".length);
+    const documentIds = encoded ? encoded.split(",").filter(Boolean) : [];
+    return { type: "documents", documentIds, ...(filter ? { filter } : {}) };
+  }
+  return null;
+}
+
+export function titleForEnsure(session: ChatSession): string {
+  if (!session.scopeKey || (session.title !== "Onboarding" && session.title !== "Untitled")) {
+    return session.title;
+  }
+  const scope = scopeFromSessionKey(session.scopeKey);
+  if (!scope) return session.title;
+  if (scope.type === "bucket" && scope.filter) return "Project";
+  if (scope.type === "bucket") return "Workspace";
+  if (scope.type === "group") return "Group";
+  if (scope.type === "documents") return "Documents";
+  return session.title;
+}
+
 const ChatStoreStateContext = createContext<ChatStoreState | null>(null);
 const ChatStoreActionsContext = createContext<ChatStoreActions | null>(null);
 
@@ -491,8 +550,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         await api.chat.ensureServerChatSession({
           id: sid,
           onboardingSessionId: sid,
-          title: session.title,
-          isOnboarding: session.isOnboardingSession,
+          title: titleForEnsure(session),
+          isOnboarding: session.scopeKey ? false : session.isOnboardingSession,
           activeEntityKey: session.activeEntityKey,
         });
       } catch {
@@ -1303,6 +1362,13 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         reportOverlay: {
           ...current.reportOverlay,
           addedFields: [...current.reportOverlay.addedFields, section],
+          // Persist an explicitly-targeted template id so the render surface
+          // picks up the right template — the read↔write round-trip for
+          // `reportOverlay.templateId` (the render reads it; the pin path is its
+          // writer). NOT auto-creating a SAVED template (Pin→template = NO auto);
+          // onboarding pins pass none (no saved template yet) → unchanged. The
+          // onboarding-bootstrap writer is `report-default-template`.
+          ...(input.templateId !== undefined ? { templateId: input.templateId } : {}),
         },
         updatedAt: Date.now(),
       });

@@ -63,7 +63,7 @@ import type {
   SchemaFieldExtractionResult,
   SchemaFieldProposal,
 } from "@/contexts/ChatStoreContext/types";
-import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import type {
   ExtractedFieldValue,
@@ -150,7 +150,7 @@ export interface SchemaViewProps {
 export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: liveValues }) => {
   const api = useApi();
   const { state: appMode } = useAppMode();
-  const { state: session } = useOnboardingSession();
+  const session = useOnboardingSessionOptional()?.state;
   const { byId } = useScenarioRegistry();
   const {
     state: chatState,
@@ -163,7 +163,7 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
     appendAgentMessage,
   } = useChatStore();
 
-  const scenarioId = appMode.scenario ?? session.scenario ?? null;
+  const scenarioId = appMode.scenario ?? session?.scenario ?? null;
   const scenario = scenarioId ? byId(scenarioId) : null;
   // 2026-05-31-schemaview-live-only-extract — the live extract is the SOLE
   // source. The Extract widget passes the resolved live schema/values as props

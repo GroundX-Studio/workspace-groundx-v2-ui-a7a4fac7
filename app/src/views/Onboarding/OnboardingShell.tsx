@@ -29,14 +29,15 @@ import type { FFrame, Scenario } from "@/types/onboarding";
 
 import type { ContentScope } from "@groundx/shared";
 
-import { BookingStatusCard } from "@/components/chat-widgets/BookingStatusCard/BookingStatusCard";
-import { BookCallView } from "@/components/viewer-widgets/BookCallView/BookCallView";
-import { GateValueProp } from "@/components/viewer-widgets/GateValueProp/GateValueProp";
+import { BookCallView, type BookCallEmbedState } from "@/components/viewer-widgets/BookCallView/BookCallView";
+import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
 import { ScopedCanvas } from "@/components/layout/ScopedCanvas/ScopedCanvas";
+import { ViewerWidgetFrame } from "@/components/layout/ViewerWidgetFrame/ViewerWidgetFrame";
 import { IngestView } from "./IngestView";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { NavDebugOverlay } from "./NavDebugOverlay";
 import { isResolvedDocumentId } from "@/api/documentId";
+import { viewerOverlayFrameDescriptors } from "./viewerOverlayFrameDescriptors";
 
 // ─────────────────────────────────────────────────────────────────────
 // ARCH-06 F1 overlay animation spec (locked 2026-05-26).
@@ -84,6 +85,11 @@ const FRAME_TO_STEP: Record<FFrame, StepId> = {
   f7: "integrate",
 };
 
+// Linear journey order. The progress gate (2026-06-12) uses this to forbid
+// JUMPING AHEAD of the step the user has actually reached.
+const STEP_ORDER: StepId[] = ["ingest", "understand", "analyze", "integrate"];
+const stepRank = (s: StepId): number => STEP_ORDER.indexOf(s);
+
 function pillState(
   stepId: StepId,
   currentStep: StepId,
@@ -93,15 +99,26 @@ function pillState(
 ): StepPillState {
   if (stepId === currentStep) return "active";
   if (completed.has(stepId)) return "done-traversed";
-  // Integrate is reachable only after sign-in (post-gate).
+  // Integrate is reachable only after sign-in (post-gate). AUTH-gated, not
+  // progress-gated — a signed-in user reaches it from anywhere.
   if (stepId === "integrate" && !authSignedIn) return "disabled";
   // Understand, Analyze can't be jumped to until a sample is picked on F1 —
   // they need a scenario to render anything meaningful.
   if ((stepId === "understand" || stepId === "analyze") && !scenarioPicked) return "disabled";
+  // Progress gate (2026-06-12): you cannot jump AHEAD of the step you're on.
+  // Analyze stays disabled until the user has actually reached it (the guided
+  // flow advances them there). Without this, Report/Extract/Interact were
+  // clickable from Understand and dropped the user into a surface that can't
+  // render anything yet.
+  if (stepId === "analyze" && stepRank(currentStep) < stepRank("analyze")) return "disabled";
   return "reachable-todo";
 }
 
-function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["substeps"] {
+function analyzeSubsteps(
+  frame: FFrame,
+  gateOpen = false,
+  analyzeReached = true,
+): StepDescriptor["substeps"] {
   // P1 (2026-05-29): while the sign-up gate is open the strip sits on
   // Understand, so the Analyze bracket shows no active sub-step (otherwise
   // both Understand and Interact would read as active at once).
@@ -110,14 +127,20 @@ function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["subst
   // there).
   const extractActive = !gateOpen && (frame === "f3" || frame === "f3a");
   const interactActive = !gateOpen && (frame === "f5" || frame === "f6");
-  // The Report pill is reachable for ALL scenarios (not chapter-gated, not
-  // auth-gated) — `reportActive = false` removed. Anon previews the render
-  // surface (export/Save locked). Active on the Report frames.
+  // Report is reachable for ALL scenarios once Analyze is reached (anon
+  // previews the render surface; export/Save locked). Active on the Report
+  // frames.
   const reportActive = !gateOpen && (frame === "f4" || frame === "f4a");
+  // Progress gate (2026-06-12): the Analyze sub-pills are DISABLED until the
+  // user has reached the Analyze step — no jumping ahead from Understand. Once
+  // on/past Analyze they are reachable again (same-bracket navigation between
+  // Extract/Interact/Report). The currently active sub-pill always stays active.
+  const subState = (active: boolean): StepPillState =>
+    active ? "active" : analyzeReached ? "reachable-todo" : "disabled";
   return [
-    { id: "extract", label: "Extract", state: extractActive ? "active" : "reachable-todo" },
-    { id: "interact", label: "Interact", state: interactActive ? "active" : "reachable-todo" },
-    { id: "report", label: "Report", state: reportActive ? "active" : "reachable-todo" },
+    { id: "extract", label: "Extract", state: subState(extractActive) },
+    { id: "interact", label: "Interact", state: subState(interactActive) },
+    { id: "report", label: "Report", state: subState(reportActive) },
   ];
 }
 
@@ -131,10 +154,9 @@ function analyzeSubsteps(frame: FFrame, gateOpen = false): StepDescriptor["subst
  *   • F1 (Ingest) — the right-of-nav slot is the full-width picker
  *     (StepStrip on top, IngestView below). No chat column.
  *   • F2–F7 — the right-of-nav slot is the AppShell chat | canvas
- *     split. Chat column hosts GateChatPanel (the chat-widget at
- *     `components/chat-widgets/GateChatPanel/`); canvas hosts the
- *     active ScopedViewerWidget via `<ScopedCanvas>` (the per-frame
- *     views were retired — the shell no longer mounts them).
+ *     split. Chat column hosts ConversationFlow; canvas hosts the
+ *     active ScopedViewerWidget via `<ScopedCanvas>` and viewer
+ *     overlays such as sign-in and booking.
  *   • The F1 ↔ shell transition slides ONLY chat + canvas; the nav
  *     is stable.
  *
@@ -145,22 +167,28 @@ export const OnboardingShell: FC = () => {
   const api = useApi();
   const { state: appMode } = useAppMode();
   const widgetRole = useWidgetRole();
-  const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate, commitGate } = useOnboardingSession();
+  const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate, dismissGate, commitGate } = useOnboardingSession();
   const { state: scenarioRegistry, byId: scenarioById } = useScenarioRegistry();
   // ChatStore is read up here so the StepStrip pill state below can
   // derive from the active ViewerStep (citation clicks push a
   // doc-viewer step → nav highlight follows the canvas swap, see
   // master-viewer-session). The same `chatStoreState` is used later
   // for overlay reads + canvas-content selection.
-  const { state: chatStoreState, pushOverlay, popOverlay } = useChatStore();
+  const { state: chatStoreState, pushOverlay, popOverlay, appendAgentMessage } = useChatStore();
   const params = useParams<{ bucketId?: string; scenarioId?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const bookCallActive = new URLSearchParams(location.search).get("bookCall") === "1";
+  const [bookCallEmbedState, setBookCallEmbedState] = useState<BookCallEmbedState>("initializing");
+  const routeSignUpActive = location.pathname.endsWith("/onboarding/signup");
   const activeChatSessionEarly =
     chatStoreState.activeSessionId != null
       ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
       : null;
+  const signupOverlayEarly =
+    activeChatSessionEarly?.viewer.overlays.find((o) => o.kind === "sign-up") ?? null;
+  const signupSurfaceActiveEarly = routeSignUpActive || signupOverlayEarly != null;
+  const activeEntityKeyEarly = activeChatSessionEarly?.activeEntityKey ?? null;
   const latestViewerStepEarly = selectActiveStep(activeChatSessionEarly);
   // ViewerStep → StepStrip pill mapping. Clickable citations push a
   // `doc-viewer` step which maps to the Understand pill, so the nav
@@ -173,16 +201,16 @@ export const OnboardingShell: FC = () => {
     report: "analyze",
     integrate: "integrate",
   };
-  // P1 (2026-05-29): while the sign-up gate is OPEN (the doors + value-prop
-  // screen), the step strip sits on "Understand" — the gate is the "you've
-  // understood the value, now save it" moment. Owner-directed. Once the gate
-  // commits and the user continues, normal step derivation resumes.
   const currentStep: StepId =
-    session.gate.status === "open"
-      ? "understand"
+    signupSurfaceActiveEarly && session.scenario == null
+      ? "ingest"
       : (latestViewerStepEarly && VIEWER_STEP_KIND_TO_STEP_ID[latestViewerStepEarly.kind]) ??
         FRAME_TO_STEP[session.currentFrame];
-  const isF1 = session.currentFrame === "f1" && !bookCallActive;
+  const isF1 = session.currentFrame === "f1" && !bookCallActive && !signupSurfaceActiveEarly;
+
+  useEffect(() => {
+    if (bookCallActive) setBookCallEmbedState("initializing");
+  }, [bookCallActive]);
 
   // -- URL ↔ surface sync ----------------------------------------
   //
@@ -208,9 +236,15 @@ export const OnboardingShell: FC = () => {
   const pickScenarioRef = useRef(pickScenario);
   const openGateRef = useRef(openGate);
   const advanceFrameRef = useRef(advanceFrame);
+  const activeScenarioRef = useRef(session.scenario);
+  const activeEntityKeyRef = useRef(activeEntityKeyEarly);
+  const appScenarioRef = useRef(appMode.scenario);
   pickScenarioRef.current = pickScenario;
   openGateRef.current = openGate;
   advanceFrameRef.current = advanceFrame;
+  activeScenarioRef.current = session.scenario;
+  activeEntityKeyRef.current = activeEntityKeyEarly;
+  appScenarioRef.current = appMode.scenario;
 
   // `master-viewer-session` Phase 2 — overlay actions referenced
   // via refs so the URL→state effect can call them without listing
@@ -243,15 +277,21 @@ export const OnboardingShell: FC = () => {
       // this branch returned early without it — a navigate from
       // /onboarding/signup → a sample URL left the overlay stuck).
       popOverlayRef.current("sign-up");
-      pickScenarioRef.current(params.scenarioId as Scenario);
+      const targetEntityKey = `sample:${params.scenarioId}`;
+      const sampleAlreadyActive =
+        activeScenarioRef.current === params.scenarioId ||
+        activeEntityKeyRef.current === targetEntityKey ||
+        appScenarioRef.current === params.scenarioId;
+      if (!sampleAlreadyActive) {
+        pickScenarioRef.current(params.scenarioId as Scenario);
+      }
       return;
     }
     if (path.endsWith("/onboarding/signup")) {
       // `master-viewer-session` Phase 2 — overlay is now the source of
-      // truth for the sign-up surface. The legacy `openGate("byo")`
-      // call STAYS for now because the chat-side `GateChatPanel`
-      // (`components/chat-widgets/GateChatPanel/`) still reads
-      // `gate.status` (Phase 6 migrates that side too).
+      // truth for the sign-up surface. `openGate("byo")` keeps lifecycle
+      // analytics in sync, but it no longer swaps the chat column out of
+      // ConversationFlow.
       pushOverlayRef.current({ kind: "sign-up", state: "pending" });
       openGateRef.current("byo");
       return;
@@ -259,8 +299,8 @@ export const OnboardingShell: FC = () => {
     if (path === "/onboarding" || path === "/onboarding/") {
       // Picker. advanceFrame("f1") deactivates any entity AND clears
       // the legacy signupOpen + gate state. Pop the sign-up overlay
-      // so the canvas-side overlay disappears in lockstep with the
-      // chat-side reset.
+      // so the viewer-side overlay disappears in lockstep with the
+      // route/session reset.
       popOverlayRef.current("sign-up");
       advanceFrameRef.current("f1");
     }
@@ -301,6 +341,11 @@ export const OnboardingShell: FC = () => {
   const steps: StepDescriptor[] = useMemo(() => {
     const signedIn = appMode.authState === "signed-in";
     const scenarioPicked = session.scenario != null;
+    // Analyze is "reached" once the user is on/past it, OR has already
+    // completed it (so a citation-click that resets currentStep to Understand
+    // doesn't re-lock a bracket the user already traversed).
+    const analyzeReached =
+      stepRank(currentStep) >= stepRank("analyze") || completedSteps.has("analyze");
     return [
       { id: "ingest", label: "1 Ingest", state: pillState("ingest", currentStep, completedSteps, signedIn, scenarioPicked) },
       { id: "understand", label: "2 Understand", state: pillState("understand", currentStep, completedSteps, signedIn, scenarioPicked) },
@@ -308,7 +353,7 @@ export const OnboardingShell: FC = () => {
         id: "analyze",
         label: "Analyze",
         state: pillState("analyze", currentStep, completedSteps, signedIn, scenarioPicked),
-        substeps: analyzeSubsteps(session.currentFrame, session.gate.status === "open"),
+        substeps: analyzeSubsteps(session.currentFrame, session.gate.status === "open", analyzeReached),
       },
       { id: "integrate", label: "4 Integrate", state: pillState("integrate", currentStep, completedSteps, signedIn, scenarioPicked) },
     ];
@@ -343,29 +388,40 @@ export const OnboardingShell: FC = () => {
   // WF-01 C3 (2026-05-28). Sub-pill clicks (Extract / Interact / Report)
   // route directly to the corresponding F-frame.
   // 2026-05-29-smart-report-screen Phase 1 — Report is now reachable for all
-  // scenarios and routes to f4 (the render surface), no longer mis-routed to
-  // f7 (Integrate).
+  // scenarios. report-empty-state: Report routing is TEMPLATE-AWARE — a present
+  // report template id → the render surface (f4); absent → the empty builder
+  // (f4a), the new-customer norm (existing-or-new UX). Extract/Interact are
+  // unconditional.
   const handleSubstepClick = useCallback(
     (subId: "extract" | "interact" | "report") => {
       if (session.scenario == null) return;
-      const frameBySub: Record<typeof subId, FFrame> = {
+      if (subId === "report") {
+        const activeReportSession =
+          chatStoreState.activeSessionId != null
+            ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
+            : undefined;
+        advanceFrame(activeReportSession?.reportOverlay.templateId ? "f4" : "f4a");
+        return;
+      }
+      const frameBySub: Record<"extract" | "interact", FFrame> = {
         extract: "f3",
         interact: "f5",
-        report: "f4",
       };
       advanceFrame(frameBySub[subId]);
     },
-    [advanceFrame, session.scenario],
+    [advanceFrame, session.scenario, chatStoreState],
   );
 
   // F6a — Book a Call · Calendly embed.
-  // Activated by `?bookCall=1` in the URL (set by the GateChatRail's
-  // Book-a-call CTA). Lives on the same route as F2-F7 so all back-
+  // Activated by `?bookCall=1` in the URL (set by the nav CTA, the
+  // sign-in viewer, or the book_call tool). Lives on the same route
+  // as F2-F7 so all back-
   // button / reload semantics work out of the box: the URL is the
-  // source of truth. When the param is present we override BOTH the
-  // canvas (Calendly scheduler) and the gate chat (BookingStatusCard).
-  // The rest of the shell stays put — StepStrip remains visible on
-  // top, the nav stays mounted in its compact/expanded state.
+  // source of truth. When the param is present we push a viewer overlay
+  // for Calendly and keep the active chat timeline mounted; booking
+  // narration arrives as normal chat messages. The rest of the shell
+  // stays put — StepStrip remains visible on top, the nav stays mounted
+  // in its compact/expanded state.
   const clearBookCallParam = useCallback(
     (replace = false) => {
       const nextParams = new URLSearchParams(location.search);
@@ -383,32 +439,128 @@ export const OnboardingShell: FC = () => {
     clearBookCallParam(true);
   }, [clearBookCallParam, commitGate]);
 
-  // `master-viewer-session` Phase 2 — gate-as-overlay. The sign-up
-  // surface is now `viewer.overlays.find(o => o.kind === "sign-up")`.
-  // The legacy `gate.status === "open"` check is preserved transitionally
-  // (Phase 6 moves the chat-side off it too) so a committed identity
-  // still mounts `<SignUpWidget />` for the post-commit confirmation
-  // beat. New URL-driven flows push/pop the overlay; ExtractView's
-  // 401 path will push an overlay (Phase 5/6 cleanup).
-  //
   // Canvas precedence:
-  //   1. bookCall=1                → BookCallView (highest; user opted into calendar from inside gate)
-  //   2. sign-up overlay present   → SignUpWidget renders on top of underlying step
-  //   3. gate.status === committed → SignUpWidget (transitional; chat shows confirmation)
-  //   4. currentFrame switch       → IngestView / UnderstandView / ExtractView / ...
+  //   1. bookCall=1                → BookCallView overlay on the active viewer
+  //   2. sign-up overlay/route     → SignUpWidget overlay on the active viewer
+  //   3. currentFrame/viewer step  → ScopedCanvas / ingest picker
   const activeChatSession =
     chatStoreState.activeSessionId != null
       ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
       : null;
+
+  useEffect(() => {
+    if (bookCallActive) {
+      pushOverlay({ kind: "book-call" });
+      return;
+    }
+    popOverlay("book-call");
+  }, [bookCallActive, popOverlay, pushOverlay]);
+
+  const appendAgentMessageRef = useRef(appendAgentMessage);
+  appendAgentMessageRef.current = appendAgentMessage;
+  const chatStoreStateRef = useRef(chatStoreState);
+  chatStoreStateRef.current = chatStoreState;
+  const bookingNarrationKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const activeSessionId = chatStoreState.activeSessionId;
+    if (!bookCallActive || !activeSessionId) {
+      bookingNarrationKeyRef.current = null;
+      return undefined;
+    }
+    const narrationKey = `${activeSessionId}:${location.pathname}:book-call`;
+    if (bookingNarrationKeyRef.current === narrationKey) return undefined;
+    bookingNarrationKeyRef.current = narrationKey;
+
+    const schedule = [
+      {
+        delay: 180,
+        text: "I'm opening the engineer booking calendar in the viewer now.",
+      },
+      {
+        delay: 760,
+        text: "Your conversation stays here while you choose a time.",
+      },
+      {
+        delay: 1380,
+        text: "Bring questions about your document type, volume, accuracy goals, where GroundX fits, or pilot scope.",
+      },
+    ];
+    const timers = schedule.map(({ delay, text }) =>
+      window.setTimeout(() => {
+        const latestState = chatStoreStateRef.current;
+        const latestSession = latestState.activeSessionId
+          ? latestState.sessions.get(latestState.activeSessionId)
+          : null;
+        const alreadyInTimeline = latestSession?.messages.some(
+          (message) => message.role === "assistant" && message.content === text,
+        );
+        if (!alreadyInTimeline) appendAgentMessageRef.current(text);
+      }, delay),
+    );
+
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+      if (bookingNarrationKeyRef.current === narrationKey) {
+        bookingNarrationKeyRef.current = null;
+      }
+    };
+  }, [bookCallActive, chatStoreState.activeSessionId, location.pathname]);
   const signupOverlay =
     activeChatSession?.viewer.overlays.find((o) => o.kind === "sign-up") ?? null;
-  // Transitional bridge: until Phase 6 migrates the chat-side gate
-  // off `gate.status`, render the SignUpWidget when the legacy gate
-  // is open OR committed (intent-driven flows still flip `gate.status`
-  // imperatively via `openGate(...)`). New flows push the overlay.
-  const legacyGateOpenOrCommitted =
-    session.gate.status === "open" || session.gate.status === "committed";
-  const signupSurfaceActive = signupOverlay != null || legacyGateOpenOrCommitted;
+  const signupSurfaceActive = routeSignUpActive || signupOverlay != null;
+
+  const signInNarrationKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const activeSessionId = chatStoreState.activeSessionId;
+    if (!signupSurfaceActive || bookCallActive || !activeSessionId) {
+      signInNarrationKeyRef.current = null;
+      return undefined;
+    }
+    const trigger =
+      session.gate.status === "open" || session.gate.status === "dismissed"
+        ? session.gate.trigger
+        : "byo";
+    const narrationKey = `${activeSessionId}:${location.pathname}:sign-in:${trigger}`;
+    if (signInNarrationKeyRef.current === narrationKey) return undefined;
+    signInNarrationKeyRef.current = narrationKey;
+
+    const first =
+      trigger === "byo"
+        ? "I opened sign-in in the viewer so you can bring your own documents into this same session."
+        : "I opened sign-in in the viewer and kept this conversation active.";
+    const schedule = [
+      { delay: 180, text: first },
+      {
+        delay: 760,
+        text: "You can close sign-in to return to the current demo state, or book time with an engineer from the same viewer.",
+      },
+    ];
+    const timers = schedule.map(({ delay, text }) =>
+      window.setTimeout(() => {
+        const latestState = chatStoreStateRef.current;
+        const latestSession = latestState.activeSessionId
+          ? latestState.sessions.get(latestState.activeSessionId)
+          : null;
+        const alreadyInTimeline = latestSession?.messages.some(
+          (message) => message.role === "assistant" && message.content === text,
+        );
+        if (!alreadyInTimeline) appendAgentMessageRef.current(text);
+      }, delay),
+    );
+
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+      if (signInNarrationKeyRef.current === narrationKey) {
+        signInNarrationKeyRef.current = null;
+      }
+    };
+  }, [
+    bookCallActive,
+    chatStoreState.activeSessionId,
+    location.pathname,
+    session.gate,
+    signupSurfaceActive,
+  ]);
 
   // post-mvs-cleanup Phase B — canvas switches on `viewer.currentStep.kind`
   // (driven by the viewer session) instead of the legacy `currentFrame`
@@ -522,23 +674,30 @@ export const OnboardingShell: FC = () => {
   // two apart; the frame disambiguates which report CanvasKind to mount.
   const reportSurface: "render" | "builder" = session.currentFrame === "f4a" ? "builder" : "render";
 
-  const canvasContent = useMemo(() => {
-    // 2026-05-30-widget-role-access: gate/book-call canvas widgets are
-    // anonymous-context (pre-signup) and not document-scoped → role
-    // "anonymous" + scope { type: "none" } satisfy the widget contract.
-    if (bookCallActive)
-      return (
-        <BookCallView
-          role="anonymous"
-          scope={{ type: "none" }}
-          onScheduled={handleBookCallScheduled}
-        />
-      );
-    // P1 (2026-05-29): the sign-up DOORS moved into the chat rail
-    // (GateChatRail). The canvas now pitches the value prop instead of
-    // hosting the account form. See GateValueProp + GateChatRail.
-    if (signupSurfaceActive)
-      return <GateValueProp role="anonymous" scope={{ type: "none" }} />;
+  const handleSignInClose = useCallback(() => {
+    dismissGate();
+    popOverlay("sign-up");
+    if (session.scenario == null || routeSignUpActive) {
+      navigate("/onboarding");
+    }
+  }, [dismissGate, navigate, popOverlay, routeSignUpActive, session.scenario]);
+
+  const handleSignInBookCall = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.set("bookCall", "1");
+    navigate(
+      { pathname: location.pathname, search: `?${params.toString()}` },
+      { replace: false },
+    );
+  }, [location.pathname, location.search, navigate]);
+
+  const handleSignInContinue = useCallback(() => {
+    advanceFrame("f7");
+  }, [advanceFrame]);
+
+  const signInCloseLabel = session.scenario == null ? "Back to samples" : "Close sign-in";
+
+  const baseCanvasContent = useMemo(() => {
     // ARCH-06B: the F1 ingest picker is rendered ONLY inside the F1 overlay
     // (see render below); the canvas underneath stays blank during the
     // return-window so the user doesn't see it duplicated.
@@ -549,17 +708,120 @@ export const OnboardingShell: FC = () => {
         step={canvasStep}
         role={widgetRole}
         reportSurface={reportSurface}
+        active={!(signupSurfaceActive || bookCallActive)}
       />
     );
   }, [
-    bookCallActive,
-    handleBookCallScheduled,
-    signupSurfaceActive,
     effectiveStepKind,
     canvasScope,
     canvasStep,
     widgetRole,
     reportSurface,
+    bookCallActive,
+    signupSurfaceActive,
+  ]);
+
+  const canvasContent = useMemo(() => {
+    const blockingViewerOverlayActive = signupSurfaceActive || bookCallActive;
+    const bookCallFrameLoading =
+      bookCallEmbedState === "initializing" || bookCallEmbedState === "embedding"
+        ? { label: "Loading booking calendar" }
+        : null;
+    const bookCallFrameStatus =
+      bookCallEmbedState === "error"
+        ? "We couldn't load the booking calendar. Please try again in a moment."
+        : undefined;
+    return (
+      <Box
+        data-testid="viewer-stack"
+        sx={{ position: "relative", height: "100%", width: "100%", overflow: "hidden" }}
+      >
+        <Box
+          data-testid="book-call-viewer-underlay"
+          aria-hidden={blockingViewerOverlayActive || undefined}
+          {...(blockingViewerOverlayActive ? { inert: "" as unknown as undefined } : {})}
+          sx={{ height: "100%", width: "100%" }}
+        >
+          {baseCanvasContent}
+        </Box>
+        {signupSurfaceActive && (
+          <Box
+            data-testid="sign-up-viewer-overlay"
+            aria-hidden={bookCallActive || undefined}
+            {...(bookCallActive ? { inert: "" as unknown as undefined } : {})}
+            sx={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 2,
+              backgroundColor: WHITE,
+            }}
+          >
+            <ViewerWidgetFrame
+              widgetId="sign-up"
+              active={!bookCallActive}
+              {...viewerOverlayFrameDescriptors["sign-up"]}
+              closeAction={{
+                id: "close-sign-up",
+                label: signInCloseLabel,
+                icon: session.scenario == null ? "back" : "close",
+                onClick: handleSignInClose,
+              }}
+            >
+              <SignUpWidget
+                role="anonymous"
+                scope={{ type: "none" }}
+                onBookCall={handleSignInBookCall}
+                onContinueIntegrate={handleSignInContinue}
+              />
+            </ViewerWidgetFrame>
+          </Box>
+        )}
+        {bookCallActive && (
+          <Box
+            data-testid="book-call-viewer-overlay"
+            sx={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 3,
+              backgroundColor: WHITE,
+            }}
+          >
+            <ViewerWidgetFrame
+              widgetId="book-call"
+              active
+              {...viewerOverlayFrameDescriptors["book-call"]}
+              closeAction={{
+                id: "close-book-call",
+                label: "Close booking",
+                icon: "close",
+                onClick: () => clearBookCallParam(false),
+              }}
+              loading={bookCallFrameLoading}
+              status={bookCallFrameStatus}
+            >
+              <BookCallView
+                role="anonymous"
+                scope={{ type: "none" }}
+                onScheduled={handleBookCallScheduled}
+                onEmbedStateChange={setBookCallEmbedState}
+              />
+            </ViewerWidgetFrame>
+          </Box>
+        )}
+      </Box>
+    );
+  }, [
+    baseCanvasContent,
+    bookCallActive,
+    bookCallEmbedState,
+    clearBookCallParam,
+    handleBookCallScheduled,
+    handleSignInBookCall,
+    handleSignInClose,
+    handleSignInContinue,
+    signInCloseLabel,
+    session.scenario,
+    signupSurfaceActive,
   ]);
 
   // Theme-driven breakpoint detection. Compact step strip activates below
@@ -675,9 +937,8 @@ export const OnboardingShell: FC = () => {
   );
 
   // The chat + canvas split that lives in the right-of-nav slot for
-  // F2+. The chat column hosts GateChatPanel (the chat-widget at
-  // `components/chat-widgets/GateChatPanel/`); the canvas hosts the
-  // active frame view with the StepStrip on top.
+  // F2+. Sign-in and booking mount in the viewer stack; the chat column
+  // keeps ConversationFlow mounted.
   const chatIdle = (
     <Box
       data-testid="onboarding-shell-chat-pane"
@@ -712,11 +973,12 @@ export const OnboardingShell: FC = () => {
           session-scoped → `scope: { type: "none" }`. (The flow
           `mode`/`surface` prop was removed by unified-conversation-flow
           Phase 2 — chat is now one `ConversationFlow` + an experience.) */}
-      {bookCallActive ? (
-        <BookingStatusCard role={widgetRole} scope={{ type: "none" }} />
-      ) : (
-        <ChatColumn role={widgetRole} scope={{ type: "none" }} />
-      )}
+      <ChatColumn
+        role={widgetRole}
+        scope={{ type: "none" }}
+        bookingActive={bookCallActive}
+        signInActive={signupSurfaceActive}
+      />
     </Box>
   );
 
@@ -853,6 +1115,7 @@ export const OnboardingShell: FC = () => {
           header={headerStrip}
           chat={chatIdle}
           canvas={canvasIdle}
+          compactInitialFocus={bookCallActive || signupSurfaceActive ? "focus-canvas" : undefined}
           initialChatWidth={360}
           navWidth={navCollapsed ? ONBOARDING_NAV_WIDTH_COLLAPSED : ONBOARDING_NAV_WIDTH_FULL}
         />

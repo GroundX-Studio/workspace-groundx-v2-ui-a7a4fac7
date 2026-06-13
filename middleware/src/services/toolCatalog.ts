@@ -393,7 +393,7 @@ const suggestIntent: ServerTool = {
 };
 
 /**
- * widget-llm-integration follow-up B.3 — BookingStatusCard mirror.
+ * widget-llm-integration follow-up B.3 — book-call suggested action mirror.
  */
 const bookCall: ServerTool = {
   name: "book_call",
@@ -401,8 +401,8 @@ const bookCall: ServerTool = {
     "Open the Calendly booking surface for a 30-minute engineer call. Use when the user asks to speak with a team member or wants a human-assisted path forward: uncertainty about fit, complex documents, evaluation questions a sales engineer can answer. The user confirms by clicking the chip; the scheduler is not opened automatically.",
   category: "mutate",
   inputSchema: z.object({}),
-  // §5 reachability — mirror of the app-side BookingStatusCard binding.
-  rendersWidget: "chat-widgets/BookingStatusCard",
+  // §5 reachability — mirror of the app-side suggested-action chip binding.
+  rendersWidget: "chat-widgets/SuggestedActionChips",
   intentBuilder: () => ({ kind: "openBookCall" }),
 };
 

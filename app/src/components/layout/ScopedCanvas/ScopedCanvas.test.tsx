@@ -52,6 +52,21 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
     expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
   });
 
+  it("wraps built CanvasKind widgets in the shared viewer frame", () => {
+    const step: ViewerStep = { kind: "doc-viewer", documentId: "doc-1" };
+    renderWithOnboardingProviders(
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+    );
+
+    const canvas = screen.getByTestId("scoped-canvas");
+    const frame = screen.getByTestId("viewer-widget-frame");
+    expect(canvas).toHaveAttribute("data-canvas-kind", "doc-viewer");
+    expect(frame).toHaveAttribute("data-viewer-frame-active", "true");
+    expect(frame).toHaveAttribute("data-viewer-content-mode", "edge-to-edge");
+    expect(frame).toHaveAttribute("data-viewer-widget-id", "pdf-viewer");
+    expect(frame).toContainElement(screen.getByTestId("pdf-viewer-widget"));
+  });
+
   // WF-01 C5 — the F2 "GroundX is reading the doc" scanner. The F2
   // doc-viewer step carries `scanning: true`; ScopedCanvas forwards it to
   // the PdfViewer's `showScanAnimation`, surfaced on the widget root as
@@ -101,6 +116,15 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
     const step: ViewerStep = { kind: "report" };
     renderWithOnboardingProviders(
       <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" reportSurface="builder" />,
+    );
+    expect(screen.getByTestId("smart-report-builder")).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
+  });
+
+  it("report step surface='builder' selects SmartReportBuilder without route-owned frame state", () => {
+    const step: ViewerStep = { kind: "report", surface: "builder", selectedSectionId: "anomalies" };
+    renderWithOnboardingProviders(
+      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" />,
     );
     expect(screen.getByTestId("smart-report-builder")).toBeInTheDocument();
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();

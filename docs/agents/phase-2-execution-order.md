@@ -41,8 +41,10 @@ Findings:
 Re-reviewed specifically for the wf04 failure mode (a plan whose premise the completed run already
 invalidated). Every plan's core premise was checked against current code and **HOLDS** — none stale:
 
-- dependency-direction-guard — `ChatColumn.tsx` STILL imports `GateChatPanel` from `@/views/` (`:44`,
-  used `:111`); the step-11 rewrite kept it. Rule-5 violation is real. ✓
+- dependency-direction-guard — historical note: this used to report
+  `ChatColumn.tsx` importing `GateChatPanel` from `@/views/`. The live route
+  no longer imports `GateChatPanel`; the guard now exists to prevent that
+  regression from returning. ✓
 - tool-system-completion — `WidgetTool.availableIn` is STILL `ToolMode[]` (`tools/types.ts:73`);
   smart-report's step-17 tools used `availableSteps`, not a role axis. WRA Phase 3 genuinely undone. ✓
 - word-level-citation-geometry — the `assignTier(v, { hasAtomBox: false })` seam EXISTS

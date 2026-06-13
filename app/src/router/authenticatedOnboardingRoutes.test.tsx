@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppProviders } from "@/App";
+import { useAppMode } from "@/contexts/AppModeContext";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { sdkFailure } from "@/contexts/sdkContextTypes";
 import { makeFakeApi } from "@/test/makeFakeApi";
@@ -19,7 +20,16 @@ const customer = {
 
 const ProductRouteMarker = () => {
   const location = useLocation();
-  return <div data-testid="product-route">{location.pathname}</div>;
+  const { state } = useAppMode();
+  return (
+    <div
+      data-testid="product-route"
+      data-app-mode={state.mode}
+      data-auth-state={state.authState}
+    >
+      {location.pathname}
+    </div>
+  );
 };
 
 const HydrateExistingAuth = ({ children }: { children: ReactNode }) => {
@@ -116,6 +126,17 @@ describe("authenticated onboarding route reachability", () => {
     await waitFor(() => expect(getUserData).toHaveBeenCalledWith(""));
     expect(await screen.findByTestId("product-route")).toHaveTextContent("/projects");
     expect(screen.queryByRole("dialog", { name: /welcome to groundx studio/i })).not.toBeInTheDocument();
+  });
+
+  it("composes product routes as signed-in steady surfaces after auth hydration", async () => {
+    renderWithRoutes({
+      initialRoute: "/workspaces",
+      getUserData: makeGetUserData("complete"),
+    });
+
+    const route = await screen.findByTestId("product-route");
+    await waitFor(() => expect(route).toHaveAttribute("data-app-mode", "steady"));
+    expect(route).toHaveAttribute("data-auth-state", "signed-in");
   });
 
   it("redirects anonymous product-route users without opening the signed-in wizard", async () => {

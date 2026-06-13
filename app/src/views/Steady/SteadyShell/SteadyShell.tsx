@@ -29,21 +29,24 @@ import { useNavigate, useParams } from "react-router-dom";
 import type { ContentScope } from "@groundx/shared";
 
 import { AppShell } from "@/components/layout/AppShell";
+import {
+  AppNav,
+  APP_NAV_WIDTH_COLLAPSED,
+  APP_NAV_WIDTH_FULL,
+  useAppNavCollapsed,
+} from "@/components/layout/AppNav/AppNav";
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Heading } from "@/components/primitives/Heading/Heading";
-import { OnboardingNav, useOnboardingNavCollapsed } from "@/components/layout/OnboardingNav/OnboardingNav";
 import { ScopedCanvas, stepToCanvasKind } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 import {
   BODY_TEXT,
   BORDER_RADIUS_CARD,
   FONT_SIZE_LABEL,
   NAVY,
-  ONBOARDING_NAV_WIDTH_COLLAPSED,
-  ONBOARDING_NAV_WIDTH_FULL,
   WARM_OFFWHITE,
   WHITE,
 } from "@/constants";
-import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
+import { scopeFromSessionKey, selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { SessionSwitcher } from "@/views/Steady/SteadyShell/SessionSwitcher";
 import { useWidgetRole } from "@/lib/widgetRole";
@@ -51,7 +54,7 @@ import { useWidgetRole } from "@/lib/widgetRole";
 export const SteadyShell: FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const { state, switchTo } = useChatStore();
-  const [navCollapsed, setNavCollapsed] = useOnboardingNavCollapsed();
+  const [navCollapsed, setNavCollapsed] = useAppNavCollapsed();
   const navigate = useNavigate();
   const widgetRole = useWidgetRole();
 
@@ -145,22 +148,25 @@ export const SteadyShell: FC = () => {
   // OWN "pick a document" placeholder — NOT ScopedCanvas's generic "not yet
   // available" placeholder.
   const activeStep = selectActiveStep(active);
-  // Build the scope the canvas renders over, by the active step kind. Today
-  // steady's only canvas-bearing step is `doc-viewer` (the citation sink);
-  // resolve its single document into a documents scope. Steps that resolve
-  // to no built CanvasKind (none reachable in steady today) keep the
-  // pick-a-document placeholder below.
-  const canvasScope: ContentScope | null =
-    activeStep && activeStep.kind === "doc-viewer"
+  const reportSurface: "render" | "builder" =
+    activeStep?.kind === "report" ? activeStep.surface ?? "render" : "render";
+  const resolvedCanvasKind = activeStep ? stepToCanvasKind(activeStep, reportSurface) : null;
+  // Build the scope the canvas renders over, by the active step kind. A
+  // doc-viewer narrows to its single document; other built viewer widgets use
+  // the scoped session when this steady deep-link belongs to Workspace/Project.
+  const sessionScope = scopeFromSessionKey(active?.scopeKey);
+  const canvasScope: ContentScope | null = activeStep
+    ? activeStep.kind === "doc-viewer"
       ? { type: "documents", documentIds: [activeStep.documentId] }
-      : null;
+      : sessionScope ?? { type: "bucket", bucketId: 28454 }
+    : null;
   const canvasPane =
-    activeStep && canvasScope && stepToCanvasKind(activeStep) !== null ? (
+    activeStep && canvasScope && resolvedCanvasKind !== null ? (
       <Box
         sx={{ height: "100%", width: "100%", backgroundColor: WHITE }}
         aria-label="Canvas"
       >
-        <ScopedCanvas scope={canvasScope} step={activeStep} role={widgetRole} />
+        <ScopedCanvas scope={canvasScope} step={activeStep} role={widgetRole} reportSurface={reportSurface} />
       </Box>
     ) : (
       <Box
@@ -195,7 +201,7 @@ export const SteadyShell: FC = () => {
     >
       <AppShell
         nav={
-          <OnboardingNav
+          <AppNav
             accountState="free"
             collapsed={navCollapsed}
             onToggleCollapsed={() => setNavCollapsed(!navCollapsed)}
@@ -205,7 +211,7 @@ export const SteadyShell: FC = () => {
         chat={chatPane}
         canvas={canvasPane}
         initialChatWidth={360}
-        navWidth={navCollapsed ? ONBOARDING_NAV_WIDTH_COLLAPSED : ONBOARDING_NAV_WIDTH_FULL}
+        navWidth={navCollapsed ? APP_NAV_WIDTH_COLLAPSED : APP_NAV_WIDTH_FULL}
       />
     </Box>
   );

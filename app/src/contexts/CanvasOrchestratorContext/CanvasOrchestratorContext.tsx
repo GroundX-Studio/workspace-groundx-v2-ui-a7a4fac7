@@ -83,6 +83,10 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
     (intent: CanvasIntent, source: IntentSource = "user"): StampedIntent => {
       intentCounterRef.current += 1;
       const stamped: StampedIntent = { intentId: intentCounterRef.current, source, ts: now(), intent };
+      const activeSession = chatStore?.state.activeSessionId
+        ? chatStore.state.sessions.get(chatStore.state.activeSessionId)
+        : null;
+      const routeThroughOnboarding = Boolean(onboardingSession && activeSession?.isOnboardingSession);
 
       // UI-10 — ChatStore triple-write, fired BEFORE the per-kind side
       // effects + the adapter so the active session sees the intent as
@@ -96,9 +100,6 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // the active ChatSession. The intent payload may name a
         // document/project, but converting that to a branded
         // EntityKey is the consumer's job, not the orchestrator's.
-        const activeSession = chatStore.state.activeSessionId
-          ? chatStore.state.sessions.get(chatStore.state.activeSessionId)
-          : null;
         chatStore.appendViewerEvent({
           action: "intent-dispatched",
           source,
@@ -289,14 +290,16 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // canvas move as the on-screen control. Soft-fail in the steady tree
         // (no OnboardingSessionProvider).
         case "showExtract":
-          if (onboardingSession) onboardingSession.advanceFrame("f3");
+          if (routeThroughOnboarding) onboardingSession?.advanceFrame("f3");
+          else if (chatStore) chatStore.pushStep({ kind: "extract-workbench", scenarioId: "utility" });
           break;
         // 2026-05-30-onboarding-shell-shared-view Phase 3b — the
         // `show_integrate` canvas-dispatch tool MOVES the canvas to the
         // Integrate connectors surface (frame f7). SAME `advanceFrame` the
         // Integrate step-strip pill calls. Soft-fail in the steady tree.
         case "showIntegrate":
-          if (onboardingSession) onboardingSession.advanceFrame("f7");
+          if (routeThroughOnboarding) onboardingSession?.advanceFrame("f7");
+          else if (chatStore) chatStore.pushStep({ kind: "integrate" });
           break;
         // 2026-05-29-smart-report-screen Phase 5 — the canvas-dispatch `show_*`
         // report tools MOVE the canvas. `show_smart_report_render` emits
@@ -308,16 +311,23 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // affordance calls. Soft-fail in the steady tree (report frames are
         // onboarding-only).
         case "showReport":
-          if (onboardingSession) onboardingSession.advanceFrame("f4");
+          if (routeThroughOnboarding) onboardingSession?.advanceFrame("f4");
+          else if (chatStore) chatStore.pushStep({ kind: "report", surface: "render" });
           break;
         case "editTemplate":
-          if (onboardingSession) {
-            onboardingSession.advanceFrame(
+          if (routeThroughOnboarding) {
+            onboardingSession?.advanceFrame(
               "f4a",
               intent.selectedSectionId !== undefined
                 ? { selectedReportSectionId: intent.selectedSectionId }
                 : undefined,
             );
+          } else if (chatStore) {
+            chatStore.pushStep({
+              kind: "report",
+              surface: "builder",
+              ...(intent.selectedSectionId !== undefined ? { selectedSectionId: intent.selectedSectionId } : {}),
+            });
           }
           break;
         // 2026-05-31-shared-canvas-affordance-restoration — route the
@@ -332,9 +342,9 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
           break;
         // ── window-routed side effect ────────────────────────────────────
         // widget-llm-integration follow-up B.3 — book-call routing. The
-        // OnboardingShell watches `?bookCall=1` to swap the viewer to
-        // `BookCallView` + the chat to `BookingStatusCard`. We just set the
-        // URL param; the existing react-router navigation handles the swap.
+        // OnboardingShell watches `?bookCall=1` to overlay `BookCallView`
+        // on the active viewer while the normal chat timeline stays mounted.
+        // We just set the URL param; react-router handles the surface update.
         case "openBookCall":
           if (typeof window !== "undefined") {
             const url = new URL(window.location.href);

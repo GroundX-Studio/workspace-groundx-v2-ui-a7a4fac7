@@ -3,6 +3,16 @@
 **Slot:** `viewer-widgets` · **Frame:** `f7` · **Status:** Phase 3b
 (2026-05-30-onboarding-shell-shared-view)
 
+## Viewer chrome
+
+Policy: `framed`
+
+Content mode: `padded-scroll`
+
+`ScopedCanvas` wraps Integrate in `ViewerWidgetFrame`. The widget owns
+connector cards, snippet tabs, disabled-future download controls, and
+next-step content controls. It does not own pane close/back chrome.
+
 ## What it does
 
 The production **Integrate** surface — the "ship it" connectors view packaged

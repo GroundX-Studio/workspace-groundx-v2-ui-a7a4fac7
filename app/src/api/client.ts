@@ -36,7 +36,7 @@ import { listScenarios } from "@/api/entities/scenarioRegistryEntity";
 import { extractField } from "@/api/extractField";
 import { fetchFieldGeometry } from "@/api/fieldGeometry";
 import { recordIntent } from "@/api/intentLog";
-import { renderReport, saveReportTemplate } from "@/api/smartReport";
+import { getReportTemplate, renderReport, saveReportTemplate } from "@/api/smartReport";
 import { saveTemplate } from "@/api/templates";
 import { recordViewerEvent } from "@/api/viewerEvents";
 import { captureException } from "@/lib/sentry";
@@ -78,8 +78,8 @@ const createChatSession = async (input: Parameters<typeof createChatSessionDirec
 const sendChatMessage: typeof sendChatMessageDirect = (input) =>
   sendChatMessageDirect(input, chatSessionEnsure);
 
-const listChatMessages: typeof listChatMessagesDirect = (chatSessionId) =>
-  listChatMessagesDirect(chatSessionId, chatSessionEnsure);
+const listChatMessages: typeof listChatMessagesDirect = (chatSessionId, sessionMeta) =>
+  listChatMessagesDirect(chatSessionId, sessionMeta, chatSessionEnsure);
 
 const ensureServerChatSession = chatSessionEnsure.ensureServerChatSession;
 
@@ -190,6 +190,7 @@ export const realApi = {
   report: {
     renderReport: renderReportWithClientEnsure,
     saveReportTemplate,
+    getReportTemplate,
   },
   extract: {
     extractField: extractFieldWithClientEnsure,

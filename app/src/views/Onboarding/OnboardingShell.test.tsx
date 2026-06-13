@@ -92,6 +92,34 @@ const ViewerHistoryProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { events: A
   return null;
 };
 
+const ChatMessagesProbe = ({ onSnapshot }: { onSnapshot: (messages: string[]) => void }) => {
+  const { state } = useChatStore();
+  const active = state.activeSessionId ? state.sessions.get(state.activeSessionId) : null;
+  onSnapshot(active?.messages.map((message) => message.content) ?? []);
+  return null;
+};
+
+const activeViewerFrames = (): HTMLElement[] =>
+  screen
+    .getAllByTestId("viewer-widget-frame")
+    .filter(
+      (frame) =>
+        frame.getAttribute("data-viewer-frame-active") === "true" &&
+        !frame.closest("[inert]") &&
+        !frame.closest('[aria-hidden="true"]'),
+    );
+
+const SIGN_IN_BYO_OPENER =
+  "I opened sign-in in the viewer so you can bring your own documents into this same session.";
+const SIGN_IN_BYO_FOLLOWUP =
+  "You can close sign-in to return to the current demo state, or book time with an engineer from the same viewer.";
+const BOOKING_OPENER =
+  "I'm opening the engineer booking calendar in the viewer now.";
+const BOOKING_FOLLOWUP =
+  "Your conversation stays here while you choose a time.";
+const BOOKING_PREP =
+  "Bring questions about your document type, volume, accuracy goals, where GroundX fits, or pilot scope.";
+
 describe("OnboardingShell", () => {
   it("issues and stores an anonymous onboarding session on mount", async () => {
     let snapshot = { sessionId: null as string | null, frame: "" };
@@ -151,7 +179,7 @@ describe("OnboardingShell", () => {
     });
   });
 
-  it("does not leave the chat column blank after dismissing the F6 gate", async () => {
+  it("keeps the current chat mounted while sign-in opens in the viewer", async () => {
     const user = userEvent.setup();
     // The InteractView "💾 Save 🔒" button that used to open the gate was
     // retired with the per-frame canvas views (the F5 canvas is now the
@@ -171,23 +199,19 @@ describe("OnboardingShell", () => {
       actions!.advanceFrame("f6");
       actions!.openGate("save");
     });
-    expect(await screen.findByTestId("gate-rail-preamble")).toBeInTheDocument();
+    expect(await screen.findByTestId("sign-up-viewer-surface")).toBeInTheDocument();
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
+    expect(activeViewerFrames()).toHaveLength(1);
+    expect(screen.queryByTestId("sign-up-viewer-close")).not.toBeInTheDocument();
 
-    await user.click(screen.getByTestId("gate-rail-dismiss"));
+    await user.click(screen.getByTestId("viewer-frame-close"));
 
-    await waitFor(() => expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument());
     expect(screen.getByText("Ask anything about the sample. Citations appear next to every answer.")).toBeInTheDocument();
   });
 
-  // ARCH-05B (2026-05-26) + P1 (2026-05-29): the canvas (viewer slot)
-  // MUST swap away from the previous frame view when the gate becomes
-  // active — so a user who clicked Sign Up while looking at an F2 sample
-  // doesn't see the sample PDF sitting behind the gate. Before the split
-  // the canvas kept rendering the prior frame view (the ARCH-05 bug).
-  // P1 changed WHAT the canvas swaps to: the sign-up DOORS moved into the
-  // chat rail (GateChatRail), so the canvas now shows the GateValueProp
-  // pitch, not the account form.
-  it("P1: canvas swaps to the value-prop pane while the gate is open (F5 sample → Sign Up)", async () => {
+  it("renders sign-in as a viewer overlay while preserving the chat relationship", async () => {
     const user = userEvent.setup();
 
     let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
@@ -200,9 +224,9 @@ describe("OnboardingShell", () => {
     );
 
     // Pre-condition: canvas shows the F5 sample surface (the shared
-    // PdfViewer via <ScopedCanvas>); the value-prop pitch is not yet up.
+    // PdfViewer via <ScopedCanvas>); the sign-in overlay is not yet up.
     expect(screen.getByTestId("onboarding-frame-f5")).toBeInTheDocument();
-    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument();
 
     // Trigger the gate via the session API (the InteractView Save button
     // that used to do this was retired with the per-frame canvas views).
@@ -211,19 +235,35 @@ describe("OnboardingShell", () => {
       actions!.openGate("save");
     });
 
-    // Canvas swaps to the value-prop pitch (the form is gone; sign-up
-    // doors live in the chat rail). The previous frame view is gone, and
-    // the chat-side gate (preamble + doors) renders alongside.
-    expect(await screen.findByTestId("gate-value-prop")).toBeInTheDocument();
-    expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("onboarding-frame-f5")).not.toBeInTheDocument();
-    expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument();
-    expect(screen.getByTestId("gate-rail-send-magic-link")).toBeInTheDocument();
+    expect(await screen.findByTestId("sign-up-viewer-overlay")).toBeInTheDocument();
+    expect(screen.getByTestId("sign-up-viewer-surface")).toBeInTheDocument();
+    expect(screen.getByTestId("signup-submit")).toBeInTheDocument();
+    expect(screen.getByTestId("sign-up-viewer-send-magic-link")).toBeInTheDocument();
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
+    expect(activeViewerFrames()).toHaveLength(1);
+    expect(screen.getByTestId("sign-up-viewer-overlay")).not.toHaveAttribute("inert");
+    expect(screen.queryByTestId("sign-up-viewer-close")).not.toBeInTheDocument();
 
-    // And when the user dismisses, the canvas drops back to the frame
-    // view (no lingering pitch). currentFrame is now f6.
-    await user.click(screen.getByTestId("gate-rail-dismiss"));
-    await waitFor(() => expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument());
+    await user.click(screen.getByTestId("sign-up-viewer-book-call"));
+    expect(await screen.findByTestId("book-call-viewer-overlay")).toBeInTheDocument();
+    expect(screen.getByTestId("sign-up-viewer-overlay")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("sign-up-viewer-overlay")).toHaveAttribute("inert");
+    expect(screen.queryByTestId("book-call-close")).not.toBeInTheDocument();
+    expect(activeViewerFrames()).toHaveLength(1);
+    expect(activeViewerFrames()[0]).toHaveAttribute("data-viewer-widget-id", "book-call");
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("viewer-frame-close"));
+    await waitFor(() => expect(screen.queryByTestId("book-call-viewer-overlay")).not.toBeInTheDocument());
+    expect(screen.getByTestId("sign-up-viewer-overlay")).not.toHaveAttribute("aria-hidden");
+    expect(screen.getByTestId("sign-up-viewer-overlay")).not.toHaveAttribute("inert");
+    expect(activeViewerFrames()).toHaveLength(1);
+    expect(activeViewerFrames()[0]).toHaveAttribute("data-viewer-widget-id", "sign-up");
+
+    await user.click(screen.getByTestId("viewer-frame-close"));
+    await waitFor(() => expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument());
     expect(screen.getByTestId("onboarding-frame-f6")).toBeInTheDocument();
   });
 
@@ -244,34 +284,34 @@ describe("OnboardingShell", () => {
       actions!.openGate("save");
     });
 
-    expect(await screen.findByTestId("gate-value-prop")).toBeInTheDocument();
-    await user.type(screen.getByLabelText(/email for magic link/i), "verify@example.com");
-    await user.click(screen.getByTestId("gate-rail-send-magic-link"));
-    await user.click(await screen.findByTestId("gate-rail-continue-integrate"));
+    expect(await screen.findByTestId("sign-up-viewer-surface")).toBeInTheDocument();
+    await user.type(screen.getByTestId("sign-up-viewer-email"), "verify@example.com");
+    await user.click(screen.getByTestId("sign-up-viewer-send-magic-link"));
+    await user.click(await screen.findByTestId("sign-up-viewer-continue-integrate"));
 
     expect(await screen.findByTestId("integrate")).toBeInTheDocument();
     expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
       "data-canvas-kind",
       "integrate",
     );
-    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument();
   });
 
-  // 2026-05-30-widget-role-access: the access matrix marks SignUpWidget /
-  // GateChatRail / GateValueProp as ANONYMOUS-ONLY. Availability is enforced
+  // 2026-05-30-widget-role-access: the access matrix marks SignUpWidget
+  // as ANONYMOUS-ONLY. Availability is enforced
   // at the mount site (the gate surface only opens for an uncommitted /
   // anonymous session), NOT by a prop inside the widget. This pins the spec
   // scenario "an anonymous-only widget does not mount for a member" — the
   // negative case the Phase-2b sweep was supposed to assert but didn't.
   // Contrast with the test above, where an ANON user advancing to f6 DOES
-  // surface the gate (gate-value-prop + gate-rail-* + sign-up doors).
+  // surface sign-in in the viewer.
   it("anonymous-only availability: a signed-in member does NOT mount the gate / sign-up widgets", () => {
     renderWithOnboardingProviders(<OnboardingShell />, {
       initialFrame: "f5",
       initialScenario: "utility",
       initialAuthState: "signed-in",
     });
-    expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument();
     expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
     expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
     expect(screen.queryByTestId("signup-celebration")).not.toBeInTheDocument();
@@ -297,36 +337,27 @@ describe("OnboardingShell", () => {
       { initialUrl: "/onboarding/signup" },
     );
     // Sign-up surface is up (overlay pushed by the /signup branch).
-    expect(await screen.findByTestId("gate-value-prop")).toBeInTheDocument();
+    expect(await screen.findByTestId("sign-up-viewer-surface")).toBeInTheDocument();
 
     // Navigate to a sample. The deep-link SAMPLE branch (params.bucketId+scenarioId)
     // must pop the stale sign-up overlay — the picker branch already does; this one
     // returned early without it, leaving SignUpWidget over the sample.
     await user.click(screen.getByTestId("goto-sample"));
-    await waitFor(() => expect(screen.queryByTestId("gate-value-prop")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument());
     expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
   });
 
-  // P1 (2026-05-29): while the sign-up gate is open the step strip sits on
-  // "Understand" (owner-directed), regardless of which frame triggered it.
-  it("P1: step strip is on Understand while the gate is open", async () => {
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
-    renderWithOnboardingProviders(
-      <>
-        <OnboardingShell />
-        <SessionActionsProbe onReady={(api) => (actions = api)} />
-      </>,
-      { initialFrame: "f5", initialScenario: "utility" },
-    );
-
-    act(() => {
-      actions!.advanceFrame("f6");
-      actions!.openGate("save");
+  it("keeps the F1-origin sign-up route on the Ingest step", async () => {
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f1",
+      initialScenario: null,
+      initialUrl: "/onboarding/signup",
     });
-    await screen.findByTestId("gate-value-prop");
 
-    const understandPill = screen.getByText("Understand").closest('[role="button"]');
-    expect(understandPill).toHaveAttribute("aria-current", "step");
+    await screen.findByTestId("sign-up-viewer-surface");
+    const active = document.querySelector<HTMLElement>('[aria-current="step"]');
+    expect(active?.textContent).toMatch(/ingest/i);
+    expect(active?.textContent).not.toMatch(/understand/i);
   });
 
   // ARCH-06B (2026-05-26): the F1 overlay has its own StepStrip
@@ -443,7 +474,7 @@ describe("OnboardingShell", () => {
     expect(afterReturn).toBe(before);
   });
 
-  it("clicking BYO from F1 advances to F2 and renders the gate in the chat column", async () => {
+  it("clicking BYO from F1 opens sign-in in the viewer and keeps one chat session", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
 
@@ -458,17 +489,14 @@ describe("OnboardingShell", () => {
     // route through handleByoClick).
     await user.click(screen.getByTestId("byo-pdf"));
 
-    // Frame advances to F2 and the chat + gate render. The F1 overlay
-    // exits via its A · Sheet dismiss animation; once it's gone the
-    // gate-rail-preamble in the always-mounted chat column becomes
-    // visible.
-    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f2")).toBeInTheDocument(), {
+    // Sign-in opens as a viewer overlay; the chat column stays the normal
+    // conversation surface.
+    await waitFor(() => expect(screen.getByTestId("sign-up-viewer-surface")).toBeInTheDocument(), {
       timeout: 2000,
     });
     await waitFor(() => expect(screen.getByLabelText("Chat column")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument(), {
-      timeout: 2000,
-    });
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
   });
 
   it("makes the Understand pill reachable once a scenario is picked", () => {
@@ -476,6 +504,34 @@ describe("OnboardingShell", () => {
     const understandPill = screen.getByText("Understand").closest('[role="button"]');
     // Active on F2; aria-disabled should be absent.
     expect(understandPill).not.toHaveAttribute("aria-disabled");
+  });
+
+  // REGRESSION (2026-06-12): the step strip let users JUMP AHEAD. On Understand
+  // (f2) the Analyze sub-pills (Extract / Interact / Report) were all
+  // `reachable-todo`, so clicking Report from Understand dropped the user into a
+  // report surface that can't render anything yet. Downstream steps must be
+  // DISABLED until the user actually reaches them. Integrate is anon-gated.
+  it("REGRESSION: on Understand (f2), the Analyze substeps + Integrate are disabled (no jumping ahead)", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    const strip = within(screen.getByTestId("step-strip-wrapper"));
+    for (const label of ["Extract", "Interact", "Report"]) {
+      const pill = strip.getByText(label).closest('[role="button"]');
+      expect(pill, `${label} sub-pill should be disabled on Understand`).toHaveAttribute("aria-disabled", "true");
+    }
+    const integrate = strip.getByText("Integrate").closest('[role="button"]');
+    expect(integrate, "Integrate should be disabled on Understand (anonymous)").toHaveAttribute("aria-disabled", "true");
+  });
+
+  // The gate blocks FORWARD jumps only: once the user is on Analyze (f3) the
+  // sub-pills become reachable again, preserving the smart-report behavior
+  // (anon Report preview + same-bracket navigation between Extract/Interact/Report).
+  it("on Analyze (f3), the Analyze substeps are reachable (gate blocks forward jumps only)", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f3", initialScenario: "utility" });
+    const strip = within(screen.getByTestId("step-strip-wrapper"));
+    for (const label of ["Extract", "Interact", "Report"]) {
+      const pill = strip.getByText(label).closest('[role="button"]');
+      expect(pill, `${label} sub-pill should be reachable on Analyze`).not.toHaveAttribute("aria-disabled");
+    }
   });
 
   it("forwards Workspaces nav clicks to a hard page reload (steady-mode landing)", async () => {
@@ -532,13 +588,33 @@ describe("OnboardingShell", () => {
     }
   });
 
-  it("opens the Book a call CTA in the in-app viewer instead of a new tab", async () => {
+  it("opens the Book a call CTA as a viewer overlay while preserving the current chat timeline", async () => {
     const user = userEvent.setup();
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     try {
-      renderWithOnboardingProviders(<OnboardingShell />, {
-        initialFrame: "f2",
-        initialScenario: "utility",
+      let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void } | null = null;
+      const listChatMessages = vi.fn().mockResolvedValue([
+        { id: "m1", role: "user", content: "what do you know?", citations: [] },
+        { id: "m2", role: "assistant", content: "The bill total is $7,613.20.", citations: [] },
+      ]);
+      renderWithOnboardingProviders(
+        <>
+          <OnboardingShell />
+          <SessionActionsProbe onReady={(api) => (actions = api)} />
+        </>,
+        {
+          initialFrame: "f3",
+          initialScenario: "utility",
+          api: { chat: { listChatMessages } },
+        },
+      );
+
+      await waitFor(() => expect(actions).not.toBeNull());
+      act(() => {
+        actions?.advanceFrame("f3");
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("scoped-canvas")).toHaveAttribute("data-canvas-kind", "extract-workbench");
       });
 
       await user.click(screen.getByTestId("onboarding-nav-cta-call"));
@@ -546,8 +622,19 @@ describe("OnboardingShell", () => {
       await waitFor(() => {
         expect(document.querySelector('[data-widget="book-call-view"]')).toBeInTheDocument();
       });
-      expect(screen.getByTestId("book-call-chat-status")).toBeInTheDocument();
+      expect(screen.getByTestId("scoped-canvas")).toHaveAttribute("data-canvas-kind", "extract-workbench");
+      expect(screen.getByTestId("book-call-viewer-underlay")).toHaveAttribute("aria-hidden", "true");
+      expect(screen.getByTestId("book-call-viewer-underlay")).toHaveAttribute("inert");
+      expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+      expect(screen.queryByTestId("book-call-chat-status")).not.toBeInTheDocument();
       expect(openSpy).not.toHaveBeenCalled();
+
+      expect(screen.queryByText(/opening the engineer booking calendar/i)).not.toBeInTheDocument();
+      expect(await screen.findByText(/opening the engineer booking calendar/i)).toBeInTheDocument();
+      expect(screen.queryByText(/conversation stays here/i)).not.toBeInTheDocument();
+      expect(await screen.findByText(/conversation stays here/i)).toBeInTheDocument();
+      expect(screen.queryByText(/document type, volume, accuracy/i)).not.toBeInTheDocument();
+      expect(await screen.findByText(/document type, volume, accuracy/i)).toBeInTheDocument();
     } finally {
       openSpy.mockRestore();
     }
@@ -581,8 +668,8 @@ describe("OnboardingShell", () => {
 
   it("activates the signup surface on /onboarding/signup", async () => {
     // URL contract: /onboarding/signup mounts the signup surface
-    // (BYO sign-up flow). Renders the shell with the gate in chat,
-    // BYO placeholder in canvas. Entity registry stays empty.
+    // (BYO sign-up flow). Renders the shell with sign-in in the viewer
+    // and the normal chat still mounted. Entity registry stays empty.
     let registrySnap = { entityKeys: [] as string[] };
 
     renderWithOnboardingProviders(
@@ -593,12 +680,43 @@ describe("OnboardingShell", () => {
       { initialFrame: "f1", initialScenario: null, initialUrl: "/onboarding/signup" },
     );
 
-    // The shell renders (not the F1 picker).
-    await waitFor(() => expect(screen.queryByTestId("onboarding-frame-f2")).toBeInTheDocument(), {
+    // The shell renders (not the F1 picker) and sign-in is the viewer state.
+    await waitFor(() => expect(screen.getByTestId("sign-up-viewer-surface")).toBeInTheDocument(), {
       timeout: 2000,
     });
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
     // Registry stays empty — signup is not an entity.
     expect(registrySnap.entityKeys).toEqual([]);
+  });
+
+  it("does not replay the sign-in opener but still appends any missing follow-up", async () => {
+    let messages: string[] = [];
+    const SeedExistingOpener = () => {
+      const { appendAgentMessage } = useChatStore();
+      const seeded = useRef(false);
+      useEffect(() => {
+        if (seeded.current) return;
+        seeded.current = true;
+        appendAgentMessage(SIGN_IN_BYO_OPENER);
+      }, [appendAgentMessage]);
+      return null;
+    };
+
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SeedExistingOpener />
+        <ChatMessagesProbe onSnapshot={(next) => (messages = next)} />
+      </>,
+      { initialFrame: "f1", initialScenario: null, initialUrl: "/onboarding/signup" },
+    );
+
+    expect(await screen.findByTestId("sign-up-viewer-surface")).toBeInTheDocument();
+    await waitFor(() => expect(messages).toContain(SIGN_IN_BYO_FOLLOWUP), { timeout: 2000 });
+
+    expect(messages.filter((message) => message === SIGN_IN_BYO_OPENER)).toHaveLength(1);
+    expect(messages.filter((message) => message === SIGN_IN_BYO_FOLLOWUP)).toHaveLength(1);
   });
 
   it("honors ?bookCall=1 on the bare onboarding route instead of masking it with the F1 picker", async () => {
@@ -611,8 +729,43 @@ describe("OnboardingShell", () => {
     await waitFor(() => {
       expect(document.querySelector('[data-widget="book-call-view"]')).not.toBeNull();
     });
-    expect(screen.getByLabelText("Book a call · status")).toBeInTheDocument();
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Book a call · status")).not.toBeInTheDocument();
     expect(screen.queryByText(/connect your data to groundx/i)).not.toBeInTheDocument();
+  });
+
+  it("does not replay booking narration already present in the same chat session", async () => {
+    let messages: string[] = [];
+    const SeedExistingBookingOpener = () => {
+      const { appendAgentMessage } = useChatStore();
+      const seeded = useRef(false);
+      useEffect(() => {
+        if (seeded.current) return;
+        seeded.current = true;
+        appendAgentMessage(BOOKING_OPENER);
+      }, [appendAgentMessage]);
+      return null;
+    };
+
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SeedExistingBookingOpener />
+        <ChatMessagesProbe onSnapshot={(next) => (messages = next)} />
+      </>,
+      {
+        initialFrame: "f3",
+        initialScenario: "utility",
+        initialUrl: "/onboarding/28454/utility?bookCall=1",
+      },
+    );
+
+    await waitFor(() => expect(document.querySelector('[data-widget="book-call-view"]')).not.toBeNull());
+    await waitFor(() => expect(messages).toContain(BOOKING_PREP), { timeout: 2000 });
+
+    expect(messages.filter((message) => message === BOOKING_OPENER)).toHaveLength(1);
+    expect(messages.filter((message) => message === BOOKING_FOLLOWUP)).toHaveLength(1);
+    expect(messages.filter((message) => message === BOOKING_PREP)).toHaveLength(1);
   });
 
   it("clears ?bookCall=1 and shows the call-requested state after Calendly confirms scheduling", async () => {
@@ -645,9 +798,10 @@ describe("OnboardingShell", () => {
 
     await waitFor(() => {
       expect(locationSnapshot.search).not.toContain("bookCall=1");
-      expect(screen.getByTestId("gate-rail-committed")).toHaveTextContent(/call requested/i);
     });
     expect(screen.queryByLabelText("Book a call · status")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-committed")).not.toBeInTheDocument();
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
   });
 
   // ── master-viewer-session Phase 2 — gate-as-overlay ──────────────
@@ -800,10 +954,11 @@ describe("OnboardingShell", () => {
       </>,
       { initialFrame: "f1", initialScenario: null, initialUrl: "/onboarding/signup" },
     );
-    // Gate-open canvas swap is showing the signup widget on /onboarding/signup.
-    await waitFor(() => expect(screen.getByTestId("gate-rail-preamble")).toBeInTheDocument(), {
+    // Sign-in opens in the viewer on /onboarding/signup.
+    await waitFor(() => expect(screen.getByTestId("sign-up-viewer-surface")).toBeInTheDocument(), {
       timeout: 2000,
     });
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
     // User backs out — simulate the URL→state path the browser back
     // button (or the Ingest step pill) would take.
     act(() => nav!("/onboarding"));
@@ -811,13 +966,14 @@ describe("OnboardingShell", () => {
     await waitFor(() => expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument(), {
       timeout: 2000,
     });
-    await waitFor(() => expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument());
     // Now pick a sample.
     await user.click(screen.getByTestId("sample-utility"));
     // The sample's F2 canvas mounts AND the gate overlay is not blocking it.
     await waitFor(() => expect(screen.getByTestId("onboarding-frame-f2")).toBeInTheDocument(), {
       timeout: 2000,
     });
+    expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument();
     expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
   });
 
@@ -887,10 +1043,13 @@ describe("OnboardingShell", () => {
 
     await user.click(screen.getByTestId("byo-pdf"));
 
-    // After clicking BYO: gate-card eventually appears in chat.
-    await waitFor(() => expect(screen.queryByTestId("gate-rail-preamble")).toBeInTheDocument(), {
+    // After clicking BYO: sign-in appears in the viewer, not as a
+    // replacement chat rail.
+    await waitFor(() => expect(screen.queryByTestId("sign-up-viewer-surface")).toBeInTheDocument(), {
       timeout: 2000,
     });
+    expect(screen.getByTestId("conversation-flow")).toBeInTheDocument();
+    expect(screen.queryByTestId("gate-rail-preamble")).not.toBeInTheDocument();
 
     // ⚠️ The registry must STILL be empty. No `byo:default` entity.
     expect(registrySnap.entityKeys).toEqual([]);
@@ -983,7 +1142,10 @@ describe("OnboardingShell", () => {
     await waitFor(() => expect(snapshot.frame).toBe("f2"));
 
     // Advance to F3 (drive via the API probe so we don't need to
-    // dig through the step strip UI in tests)
+    // dig through the step strip UI in tests). In production, reaching F3 this
+    // way means the ThinkingStream finished and persisted its done marker; set
+    // the same marker because this test bypasses that animation.
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     act(() => {
       actions!.advanceFrame("f3");
     });
@@ -1020,42 +1182,62 @@ describe("OnboardingShell", () => {
     });
   });
 
-  // ── 2026-05-29-smart-report-screen Phase 0 — failing user-visible test ──
+  // report-empty-state: the former "Phase 0" test (clicking Report → f4 render
+  // with the fixture's billing summary / charge breakdown / anomalies /
+  // recommendation sections) is REMOVED — there is no client fixture, and with
+  // no template a Report click now lands on the empty BUILDER (covered by the
+  // template-aware routing tests below). The content-render version is
+  // re-created against the REAL seeded template in `report-default-template`
+  // (with the new section names: billing summary / charges by service / service
+  // accounts / account activity).
+
+  // ── report-empty-state T1(c) — RED until Report routing is template-aware ──
   //
-  // The Report step-strip pill is the Analyze sub-pill that was hard-disabled
-  // (`reportActive = false`) and `f4` mis-routed to the extract workbench.
-  // Phase 0 forcing function: with the Utility scenario, clicking the Report
-  // sub-pill must (a) advance the canvas to `f4` and (b) render the single-doc
-  // IC-brief report render surface — fixture sections + CiteChips — NOT the
-  // extract workbench. Red before Phases 1-3 land.
-  it("Phase 0: Utility → clicking the Report pill advances to f4 and renders the report surface", async () => {
+  // With no real report template (the new-customer norm + the locked no-seed
+  // decision), activating the Report step must land on the EMPTY BUILDER (f4a),
+  // not the render surface (f4). Today `handleSubstepClick` routes "report" → f4
+  // unconditionally, so this is RED.
+  it("report-empty-state: clicking Report with no template lands on the empty builder (f4a), not the render", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, {
       initialFrame: "f3",
       initialScenario: "utility",
     });
-
-    // Pre-condition: on F3 the canvas is the extract workbench (Report not yet shown).
-    expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
-
-    // Click the Report sub-pill (now reachable for all scenarios).
     await user.click(screen.getByText("Report"));
+    // No template → the builder (f4a), never the render surface (f4).
+    expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
+  });
 
-    // The canvas advances to f4 and mounts the report render surface.
+  // The OTHER routing arm: WITH a report template id (set on the active
+  // session's reportOverlay via the pin path), Report routes to the RENDER
+  // surface (f4), not the builder — so the template-aware conditional is not a
+  // one-armed no-op. (`report-default-template` exercises this via the seeded
+  // onboarding default; here the writer is the pin path.)
+  it("report-empty-state: clicking Report WITH a report template lands on the render surface (f4), not the builder", async () => {
+    const user = userEvent.setup();
+    const TemplateSeeder = () => {
+      const { state, pinToReport } = useChatStore();
+      const done = useRef(false);
+      useEffect(() => {
+        if (state.activeSessionId && !done.current) {
+          done.current = true;
+          pinToReport({ turnId: "seed-turn", text: "seed", templateId: "rt-seeded" });
+        }
+      }, [state.activeSessionId, pinToReport]);
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <TemplateSeeder />
+      </>,
+      { initialFrame: "f3", initialScenario: "utility" },
+    );
+    await user.click(screen.getByText("Report"));
+    // A template id is present → the render surface (f4), never the builder (f4a).
     expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
-    // The extract workbench is no longer the canvas content.
-    expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
-
-    // The sections render with their headings — now from the render endpoint
-    // (async first paint), so await the first section before asserting the rest.
-    expect(await screen.findByText(/billing summary/i)).toBeInTheDocument();
-    const surface = within(screen.getByTestId("smart-report-render"));
-    expect(surface.getByText(/charge breakdown/i)).toBeInTheDocument();
-    expect(surface.getByText(/anomalies/i)).toBeInTheDocument();
-    expect(surface.getByText(/recommendation/i)).toBeInTheDocument();
-
-    // At least one CiteChip is present in a rendered section body.
-    expect(surface.getByTestId("cite-chip-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-builder")).not.toBeInTheDocument();
   });
 
   // ── 2026-05-29-smart-report-screen Phase 1 — frame/nav wiring ──────
@@ -1070,20 +1252,11 @@ describe("OnboardingShell", () => {
     expect(reportPill).not.toHaveAttribute("aria-disabled");
   });
 
-  it("Phase 1: anon previews the report render surface (export/Save locked)", async () => {
-    const user = userEvent.setup();
-    renderWithOnboardingProviders(<OnboardingShell />, {
-      initialFrame: "f3",
-      initialScenario: "utility",
-      initialAuthState: "anonymous",
-    });
-    await user.click(screen.getByText("Report"));
-    const surface = await screen.findByTestId("smart-report-render");
-    expect(surface).toHaveAttribute("data-role", "anonymous");
-    // The export/Save lock + preview badge are part of the rendered report, so
-    // await the endpoint-sourced first paint before asserting the lock.
-    expect(await within(surface).findByTestId("smart-report-export")).toHaveTextContent("🔒");
-  });
+  // report-empty-state: the anon "previews the render surface with export/Save
+  // locked" test is REMOVED here — with no template, an anon Report click lands
+  // on the empty builder (no rendered report to lock). The
+  // export-lock-over-real-content version is re-created against the seeded
+  // template in `report-default-template`.
 
   it("Phase 1: Report pill is reachable on the Loan scenario too (not chapter-gated)", async () => {
     const user = userEvent.setup();
@@ -1092,10 +1265,9 @@ describe("OnboardingShell", () => {
       initialScenario: "loan",
     });
     await user.click(screen.getByText("Report"));
-    // Loan has no fixture → the surface mounts in its empty state (still f4,
-    // not the extract workbench).
-    const surface = await screen.findByTestId("smart-report-render");
-    expect(await within(surface).findByTestId("smart-report-empty")).toBeInTheDocument();
+    // Loan has no template → Report is reachable and lands on the empty BUILDER
+    // (existing-or-new UX), NOT the extract workbench.
+    expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
     expect(screen.queryByTestId("extract-workbench")).not.toBeInTheDocument();
   });
 
@@ -1133,55 +1305,12 @@ describe("OnboardingShell", () => {
     await waitFor(() => expect(snapshot.frame).toBe("f4"));
   });
 
-  it("Restoration: clicking ✎ edit §N on the live f4 render surface reaches the builder with the section pre-opened", async () => {
-    // 2026-05-31-shared-canvas-affordance-restoration: the render→builder edit
-    // hand-off is restored WITHOUT per-frame view wiring — the on-screen
-    // `✎ edit §N` button dispatches the `editTemplate` intent through the
-    // orchestrator (the same intent `show_smart_report_edit` emits), which
-    // routes to advanceFrame("f4a", { selectedReportSectionId }); the builder
-    // pre-opens that section from session.selectedReportSectionId.
-    //
-    // Mid-flow premise (f4 with an empty thread) ⇒ seed the scripted-intro
-    // doneness, else the Intro's replay-snap (canvas↔chat coherence,
-    // 2026-06-11) correctly yanks the canvas back to f2.
-    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
-    const user = userEvent.setup();
-    renderWithOnboardingProviders(<OnboardingShell />, {
-      initialFrame: "f4",
-      initialScenario: "utility",
-    });
-
-    // f4 render surface is up with its sections.
-    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
-    await screen.findByText(/billing summary/i);
-
-    // Click the on-screen edit affordance for the billing_summary section.
-    await user.click(screen.getByTestId("report-section-edit-billing_summary"));
-
-    // The canvas swaps to the builder (report-builder CanvasKind)…
-    expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
-    expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
-      "data-canvas-kind",
-      "report-builder",
-    );
-    // …with that section's inline editor pre-opened (no host callback prop).
-    expect(await screen.findByTestId("report-builder-editor-billing_summary")).toBeInTheDocument();
-  });
-
-  it("Phase 1: Extract → Report carries the source ContentScope (bucket+project filter, no re-pick)", async () => {
-    const user = userEvent.setup();
-    renderWithOnboardingProviders(<OnboardingShell />, {
-      initialFrame: "f3",
-      initialScenario: "utility",
-    });
-    await user.click(screen.getByText("Report"));
-    // The Utility fixture only resolves for a bucket+project:"utility" scope —
-    // its presence proves the render scope was the source surface's scope, not
-    // a re-picked default.
-    const surface = await screen.findByTestId("smart-report-render");
-    // Endpoint-sourced first paint — await the Utility section.
-    expect(await within(surface).findByText(/billing summary/i)).toBeInTheDocument();
-  });
+  // report-empty-state: the render→builder `✎ edit §N` hand-off test and the
+  // "Extract → Report carries the source ContentScope" test both required a
+  // RENDERED report (the fixture's billing-summary sections). With the fixture
+  // gone, the render is empty until a real template is seeded, so both are
+  // re-created against the seeded template in `report-default-template` (the
+  // edit hand-off in its T5, the scope-carry in its T6b).
 
   // ── 2026-05-30-onboarding-shell-shared-view Phase 3a ──────────────
   //

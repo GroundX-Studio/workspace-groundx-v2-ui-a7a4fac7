@@ -309,7 +309,18 @@ export type PendingReportOverlay = PendingTemplateOverlay<
   ReportSectionItem,
   ReportSectionEdit,
   ReportSectionProposal
->;
+> & {
+  /**
+   * The id of the saved/default report template this overlay renders against.
+   * The render surface reads it to pick the template for the LIVE render — never
+   * a client-side scope→fixture map. `undefined` is the new-customer norm
+   * (`Pin→template = NO auto`) → the empty state with NO network round-trip. Set
+   * by the pin path (an explicit target) or the onboarding bootstrap (the seeded
+   * default, `report-default-template`); report-specific, not on the generic
+   * shell (Extract has no analogous render).
+   */
+  templateId?: string;
+};
 
 /**
  * smart-report Phase 5 — input to `ChatStore.pinToReport`. The pinned section's
@@ -408,7 +419,7 @@ export type ViewerStep =
     }
   | { kind: "extract-workbench"; scenarioId: string; focusedCategoryId?: string }
   | { kind: "interact-chat"; scenarioId: string }
-  | { kind: "report" }
+  | { kind: "report"; surface?: "render" | "builder"; selectedSectionId?: string }
   | { kind: "integrate" };
 
 /**
@@ -527,7 +538,7 @@ export interface ChatStoreApi {
    * `isOnboardingSession` defaults to false — the onboarding
    * bootstrap (Phase D) explicitly opts in.
    */
-  newSession: (options?: { isOnboardingSession?: boolean; title?: string }) => string;
+  newSession: (options?: { isOnboardingSession?: boolean; title?: string; scopeKey?: string }) => string;
   /** Activate an existing session. No-op if id is unknown. */
   switchTo: (id: string) => void;
   /**

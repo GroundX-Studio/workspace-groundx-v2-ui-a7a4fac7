@@ -1,5 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+
+import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
 import { LiveTurnList } from "./chatPrimitives";
 import type { LiveTurn } from "./useConversation";
@@ -14,9 +16,8 @@ function assistantTurn(extra: Partial<LiveTurn>): LiveTurn {
     id: "a-1",
     role: "assistant",
     content: "X-Ray breaks documents into semantic objects.",
-    // Skip the PinToReportAction branch — it needs ChatStore context the bare
-    // render doesn't provide, and isn't the unit under test here.
-    pinToReport: false,
+    // Not pinnable (opt-in) → skips the pin affordance branch, which needs
+    // ChatStore context the bare render doesn't provide and isn't under test here.
     ...extra,
   };
 }
@@ -63,5 +64,56 @@ describe("LiveTurnList — tool-activity annotation", () => {
       />,
     );
     expect(screen.queryByTestId("chat-tool-activity")).toBeNull();
+  });
+});
+
+// report-pin-affordance T1 — the pin affordance is OPT-IN and COMPACT.
+// (Uses the full providers because the pin control reads ChatStore.)
+describe("report-pin-affordance — opt-in compact pin (T1)", () => {
+  const turn = (extra: Partial<LiveTurn>): LiveTurn => ({
+    id: "a-1",
+    role: "assistant",
+    content: "The total amount due is $7,613.20.",
+    ...extra,
+  });
+
+  it("a genuine answer turn (pinnable) shows the COMPACT AnswerActions control", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[turn({ pinnable: true })]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("answer-actions")).toBeInTheDocument();
+  });
+
+  it("a narration / scripted turn (NOT pinnable) shows NO pin affordance at all", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[turn({})]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("answer-actions")).not.toBeInTheDocument();
+    // and NOT the old full-width pill either.
+    expect(screen.queryByTestId("pin-to-report-action")).not.toBeInTheDocument();
+  });
+
+  it("the pin control is a real <button> with an aria-label (keyboard/touch operable, not hover-only)", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[turn({ pinnable: true })]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    const actions = screen.getByTestId("answer-actions");
+    const btn = within(actions).getByRole("button", { name: /pin/i });
+    expect(btn.tagName).toBe("BUTTON");
   });
 });

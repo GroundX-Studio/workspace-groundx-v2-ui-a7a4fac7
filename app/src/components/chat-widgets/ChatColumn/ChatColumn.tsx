@@ -6,7 +6,7 @@
  * `<ConversationFlow>`, over the durable `useConversation` engine. ChatColumn's
  * only job is dispatch + experience selection:
  *
- *   1. Gate active (open / committed) → render <GateChatPanel /> (unchanged).
+ *   1. Viewer overlays (sign-in / booking) keep <ConversationFlow> mounted.
  *   2. F1 / BYO-no-scenario → idle / sign-in placeholders (unchanged).
  *   3. In the onboarding journey (F2–F5 with a scenario) → mount
  *      <ConversationFlow> WITH the onboarding `ChatExperience` looked up from
@@ -41,8 +41,6 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistryOptional } from "@/contexts/ScenarioRegistryContext";
 
-import { GateChatPanel } from "@/components/chat-widgets/GateChatPanel/GateChatPanel";
-
 export interface ChatColumnProps {
   /**
    * 2026-05-30-widget-role-access — widget AUTHORIZATION role.
@@ -71,9 +69,25 @@ export interface ChatColumnProps {
    * Override the current frame. Same use case as overrideScenarioId.
    */
   overrideFrame?: "f1" | "f2" | "f3" | "f3a" | "f4" | "f5" | "f6" | "f7";
+  /**
+   * Booking is a viewer overlay, not a replacement chat mode. While the
+   * calendar is open, keep the current conversation mounted even if the
+   * underlying onboarding gate is open/committed.
+   */
+  bookingActive?: boolean;
+  /**
+   * Sign-in is a viewer overlay, not a replacement chat mode. While the
+   * sign-in widget is open, keep the active conversation mounted.
+   */
+  signInActive?: boolean;
 }
 
-export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFrame }) => {
+export const ChatColumn: FC<ChatColumnProps> = ({
+  overrideScenarioId,
+  overrideFrame,
+  bookingActive = false,
+  signInActive = false,
+}) => {
   const { state: appMode } = useAppMode();
   const scenarioRegistry = useScenarioRegistryOptional();
   const { state: chatState } = useChatStore();
@@ -133,16 +147,6 @@ export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFr
     return <ConversationFlow chatSessionId={activeSessionId} />;
   }
 
-  // Gate takes over the chat column when active — preserves the existing F6
-  // typing-indicator + GateView flow.
-  const gateActive =
-    session?.gate.status === "open" || session?.gate.status === "committed";
-  // The gate is the anonymous, pre-sign-up moment — session-scoped, not
-  // document-scoped. Pass the gate's own role/scope (anonymous /
-  // { type: "none" }), NOT ChatColumn's role, preserving the byte-for-byte
-  // behavior of GateChatPanel's prior hardcoded GateChatRail mount.
-  if (gateActive) return <GateChatPanel role="anonymous" scope={{ type: "none" }} />;
-
   const isF1 = currentFrame === "f1";
 
   // The onboarding journey (F2–F5 with a scenario) gets the onboarding
@@ -153,10 +157,22 @@ export const ChatColumn: FC<ChatColumnProps> = ({ overrideScenarioId, overrideFr
     currentFrame === "f3" ||
     currentFrame === "f3a" ||
     currentFrame === "f4" ||
-    currentFrame === "f5";
+    // f4a = the report BUILDER. It is part of the Analyze journey exactly like
+    // f4 (the render) — omitting it dropped the production chat to a static
+    // placeholder on the builder (a viewer surface must NOT disable the chat).
+    // Regression: ChatColumn.test.tsx "on F4a (report builder) …".
+    currentFrame === "f4a" ||
+    currentFrame === "f5" ||
+    (bookingActive &&
+      !signInActive &&
+      (currentFrame === "f6" || currentFrame === "f7" || currentFrame === "f1"));
 
   if (isInScenarioJourney && scenario) {
     return <ConversationFlow chatSessionId={activeSessionId} experience={onboardingExperience} />;
+  }
+
+  if (bookingActive || signInActive) {
+    return <ConversationFlow chatSessionId={activeSessionId} />;
   }
 
   if (isF1) return <IdleChatPlaceholder />;

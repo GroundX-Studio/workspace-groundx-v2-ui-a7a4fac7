@@ -1,10 +1,9 @@
 /**
  * SignUpWidget — viewer-slot half of the sign-up surface.
  *
- * The chat-side half is `GateChatRail`. Together they replace the
- * old `GateView` monolith that stuffed form fields + preamble +
- * dismiss + book-a-call into the chat column (which left the viewer
- * displaying a sample doc behind the form — the ARCH-05 bug).
+ * Sign-in is viewer-widget content. The host-owned ViewerWidgetFrame
+ * keeps close/back chrome consistent while this widget handles sign-in,
+ * book-a-call, and post-commit continue actions.
  *
  * Contract per `scaffold/docs/agents/widget-contract.md`:
  *   - Lives at `components/viewer-widgets/SignUpWidget/`.
@@ -38,9 +37,6 @@
  *   3. promoteToSignedIn() (in-app auth state)
  *   4. commitGate("register") (only when a gate is awaiting commit)
  *
- * The book-a-call CTA and the "← keep exploring" dismiss link
- * intentionally live in the chat-side `GateChatRail`, not here. This
- * widget is the FORM, nothing else.
  */
 
 import Alert from "@mui/material/Alert";
@@ -65,6 +61,41 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import type { GateCause } from "@/contexts/OnboardingSessionContext/types";
+import type { GateTrigger } from "@/types/onboarding";
+
+const SIGNUP_COPY: Record<GateTrigger, { eyebrow: string; title: string; body: string }> = {
+  save: {
+    eyebrow: "SAVE YOUR WORK",
+    title: "Create an account to save this session",
+    body: "Your chat, viewer state, and sample progress stay together after sign-in.",
+  },
+  export: {
+    eyebrow: "EXPORT",
+    title: "Sign in to export from GroundX",
+    body: "Exports are tied to an account so the generated work can be recovered later.",
+  },
+  byo: {
+    eyebrow: "BRING YOUR OWN DATA",
+    title: "Create an account to upload documents",
+    body: "Your current chat stays open. After sign-in, you can add your own files.",
+  },
+  threshold: {
+    eyebrow: "FREE PREVIEW LIMIT",
+    title: "Create an account to keep going",
+    body: "Your current session stays available while you sign in.",
+  },
+};
+
+const SIGNUP_COPY_BY_CAUSE: Record<GateCause, { eyebrow: string; title: string; body: string }> = {
+  "save-schema": {
+    eyebrow: "SAVE SCHEMA",
+    title: "Sign in to save this schema",
+    body: "Your schema edits stay with this session after sign-in.",
+  },
+};
+
+const PRE_INTEGRATE_FRAMES = new Set(["f1", "f2", "f3", "f3a", "f4", "f4a", "f5", "f6"]);
 
 export interface SignUpWidgetProps {
   /**
@@ -79,19 +110,26 @@ export interface SignUpWidgetProps {
    * this is always `{ type: "none" }`. Declared, never read by the form.
    */
   scope: WidgetScope;
+  /** Open the engineer-booking viewer overlay from the sign-in surface. */
+  onBookCall?: () => void;
+  /** Continue from a committed sign-in to the Integrate step. */
+  onContinueIntegrate?: () => void;
 }
 
 // `role` and `scope` are intentionally not destructured for use — they
 // satisfy the widget contract. Role is forward-looking (no affordance is
 // role-locked here); scope is always `{ type: "none" }`. Gate behavior is
 // sourced from gate-state below.
-export const SignUpWidget: FC<SignUpWidgetProps> = () => {
+export const SignUpWidget: FC<SignUpWidgetProps> = ({
+  onBookCall,
+  onContinueIntegrate,
+}) => {
   const api = useApi();
   const { promoteToSignedIn } = useAppMode();
-  const { state: session, commitGate } = useOnboardingSession();
+  const { state: session, commitGate, advanceFrame } = useOnboardingSession();
   // RE-SOURCED gate behavior: a gate is "awaiting commit" when it is open
   // or was dismissed (re-openable). We commit it on a successful register
-  // so the chat rail flips to its success state. When idle, registering
+  // so the viewer flips to its committed state. When idle, registering
   // does not touch the gate.
   const gateAwaitingCommit =
     session.gate.status === "open" || session.gate.status === "dismissed";
@@ -101,8 +139,50 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [magicEmail, setMagicEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const trigger =
+    session.gate.status === "open" || session.gate.status === "dismissed"
+      ? session.gate.trigger
+      : "byo";
+  const gateCause =
+    session.gate.status === "open" ||
+    session.gate.status === "dismissed" ||
+    session.gate.status === "committed"
+      ? session.gate.cause
+      : undefined;
+  const copy = gateCause ? SIGNUP_COPY_BY_CAUSE[gateCause] : SIGNUP_COPY[trigger];
+  const canContinueToIntegrate = PRE_INTEGRATE_FRAMES.has(session.currentFrame);
+
+  const handleBookCall = useCallback(() => {
+    onBookCall?.();
+  }, [onBookCall]);
+
+  const handleSendMagicLink = useCallback(() => {
+    if (!magicEmail.trim()) {
+      setError("Enter your email to send a magic link.");
+      return;
+    }
+    setError(null);
+    if (gateAwaitingCommit) {
+      commitGate("register");
+    }
+  }, [magicEmail, gateAwaitingCommit, commitGate]);
+
+  const handleSso = useCallback(() => {
+    if (gateAwaitingCommit) {
+      commitGate("sso");
+    }
+  }, [gateAwaitingCommit, commitGate]);
+
+  const handleContinueIntegrate = useCallback(() => {
+    if (onContinueIntegrate) {
+      onContinueIntegrate();
+      return;
+    }
+    advanceFrame("f7");
+  }, [advanceFrame, onContinueIntegrate]);
 
   // The REAL submit sequence, parameterized by explicit field values. Both the
   // on-screen form submit and the `submit_signup` LLM tool (via the registered
@@ -196,15 +276,13 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
     });
   }, [orchestrator, submitForm]);
 
-  // Committed-state celebration. The chat-side `GateChatRail` shows
-  // the canonical "Continue to Integrate" CTA; the canvas mirrors the
-  // success so the user isn't left staring at the form they just
-  // submitted while the chat says "Welcome." Kept deliberately quiet
-  // — the chat rail is the call-to-action.
+  // Committed-state celebration. The viewer owns the Continue action so
+  // sign-in stays in the same viewer/chat relationship after commit.
   if (gateCommitted) {
     return (
       <Box
         data-widget="sign-up"
+        data-testid="sign-up-viewer-surface"
         data-state="committed"
         sx={{
           display: "flex",
@@ -216,7 +294,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
       >
         <Card
           data-testid="signup-celebration"
-          sx={{ p: 4, borderRadius: BORDER_RADIUS_CARD, maxWidth: 460, width: "100%" }}
+          sx={{ p: 4, borderRadius: BORDER_RADIUS_CARD, maxWidth: 540, width: "100%" }}
           aria-label="Account created"
         >
           <MuiStack spacing={1.5}>
@@ -227,8 +305,19 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
             <BodyText>
               Your sample work is saved to your account. Use the
               <Box component="span" sx={{ whiteSpace: "nowrap" }}> Continue </Box>
-              button on the right to wire your real data.
+              button to wire your real data.
             </BodyText>
+            <MuiStack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              {canContinueToIntegrate ? (
+                <Button
+                  noTool="continues onboarding after sign-in"
+                  data-testid="sign-up-viewer-continue-integrate"
+                  onClick={handleContinueIntegrate}
+                >
+                  Continue
+                </Button>
+              ) : null}
+            </MuiStack>
           </MuiStack>
         </Card>
       </Box>
@@ -238,6 +327,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
   return (
     <Box
       data-widget="sign-up"
+      data-testid="sign-up-viewer-surface"
       sx={{
         display: "flex",
         alignItems: "center",
@@ -247,19 +337,61 @@ export const SignUpWidget: FC<SignUpWidgetProps> = () => {
       }}
     >
       <Card
-        sx={{ p: 4, borderRadius: BORDER_RADIUS_CARD, maxWidth: 460, width: "100%" }}
+        sx={{ p: 4, borderRadius: BORDER_RADIUS_CARD, maxWidth: 640, width: "100%" }}
         aria-label="Create your account"
       >
-        <MuiStack spacing={2.5}>
+        <MuiStack spacing={2}>
           <MuiStack spacing={0.5}>
-            <Label sx={{ color: EYEBROW_ON_LIGHT }}>CREATE ACCOUNT</Label>
+            <Label sx={{ color: EYEBROW_ON_LIGHT }}>{copy.eyebrow}</Label>
             <Heading level="h3" sx={{ color: NAVY }}>
-              Save your work
+              {copy.title}
             </Heading>
-            <BodyText>
-              One quick step — name, email, password. We&apos;ll keep your sample
-              progress and chat history.
-            </BodyText>
+            <BodyText>{copy.body}</BodyText>
+          </MuiStack>
+
+          <MuiStack spacing={1}>
+            <TextField
+              noTool="email used by viewer magic-link sign-in"
+              dense
+              fullWidth
+              size="small"
+              type="email"
+              label="Email"
+              value={magicEmail}
+              onChange={(event) => setMagicEmail(event.target.value)}
+              inputProps={{ "data-testid": "sign-up-viewer-email" }}
+              InputProps={{
+                startAdornment: <EmailOutlinedIcon sx={{ mr: 1, color: NAVY }} fontSize="small" />,
+              }}
+            />
+            <MuiStack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              <Button
+                noTool="demo magic-link sign-in"
+                data-testid="sign-up-viewer-send-magic-link"
+                onClick={handleSendMagicLink}
+                fullWidth
+              >
+                Send magic link
+              </Button>
+              <Button
+                noTool="demo sso sign-in"
+                variant="secondary"
+                data-testid="sign-up-viewer-sso"
+                onClick={handleSso}
+                fullWidth
+              >
+                Continue with SSO
+              </Button>
+            </MuiStack>
+            <Button
+              noTool="opens engineer booking from sign-in viewer"
+              variant="secondary"
+              data-testid="sign-up-viewer-book-call"
+              onClick={handleBookCall}
+              fullWidth
+            >
+              Book a call with an engineer
+            </Button>
           </MuiStack>
 
           <Box component="form" onSubmit={handleSubmit} aria-label="Sign-up form">

@@ -1,11 +1,10 @@
 /**
- * GateValueProp — the canvas (viewer-slot) half of the F6 sign-up gate.
+ * GateValueProp — legacy value-prop companion for the old F6 sign-up gate.
  *
- * P1 (2026-05-29): the gate's sign-up DOORS moved into the chat rail
- * (`GateChatRail` — magic-link · SSO · book-a-call). This widget is the
- * viewer-slot counterpart: instead of an account form, the canvas pitches
- * the GroundX value proposition while the user decides. It is the "you've
- * felt the value, here's why it's worth an account" surface.
+ * The live sign-in path now mounts SignUpWidget as the viewer overlay and
+ * keeps ConversationFlow mounted in chat. This widget remains for legacy
+ * reference/tests as the old "you've felt the value, here's why it's worth
+ * an account" pitch surface.
  *
  * P1 polish (2026-05-29): rebuilt from a flat bullet list into a designed
  * hero — eyebrow chip, display headline, lead, four icon-badged feature
@@ -16,8 +15,8 @@
  *
  * Migrated to the role+scope widget contract in 2026-05-30-widget-role-access
  * Phase 2b. Matrix row (docs/agents/widget-access-matrix.md): **anonymous-only**
- * availability (gate context) — enforced at the MOUNT SITE, not by a prop;
- * no affordance lock; scope `{ type: "none" }` (not a ScopedViewerWidget).
+ * legacy availability — enforced at the MOUNT SITE, not by a prop; no
+ * affordance lock; scope `{ type: "none" }` (not a ScopedViewerWidget).
  * The retired cosmetic `mode` prop was dropped (identical pitch in both
  * modes) and replaced by `role` for contract conformance.
  */

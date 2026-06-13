@@ -32,6 +32,7 @@ import type { RenderedReport, ReportSectionRenderAs } from "@/types/report";
 
 const RENDER_ROUTE = "/api/widgets/smart-report/reports/render";
 const SAVE_ROUTE = "/api/widgets/smart-report/reports";
+const TEMPLATE_READ_ROUTE = "/api/widgets/smart-report/reports/template";
 
 export class SmartReportApiError extends ApiError {
   constructor(message: string, status: number, detail: unknown) {
@@ -251,4 +252,59 @@ export async function saveReportTemplate(
     throw error;
   }
   return (await res.json()) as SaveReportTemplateResult;
+}
+
+// ── Read (template definition, for the builder) ─────────────────────────────
+
+/** A report template's scope-independent definition (questions, no answers). */
+export interface ReportTemplateDefinition {
+  id: string;
+  name: string;
+  sections: SaveReportTemplateInput["sections"];
+}
+
+export interface GetReportTemplateResult {
+  template: ReportTemplateDefinition;
+  /** Whether the CALLER owns this template (FALSE for the public sample / anon). */
+  owned: boolean;
+}
+
+/**
+ * Read a report template's section definitions by id — the builder uses this to
+ * seed its editable base rows. Access-scoped server-side: anon reads only the
+ * public sample, members read the sample or their own. A `404` (not found / not
+ * visible) maps to `null`. `owned` drives the builder's fork-on-edit (editing a
+ * NOT-owned template saves a new member-owned copy).
+ */
+export async function getReportTemplate(id: string): Promise<GetReportTemplateResult | null> {
+  const route = `${TEMPLATE_READ_ROUTE}/${encodeURIComponent(id)}`;
+  let res: Response;
+  try {
+    res = await csrfFetch(route, { method: "GET", credentials: "include" });
+  } catch (err) {
+    captureException(err, { route });
+    throw err;
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    let detail: unknown = null;
+    try {
+      detail = await res.json();
+    } catch {
+      // ignore
+    }
+    const error = new SmartReportApiError(`GET ${route} failed: ${res.status}`, res.status, detail);
+    if (res.status >= 500) {
+      captureException(error, { route, status: res.status });
+    }
+    throw error;
+  }
+  const body = (await res.json()) as {
+    template: { id: string; name: string; sections: ReportTemplateDefinition["sections"] };
+    owned: boolean;
+  };
+  return {
+    template: { id: body.template.id, name: body.template.name, sections: body.template.sections },
+    owned: body.owned === true,
+  };
 }

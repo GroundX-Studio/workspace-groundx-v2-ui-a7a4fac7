@@ -32,12 +32,22 @@ const pdf = defineScopedViewerWidget({
   id: "pdf-viewer",
   kind: "doc-viewer",
   slot: "viewer-widgets",
+  viewerFrame: {
+    chromePolicy: "edge-to-edge",
+    contentMode: "edge-to-edge",
+    title: "Document viewer",
+  },
   tools: [mkTool("open_document")],
 });
 const extract = defineScopedViewerWidget({
   id: "extract",
   kind: "report",
   slot: "viewer-widgets",
+  viewerFrame: {
+    chromePolicy: "framed",
+    contentMode: "padded-scroll",
+    title: "Report",
+  },
   tools: [mkTool("show_smart_report_render")],
 });
 
@@ -65,6 +75,11 @@ describe("createScopedViewerWidgetRegistry — Catalog<ScopedViewerWidgetDescrip
       id: "pdf-viewer",
       kind: "report",
       slot: "viewer-widgets",
+      viewerFrame: {
+        chromePolicy: "framed",
+        contentMode: "padded-scroll",
+        title: "Report",
+      },
       tools: [mkTool("open_document_again")],
     });
     expect(() => createScopedViewerWidgetRegistry([pdf, dup], (d) => d.id)).toThrow(

@@ -5,6 +5,17 @@
 The production PDF viewer used by every surface that needs to show a
 GroundX document.
 
+## Viewer chrome
+
+Policy: `edge-to-edge inside ViewerWidgetFrame`
+
+Content mode: `edge-to-edge`
+
+`ScopedCanvas` wraps PdfViewer in `ViewerWidgetFrame` with minimal
+edge-to-edge chrome so document imagery keeps the full viewer area. The
+widget owns document-local controls such as thumbnails, zoom, page state,
+scan animation, and citation highlights.
+
 ## What it does
 
 Reads a `scope: ContentScope`, resolves the target document from it
@@ -87,26 +98,28 @@ None today. The viewer is read-only — citation-jump flows in via
 ## How to mount
 
 ```tsx
-import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
+import { ScopedCanvas } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 
-// Uncontrolled (onboarding F2 default).
-<PdfViewerWidget
-  scope={{ type: "documents", documentIds: [scenario.documents[0].documentId] }}
+const documentId = scenario.documents[0].documentId;
+
+// Default document viewer.
+<ScopedCanvas
+  scope={{ type: "documents", documentIds: [documentId] }}
+  step={{ kind: "doc-viewer", documentId }}
   role={role}
 />
 
 // Controlled by a doc-viewer ViewerStep (citation-jump flow).
-<PdfViewerWidget
+<ScopedCanvas
   scope={{ type: "documents", documentIds: [step.documentId] }}
+  step={step}
   role={role}
-  targetPage={step.highlight?.page ?? step.page ?? null}
-  highlightBbox={step.highlight?.bbox ?? null}
 />
 ```
 
-The host wraps the widget in a viewer pane Box (`height: 100%` + flex)
-and lets the widget fill it. The widget surfaces loading + error
-states inline — the host doesn't render a loading skeleton.
+`ScopedCanvas` resolves the PDF viewer, wraps it in `ViewerWidgetFrame`, and
+passes the active document scope plus any citation jump data. Direct widget
+imports are reserved for unit tests or implementation-local composition.
 
 ## Replaces
 

@@ -3,6 +3,17 @@
 **Slot:** `viewer-widgets` · **Frame:** `f4` / spec `S3` · **Status:** Phase 3
 (2026-05-29-smart-report-screen)
 
+## Viewer chrome
+
+Policy: `framed`
+
+Content mode: `padded-scroll`
+
+`ScopedCanvas` wraps SmartReportRender in `ViewerWidgetFrame`. The widget
+owns report-local controls such as re-render, edit section, Save/export, and
+CiteChip citation navigation. Those controls mutate or inspect report content;
+they are not viewer-frame close/back chrome.
+
 ## What it does
 
 Renders the Report **render** surface (f4): an ordered list of report sections,
@@ -17,9 +28,10 @@ sees is the endpoint response, not a synchronous client-side fixture read
 live render path). First paint has an explicit lifecycle:
 `loading` (`smart-report-loading`) → `ready` / `empty` (`smart-report-empty`,
 endpoint returned no sections) / `error` (`smart-report-error` +
-`smart-report-retry`, retryable). `reportTemplateIdForScope(scope)` resolves
-which template to render (a scope→template routing decision, not a report read);
-a scope with no template shows the empty state without a network call. The
+`smart-report-retry`, retryable). The template id to render comes from REAL
+report state (`reportOverlay.templateId` on the active session) — never a
+client-side scope→fixture map; when it is absent (the new-customer norm) the
+surface shows the empty state without a network call. The
 **↻ re-render** control re-runs the same fetch and swaps in the endpoint
 response. The live multi-doc fan-out is Phase 7 (BLOCKED on WF-10) — the same
 endpoint serves it with no surface rework.
@@ -71,15 +83,17 @@ re-resolves the report whenever the scope IDENTITY changes.
 ## How to mount
 
 ```tsx
-import { SmartReportRender } from "@/components/viewer-widgets/SmartReportRender/SmartReportRender";
+import { ScopedCanvas } from "@/components/layout/ScopedCanvas/ScopedCanvas";
 
-<SmartReportRender
-  role={role}
+<ScopedCanvas
   scope={{
     type: "bucket",
     bucketId: 28454,
     filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
   }}
+  step={{ kind: "report" }}
+  role={role}
+  reportSurface="render"
 />
 ```
 

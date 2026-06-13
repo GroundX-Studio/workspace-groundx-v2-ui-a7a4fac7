@@ -19,7 +19,9 @@ experience, same engine/code path.
 Reads the active chat session + onboarding session/scenario state and
 dispatches to one of:
 
-- **Gate active** → `GateChatPanel` (the F6 typing-indicator + GateView).
+- **Viewer overlay active** (`bookingActive` / `signInActive`) →
+  `<ConversationFlow>` stays mounted. The overlay belongs to the
+  viewer stack, not a replacement chat mode.
 - **Steady chat** (active session is non-onboarding) → `<ConversationFlow>`
   with **no experience** (the bare chat: live-turns + input bar).
 - **Onboarding journey** (F2–F5 with a scenario) → `<ConversationFlow>`
@@ -44,6 +46,8 @@ live in `useConversation` / `ConversationFlow` / `chatPrimitives` (under
 | `scope` | `WidgetScope` | — (required) | Always `{ type: "none" }` — chat is session-scoped, not document-scoped. ChatColumn is not a ScopedViewerWidget. |
 | `overrideScenarioId` | `string \| null` | undefined | Onboarding only — used by the F2→F1 slide-out so the leaving pane shows the conversation that's sliding away. |
 | `overrideFrame` | `FFrame` | undefined | Onboarding only — same use case as `overrideScenarioId`. |
+| `bookingActive` | `boolean` | `false` | Keeps the same chat mounted while Calendly is shown in the viewer. |
+| `signInActive` | `boolean` | `false` | Keeps the same chat mounted while sign-in is shown in the viewer. |
 
 The steady-vs-onboarding signal is the **active chat session's
 `isOnboardingSession` flag** (read from the source of truth, the same flag
@@ -93,7 +97,12 @@ on completion.
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 
 // Onboarding shell (role sourced from auth state):
-<ChatColumn role={signedIn ? "member" : "anonymous"} scope={{ type: "none" }} />
+<ChatColumn
+  role={signedIn ? "member" : "anonymous"}
+  scope={{ type: "none" }}
+  bookingActive={bookCallActive}
+  signInActive={signupSurfaceActive}
+/>
 
 // Steady shell (same component; the non-onboarding session selects the bare chat):
 <ChatColumn role={widgetRole} scope={{ type: "none" }} />
@@ -133,7 +142,6 @@ so the widget-contract drift guard does not apply to them.
   reference experience (`makeOnboardingExperience`).
 - `chat-widgets/ThinkingStream/` — the scripted-notes widget the
   onboarding experience's `Intro` embeds.
-- `chat-widgets/GateChatRail/` — the gate-state widget that takes over
-  when `gate.status === "open" | "committed"`.
+- `viewer-widgets/SignUpWidget/` — the viewer-side sign-in overlay.
 - `viewer-widgets/PdfViewer/` — the canvas-side companion (same shell,
   different slot).

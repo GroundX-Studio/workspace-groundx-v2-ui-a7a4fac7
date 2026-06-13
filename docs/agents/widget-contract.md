@@ -57,29 +57,29 @@ Every widget MUST:
    entry point, named after the directory (e.g.
    `viewer-widgets/PdfViewer/PdfViewerWidget.tsx`).
 
-3. Accept a `mode: "onboarding" | "steady"` prop that locks editable
-   affordances when set to `"onboarding"`:
-   - Chat widgets: locked affordances mean the user can't send custom
-     messages outside the scripted thinking-stream; the input is
-     present but greyed.
-   - Viewer widgets: locked affordances mean editable controls
-     (toolbars, dropdowns, save buttons) are hidden, but read-only
-     viewing is still functional.
+3. Accept required `role: WidgetRole` and `scope: WidgetScope` props.
+   Role describes authorization / affordance availability
+   (`anonymous` / `member` today). Scope describes the content set. A
+   widget does not receive raw `documentId`, `bucketId`, or `projectId`
+   props; those collapse into `scope`.
 
 4. Ship a sibling `README.md` describing:
    - What the widget does + what slot it occupies
-   - Required + optional props (including config-only knobs)
-   - Locked affordances under `mode="onboarding"`
+   - Required + optional props, including `role` and `scope`
+   - Locked affordances by role
+   - For viewer widgets: the `## Viewer chrome` policy section
    - Events / callbacks it fires
    - How the host wires it (one-line integration example)
 
 5. Ship a sibling `.test.tsx` covering:
-   - Mounts in both modes without crashing
-   - Locked affordances are absent / disabled when `mode="onboarding"`
+   - Mounts for supported roles without crashing
+   - Locked affordances are absent / disabled for the locked role
    - Required events fire on user action
 
-The drift-guard test (`app/src/test/widget-contract.test.ts`)
-auto-discovers all widgets and enforces 1, 2, 4, 5.
+The drift-guard tests (`app/src/test/widget-contract.test.ts` and
+`app/src/test/viewer-widget-shell-contract.test.ts`) auto-discover widgets
+and enforce the directory, README, role/scope, dependency, LLM-tool, and
+viewer-chrome contracts.
 
 ## Slot-specific rules
 
@@ -96,12 +96,39 @@ auto-discovers all widgets and enforces 1, 2, 4, 5.
 ### Viewer widgets
 
 - Render inside the viewer pane (right of the resize handle).
-- Fill the pane: `width: 100%, height: 100%`. The AppShell handles
-  edges + scrolling; widgets don't manage their own outer width.
-- May ship their own toolbar / thumbnail strip / footer as long as
-  those parts are locked behind `mode="onboarding"` where appropriate.
-- Heavy data fetches are the widget's responsibility, but the widget
-  must surface loading + error states inline.
+- Fill the pane content region: `width: 100%, height: 100%`. The host wraps
+  them in `ViewerWidgetFrame`, which owns pane chrome, close/back actions,
+  outer padding, loading/status bands, and active/inert state.
+- Do not render host-level close/back/header/pane cards inside a viewer
+  widget. Local content controls are allowed: PDF thumbnails/zoom, Extract
+  field controls, report row editors, connector cards, menus, and inline
+  editor close buttons stay in the widget.
+- Heavy data fetches are the widget's responsibility. Third-party embed
+  lifecycle can be reported to the host so `ViewerWidgetFrame` places loaders
+  above the embed instead of overlaying the iframe.
+
+### Viewer chrome
+
+Every viewer-widget README MUST include `## Viewer chrome` with:
+
+- policy `framed` for standard workbench/form surfaces;
+- policy `edge-to-edge inside ViewerWidgetFrame` for PDF/canvas-style
+  surfaces that need minimal visual chrome but still use the shared frame; or
+- policy `hostless-exception` with the owning host named.
+
+It must also declare a content mode: `centered-panel`, `padded-scroll`,
+`edge-to-edge`, or `embed`.
+
+Runtime descriptors live in exactly two places:
+
+- production `CanvasKind` widgets: their `.tools.ts` descriptor via
+  `scopedViewerWidgetRegistryProduction.ts`;
+- onboarding overlays: `views/Onboarding/viewerOverlayFrameDescriptors.ts`.
+
+No widget should invent its own outer shell. If a widget needs a close/back
+control that changes the viewer slot, add it to the host frame descriptor. If
+the control edits or closes an item inside the widget, document it as content
+chrome in that widget README.
 
 ## Primitives
 
@@ -114,10 +141,10 @@ themselves are NOT widgets — they're the building blocks. Locked
 | `BotBubble` | `chat-widgets/_primitives/BotBubble.tsx` | ThinkingStream, GateBotResponse, ChatWithSources |
 | `UserBubble` | `chat-widgets/_primitives/UserBubble.tsx` | ThinkingStream, ChatWithSources |
 | `ThinkingNote` | `chat-widgets/_primitives/ThinkingNote.tsx` | ThinkingStream |
-| `PillRow` | `chat-widgets/_primitives/PillRow.tsx` | PickAViewPills, GateChatRail, BookingStatusCard |
-| `StatusCard` | `chat-widgets/_primitives/StatusCard.tsx` | BookingStatusCard, GateChatRail, BookCallConfirmed |
+| `PillRow` | `chat-widgets/_primitives/PillRow.tsx` | PickAViewPills, BookingStatusCard, legacy GateChatRail |
+| `StatusCard` | `chat-widgets/_primitives/StatusCard.tsx` | BookingStatusCard, BookCallConfirmed, legacy GateChatRail |
 | `LoadingDots` | `shared/components/LoadingDots.tsx` (already exists) | GateBotResponse, ThinkingStream |
-| `MagicLinkInput` | `chat-widgets/_primitives/MagicLinkInput.tsx` | GateChatRail |
+| `MagicLinkInput` | `chat-widgets/_primitives/MagicLinkInput.tsx` | legacy GateChatRail |
 
 ARCH-03 moves the existing inline implementations into these
 primitive files; ARCH-11 extracts ThinkingStream proper.
@@ -144,7 +171,7 @@ Widgets that exist or will exist after ARCH-03..ARCH-11 land:
 | Widget | Status | Replaces |
 |---|---|---|
 | `BookingStatusCard` | shipped as `BookCallChatPanel` (move + rename in ARCH-03) | n/a |
-| `GateChatRail` | shipped (ARCH-05 · 2026-05-26) | the chat half of monolithic `GateView` (deleted in ARCH-05C) |
+| `GateChatRail` | legacy (not mounted by live sign-in) | historical chat half of monolithic `GateView` |
 | `ChatWithSources` | future (UI-05 / steady) | placeholder in SteadyShell |
 | `ThinkingStream` | ARCH-11 | inline `F2ConversationFlow` block in `ChatColumn` |
 | `PickAViewPills` | ARCH-11 (extract from F2ConversationFlow) | inline pill row in F2ConversationFlow |
@@ -245,7 +272,7 @@ primitives/      →  (theme only)
 **Rule 5 — dependency direction.** A widget's production source imports
 ONLY the three lower tiers (`brand/ · primitives/ · layout/`) and, within
 its OWN slot, sibling widgets (e.g. `chat-widgets/ChatColumn` →
-`chat-widgets/GateChatPanel` → `chat-widgets/GateChatRail`). A widget
+`chat-widgets/BookingStatusCard`). A widget
 SHALL NOT:
 
 - import from `views/` (a higher-level surface — widgets sit ABOVE views), nor
@@ -707,8 +734,8 @@ IS the sanction. The **inert/dispatch trio** below are the canonical exceptions:
 | `ChatColumn` | The chat surface itself, not an affordance. Its tools live on the widgets it composes. The LLM already drives the column by being the other side of the conversation; a `send_message` tool would loop. |
 
 Other widgets also currently carry a documented `no-llm.md` opt-out — `BookCallView`,
-`GateValueProp`, and `GateChatPanel` (gate/booking chrome that is presentational or whose
-actions live on composed widgets). These are NOT silent exemptions: each ships its own
+legacy `GateValueProp`, and legacy `GateChatPanel` (gate/booking chrome that is
+presentational or whose actions live on composed widgets). These are NOT silent exemptions: each ships its own
 `## Why`, which the guard requires. (Whether any of them should instead expose a real tool
 is a separate review — tracked, not assumed-fine.)
 
@@ -723,9 +750,7 @@ not just be dropped in. This mirrors the `app-architecture` spec requirement
   nav={<OnboardingNav ... />}
   header={<StepStrip ... />}                          // optional
   chat={<ChatScroll>                                  // host scroll
-    <ThinkingStream mode="onboarding" ... />
-    <PickAViewPills mode="onboarding" ... />
-    <GateChatRail mode="onboarding" ... />            // when gate open
+    <ConversationFlow experience={onboardingExperience} />
   </ChatScroll>}
   viewer={
     bookCallActive ? <BookCallView mode="onboarding" /> :

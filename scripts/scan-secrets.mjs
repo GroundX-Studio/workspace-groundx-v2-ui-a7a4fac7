@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const root = process.cwd();
 const ignoredFiles = new Set(["package-lock.json"]);
@@ -15,6 +15,7 @@ const secretPatterns = [
 
 function scanFile(file) {
   if (ignoredFiles.has(file) || file.endsWith(".png") || file.endsWith(".jpg") || file.endsWith(".jpeg")) return;
+  if (!existsSync(file)) return;
   const text = readFileSync(file, "utf8");
   for (const pattern of secretPatterns) {
     if (pattern.regex.test(text)) violations.push(`${file}: contains ${pattern.name}`);
