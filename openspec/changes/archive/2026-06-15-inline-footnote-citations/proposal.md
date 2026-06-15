@@ -15,7 +15,7 @@ SAME document across 3 pages — this is a wall of meaningless numbered chips:
 
 It is acceptable at 1–2 citations and collapses into noise at 5+.
 
-## What
+## What Changes
 Replace the detached chip row with the **footnote model**, applied **app-wide on every
 surface that renders citations** (chat answers, extract field rows, report sections — the
 shared production `CiteChip`, NOT any one frame):
