@@ -73,10 +73,16 @@ failing-test-first (discipline §1) + adversarial review before advancing.
   the prior runner (AbortController on the LLM call). Test: prior runner aborted.
 
 ## P3 — Client: stream reader + reconnect
-- [ ] **P3.1** Streaming `sendChatMessage` variant: generate a `turnKey` (idempotency
+- [x] **P3.1** Streaming `sendChatMessage` variant: generate a `turnKey` (idempotency
   key) on the initiating POST; POST `Accept: text/event-stream`,
   `response.body.getReader()`, SSE frame parser → dispatch token/activity/envelope/
-  error. JSON variant retained. Test: parser + dispatch; turnKey sent; JSON path unchanged.
+  error. JSON variant retained.
+  - ↳ DONE: `sseFrames.ts` `readSseFrames()` (id/event/data blocks, split-frame-safe,
+    skips heartbeats) + `streamChatMessage()` in `chatSessions.ts` (same ensure +
+    reply-validate + 404-invalidation as the JSON path; client `turnKey`; fires
+    onToken/onActivity/onMeta; returns the same `SendChatMessageResult` from the
+    `envelope` frame; throws a ChatApiError on an `error` frame). 2 tests; app 1752
+    green; tsc clean. Consumed by P4 (the chat send path).
 - [ ] **P3.2** Reconnect with `Last-Event-ID` (bounded retries + backoff); on
   exhaustion, fetch the saved message. `AbortController` on navigate/new-turn +
   signal the server to supersede-cancel. Tests: reconnect, abort.

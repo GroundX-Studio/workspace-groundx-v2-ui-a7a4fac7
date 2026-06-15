@@ -22,6 +22,7 @@
  */
 
 import { csrfFetch } from "@/api/csrfFetch";
+import { readSseFrames } from "@/api/sseFrames";
 import { ChatApiError } from "@/api/chatErrors";
 import { captureException } from "@/lib/sentry";
 
@@ -379,6 +380,129 @@ export async function sendChatMessage(
     // CF-08: per-status user copy lives in `chatErrorToUserCopy`.
     // Catch sites (F2, F5, future steady chat) call that helper to
     // render the right copy without re-implementing the status branch.
+    throw err;
+  }
+}
+
+/** Live callbacks for the streaming send — token-by-token text + tool activity. */
+export interface StreamChatCallbacks {
+  /** A content delta arrived → append to the in-flight assistant bubble. */
+  onToken?: (delta: string) => void;
+  /** A server tool ran → drive the live "Checked the documents" indicator. */
+  onActivity?: (activity: { name: string; label: string }) => void;
+  /** The turn's id confirmed (for reconnect) — first frame. */
+  onMeta?: (meta: { turnKey: string }) => void;
+}
+
+/**
+ * Streaming counterpart to {@link sendChatMessage}: same ensure-create +
+ * reply-validation + 404 cache-invalidation, but POSTs `Accept: text/event-stream`
+ * with a client idempotency `turnKey` and consumes the SSE frames, firing
+ * `onToken`/`onActivity` live and resolving to the SAME `SendChatMessageResult`
+ * (from the `envelope` frame) the JSON path returns. Used by the chat send path
+ * when streaming is enabled; the JSON `sendChatMessage` is retained for callers/
+ * tests that don't stream.
+ */
+export async function streamChatMessage(
+  input: SendChatMessageInput,
+  callbacks: StreamChatCallbacks = {},
+  chatSessionEnsure: ChatSessionEnsureClient = legacyChatSessionEnsure,
+): Promise<SendChatMessageResult> {
+  await chatSessionEnsure.ensureChatSessionForSend({
+    id: input.chatSessionId,
+    onboardingSessionId: input.sessionMeta.onboardingSessionId,
+    title: input.sessionMeta.title,
+    isOnboarding: input.sessionMeta.isOnboarding,
+    activeEntityKey: input.sessionMeta.activeEntityKey ?? null,
+  });
+
+  // Client-supplied idempotency key: a reconnect re-POST with the same key attaches
+  // to the running turn server-side instead of starting a duplicate generation.
+  const turnKey = crypto.randomUUID();
+  try {
+    const res = await csrfFetch("/api/chat/messages", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify({
+        chatSessionId: input.chatSessionId,
+        newUserMessage: input.newUserMessage,
+        intent: input.intent ?? null,
+        scopeHint: input.scopeHint,
+        activeStepKind: input.activeStepKind ?? null,
+        turnKey,
+      }),
+    });
+    if (!res.ok) {
+      let detail: unknown = null;
+      try {
+        detail = await res.json();
+      } catch {
+        // ignore
+      }
+      throw new ChatApiError(`/api/chat/messages failed: ${res.status}`, res.status, detail);
+    }
+    if (!res.body) {
+      throw new ChatApiError("/api/chat/messages returned no stream body", 502, null);
+    }
+
+    let result: SendChatMessageResult | null = null;
+    let streamErrorCode: string | null = null;
+    for await (const frame of readSseFrames(res.body)) {
+      switch (frame.event) {
+        case "meta":
+          callbacks.onMeta?.(JSON.parse(frame.data) as { turnKey: string });
+          break;
+        case "token":
+          callbacks.onToken?.((JSON.parse(frame.data) as { delta: string }).delta);
+          break;
+        case "activity":
+          callbacks.onActivity?.(JSON.parse(frame.data) as { name: string; label: string });
+          break;
+        case "envelope":
+          result = JSON.parse(frame.data) as SendChatMessageResult;
+          break;
+        case "error":
+          streamErrorCode = (JSON.parse(frame.data) as { code: string }).code;
+          break;
+        default:
+          break;
+      }
+    }
+
+    if (streamErrorCode) {
+      // The server delivers a turn-level failure as an `error` frame (HTTP 200).
+      // Mirror the JSON path's not-found cache invalidation by code.
+      if (streamErrorCode === "chat_session_not_found") {
+        chatSessionEnsure.forgetChatSessionEnsured(input.chatSessionId);
+      }
+      throw new ChatApiError(`chat stream error: ${streamErrorCode}`, 500, { code: streamErrorCode });
+    }
+    if (!result) {
+      throw new ChatApiError("chat stream ended without an envelope", 502, null);
+    }
+
+    // Same drop-safe reply validation as sendChatMessage (single-sourced envelope).
+    const replyParse = chatReplySchema.safeParse(result.reply);
+    if (!replyParse.success) {
+      captureException(replyParse.error, {
+        route: "/api/chat/messages",
+        chatSessionId: input.chatSessionId,
+        validation: "chatReplySchema",
+        transport: "sse",
+      });
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof ChatApiError && err.status === 404) {
+      chatSessionEnsure.forgetChatSessionEnsured(input.chatSessionId);
+    }
+    captureException(err, {
+      route: "/api/chat/messages",
+      chatSessionId: input.chatSessionId,
+      transport: "sse",
+      status: err instanceof ChatApiError ? err.status : null,
+    });
     throw err;
   }
 }

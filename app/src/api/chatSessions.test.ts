@@ -35,6 +35,7 @@ import {
   createChatSession,
   listChatMessages,
   sendChatMessage,
+  streamChatMessage,
   type ChatDispatchedIntent,
   type ChatReply,
   type ChatReplyDebug,
@@ -680,5 +681,84 @@ describe("listChatMessages (RT-01)", () => {
       json: async () => ({ error: "no_session" }),
     });
     await expect(listChatMessages("chat-noauth")).rejects.toBeInstanceOf(ChatApiError);
+  });
+});
+
+describe("streamChatMessage (chat-response-streaming P3)", () => {
+  function sseStream(frames: string[]): ReadableStream<Uint8Array> {
+    const body = frames.map((f) => `${f}\n\n`).join("");
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(body));
+        controller.close();
+      },
+    });
+  }
+  const frame = (event: string, data: unknown, seq: number) =>
+    `id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}`;
+  const meta = { title: "Onboarding", isOnboarding: true, onboardingSessionId: "onb-1" };
+
+  it("ensures the session, fires token/activity/meta callbacks, and returns the envelope", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ chatSessionId: "chat-1" }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: sseStream([
+          frame("meta", { turnKey: "tk-1" }, 1),
+          frame("activity", { name: "search_documents", label: "Checked the documents" }, 2),
+          frame("token", { delta: "Hello " }, 3),
+          frame("token", { delta: "world." }, 4),
+          frame(
+            "envelope",
+            {
+              userMessageId: "u1",
+              assistantMessageId: "a1",
+              reply: { mode: "rag", answer: "Hello world.", citations: [], suggestedActions: [] },
+              compressionRan: false,
+            },
+            5,
+          ),
+        ]),
+      });
+
+    const tokens: string[] = [];
+    const activities: string[] = [];
+    let metaKey = "";
+    const result = await streamChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "What is RAG?", sessionMeta: meta },
+      {
+        onToken: (d) => tokens.push(d),
+        onActivity: (a) => activities.push(a.label),
+        onMeta: (m) => {
+          metaKey = m.turnKey;
+        },
+      },
+    );
+
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/chat/messages");
+    const init = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(new Headers(init.headers).get("accept")).toBe("text/event-stream");
+    expect((JSON.parse(String(init.body)) as { turnKey: string }).turnKey).toEqual(expect.any(String));
+    expect(metaKey).toBe("tk-1");
+    expect(tokens).toEqual(["Hello ", "world."]);
+    expect(activities).toEqual(["Checked the documents"]);
+    expect(result.reply.answer).toBe("Hello world.");
+  });
+
+  it("throws a ChatApiError when the stream delivers an error frame", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ chatSessionId: "chat-1" }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: sseStream([frame("meta", { turnKey: "tk" }, 1), frame("error", { code: "internal_error" }, 2)]),
+      });
+
+    await expect(
+      streamChatMessage({ chatSessionId: "chat-1", newUserMessage: "x", sessionMeta: meta }),
+    ).rejects.toThrow(/internal_error/);
   });
 });
