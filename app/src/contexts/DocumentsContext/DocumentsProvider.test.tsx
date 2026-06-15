@@ -117,6 +117,58 @@ describe("DocumentsProvider (TS-02)", () => {
       expect(actionResult?.isSuccess).toBe(false);
       expect(actionResult?.error).toBeInstanceOf(Error);
     });
+
+    it("retries a TRANSIENT fetch failure then succeeds (no spurious 'could not load')", async () => {
+      // First call throws (a transient upstream/network blip), second succeeds.
+      vi.mocked(api.groundxDocuments.getGroundXDocumentXray)
+        .mockRejectedValueOnce(new Error("transient network blip"))
+        .mockResolvedValueOnce(validXray);
+
+      const { result } = renderHook(() => useDocumentsContext(), { wrapper });
+      let actionResult: { isSuccess: boolean; response?: unknown } | undefined;
+      await act(async () => {
+        actionResult = await result.current.getDocumentXray("doc-1");
+      });
+
+      expect(actionResult?.isSuccess).toBe(true);
+      expect(actionResult?.response).toEqual(validXray);
+      expect(vi.mocked(api.groundxDocuments.getGroundXDocumentXray)).toHaveBeenCalledTimes(2);
+    });
+
+    it("does NOT retry a malformed-but-successful payload (parse runs once — fail fast)", async () => {
+      // The fetch RESOLVES (200) but the payload is malformed → the schema parse
+      // fails. That's a consistent error, not a transient: no retry, one fetch.
+      vi.mocked(api.groundxDocuments.getGroundXDocumentXray).mockResolvedValue({
+        fileName: "broken.pdf",
+        fileType: "pdf",
+      } as Awaited<ReturnType<typeof api.groundxDocuments.getGroundXDocumentXray>>);
+
+      const { result } = renderHook(() => useDocumentsContext(), { wrapper });
+      let actionResult: { isSuccess: boolean } | undefined;
+      await act(async () => {
+        actionResult = await result.current.getDocumentXray("doc-1");
+      });
+
+      expect(actionResult?.isSuccess).toBe(false);
+      expect(vi.mocked(api.groundxDocuments.getGroundXDocumentXray)).toHaveBeenCalledTimes(1);
+    });
+
+    it("gives up after exhausting retries on a PERSISTENT fetch failure", async () => {
+      vi.mocked(api.groundxDocuments.getGroundXDocumentXray).mockRejectedValue(new Error("upstream down"));
+
+      const { result } = renderHook(() => useDocumentsContext(), { wrapper });
+      let actionResult: { isSuccess: boolean; error?: unknown } | undefined;
+      await act(async () => {
+        actionResult = await result.current.getDocumentXray("doc-1");
+      });
+
+      expect(actionResult?.isSuccess).toBe(false);
+      expect(actionResult?.error).toBeInstanceOf(Error);
+      // Initial attempt + bounded retries (not infinite, not one).
+      expect(
+        vi.mocked(api.groundxDocuments.getGroundXDocumentXray).mock.calls.length,
+      ).toBeGreaterThanOrEqual(2);
+    });
   });
 
   it("a thrown API error surfaces 'Document operation failed.' and isSuccess=false", async () => {

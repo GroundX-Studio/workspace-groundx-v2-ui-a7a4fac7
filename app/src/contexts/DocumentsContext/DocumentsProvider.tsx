@@ -15,6 +15,11 @@ import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { DocumentsContext } from "./DocumentsContext";
 
+/** Viewer X-Ray fetch: retry a transient blip this many times before failing. */
+const XRAY_FETCH_RETRIES = 2;
+/** Base backoff between X-Ray fetch retries (×attempt: 250ms, 500ms). */
+const XRAY_RETRY_BACKOFF_MS = 250;
+
 export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const api = useApi();
   const run = useSdkRunner("Document operation failed.");
@@ -101,14 +106,27 @@ export const DocumentsProvider: FC<{ children: ReactNode }> = ({ children }) => 
   const getDocumentXray = useCallback(
     (documentId: string, options?: RequestOptions) =>
       run(async () => {
+        // Harden the viewer against a TRANSIENT X-Ray fetch blip (a rare upstream
+        // hiccup under load): retry the FETCH a couple times with backoff so a
+        // single transient self-heals instead of flashing "COULD NOT LOAD". Only
+        // the network fetch is retried — see the parse below.
+        let raw: Awaited<ReturnType<typeof api.groundxDocuments.getGroundXDocumentXray>>;
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            raw = await api.groundxDocuments.getGroundXDocumentXray(documentId, options);
+            break;
+          } catch (err) {
+            if (attempt >= XRAY_FETCH_RETRIES) throw err; // exhausted → real failure
+            await new Promise((resolve) => setTimeout(resolve, XRAY_RETRY_BACKOFF_MS * (attempt + 1)));
+          }
+        }
         // 2026-06-01-data-model-tail item 5 — runtime-narrow the SDK-boundary
         // response against the canonical `@groundx/shared` X-Ray schema instead
         // of blind-casting (`as unknown as DocumentXrayResponse`). The real API
         // returns the response object at top level (verified 2026-05-25; see
-        // docs/agents/groundx-real-api-shapes.md). A malformed payload now
-        // throws here and surfaces as an `SdkActionResult` failure rather than
-        // being passed straight through as if it were well-formed.
-        const raw = await api.groundxDocuments.getGroundXDocumentXray(documentId, options);
+        // docs/agents/groundx-real-api-shapes.md). Parsed ONCE, OUTSIDE the retry:
+        // a malformed payload is a CONSISTENT error, not a transient, so it fails
+        // fast (no wasteful re-fetches) and surfaces as an `SdkActionResult` failure.
         return documentXrayResponseSchema.parse(raw);
       }),
     [api, run]
