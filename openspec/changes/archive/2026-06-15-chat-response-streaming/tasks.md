@@ -29,7 +29,7 @@ failing-test-first (discipline §1) + adversarial review before advancing.
     the JSON branch's UPSTREAM LLM call is byte-identical (test asserts no `stream:true`).
     Tests: SSE returns `text/event-stream` + meta/token/envelope; JSON unchanged + same
     envelope; persists once. 980 middleware green.
-- [ ] **P1.2** `TurnRunner` that drives the existing grounded path but EMITS
+- [x] **P1.2** `TurnRunner` that drives the existing grounded path but EMITS
   `meta`/`activity`/`token`/`envelope`/`error` events (monotonic `seq`) to an
   append-only buffer, and performs the existing MySQL persistence on completion.
   Keyed by a CLIENT-supplied `turnKey` scoped to the session (`Map<(sessionId,
@@ -149,5 +149,9 @@ failing-test-first (discipline §1) + adversarial review before advancing.
   table + 27 citations) with the source auto-opened on the canvas; ZERO console errors.
   (Token-by-token increment is unit-proven in P4.1; the live run proves the SSE
   transport + render end-to-end.)
-- [ ] **P5.3** Adversarial review (per phase + whole); archive; the superseded
-  `stream-chat-tool-activity` stub is already removed by this change.
+- [x] **P5.3** Adversarial review (per phase + whole) + archive.
+  - ↳ DONE: whole-change review found + fixed the abrupt-disconnect pump gap (writer
+    swallows write-after-close, reports `writableEnded` on a destroyed socket, resolves
+    onceDrain on error). All spec'd hardening (supersede-cancel + from-DB resume) is now
+    BUILT, so the spec delta matches the code. `openspec validate --strict` clean. The
+    superseded `stream-chat-tool-activity` stub was removed by this change. Archiving.
