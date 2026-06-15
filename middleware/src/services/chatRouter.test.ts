@@ -2177,11 +2177,15 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       "dismiss_gate",
       "dismiss_wizard",
       "edit_report_section",
+      // loop-tool-secondary-extraction — server-executed extraction fetch is universal.
+      "fetch_document_fields",
       // agentic-tool-loop — server-executed product-docs lookup is universal.
       "lookup_groundx_docs",
       "pin_to_report",
       "propose_report_section",
       "reject_report_section",
+      // loop-tool-refined-research — server-executed scoped re-search is universal.
+      "search_documents",
       // onboarding-shell-shared-view Phase 3a — show_extraction lists `report`.
       "show_extraction",
       // onboarding-shell-shared-view Phase 3b — show_integrate lists `report`.

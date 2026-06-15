@@ -12,8 +12,8 @@ snippets back to the model. Adds a `serverExecute` value on the existing loop �
 framework work.
 
 ## Status
-NOT STARTED — backlog stub. Depends on `agentic-tool-loop` (the loop + `serverExecute`
-mechanism).
+COMPLETE (implemented + tested 2026-06-15) — ready to archive. Built on the shipped
+`agentic-tool-loop` (the loop + `serverExecute` mechanism).
 
 ## Conformance to core architectural decisions
 Composable: a new value on the existing `serverExecute` axis, not a new mechanism.

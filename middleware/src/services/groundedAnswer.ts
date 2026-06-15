@@ -722,6 +722,32 @@ async function fetchDocumentExtraction(
 }
 
 /**
+ * loop-tool-refined-research — format re-search snippets as the `role:"tool"`
+ * result fed back into the grounded loop. Per-snippet cap reuses the shared
+ * `RAG_SNIPPET_CHARS`; a total cap keeps a broad re-search from bloating the
+ * next completion. Deliberately a small LOCAL formatter (not `buildSnippetBlock`,
+ * which lives in `ragPipeline.ts` and would create a ragPipeline↔groundedAnswer
+ * import cycle); the tool-result message is a distinct consumer from the prompt
+ * snippet block. If a third caller appears, extract a shared snippet formatter.
+ */
+const RESEARCH_RESULT_MAX_CHARS = 4000;
+function formatResearchSnippets(snippets: GroundXSearchResult[]): string {
+  if (snippets.length === 0) return "No additional document passages matched that query.";
+  const entries: string[] = [];
+  let used = 0;
+  for (const [i, s] of snippets.entries()) {
+    const entry = `[${i + 1}] page ${s.pageNumber ?? "?"}\n${(s.text ?? "").slice(0, RAG_SNIPPET_CHARS)}`;
+    // Always include the FIRST snippet; stop adding once the total cap is hit so
+    // a broad re-search can't bloat the next completion. (Per-snippet cap 600 ≪
+    // 4000, so the first entry always fits — no separate "first too big" branch.)
+    if (entries.length > 0 && used + 2 + entry.length > RESEARCH_RESULT_MAX_CHARS) break;
+    entries.push(entry);
+    used += entry.length + (entries.length > 1 ? 2 : 0);
+  }
+  return entries.join("\n\n");
+}
+
+/**
  * Produce a grounded, verified answer for a `(question, scope)` pair.
  *
  * The `body` is the cleaned (JSON-block-stripped) LLM prose; `citations` are the
@@ -798,6 +824,65 @@ export async function groundedAnswerOverScope(
         ? skillsRetrieve(question)
         : skillsRetrieve(question, { bypassEntryBar: true });
 
+  // loop-tool-refined-research — bind the re-search seam to the TURN's scope +
+  // search options (the SAME `rbacFilter` as the primary search above), so the
+  // `search_documents` executor re-queries the current documents only and can
+  // NEVER widen scope. No GroundX client → a graceful "unavailable" line.
+  const researchDocuments = async (refinedQuery: string): Promise<string> => {
+    if (!deps.groundxClient || !deps.groundxApiKey) {
+      return "Document search is unavailable for this turn.";
+    }
+    // Reuse the SAME RBAC filter (the scope-safety-critical part) but NOT the
+    // `debug` accumulator from `searchOptions`: `searchGroundX` writes the
+    // SINGULAR `options.debug.groundx`, so a re-search would clobber the primary
+    // search's dev debug record. Filter-only options keep the primary's debug intact.
+    const results = await searchGroundX(
+      refinedQuery,
+      scope,
+      deps.groundxClient,
+      deps.groundxApiKey,
+      deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {},
+    );
+    return formatResearchSnippets(results);
+  };
+
+  // loop-tool-secondary-extraction — the AUTHORIZED document set for this turn:
+  // documents the RBAC-filtered search surfaced (`snippets`) plus an explicit
+  // `documents` scope. `fetchExtraction` REFUSES any id outside it with no fetch,
+  // so the model can't pull an out-of-scope / foreign document's fields (e.g. a
+  // documentId injected into document text). Same authorization boundary the
+  // citation validation uses (`allowedDocIds` = snippet docIds).
+  const authorizedDocIds = new Set<string>([
+    ...snippets.map((s) => s.documentId),
+    ...(scope?.type === "documents" ? scope.documentIds : []),
+  ]);
+  // Per-turn memo so repeated tool fetches of the SAME document don't re-hit the
+  // API across loop rounds (extraction has no module cache, unlike X-Ray). Only
+  // AUTHORIZED fetches are memoized (a refusal throws before this, and is cheap).
+  const extractionMemo = new Map<string, Promise<string>>();
+  const fetchExtraction = async (documentId: string): Promise<string> => {
+    if (!authorizedDocIds.has(documentId)) {
+      // An out-of-scope id (model confusion / prompt-injected document text) is a
+      // security-relevant REFUSAL — surface it as a tool FAILURE (→
+      // `serverToolFailures` + this warn log), NOT a successful-looking "fetched"
+      // activity. The loop feeds the model a terse error; the turn still succeeds.
+      logger.warn(
+        { secondaryExtractionRefused: { documentId } },
+        "secondary extraction refused: document not surfaced under this turn's authorization",
+      );
+      throw new Error("document not available in this conversation");
+    }
+    if (!deps.groundxClient) return "Extraction is unavailable for this turn.";
+    let cached = extractionMemo.get(documentId);
+    if (!cached) {
+      cached = fetchDocumentExtraction(deps.groundxClient, deps.groundxApiKey ?? null, documentId).then(
+        (extraction) => extraction?.promptBlock ?? "No structured extraction found for that document.",
+      );
+      extractionMemo.set(documentId, cached);
+    }
+    return cached;
+  };
+
   // agentic-tool-loop — build the bounded server-tool loop controller when the
   // caller opted in (chat) AND advertised tools. The controller bridges the
   // catalog (`getServerTool`) + the injected `skillsRetrieve` seam into
@@ -828,7 +913,7 @@ export async function groundedAnswerOverScope(
               return { result: `${call.name} failed: invalid arguments — ${reason}`, failure: { name: call.name, reason: `invalid arguments — ${reason}` } };
             }
             try {
-              const result = await tool.serverExecute(parse.data, { skillsRetrieve });
+              const result = await tool.serverExecute(parse.data, { skillsRetrieve, researchDocuments, fetchExtraction });
               return {
                 result,
                 ...(tool.activityLabel ? { activity: { name: call.name, label: tool.activityLabel } } : {}),

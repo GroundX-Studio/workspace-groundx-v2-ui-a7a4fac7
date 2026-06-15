@@ -39,7 +39,14 @@ import type { WidgetRole } from "@groundx/shared";
 // suggestion (the app resolves the kebab label against scenario context);
 // `lookup_groundx_docs` (agentic-tool-loop) is server-EXECUTED — the middleware
 // runs it inside the grounded tool-result loop and it never reaches the app.
-const SERVER_ONLY = new Set(["suggest_intent", "lookup_groundx_docs"]);
+// `search_documents` (loop-tool-refined-research) is the second such server-only tool.
+// `fetch_document_fields` (loop-tool-secondary-extraction) is the third.
+const SERVER_ONLY = new Set([
+  "suggest_intent",
+  "lookup_groundx_docs",
+  "search_documents",
+  "fetch_document_fields",
+]);
 
 // The single source-of-truth role map (matrix §3). Any tool NOT listed here is
 // all-roles (no `availableIn`). Adding a role-restricted tool means adding a

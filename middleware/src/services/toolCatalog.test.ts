@@ -54,6 +54,10 @@ const EXPECTED_NAMES = [
   "close_dialog",
   // agentic-tool-loop — server-executed read tool (no app mirror; server-only).
   "lookup_groundx_docs",
+  // loop-tool-refined-research — second server-executed read tool (server-only).
+  "search_documents",
+  // loop-tool-secondary-extraction — third server-executed read tool (server-only).
+  "fetch_document_fields",
 ].sort();
 
 describe("server tool catalog", () => {
@@ -135,6 +139,8 @@ describe("server tool catalog", () => {
         // tool-system-completion — wizard nav is universal (no step filter).
         "dismiss_gate",
         "dismiss_wizard",
+        // loop-tool-secondary-extraction — server-executed extraction fetch is universal.
+        "fetch_document_fields",
         "jump_to_page",
         // agentic-tool-loop — server-executed product-docs lookup is universal.
         "lookup_groundx_docs",
@@ -146,6 +152,8 @@ describe("server tool catalog", () => {
         // shared-canvas-affordance-restoration — save_to_account opens the gate
         // from the doc-viewer / interact canvas (the chat Save successor).
         "save_to_account",
+        // loop-tool-refined-research — server-executed scoped re-search is universal.
+        "search_documents",
         // onboarding-shell-shared-view Phase 3a — show_extraction is reachable
         // from the doc-viewer (the user can ask to see the extraction).
         "show_extraction",
@@ -176,11 +184,15 @@ describe("server tool catalog", () => {
       "dismiss_gate",
       "dismiss_wizard",
       "edit_report_section",
+      // loop-tool-secondary-extraction — server-executed extraction fetch is universal.
+      "fetch_document_fields",
       // agentic-tool-loop — server-executed product-docs lookup is universal.
       "lookup_groundx_docs",
       "pin_to_report",
       "propose_report_section",
       "reject_report_section",
+      // loop-tool-refined-research — server-executed scoped re-search is universal.
+      "search_documents",
       // onboarding-shell-shared-view Phase 3a — show_extraction lists `report`.
       "show_extraction",
       // onboarding-shell-shared-view Phase 3b — show_integrate lists `report`.

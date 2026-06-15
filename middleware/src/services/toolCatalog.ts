@@ -37,6 +37,22 @@ export type { ViewerStepKind, WidgetRole };
 export interface ServerExecuteContext {
   /** Vendored GroundX skill-pack retrieval (same type as `GroundedAnswerDeps.skillsRetrieve`). */
   skillsRetrieve: (question: string, options?: { bypassEntryBar?: boolean }) => string | null;
+  /**
+   * loop-tool-refined-research — re-run the TURN'S scoped GroundX search with a
+   * refined query and return the formatted snippets (or a "no matches" line).
+   * Bound by the grounded loop to the SAME `scope` + server-derived RBAC filter
+   * as the turn's primary search, so an executor can NEVER widen scope.
+   */
+  researchDocuments: (refinedQuery: string) => Promise<string>;
+  /**
+   * loop-tool-secondary-extraction — fetch a NAMED document's full
+   * workflow-extraction (the same payload the prompt's primary EXTRACTED FIELDS
+   * block uses), for cross-document answers. Bound by the grounded loop to the
+   * turn's AUTHORIZED document set (the RBAC-filtered snippets + explicit scope):
+   * a documentId outside that set is REFUSED with no fetch, so an executor can
+   * never reach content the turn's authorized retrieval did not surface.
+   */
+  fetchExtraction: (documentId: string) => Promise<string>;
 }
 
 /**
@@ -782,6 +798,71 @@ const lookupGroundxDocs: ServerTool = {
 };
 
 /**
+ * loop-tool-refined-research — the SECOND server-executed read tool. Re-runs the
+ * turn's scoped GroundX search with a model-supplied refined query and feeds the
+ * resulting snippets back into the grounded loop. Like `lookup_groundx_docs` it
+ * is server-only (no app mirror; allowlisted in the parity guard), has NO
+ * `intentBuilder`, and declares `activityLabel`. The executor delegates to
+ * `ctx.researchDocuments`, which the grounded loop binds to the SAME content
+ * scope + RBAC filter as the primary search — so this tool searches the CURRENT
+ * documents only and can never widen scope.
+ */
+const searchDocuments: ServerTool = {
+  name: "search_documents",
+  description:
+    "Search the CURRENT documents again with a refined query. Use when the document " +
+    "passages already provided don't contain what you need and a differently-worded or " +
+    "more specific search of the SAME documents might surface it. It searches only the " +
+    "documents already in scope — it cannot reach other documents.",
+  category: "read",
+  inputSchema: z.object({
+    query: z
+      .string()
+      .min(3)
+      .describe("A refined search query over the current documents, e.g. 'late-payment penalty terms'"),
+  }),
+  promptGuidance:
+    "Call ONLY when the document passages already in this prompt don't answer the question " +
+    "and a reworded search of the SAME documents might surface it. Don't repeat the query " +
+    "that already missed. Never mention the tool — answer from the new passages.",
+  activityLabel: "Searched the documents again",
+  serverExecute: ({ query }, ctx) => ctx.researchDocuments(query),
+};
+
+/**
+ * loop-tool-secondary-extraction — the THIRD server-executed read tool. Fetches
+ * a NAMED document's full workflow-extraction (the same payload the grounded
+ * prompt's primary-document EXTRACTED FIELDS block uses) on demand, so a
+ * cross-document answer can reach a SECOND document's structured fields. Like
+ * the other two it is server-only (no app mirror; allowlisted in the parity
+ * guard), has NO `intentBuilder`, and declares `activityLabel`. The executor
+ * delegates to `ctx.fetchExtraction`, which the grounded loop gates to the
+ * turn's AUTHORIZED document set — a documentId the turn did not surface is
+ * refused with NO fetch (no cross-tenant/out-of-scope read).
+ */
+const fetchDocumentFields: ServerTool = {
+  name: "fetch_document_fields",
+  description:
+    "Fetch another document's extracted structured fields by id. Use when your answer " +
+    "spans more than one document and you need a SECOND document's fields — the prompt " +
+    "only includes the primary document's fields. Only documents already surfaced in " +
+    "this conversation (a citation or search result) can be fetched.",
+  category: "read",
+  inputSchema: z.object({
+    documentId: z
+      .string()
+      .min(1)
+      .describe("Id of a document already surfaced in this conversation (from a citation or search result)."),
+  }),
+  promptGuidance:
+    "Call ONLY for a cross-document answer that needs a SECOND document's structured " +
+    "fields (the prompt already has the primary document's). Use a documentId you've seen " +
+    "in a citation or search result this turn. Never mention the tool — answer from the fields.",
+  activityLabel: "Fetched another document's fields",
+  serverExecute: ({ documentId }, ctx) => ctx.fetchExtraction(documentId),
+};
+
+/**
  * The authoritative server catalog. Phase 7 backfill extends this
  * array as widgets are mirrored. The order here is stable (matches
  * the LLM's tool listing); duplicates fail the drift test.
@@ -826,6 +907,12 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   // agentic-tool-loop — server-executed read tool (no app mirror; allowlisted
   // server-only in the parity guard).
   lookupGroundxDocs,
+  // loop-tool-refined-research — second server-executed read tool (scoped
+  // document re-search; server-only, allowlisted in the parity guard).
+  searchDocuments,
+  // loop-tool-secondary-extraction — third server-executed read tool (named
+  // document's extraction, gated to the turn's authorized docs; server-only).
+  fetchDocumentFields,
 ];
 
 /**

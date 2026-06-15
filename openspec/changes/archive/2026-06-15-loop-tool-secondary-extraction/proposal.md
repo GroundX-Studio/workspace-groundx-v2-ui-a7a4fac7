@@ -12,7 +12,9 @@ mid-answer, for cross-document answers. Adds a `serverExecute` value on the exis
 loop.
 
 ## Status
-NOT STARTED — backlog stub. Depends on `agentic-tool-loop`.
+COMPLETE (implemented + tested 2026-06-15) — ready to archive. Built on the shipped
+`agentic-tool-loop`. Spec delta hardened with an authorization constraint (the fetch
+is gated to the turn's surfaced/authorized documents — no IDOR).
 
 ## Conformance to core architectural decisions
 Composable: a new value on the existing `serverExecute` axis. Reuses the existing
