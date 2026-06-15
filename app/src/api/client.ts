@@ -5,6 +5,7 @@ import {
   createChatSessionEnsureClient,
   listChatMessages as listChatMessagesDirect,
   sendChatMessage as sendChatMessageDirect,
+  streamChatMessage as streamChatMessageDirect,
 } from "@/api/chatSessions";
 import { listChatSessions } from "@/api/chatSessionsList";
 import { claimAnonymousChat } from "@/api/claimAnonymousChat";
@@ -77,6 +78,9 @@ const createChatSession = async (input: Parameters<typeof createChatSessionDirec
 
 const sendChatMessage: typeof sendChatMessageDirect = (input) =>
   sendChatMessageDirect(input, chatSessionEnsure);
+
+const streamChatMessage: typeof streamChatMessageDirect = (input, callbacks) =>
+  streamChatMessageDirect(input, callbacks, chatSessionEnsure);
 
 const listChatMessages: typeof listChatMessagesDirect = (chatSessionId, sessionMeta) =>
   listChatMessagesDirect(chatSessionId, sessionMeta, chatSessionEnsure);
@@ -162,6 +166,7 @@ export const realApi = {
   chat: {
     createChatSession,
     sendChatMessage,
+    streamChatMessage,
     listChatMessages,
     ensureServerChatSession,
     patchChatSession: patchChatSessionWithClientEnsure,

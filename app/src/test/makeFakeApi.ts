@@ -281,5 +281,15 @@ const deepMerge = (
 
 export const makeFakeApi = (overrides: ApiOverrides = {}): Api => {
   const base = fakeify(realApi as unknown as Record<string, unknown>);
-  return deepMerge(base, overrides as Record<string, unknown>) as Api;
+  const api = deepMerge(base, overrides as Record<string, unknown>) as Api;
+  // chat-response-streaming — unless a test overrides it explicitly, the fake's
+  // streaming send DELEGATES to `sendChatMessage` (ignoring the live callbacks):
+  // so existing tests that override or assert on `chat.sendChatMessage` keep
+  // working when the hook switches to streaming. Read at call time so a per-test
+  // `sendChatMessage` override is honored. A test that needs the live callbacks
+  // overrides `chat.streamChatMessage` directly.
+  if (!("chat" in overrides && (overrides.chat as Record<string, unknown> | undefined)?.streamChatMessage)) {
+    api.chat.streamChatMessage = ((input) => api.chat.sendChatMessage(input)) as Api["chat"]["streamChatMessage"];
+  }
+  return api;
 };

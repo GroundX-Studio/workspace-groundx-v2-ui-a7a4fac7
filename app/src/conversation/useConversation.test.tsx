@@ -66,6 +66,11 @@ function Probe({ onFirstUserSend }: { onFirstUserSend?: () => void }) {
                 {a.label}
               </span>
             ))}
+            {(t.toolActivity ?? []).map((a, i) => (
+              <span key={i} data-testid="probe-activity">
+                {a.label}
+              </span>
+            ))}
           </li>
         ))}
       </ul>
@@ -364,5 +369,64 @@ describe("useConversation (durable engine)", () => {
     expect(listChatMessages.mock.calls[0][1].onboardingSessionId).toBe(
       screen.getByTestId("probe-session-id").textContent,
     );
+  });
+});
+
+describe("streaming send (chat-response-streaming P4)", () => {
+  it("renders streamed tokens + live activity, then finalizes with the envelope answer", async () => {
+    let release: (v: unknown) => void = () => {};
+    const streamChatMessage = vi.fn(
+      (
+        _input: unknown,
+        callbacks: { onToken?: (d: string) => void; onActivity?: (a: { name: string; label: string }) => void },
+      ) => {
+        callbacks.onActivity?.({ name: "search_documents", label: "Checked the documents" });
+        callbacks.onToken?.("streaming draft…");
+        return new Promise((res) => {
+          release = res;
+        });
+      },
+    );
+
+    renderWithOnboardingProviders(<Probe />, {
+      api: { chat: { streamChatMessage, sendChatMessage, listChatMessages } },
+    } as RenderOptions);
+
+    await waitFor(() => expect(screen.getByTestId("probe-session-id").textContent).not.toBe("none"));
+    act(() => {
+      screen.getByTestId("probe-send").click();
+    });
+
+    // Mid-stream: the draft token + the live activity render BEFORE the envelope.
+    await waitFor(() =>
+      expect(screen.getByTestId("probe-turn-assistant").textContent).toContain("streaming draft…"),
+    );
+    expect(screen.getByTestId("probe-activity").textContent).toBe("Checked the documents");
+
+    // Resolve the envelope → finalize replaces the draft with the cleaned answer.
+    await act(async () => {
+      release({
+        userMessageId: "u1",
+        assistantMessageId: "a1",
+        compressionRan: false,
+        reply: {
+          mode: "rag",
+          answer: "Final answer.",
+          citations: [],
+          suggestedActions: [],
+          intents: [],
+          toolFailures: [],
+          proposedSchemaField: null,
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("probe-turn-assistant").textContent).toContain("Final answer."),
+    );
+    expect(screen.getByTestId("probe-turn-assistant").textContent).not.toContain("streaming draft…");
+    // The hook used the streaming path, not the JSON sendChatMessage.
+    expect(sendChatMessage).not.toHaveBeenCalled();
   });
 });

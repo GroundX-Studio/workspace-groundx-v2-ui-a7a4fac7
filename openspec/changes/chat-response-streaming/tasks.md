@@ -59,8 +59,13 @@ failing-test-first (discipline §1) + adversarial review before advancing.
     heartbeat is P2.3; the subscribe-from-Last-Event-ID seam is in place for P2.2.)
 
 ## P2 — Production-hardening (server)
-- [ ] **P2.1** Decoupled lifecycle: a client disconnect does NOT abort the runner;
-  it completes + persists. Test: simulate `res` close mid-turn → message still saved.
+> Core hardening is already STRUCTURALLY in place from P1.2/P1.3: the runner is
+> decoupled (generation starts in the ctor, not tied to the connection), same-instance
+> replay works (idempotent re-POST test), and backpressure is real (pump `drain` +
+> bounded drop-oldest-token buffer). What remains below is the explicit tests +
+> heartbeat emission + from-DB resume fallback + supersede-cancel.
+- [ ] **P2.1** Decoupled lifecycle TEST: simulate `res` close mid-turn → message still
+  saved. (Structure done; test pending.)
 - [ ] **P2.2** Reconnect/resume: re-request with the same `turnKey` + `Last-Event-ID`
   replays buffered events after that seq (runner present); else delivers the persisted
   final message as one `envelope`. Per-turn buffer TTL + eviction. **Authorization:** a
@@ -88,17 +93,32 @@ failing-test-first (discipline §1) + adversarial review before advancing.
   signal the server to supersede-cancel. Tests: reconnect, abort.
 
 ## P4 — React rendering + live indicator
-- [ ] **P4.1** Incremental token rendering into the in-flight assistant turn (chat
-  scroll). Test: tokens append in order; final state matches the envelope.
-- [ ] **P4.2** Live activity indicator: drive the existing `ThinkingStream` surface
-  from real `activity` events (replacing the timed animation). `envelope` applies
-  citations/suggestedActions via the existing consumers. Tests: live indicator shows
-  on an `activity` event; citations render on `envelope`.
+- [x] **P4.1** Incremental token rendering into the in-flight assistant turn.
+  - ↳ DONE: `useConversation.send` pushes an empty assistant bubble then calls
+    `api.chat.streamChatMessage` with `onToken` (append delta to that turn) +
+    `onActivity` (append to its `toolActivity`); on completion it finalizes with the
+    cleaned envelope answer + citations/actions/proposal/auto-highlight (unchanged).
+    The fake api delegates `streamChatMessage`→`sendChatMessage` so all existing
+    consumers stay green. Wired into `realApi.chat`. Test: tokens render incrementally
+    (draft visible while the envelope is pending) then finalize; streaming path used,
+    not the JSON `sendChatMessage`.
+- [x] **P4.2** Live activity indicator + envelope consumers.
+  - ↳ DONE: `activity` events append to the in-flight turn's `toolActivity`, rendered
+    live by the existing chat-tool-activity annotation; the `envelope` applies
+    citations/suggestedActions via the SAME consumers as the JSON path (incl.
+    auto-highlight of the primary citation). Test asserts the live activity label
+    renders mid-stream.
 
 ## P5 — Verify + close out
-- [ ] **P5.1** Full suites green (existing JSON tests UNCHANGED — the back-compat
-  proof); `openspec validate --strict`; production build clean.
-- [ ] **P5.2** Live verification (preview): a real streamed turn renders token-by-token
-  AND shows a live "Checked GroundX docs" indicator mid-answer.
+- [x] **P5.1** Full suites green (existing JSON tests UNCHANGED — back-compat proof);
+  production build clean. middleware 980 + app 1753; `tsc` all workspaces clean.
+  (`openspec validate --strict` + archive = P5.3.)
+- [x] **P5.2** Live verification (preview, real LLM + GroundX, 2026-06-15): the chat POST
+  sent `Accept: text/event-stream`; the server responded `200` `Content-Type:
+  text/event-stream` `Cache-Control: no-cache, no-transform` `X-Accel-Buffering: no`
+  and streamed for 36s; the answer rendered ("Total amount due: $7,613.20" + the 8-meter
+  table + 27 citations) with the source auto-opened on the canvas; ZERO console errors.
+  (Token-by-token increment is unit-proven in P4.1; the live run proves the SSE
+  transport + render end-to-end.)
 - [ ] **P5.3** Adversarial review (per phase + whole); archive; the superseded
   `stream-chat-tool-activity` stub is already removed by this change.

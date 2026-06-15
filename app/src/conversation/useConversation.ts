@@ -386,6 +386,9 @@ export function useConversation(
       }
 
       setSending(true);
+      // chat-response-streaming P4 — mint the assistant turn id up front so the
+      // in-flight bubble fills token-by-token and the error path targets it.
+      const assistantTurnId = `a-${Date.now()}`;
       try {
         // widget-llm-integration Phase 5 — surface the user's current
         // ViewerStep kind so the LLM tool catalog is scoped.
@@ -396,42 +399,67 @@ export function useConversation(
         const activeStepKind =
           stepIdx >= 0 ? targetChatSession?.viewer.history[stepIdx]?.kind ?? null : null;
         const scopeHint = scopeHintRef.current;
-        const result = await api.chat.sendChatMessage({
-          chatSessionId,
-          newUserMessage: trimmed,
-          sessionMeta: {
-            // Session title wins; the caller's `title` is only a fallback
-            // label when the session has none. This preserves the deleted
-            // onboarding fork's `activeChatSession?.title ?? "Onboarding"`
-            // precedence (and the steady fork's `"Steady chat"` label, which
-            // a title-less steady session never overrode in practice).
-            title: targetChatSession?.title ?? titleRef.current ?? "Conversation",
-            // Read from the session — NOT hardcoded. Onboarding sessions
-            // carry isOnboardingSession:true; a bare chat session false.
-            isOnboarding: targetChatSession?.scopeKey
-              ? false
-              : targetChatSession?.isOnboardingSession ?? titleRef.current === "Onboarding",
-            onboardingSessionId: chatSessionId,
-            activeEntityKey: targetChatSession?.activeEntityKey ?? null,
-          },
-          ...(scopeHint ? { scopeHint } : {}),
-          activeStepKind,
-        });
-        setLiveTurns((cur) => [
-          ...cur,
+        // P4 — push the in-flight assistant bubble, then STREAM into it: tokens
+        // append live, activity drives the indicator; the cleaned envelope
+        // finalizes it. The fake api delegates streamChatMessage→sendChatMessage,
+        // so non-streaming callers/tests are unaffected.
+        setLiveTurns((cur) => [...cur, { id: assistantTurnId, role: "assistant", content: "" }]);
+        const result = await api.chat.streamChatMessage(
           {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content: result.reply.answer,
-            proposedSchemaField: result.reply.proposedSchemaField,
-            citations: result.reply.citations ?? [],
-            suggestedActions: result.reply.suggestedActions ?? [],
-            toolActivity: result.reply.toolActivity ?? [],
-            // report-pin-affordance — opt-in: the genuine server answer is the
-            // canonical pinnable turn.
-            pinnable: true,
+            chatSessionId,
+            newUserMessage: trimmed,
+            sessionMeta: {
+              // Session title wins; the caller's `title` is only a fallback
+              // label when the session has none. This preserves the deleted
+              // onboarding fork's `activeChatSession?.title ?? "Onboarding"`
+              // precedence (and the steady fork's `"Steady chat"` label, which
+              // a title-less steady session never overrode in practice).
+              title: targetChatSession?.title ?? titleRef.current ?? "Conversation",
+              // Read from the session — NOT hardcoded. Onboarding sessions
+              // carry isOnboardingSession:true; a bare chat session false.
+              isOnboarding: targetChatSession?.scopeKey
+                ? false
+                : targetChatSession?.isOnboardingSession ?? titleRef.current === "Onboarding",
+              onboardingSessionId: chatSessionId,
+              activeEntityKey: targetChatSession?.activeEntityKey ?? null,
+            },
+            ...(scopeHint ? { scopeHint } : {}),
+            activeStepKind,
           },
-        ]);
+          {
+            onToken: (delta) =>
+              setLiveTurns((cur) =>
+                cur.map((t) => (t.id === assistantTurnId ? { ...t, content: t.content + delta } : t)),
+              ),
+            onActivity: (activity) =>
+              setLiveTurns((cur) =>
+                cur.map((t) =>
+                  t.id === assistantTurnId
+                    ? { ...t, toolActivity: [...(t.toolActivity ?? []), activity] }
+                    : t,
+                ),
+              ),
+          },
+        );
+        // Finalize: the cleaned answer + full metadata replace the streamed draft
+        // (the streamed text is the RAW answer; the envelope's is fence-stripped).
+        setLiveTurns((cur) =>
+          cur.map((t) =>
+            t.id === assistantTurnId
+              ? {
+                  ...t,
+                  content: result.reply.answer,
+                  proposedSchemaField: result.reply.proposedSchemaField,
+                  citations: result.reply.citations ?? [],
+                  suggestedActions: result.reply.suggestedActions ?? [],
+                  toolActivity: result.reply.toolActivity ?? [],
+                  // report-pin-affordance — opt-in: the genuine server answer is
+                  // the canonical pinnable turn.
+                  pinnable: true,
+                }
+              : t,
+          ),
+        );
         // core-data-model-hardening item 6 — mirror the assistant turn
         // (with citations) into the shared ChatStore so canvas consumers
         // (InteractView litRegions / CiteChip / report-pin) read it off
@@ -468,11 +496,15 @@ export function useConversation(
         }
       } catch (err) {
         const mapped = chatErrorToUserCopy(err);
-        setLiveTurns((cur) => [
-          ...cur,
-          // Not pinnable (an error turn, not a genuine answer).
-          { id: `a-${Date.now()}`, role: "assistant", content: mapped.message },
-        ]);
+        // Replace the in-flight bubble with the error (or append if the stream
+        // failed before it was pushed). Not pinnable (an error, not an answer).
+        setLiveTurns((cur) =>
+          cur.some((t) => t.id === assistantTurnId)
+            ? cur.map((t) =>
+                t.id === assistantTurnId ? { id: assistantTurnId, role: "assistant", content: mapped.message } : t,
+              )
+            : [...cur, { id: assistantTurnId, role: "assistant", content: mapped.message }],
+        );
       } finally {
         setSending(false);
       }
