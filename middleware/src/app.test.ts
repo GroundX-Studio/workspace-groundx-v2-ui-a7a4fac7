@@ -569,6 +569,94 @@ describe("middleware scaffold", () => {
     expect(groundxClient.calls.length).toBeGreaterThan(0);
   });
 
+  // chat-response-streaming P1.3 — content-negotiated SSE on the SAME endpoint.
+  // Helper: seed a chat session owned by the agent and an upstream pair where the
+  // LLM streams when asked (stream:true → SSE) so live token frames flow.
+  async function streamingChatFixture() {
+    const repository = new MemoryAppRepository();
+    const partnerClient = new FakePartnerClient();
+    const groundxClient = new FakeGroundXClient();
+    groundxClient.responseByPathFragment.set("/search", {
+      search: { results: [{ documentId: "doc-1", pageNumber: 1, text: "RAG grounds answers in retrieved snippets." }] },
+    });
+    const llmClient: LlmClient = {
+      calls: [] as Array<{ stream: boolean }>,
+      async forward(_path: string, init: RequestInit) {
+        const body = JSON.parse(String(init.body)) as { stream?: boolean };
+        (this.calls as Array<{ stream: boolean }>).push({ stream: body.stream === true });
+        if (body.stream) {
+          const sse =
+            `data: ${JSON.stringify({ choices: [{ delta: { content: "Streamed " }, index: 0 }] })}\n\n` +
+            `data: ${JSON.stringify({ choices: [{ delta: { content: "answer." }, index: 0 }] })}\n\n` +
+            `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop", index: 0 }] })}\n\n` +
+            "data: [DONE]\n\n";
+          return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+        }
+        return Response.json({ choices: [{ message: { content: "Streamed answer." }, finish_reason: "stop" }] });
+      },
+    } as unknown as LlmClient & { calls: Array<{ stream: boolean }> };
+    const scenarioRegistry = new FakeScenarioRegistry();
+    const liveEnv = { ...testEnv, GROUNDX_SAMPLES_BUCKET_ID: 28454 };
+    const app = createApp({ env: liveEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+    const agent = request.agent(app);
+    const created = await agent.post("/api/onboarding/session").expect(200);
+    const now = new Date();
+    await repository.upsertChatSession({
+      id: "chat-1", onboardingSessionId: "onb-1", ownerUserId: null, ownerAnonId: created.body.sessionId,
+      title: "Onboarding", isOnboarding: true, activeEntityKey: null, currentIntent: null,
+      createdAt: now, updatedAt: now, archivedAt: null,
+    });
+    return { app, agent, repository, llmClient: llmClient as unknown as { calls: Array<{ stream: boolean }> } };
+  }
+
+  it("POST /api/chat/messages streams SSE frames (meta → token → envelope) under Accept: text/event-stream", async () => {
+    const { agent, repository } = await streamingChatFixture();
+    const response = await agent
+      .post("/api/chat/messages")
+      .set("Accept", "text/event-stream")
+      .send({ chatSessionId: "chat-1", newUserMessage: "What is RAG?", turnKey: "tk-1" })
+      .expect(200);
+
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    expect(response.text).toContain("event: meta");
+    expect(response.text).toContain("event: token"); // live tokens (provider streamed)
+    expect(response.text).toContain("Streamed ");
+    expect(response.text).toContain("event: envelope");
+    expect(response.text).toContain("Streamed answer."); // assembled answer in the envelope
+
+    // Persisted exactly once (one engine — the user + assistant turn).
+    const messages = await repository.listChatMessages("chat-1");
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("a re-POST with the same turnKey ATTACHES (idempotent — no second generation/persist)", async () => {
+    const { agent, repository, llmClient } = await streamingChatFixture();
+    const body = { chatSessionId: "chat-1", newUserMessage: "What is RAG?", turnKey: "tk-dup" };
+    await agent.post("/api/chat/messages").set("Accept", "text/event-stream").send(body).expect(200);
+    const callsAfterFirst = llmClient.calls.length;
+
+    const second = await agent.post("/api/chat/messages").set("Accept", "text/event-stream").send(body).expect(200);
+    // The second connection replays the SAME completed turn (envelope present)…
+    expect(second.text).toContain("event: envelope");
+    expect(second.text).toContain("Streamed answer.");
+    // …without re-invoking the LLM or persisting a second turn.
+    expect(llmClient.calls.length).toBe(callsAfterFirst);
+    const messages = await repository.listChatMessages("chat-1");
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("the non-streaming JSON path is unchanged (no stream:true upstream, same envelope)", async () => {
+    const { agent, llmClient } = await streamingChatFixture();
+    const response = await agent
+      .post("/api/chat/messages")
+      .send({ chatSessionId: "chat-1", newUserMessage: "What is RAG?", turnKey: "tk-json" })
+      .expect(200);
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(response.body.reply.answer).toBe("Streamed answer.");
+    // The JSON branch did NOT request upstream streaming (byte-identical call).
+    expect(llmClient.calls.every((c) => c.stream === false)).toBe(true);
+  });
+
   // Finding 3 (§4 #19 follow-up) — MAJOR IDOR. The route was gated only by
   // requireSession (cookie-exists), with NO ownership check, so any visitor
   // could POST a victim's chatSessionId and write into / read the assistant

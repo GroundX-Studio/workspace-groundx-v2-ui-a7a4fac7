@@ -20,11 +20,15 @@ failing-test-first (discipline §1) + adversarial review before advancing.
     agnostic). Non-streaming path byte-identical (no `stream` key). 3 tests. Parser is
     now CONSUMED (not dormant). Threading `onToken` up through `groundedAnswerOverScope`
     → the runner is P1.2.
-- [ ] **P1.1** Content negotiation on `POST /api/chat/messages`: BOTH branches drive the
+- [x] **P1.1** Content negotiation on `POST /api/chat/messages`: BOTH branches drive the
   SAME runner (one generation path, persist once). `Accept: text/event-stream` → stream;
-  else run to completion → JSON. Failing test first: a non-streaming POST still returns
-  the exact JSON envelope (back-compat guard) AND persists exactly one message; a
-  streaming POST returns `Content-Type: text/event-stream`.
+  else run to completion → JSON.
+  - ↳ DONE: the route branches on `Accept`; both create a runner via the per-app
+    `TurnRegistry`. JSON awaits `runner.completion` (surfacing a `ChatHandlerError` as
+    today's status); SSE pumps. The streaming-sink is wired only on the SSE branch, so
+    the JSON branch's UPSTREAM LLM call is byte-identical (test asserts no `stream:true`).
+    Tests: SSE returns `text/event-stream` + meta/token/envelope; JSON unchanged + same
+    envelope; persists once. 980 middleware green.
 - [ ] **P1.2** `TurnRunner` that drives the existing grounded path but EMITS
   `meta`/`activity`/`token`/`envelope`/`error` events (monotonic `seq`) to an
   append-only buffer, and performs the existing MySQL persistence on completion.
@@ -38,12 +42,21 @@ failing-test-first (discipline §1) + adversarial review before advancing.
     BOUNDED (`maxEvents`) dropping oldest `token`s but never structural frames;
     no-missed-wakeup waiter. 5 tests. This is the resume + backpressure core the
     runner + pump build on.
-  - ↳ PENDING: the runner itself (drive `handleChatMessage`/grounded generation,
-    emit frames to a buffer, persist once on completion) + the session-scoped
-    `turnKey` registry.
-- [ ] **P1.3** Connection-as-subscriber: SSE writer that subscribes to a runner buffer
-  and writes frames. Streaming headers set (`text/event-stream`, `no-cache`,
-  `X-Accel-Buffering: no`). Test: headers + a full happy-path stream.
+  - ↳ DONE (runner + registry): `turnRunner.ts` — `TurnRunner` runs generation
+    DECOUPLED from the connection (starts in ctor; a disconnect never aborts it),
+    sets the ambient `turnStreamContext` sink (via `streamSink.ts` AsyncLocalStorage,
+    so `callGroundedLlm` 5 layers down streams with NO threaded params), brackets
+    frames `meta` … `envelope`/`error`, and lets the `generate` thunk own the single
+    MySQL write. `TurnRegistry` keys by `(chatSessionId, turnKey)` → idempotent attach
+    + session isolation; retains a done runner briefly for late replay. The
+    `callGroundedLlm` `stream` arg now resolves `explicit ?? ambient store`, with a
+    live `onActivity` at the tool-exec site. 4 runner tests + 3 dispatch + route tests.
+- [x] **P1.3** Connection-as-subscriber: SSE writer that subscribes to a runner buffer
+  from `Last-Event-ID` and writes `id:`/`event:`/`data:` frames, honoring `res.write()`
+  backpressure (`once(res,"drain")`). Streaming headers set (`text/event-stream`,
+  `no-cache, no-transform`, `keep-alive`, `X-Accel-Buffering: no`).
+  - ↳ DONE: pump in the route; full happy-path + idempotent-replay tested. (Periodic
+    heartbeat is P2.3; the subscribe-from-Last-Event-ID seam is in place for P2.2.)
 
 ## P2 — Production-hardening (server)
 - [ ] **P2.1** Decoupled lifecycle: a client disconnect does NOT abort the runner;

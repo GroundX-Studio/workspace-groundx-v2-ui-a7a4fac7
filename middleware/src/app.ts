@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 
 import cookieParser from "cookie-parser";
 import cors from "cors";
@@ -33,6 +34,7 @@ import {
 import { reportTemplateAccess } from "./services/reportTemplateAccess.js";
 import { sendUpstreamResponse, UpstreamHttpError } from "./services/http.js";
 import { fetchDocumentXray } from "./services/xrayCache.js";
+import { TurnRegistry, TurnRunner } from "./services/turnRunner.js";
 import type {
   AppRepository,
   ChatSessionRecord,
@@ -231,6 +233,12 @@ export function createApp({
   const app = express();
   app.set("etag", false);
   app.disable("x-powered-by");
+
+  // chat-response-streaming — per-app registry of in-flight chat turns, keyed by
+  // (chatSessionId, client turnKey). Lets a streaming reconnect ATTACH to the
+  // running turn (idempotent — no duplicate generation/persist) and keeps turns
+  // session-scoped (a turnKey can only reach the chat session that owns it).
+  const chatTurnRegistry = new TurnRegistry();
 
   // Trust proxy when behind an Ingress/ELB. Helps rate-limit + cookie-secure
   // pick the right client IP/scheme in EKS deployments.
@@ -1508,27 +1516,76 @@ export function createApp({
       const callerUsername = sessionUsername(session); // null for anonymous
       const authorizedProjects = await authorizedProjectIds(repository, callerUsername);
 
-      const result = await handleChatMessage(payload, {
-        repository,
-        llmClient,
-        lightLlmClient,
-        groundxClient,
-        partnerClient,
-        groundxApiKey,
-        rbacFilter: rbacFilterForProjects(authorizedProjects),
-        samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
-        llmModelId: env.LLM_MODEL_ID ?? "model",
-        lightLlmModelId: env.LLM_LIGHT_MODEL_ID,
-        quoteEmbedder,
-        embedThreshold,
-        byoPagesLimit: env.BYO_PAGES_LIMIT,
-        contextWindowTokens: env.LLM_CONTEXT_WINDOW_TOKENS,
-        compressionTriggerRatio: env.COMPRESSION_TRIGGER_RATIO,
-        compressionTargetTokens: env.COMPRESSION_TARGET_TOKENS,
-        maxActiveSummariesBeforeMeta: env.MAX_ACTIVE_SUMMARIES_BEFORE_META,
-        metaCompactionBatchSize: env.META_COMPACTION_BATCH_SIZE,
-        maxSummaryOutputTokens: env.MAX_SUMMARY_OUTPUT_TOKENS,
-      });
+      // chat-response-streaming — BOTH branches drive ONE engine (the TurnRunner),
+      // so there is a single generation path and exactly one persistence write.
+      // The runner is idempotent per (chatSessionId, turnKey): a reconnect re-POST
+      // with the same client-supplied turnKey ATTACHES to the running turn rather
+      // than starting a duplicate. Ownership was verified above, so the
+      // chatSessionId key cannot be reached by a non-owning session.
+      const wantsStream = (req.headers.accept ?? "").includes("text/event-stream");
+      const rawTurnKey = (req.body as { turnKey?: unknown })?.turnKey;
+      const turnKey = typeof rawTurnKey === "string" && rawTurnKey.length > 0 ? rawTurnKey : randomUUID();
+      const runner = chatTurnRegistry.getOrCreate(payload.chatSessionId, turnKey, () =>
+        new TurnRunner({
+          sessionId: payload.chatSessionId,
+          turnKey,
+          streaming: wantsStream,
+          generate: () =>
+            handleChatMessage(payload, {
+              repository,
+              llmClient,
+              lightLlmClient,
+              groundxClient,
+              partnerClient,
+              groundxApiKey,
+              rbacFilter: rbacFilterForProjects(authorizedProjects),
+              samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
+              llmModelId: env.LLM_MODEL_ID ?? "model",
+              lightLlmModelId: env.LLM_LIGHT_MODEL_ID,
+              quoteEmbedder,
+              embedThreshold,
+              byoPagesLimit: env.BYO_PAGES_LIMIT,
+              contextWindowTokens: env.LLM_CONTEXT_WINDOW_TOKENS,
+              compressionTriggerRatio: env.COMPRESSION_TRIGGER_RATIO,
+              compressionTargetTokens: env.COMPRESSION_TARGET_TOKENS,
+              maxActiveSummariesBeforeMeta: env.MAX_ACTIVE_SUMMARIES_BEFORE_META,
+              metaCompactionBatchSize: env.META_COMPACTION_BATCH_SIZE,
+              maxSummaryOutputTokens: env.MAX_SUMMARY_OUTPUT_TOKENS,
+            }),
+        }),
+      );
+
+      if (wantsStream) {
+        // SSE pump: subscribe from Last-Event-ID (resume), drain frames to the
+        // socket honoring write backpressure. The runner keeps generating even if
+        // this connection drops (decoupled).
+        const lastEventId = Number.parseInt(String(req.headers["last-event-id"] ?? ""), 10) || 0;
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        for await (const frame of runner.buffer.read(lastEventId)) {
+          if (res.writableEnded) break;
+          const wrote = res.write(`id: ${frame.seq}\nevent: ${frame.type}\ndata: ${JSON.stringify(frame.data)}\n\n`);
+          if (!wrote) await once(res, "drain"); // socket backpressure (per-connection)
+        }
+        res.end();
+        return;
+      }
+
+      // JSON branch: await the same runner; surface a handler error as today's status.
+      const result = await runner.completion;
+      if (!result) {
+        const err = runner.error;
+        if (err instanceof ChatHandlerError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        next(err);
+        return;
+      }
       res.json(result);
     } catch (error) {
       if (error instanceof ChatHandlerError) {
