@@ -59,9 +59,11 @@ Each task is TDD (failing test first) and ends with the standing adversarial-rev
 - [ ] 5.1 Extract widget field-row values use the `footnote` variant (wherever the widget
       mounts — onboarding AND authenticated). Test: same component, routes like chat.
 - [ ] 5.2 Report sections use inline markers + `SourceList`. Test: shared components, no fork.
-- [ ] 5.3 DEFERRED (tracked): extraction-form citation `fileName` attach — `verifyExtractionCitation`
-      doesn't receive snippets, so threading the doc's fileName there is a separate change; the
-      never-blank `documentId` fallback covers this rare chat path (citing EXTRACTED FIELDS) for now.
+- [x] 5.3 DONE (follow-up commit): extraction-form citation `fileName` attach — a shared
+      `attachSourceMeta(citation, snippets)` helper (fileName + sourceUrl from the matching snippet
+      by documentId, never overwriting) is applied to extraction-form citations in `verifiedCitations`
+      and refactored into the snippet-form path, so every chat citation labels by GroundX's real
+      fileName. +3 unit tests. Middleware 1005 green.
 
 ## 6. Generation contract (chat-routing prompts module)
 - [ ] 6.1 Extend the grounded prompt's merged citation contract to require inline `[N]` markers

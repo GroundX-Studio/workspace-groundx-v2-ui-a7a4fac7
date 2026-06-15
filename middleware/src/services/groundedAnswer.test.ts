@@ -6,6 +6,7 @@ import { __clearWordMapCache } from "./wordMapCache.js";
 import type { ContentScope } from "@groundx/shared";
 
 import {
+  attachSourceMeta,
   groundedAnswerOverScope,
   verifyAndTierSnippetCitation,
   type GroundedAnswerDeps,
@@ -605,5 +606,27 @@ describe("verifyAndTierSnippetCitation — source attribution (inline-footnote-c
       {},
     );
     expect(citation.fileName).toBeUndefined();
+  });
+});
+
+describe("attachSourceMeta — shared fileName/sourceUrl labeling (extraction-form follow-up)", () => {
+  it("attaches fileName + sourceUrl from the matching snippet by documentId", () => {
+    const out = attachSourceMeta({ documentId: "doc-1", tier: "ambient", snippet: "meters: 8" }, [
+      { documentId: "doc-1", fileName: "utility-bill-april-2026.pdf", sourceUrl: "https://x/d1.pdf" },
+    ]);
+    expect(out.fileName).toBe("utility-bill-april-2026.pdf");
+    expect(out.sourceUrl).toBe("https://x/d1.pdf");
+  });
+
+  it("leaves a citation unchanged when no snippet matches its documentId (never-blank fallback)", () => {
+    const out = attachSourceMeta({ documentId: "doc-z" }, [{ documentId: "doc-1", fileName: "bill.pdf" }]);
+    expect(out.fileName).toBeUndefined();
+  });
+
+  it("does not overwrite an already-set fileName", () => {
+    const out = attachSourceMeta({ documentId: "doc-1", fileName: "kept.pdf" }, [
+      { documentId: "doc-1", fileName: "other.pdf" },
+    ]);
+    expect(out.fileName).toBe("kept.pdf");
   });
 });

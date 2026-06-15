@@ -464,6 +464,23 @@ async function verifyExtractionCitation(
  * dropped); the verified chunk's bbox pairs with the match, with a word-level
  * (`exact`) upgrade via the `-118-map` word resolver when available.
  */
+/**
+ * inline-footnote-citations — attach GroundX's display name (`fileName`) +
+ * `sourceUrl` to a citation from the matching snippet (by `documentId`), unless
+ * already set. Used by BOTH snippet-form and extraction-form citations so every
+ * citation labels by its real document name instead of a `documentId` UUID.
+ */
+export function attachSourceMeta(citation: Citation, snippets: GroundXSearchResult[]): Citation {
+  if (citation.fileName && citation.sourceUrl) return citation;
+  const docMeta = snippets.find((s) => s.documentId === citation.documentId);
+  if (!docMeta) return citation;
+  return {
+    ...citation,
+    ...(citation.fileName || !docMeta.fileName ? {} : { fileName: docMeta.fileName }),
+    ...(citation.sourceUrl || !docMeta.sourceUrl ? {} : { sourceUrl: docMeta.sourceUrl }),
+  };
+}
+
 export async function verifyAndTierSnippetCitation(
   cite: { documentId: string; page: number; quote: string; answerSpan?: string },
   snippets: GroundXSearchResult[],
@@ -524,11 +541,7 @@ export async function verifyAndTierSnippetCitation(
     regions = [{ page: cite.page, bbox: { x: 0, y: 0, w: 1, h: 1 }, tier: "ambient" }];
   }
   const first = regions[0];
-  // inline-footnote-citations — recover GroundX's display name + source URL from
-  // any snippet for this document (doc-level metadata, not page-specific), so the
-  // UI labels the source by fileName instead of a documentId UUID.
-  const docMeta = snippets.find((s) => s.documentId === cite.documentId);
-  return {
+  const built: Citation = {
     documentId: cite.documentId,
     page: cite.page,
     snippet: cite.quote.slice(0, RAG_SNIPPET_CHARS),
@@ -537,9 +550,9 @@ export async function verifyAndTierSnippetCitation(
     tier: first?.tier ?? tier,
     confidence: confidenceFor(v),
     ...(cite.answerSpan ? { answerSpan: cite.answerSpan } : {}),
-    ...(docMeta?.fileName ? { fileName: docMeta.fileName } : {}),
-    ...(docMeta?.sourceUrl ? { sourceUrl: docMeta.sourceUrl } : {}),
   };
+  // Label by GroundX's real fileName (+ sourceUrl), recovered from the matching snippet.
+  return attachSourceMeta(built, snippets);
 }
 
 async function verifiedCitations(
@@ -590,7 +603,12 @@ async function verifiedCitations(
         }),
       ),
     )
-  ).filter((c): c is Citation => c !== null);
+  )
+    .filter((c): c is Citation => c !== null)
+    // inline-footnote-citations follow-up — extraction-form citations are built
+    // without snippets, so label them by fileName here from the primary doc's
+    // snippet (same `attachSourceMeta` as the snippet-form path).
+    .map((c) => attachSourceMeta(c, snippets));
 
   const snippetCitations = await Promise.all(
     validatedCitations.map((c) => verifyAndTierSnippetCitation(c, snippets, deps)),
