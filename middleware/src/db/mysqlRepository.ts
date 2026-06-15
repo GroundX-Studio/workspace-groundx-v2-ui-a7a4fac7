@@ -139,6 +139,23 @@ export class MySqlAppRepository implements AppRepository {
       )
     `);
 
+    // chat-response-streaming P2.2 — maps a streaming turn's client idempotency
+    // key to its persisted assistant message, so a reconnect after the in-memory
+    // runner is gone returns the saved answer instead of re-generating. A SEPARATE
+    // table (not a chat_messages column) so the boot stays CREATE-only — this repo
+    // deliberately issues NO `ALTER`/`information_schema` migrations (a fresh DB
+    // and an already-provisioned one both get the table via CREATE IF NOT EXISTS).
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS chat_turn_index (
+        chat_session_id VARCHAR(64) NOT NULL,
+        turn_key VARCHAR(64) NOT NULL,
+        message_id VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (chat_session_id, turn_key),
+        FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS conversation_summaries (
         id VARCHAR(64) PRIMARY KEY,
@@ -444,6 +461,15 @@ export class MySqlAppRepository implements AppRepository {
         record.createdAt,
       ],
     );
+    // chat-response-streaming P2.2 — index a streaming turn's assistant message by
+    // its client idempotency key for from-DB reconnect (REPLACE so a rare re-run
+    // for the same key points at the latest row).
+    if (record.turnKey) {
+      await this.pool.execute(
+        `REPLACE INTO chat_turn_index (chat_session_id, turn_key, message_id) VALUES (?, ?, ?)`,
+        [record.chatSessionId, record.turnKey, record.id],
+      );
+    }
   }
 
   async listChatMessages(chatSessionId: string): Promise<ChatMessageRecord[]> {
@@ -458,6 +484,24 @@ export class MySqlAppRepository implements AppRepository {
       [chatSessionId],
     );
     return rows.map(rowToChatMessage);
+  }
+
+  async getAssistantMessageByTurnKey(
+    chatSessionId: string,
+    turnKey: string,
+  ): Promise<ChatMessageRecord | null> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT m.id, m.chat_session_id, m.turn_index, m.role, m.content,
+        m.citations_json,
+        m.compressed_into_summary_id, m.llm_provider, m.llm_model_id,
+        m.latency_ms, m.prompt_tokens, m.completion_tokens, m.error_code, m.created_at
+       FROM chat_messages m
+       JOIN chat_turn_index t ON t.message_id = m.id
+       WHERE t.chat_session_id = ? AND t.turn_key = ? AND m.role = 'assistant'
+       LIMIT 1`,
+      [chatSessionId, turnKey],
+    );
+    return rows.length > 0 ? rowToChatMessage(rows[0]) : null;
   }
 
   async markChatMessagesCompressed(messageIds: string[], summaryId: string): Promise<void> {

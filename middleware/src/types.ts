@@ -77,6 +77,14 @@ export interface ChatMessageRecord {
   completionTokens: number | null;
   errorCode: string | null;
   createdAt: Date;
+  /**
+   * chat-response-streaming P2.2 — the client idempotency key of the streaming
+   * turn that produced this message (assistant rows only). Lets a reconnect after
+   * the in-memory runner is gone find the persisted final answer by
+   * `(chatSessionId, turnKey)` instead of re-generating. Optional/null for
+   * non-streaming turns and every pre-existing row.
+   */
+  turnKey?: string | null;
 }
 
 export interface ConversationSummaryRecord {
@@ -285,6 +293,12 @@ export interface AppRepository {
   // Messages
   appendChatMessage(record: ChatMessageRecord): Promise<void>;
   listChatMessages(chatSessionId: string): Promise<ChatMessageRecord[]>;
+  /**
+   * chat-response-streaming P2.2 — find the persisted ASSISTANT message for a
+   * streaming turn by its client idempotency key, so a reconnect after the runner
+   * is gone returns the saved answer instead of re-generating. Null if none.
+   */
+  getAssistantMessageByTurnKey(chatSessionId: string, turnKey: string): Promise<ChatMessageRecord | null>;
   /**
    * Mark a batch of chat messages as compressed into a given summary.
    * Used by the compression chain (Phase J): after a new

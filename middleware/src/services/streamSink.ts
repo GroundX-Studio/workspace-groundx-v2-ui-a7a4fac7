@@ -21,6 +21,14 @@ export interface TurnStreamSink {
   onToken?: (delta: string) => void;
   /** Called when a server-executed tool runs → an `activity` frame. */
   onActivity?: (activity: ToolActivity) => void;
+  /**
+   * Aborts the turn's upstream LLM call (supersede-cancel). The runner sets this
+   * to its AbortController's signal; `callGroundedLlm` passes it to the LLM
+   * client, which composes it with the per-call timeout. When a new turn
+   * supersedes a prior in-flight one, aborting makes the prior generation throw
+   * BEFORE it persists — so a superseded turn's partial output is discarded.
+   */
+  abortSignal?: AbortSignal;
 }
 
 export const turnStreamContext = new AsyncLocalStorage<TurnStreamSink>();

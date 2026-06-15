@@ -27,12 +27,16 @@ describe("MySqlAppRepository", () => {
     await repository.createSchema();
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
-    // 11 CREATE TABLE statements + the DROP TABLE for the superseded
-    // extraction_schemas (2026-05-31-extraction-schemas-table-drop) = 12. The
+    // 12 CREATE TABLE statements + the DROP TABLE for the superseded
+    // extraction_schemas (2026-05-31-extraction-schemas-table-drop) = 13. The
     // table + its boot copy-INSERT…SELECT were removed once `templates` soaked
-    // one full prod release; the DROP sheds the table on the next boot.
-    expect(statements).toHaveLength(12);
+    // one full prod release; the DROP sheds the table on the next boot. The 12th
+    // CREATE is chat_turn_index (chat-response-streaming P2.2 from-DB resume).
+    expect(statements).toHaveLength(13);
     const joined = statements.join("\n");
+    // chat-response-streaming P2.2 — the streaming-turn → message index (CREATE-only,
+    // no ALTER, so it lands on fresh AND already-provisioned DBs identically).
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS chat_turn_index");
     // Auth + metadata.
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS sessions");
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS app_user_metadata");

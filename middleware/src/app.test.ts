@@ -657,6 +657,43 @@ describe("middleware scaffold", () => {
     expect(llmClient.calls.every((c) => c.stream === false)).toBe(true);
   });
 
+  it("a reconnect after the runner is gone returns the persisted answer from the DB — no re-generation (P2.2)", async () => {
+    const { agent, repository, llmClient } = await streamingChatFixture();
+    // A completed assistant turn stamped with a turnKey, whose in-memory runner has
+    // since been evicted (simulated by never creating one for this key).
+    await repository.appendChatMessage({
+      id: "m-prior",
+      chatSessionId: "chat-1",
+      turnIndex: 2,
+      role: "assistant",
+      content: "The persisted answer.",
+      citationsJson: null,
+      compressedIntoSummaryId: null,
+      llmProvider: "live",
+      llmModelId: "x",
+      latencyMs: 1,
+      promptTokens: null,
+      completionTokens: null,
+      errorCode: null,
+      createdAt: new Date(),
+      turnKey: "tk-evicted",
+    });
+    const llmCallsBefore = llmClient.calls.length;
+
+    const res = await agent
+      .post("/api/chat/messages")
+      .set("Accept", "text/event-stream")
+      .set("Last-Event-ID", "5") // a RECONNECT (not a fresh turn)
+      .send({ chatSessionId: "chat-1", newUserMessage: "reconnect", turnKey: "tk-evicted" })
+      .expect(200);
+
+    expect(res.headers["content-type"]).toContain("text/event-stream");
+    expect(res.text).toContain("event: envelope");
+    expect(res.text).toContain("The persisted answer.");
+    // No re-generation — the LLM was not called for the from-DB reconnect.
+    expect(llmClient.calls.length).toBe(llmCallsBefore);
+  });
+
   // Finding 3 (§4 #19 follow-up) — MAJOR IDOR. The route was gated only by
   // requireSession (cookie-exists), with NO ownership check, so any visitor
   // could POST a victim's chatSessionId and write into / read the assistant

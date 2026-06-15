@@ -92,6 +92,17 @@ export class MemoryAppRepository implements AppRepository {
     );
   }
 
+  async getAssistantMessageByTurnKey(
+    chatSessionId: string,
+    turnKey: string,
+  ): Promise<ChatMessageRecord | null> {
+    const list = this.chatMessages.get(chatSessionId) ?? [];
+    // Latest assistant message stamped with this turn key (mirrors the SQL ORDER
+    // BY turn_index DESC LIMIT 1).
+    const matches = list.filter((m) => m.role === "assistant" && m.turnKey === turnKey);
+    return matches.length > 0 ? matches.reduce((a, b) => (b.turnIndex > a.turnIndex ? b : a)) : null;
+  }
+
   async markChatMessagesCompressed(messageIds: string[], summaryId: string): Promise<void> {
     if (messageIds.length === 0) return;
     const idSet = new Set(messageIds);

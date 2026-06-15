@@ -99,6 +99,65 @@ describe("TurnRegistry", () => {
     expect(calls).toBe(1);
   });
 
+  it("supersedes a prior IN-FLIGHT turn when a NEW turn arrives for the same session", async () => {
+    const registry = new TurnRegistry();
+    // A generation that runs until the ambient sink's abort signal fires.
+    const pendingUntilAbort = () =>
+      new Promise<never>((_resolve, reject) => {
+        const sink = turnStreamContext.getStore();
+        sink?.abortSignal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+
+    const r1 = registry.getOrCreate(
+      "s1",
+      "k1",
+      () => new TurnRunner({ sessionId: "s1", turnKey: "k1", generate: pendingUntilAbort }),
+    );
+    // A NEW turn (different key) for the SAME session supersedes r1.
+    const r2 = registry.getOrCreate(
+      "s1",
+      "k2",
+      () => new TurnRunner({ sessionId: "s1", turnKey: "k2", generate: async () => reply("second") as never }),
+    );
+
+    await r1.completion; // resolves because r1 was aborted
+    await r2.completion;
+    expect(r1).not.toBe(r2);
+    // r1 was aborted → its turn ends in an `error` frame, NOT an envelope (its
+    // partial output is discarded, never persisted).
+    const r1Frames = [];
+    for await (const f of r1.buffer.read(0)) r1Frames.push(f);
+    expect(r1Frames.map((f) => f.type)).toEqual(["meta", "error"]);
+    expect(r2.result?.reply.answer).toBe("second");
+  });
+
+  it("a reconnect (same turnKey) does NOT supersede — it attaches", async () => {
+    const registry = new TurnRegistry();
+    let aborted = false;
+    const r1 = registry.getOrCreate(
+      "s1",
+      "k1",
+      () =>
+        new TurnRunner({
+          sessionId: "s1",
+          turnKey: "k1",
+          generate: async () => {
+            const sink = turnStreamContext.getStore();
+            sink?.abortSignal?.addEventListener("abort", () => {
+              aborted = true;
+            });
+            return reply("only") as never;
+          },
+        }),
+    );
+    const again = registry.getOrCreate("s1", "k1", () => {
+      throw new Error("factory must not run for a known key");
+    });
+    await r1.completion;
+    expect(again).toBe(r1);
+    expect(aborted).toBe(false);
+  });
+
   it("keeps sessions isolated — same turnKey, different session → different runner", () => {
     const registry = new TurnRegistry();
     const make = (sessionId: string) =>

@@ -68,6 +68,19 @@ describe("MemoryAppRepository — chat-session methods", () => {
     expect(list.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
   });
 
+  it("finds the assistant message by turnKey (P2.2 from-DB resume), session-scoped", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.appendChatMessage({ ...makeMessage("m-a", "chat-1", 2, "assistant", "the answer"), turnKey: "tk-1" });
+    await repo.appendChatMessage(makeMessage("m-u", "chat-1", 1, "user", "q")); // no turnKey
+
+    const found = await repo.getAssistantMessageByTurnKey("chat-1", "tk-1");
+    expect(found?.id).toBe("m-a");
+    expect(found?.content).toBe("the answer");
+    // Unknown key, and a key not in this session, both return null.
+    expect(await repo.getAssistantMessageByTurnKey("chat-1", "tk-nope")).toBeNull();
+    expect(await repo.getAssistantMessageByTurnKey("chat-other", "tk-1")).toBeNull();
+  });
+
   it("marks chat messages as compressed into a summary id (compression chain Phase J)", async () => {
     // When the compression runner writes a new ConversationSummary it
     // must also update the absorbed messages' compressedIntoSummaryId

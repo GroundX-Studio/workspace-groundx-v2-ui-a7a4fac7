@@ -28,6 +28,7 @@ export class TurnRunner {
   readonly buffer = new TurnEventBuffer();
 
   private readonly streaming: boolean;
+  private readonly controller = new AbortController();
   private readonly _completion: Promise<HandleChatMessageResponse | null>;
   private _result: HandleChatMessageResponse | null = null;
   private _error: unknown = null;
@@ -66,16 +67,32 @@ export class TurnRunner {
     return this._error;
   }
 
+  /** True once this turn has finished (envelope or error buffered). */
+  get done(): boolean {
+    return this.buffer.done;
+  }
+
+  /**
+   * Supersede-cancel: abort the upstream LLM call so generation throws BEFORE it
+   * persists (the partial output is discarded). Idempotent; a no-op once done.
+   */
+  abort(): void {
+    if (!this.buffer.done) this.controller.abort();
+  }
+
   private async run(generate: () => Promise<HandleChatMessageResponse>): Promise<HandleChatMessageResponse | null> {
     this.buffer.append("meta", { turnKey: this.turnKey });
-    // Only the streaming branch wires live callbacks: with them set, callGroundedLlm
-    // streams the upstream completion; without (JSON), the upstream call is unchanged.
-    const sink: TurnStreamSink = this.streaming
-      ? {
-          onToken: (delta) => this.buffer.append("token", { delta }),
-          onActivity: (activity) => this.buffer.append("activity", activity),
-        }
-      : {};
+    // The abort signal is ALWAYS wired (so any turn can be superseded); the live
+    // callbacks are streaming-only (JSON keeps its upstream call byte-identical).
+    const sink: TurnStreamSink = {
+      abortSignal: this.controller.signal,
+      ...(this.streaming
+        ? {
+            onToken: (delta: string) => this.buffer.append("token", { delta }),
+            onActivity: (activity) => this.buffer.append("activity", activity),
+          }
+        : {}),
+    };
     try {
       // The ambient sink is in scope for the whole generation, so callGroundedLlm
       // (5 layers down) streams without any threaded parameter.
@@ -88,7 +105,11 @@ export class TurnRunner {
       return result;
     } catch (err) {
       this._error = err;
-      const code = err instanceof ChatHandlerError ? err.message : "internal_error";
+      const code = this.controller.signal.aborted
+        ? "superseded"
+        : err instanceof ChatHandlerError
+          ? err.message
+          : "internal_error";
       this.buffer.append("error", { code });
       this.buffer.markDone();
       return null;
@@ -98,6 +119,8 @@ export class TurnRunner {
 
 export class TurnRegistry {
   private readonly runners = new Map<string, TurnRunner>();
+  /** The current (most-recently-started) runner per session, for supersede-cancel. */
+  private readonly bySession = new Map<string, TurnRunner>();
 
   private key(sessionId: string, turnKey: string): string {
     return `${sessionId}::${turnKey}`;
@@ -107,14 +130,22 @@ export class TurnRegistry {
   getOrCreate(sessionId: string, turnKey: string, factory: () => TurnRunner): TurnRunner {
     const k = this.key(sessionId, turnKey);
     const existing = this.runners.get(k);
-    if (existing) return existing;
+    if (existing) return existing; // reconnect with a KNOWN key → attach, never supersede
+
+    // A NEW turn (unknown key) for this session SUPERSEDES any still-running prior
+    // turn — the user moved on; don't burn compute, and discard its partial output.
+    const prior = this.bySession.get(sessionId);
+    if (prior && !prior.done) prior.abort();
+
     const runner = factory();
     this.runners.set(k, runner);
-    // Retain after completion for late reconnect/replay, then evict (P2.2 will tune
-    // the TTL); a reconnect past eviction falls back to the persisted final message.
+    this.bySession.set(sessionId, runner);
+    // Retain after completion for late reconnect/replay, then evict; a reconnect
+    // past eviction falls back to the persisted final message (P2.2).
     void runner.completion.finally(() => {
       setTimeout(() => {
         if (this.runners.get(k) === runner) this.runners.delete(k);
+        if (this.bySession.get(sessionId) === runner) this.bySession.delete(sessionId);
       }, RETAIN_AFTER_DONE_MS).unref?.();
     });
     return runner;

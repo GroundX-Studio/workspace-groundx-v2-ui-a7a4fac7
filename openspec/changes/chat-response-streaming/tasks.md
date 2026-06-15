@@ -68,25 +68,34 @@ failing-test-first (discipline §1) + adversarial review before advancing.
   - ↳ DONE: runner unit test — generation runs to completion + buffers the envelope
     even when NO connection reads the buffer (a disconnect never stops the turn; the
     generate thunk's persistence still runs).
-- [~] **P2.2** Reconnect/resume.
+- [x] **P2.2** Reconnect/resume.
   - ↳ DONE: SAME-INSTANCE replay (idempotent re-POST attaches + replays from the live
-    runner — app test) + session isolation (the `(chatSessionId, turnKey)` registry key
-    makes cross-session attach structurally impossible) + per-turn buffer TTL eviction.
-  - ↳ DEFERRED: the FROM-DB fallback for a reconnect after the runner is evicted /
-    on another replica. Clean impl needs a `turnKey`→assistant-message mapping (a new
-    column) to find the persisted turn without re-generating; out of scope here. Today
-    a reconnect within the 60s retain window replays; beyond it re-generates (correct,
-    just not free). Filed as a follow-up (schema + lookup).
+    runner) + session isolation (the `(chatSessionId, turnKey)` registry key makes
+    cross-session attach structurally impossible) + per-turn buffer TTL eviction.
+  - ↳ DONE: FROM-DB fallback — a reconnect (Last-Event-ID present) whose runner is
+    gone returns the persisted answer instead of re-generating. Mapping via a NEW
+    `chat_turn_index (chat_session_id, turn_key) → message_id` table — a separate
+    CREATE-only table (NOT a chat_messages ALTER), because this repo's boot is
+    deliberately CREATE-only (no `information_schema`/`ALTER`; test-enforced). The
+    route looks it up + streams a single envelope; the handler stamps the index on
+    persist. Tests: route from-DB reconnect (no re-generation) + memory-repo lookup
+    (session-scoped, miss→null). middleware booted clean against the live RDS.
 - [x] **P2.3** Heartbeats + backpressure.
   - ↳ DONE: extracted `streamPump.ts` `pumpFramesToResponse()` — replays from
     Last-Event-ID, emits a `:` heartbeat every 15s while idle (under a ~60s ingress
     idle timeout), awaits socket `drain` on backpressure, ends on done. The route uses
     it. Backpressure's buffer half (drop-oldest-token, never structural) was already
     done + tested in `TurnEventBuffer`. 2 pump tests (heartbeat+resume, drain).
-- [ ] **P2.4** Supersede-cancel — DEFERRED. A cooperative LLM-abort needs the signal
-  threaded into the upstream fetch; and the UI disables the input while `sending`, so a
-  same-session concurrent send (the only trigger) cannot occur today. Filed as a
-  follow-up; not reachable via the current UI.
+- [x] **P2.4** Supersede-cancel.
+  - ↳ DONE: the runner holds an `AbortController` exposed via `abort()`; the ambient
+    sink carries `abortSignal` → `callGroundedLlm` passes it to `llmClient.forward`,
+    which composes it with the per-call timeout (`fetchWithTimeout`). The registry
+    tracks the current runner per session and aborts a still-running prior one when a
+    NEW turn (unknown key) arrives — a reconnect (known key) attaches, never
+    supersedes. An aborted turn ends in an `error` frame (code `superseded`) and its
+    partial output is NEVER persisted (the abort throws before the assistant write).
+    Tests: supersede aborts the prior + emits error-not-envelope; reconnect attaches
+    without aborting.
 
 ## P3 — Client: stream reader + reconnect
 - [x] **P3.1** Streaming `sendChatMessage` variant: generate a `turnKey` (idempotency

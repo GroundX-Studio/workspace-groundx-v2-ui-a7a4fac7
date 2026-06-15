@@ -70,6 +70,12 @@ export interface HandleChatMessageRequest {
    * to tools relevant on the user's current surface.
    */
   activeStepKind?: string | null;
+  /**
+   * chat-response-streaming P2.2 — the streaming client's idempotency key, stamped
+   * onto the persisted assistant message so a reconnect after the runner is gone
+   * can find the saved answer by `(chatSessionId, turnKey)`. Absent for non-stream.
+   */
+  turnKey?: string | null;
 }
 
 export interface HandleChatMessageResponse {
@@ -475,6 +481,7 @@ export async function handleChatMessage(
     completionTokens: null,
     errorCode: null,
     createdAt: new Date(),
+    turnKey: request.turnKey ?? null,
   });
 
   // widget-llm-integration Phase 5 — persist every dispatched tool

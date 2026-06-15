@@ -631,6 +631,9 @@ export async function callGroundedLlm(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(requestBody),
+      // supersede-cancel: the runner's abort signal cancels this upstream call
+      // (the LLM client composes it with the per-call timeout).
+      ...(sink?.abortSignal ? { signal: sink.abortSignal } : {}),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "<unreadable>");

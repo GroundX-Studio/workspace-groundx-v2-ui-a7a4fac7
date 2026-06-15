@@ -1526,13 +1526,50 @@ export function createApp({
       const wantsStream = (req.headers.accept ?? "").includes("text/event-stream");
       const rawTurnKey = (req.body as { turnKey?: unknown })?.turnKey;
       const turnKey = typeof rawTurnKey === "string" && rawTurnKey.length > 0 ? rawTurnKey : randomUUID();
+      const lastEventId = wantsStream
+        ? Number.parseInt(String(req.headers["last-event-id"] ?? ""), 10) || 0
+        : 0;
+
+      // P2.2 from-DB resume: a reconnect (Last-Event-ID present) whose in-memory
+      // runner is GONE (evicted / different replica) returns the PERSISTED final
+      // answer as a single envelope instead of re-generating. A miss falls through
+      // to a fresh runner.
+      if (wantsStream && lastEventId > 0 && !chatTurnRegistry.get(payload.chatSessionId, turnKey)) {
+        const saved = await repository.getAssistantMessageByTurnKey(payload.chatSessionId, turnKey);
+        if (saved) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
+          });
+          const envelope = {
+            assistantMessageId: saved.id,
+            compressionRan: false,
+            reply: {
+              mode: "rag" as const,
+              answer: saved.content,
+              citations: saved.citationsJson ? (JSON.parse(saved.citationsJson) as unknown) : [],
+              suggestedActions: [],
+              intents: [],
+              toolFailures: [],
+            },
+          };
+          res.write(`id: 0\nevent: meta\ndata: ${JSON.stringify({ turnKey, messageId: saved.id })}\n\n`);
+          res.write(`event: envelope\ndata: ${JSON.stringify(envelope)}\n\n`);
+          res.end();
+          return;
+        }
+        // not found → fall through to a fresh runner (re-generate).
+      }
+
       const runner = chatTurnRegistry.getOrCreate(payload.chatSessionId, turnKey, () =>
         new TurnRunner({
           sessionId: payload.chatSessionId,
           turnKey,
           streaming: wantsStream,
           generate: () =>
-            handleChatMessage(payload, {
+            handleChatMessage({ ...payload, turnKey }, {
               repository,
               llmClient,
               lightLlmClient,
@@ -1560,7 +1597,6 @@ export function createApp({
         // SSE pump: subscribe from Last-Event-ID (resume), drain frames to the
         // socket honoring write backpressure. The runner keeps generating even if
         // this connection drops (decoupled).
-        const lastEventId = Number.parseInt(String(req.headers["last-event-id"] ?? ""), 10) || 0;
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache, no-transform",
