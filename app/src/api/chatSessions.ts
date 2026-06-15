@@ -384,6 +384,9 @@ export async function sendChatMessage(
   }
 }
 
+/** Base backoff between streaming reconnect attempts (×attempt number). */
+const RECONNECT_BACKOFF_MS = 250;
+
 /** Live callbacks for the streaming send — token-by-token text + tool activity. */
 export interface StreamChatCallbacks {
   /** A content delta arrived → append to the in-flight assistant bubble. */
@@ -407,6 +410,7 @@ export async function streamChatMessage(
   input: SendChatMessageInput,
   callbacks: StreamChatCallbacks = {},
   chatSessionEnsure: ChatSessionEnsureClient = legacyChatSessionEnsure,
+  opts: { signal?: AbortSignal; maxRetries?: number } = {},
 ): Promise<SendChatMessageResult> {
   await chatSessionEnsure.ensureChatSessionForSend({
     id: input.chatSessionId,
@@ -416,14 +420,28 @@ export async function streamChatMessage(
     activeEntityKey: input.sessionMeta.activeEntityKey ?? null,
   });
 
-  // Client-supplied idempotency key: a reconnect re-POST with the same key attaches
-  // to the running turn server-side instead of starting a duplicate generation.
+  // Client-supplied idempotency key: a reconnect re-POST with the same key ATTACHES
+  // to the running turn server-side (no duplicate generation), and `Last-Event-ID`
+  // makes the server replay only the frames missed during the drop.
   const turnKey = crypto.randomUUID();
-  try {
+  const maxRetries = opts.maxRetries ?? 2;
+  let lastSeq = 0;
+  let result: SendChatMessageResult | null = null;
+  let attempt = 0;
+
+  // One connect+drain attempt → "done" (envelope seen) | "dropped" (stream ended
+  // with no envelope/error — a connection drop). HTTP failures, server `error`
+  // frames, and aborts THROW (terminal — not retried here).
+  const attemptStream = async (): Promise<SendChatMessageResult | null> => {
+    let seen: SendChatMessageResult | null = null;
     const res = await csrfFetch("/api/chat/messages", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...(lastSeq > 0 ? { "Last-Event-ID": String(lastSeq) } : {}),
+      },
       body: JSON.stringify({
         chatSessionId: input.chatSessionId,
         newUserMessage: input.newUserMessage,
@@ -432,6 +450,7 @@ export async function streamChatMessage(
         activeStepKind: input.activeStepKind ?? null,
         turnKey,
       }),
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
     if (!res.ok) {
       let detail: unknown = null;
@@ -445,10 +464,8 @@ export async function streamChatMessage(
     if (!res.body) {
       throw new ChatApiError("/api/chat/messages returned no stream body", 502, null);
     }
-
-    let result: SendChatMessageResult | null = null;
-    let streamErrorCode: string | null = null;
     for await (const frame of readSseFrames(res.body)) {
+      if (frame.seq != null) lastSeq = frame.seq;
       switch (frame.event) {
         case "meta":
           callbacks.onMeta?.(JSON.parse(frame.data) as { turnKey: string });
@@ -460,28 +477,56 @@ export async function streamChatMessage(
           callbacks.onActivity?.(JSON.parse(frame.data) as { name: string; label: string });
           break;
         case "envelope":
-          result = JSON.parse(frame.data) as SendChatMessageResult;
+          seen = JSON.parse(frame.data) as SendChatMessageResult;
           break;
-        case "error":
-          streamErrorCode = (JSON.parse(frame.data) as { code: string }).code;
-          break;
+        case "error": {
+          // A turn-level failure (HTTP 200 + error frame) is terminal — don't retry.
+          const code = (JSON.parse(frame.data) as { code: string }).code;
+          if (code === "chat_session_not_found") {
+            chatSessionEnsure.forgetChatSessionEnsured(input.chatSessionId);
+          }
+          throw new ChatApiError(`chat stream error: ${code}`, 500, { code });
+        }
         default:
           break;
       }
     }
+    return seen;
+  };
 
-    if (streamErrorCode) {
-      // The server delivers a turn-level failure as an `error` frame (HTTP 200).
-      // Mirror the JSON path's not-found cache invalidation by code.
-      if (streamErrorCode === "chat_session_not_found") {
-        chatSessionEnsure.forgetChatSessionEnsured(input.chatSessionId);
+  const backoff = (n: number) => new Promise((r) => setTimeout(r, RECONNECT_BACKOFF_MS * n));
+
+  try {
+    for (;;) {
+      let seen: SendChatMessageResult | null;
+      try {
+        seen = await attemptStream();
+      } catch (err) {
+        // Terminal: HTTP error / server error-frame / abort → re-throw. A bare
+        // network drop (fetch or body stream threw) is retryable.
+        if (err instanceof ChatApiError) throw err;
+        if (opts.signal?.aborted) throw err;
+        if (attempt >= maxRetries) throw err;
+        attempt += 1;
+        await backoff(attempt);
+        continue;
       }
-      throw new ChatApiError(`chat stream error: ${streamErrorCode}`, 500, { code: streamErrorCode });
+      if (seen) {
+        result = seen;
+        break;
+      }
+      // Silent drop (no envelope) → reconnect from Last-Event-ID if attempts remain.
+      if (opts.signal?.aborted) throw new ChatApiError("chat stream aborted", 0, null);
+      if (attempt >= maxRetries) {
+        throw new ChatApiError("chat stream ended without an envelope", 502, null);
+      }
+      attempt += 1;
+      await backoff(attempt);
     }
+
     if (!result) {
       throw new ChatApiError("chat stream ended without an envelope", 502, null);
     }
-
     // Same drop-safe reply validation as sendChatMessage (single-sourced envelope).
     const replyParse = chatReplySchema.safeParse(result.reply);
     if (!replyParse.success) {

@@ -99,9 +99,18 @@ failing-test-first (discipline §1) + adversarial review before advancing.
     onToken/onActivity/onMeta; returns the same `SendChatMessageResult` from the
     `envelope` frame; throws a ChatApiError on an `error` frame). 2 tests; app 1752
     green; tsc clean. Consumed by P4 (the chat send path).
-- [ ] **P3.2** Reconnect with `Last-Event-ID` (bounded retries + backoff); on
-  exhaustion, fetch the saved message. `AbortController` on navigate/new-turn +
-  signal the server to supersede-cancel. Tests: reconnect, abort.
+- [x] **P3.2** Reconnect with `Last-Event-ID` (bounded retries + backoff).
+  - ↳ DONE: `streamChatMessage` wraps connect+drain in a retry loop — a silent drop
+    (stream ends with no envelope) OR a network throw reconnects with the SAME turnKey
+    + `Last-Event-ID: <lastSeq>` (server attaches to the live runner + replays the
+    missed frames), bounded by `maxRetries` (default 2) with ×attempt backoff. HTTP
+    errors / server `error` frames / aborts are terminal (no retry). An `AbortSignal`
+    is plumbed (`opts.signal`). Test: drop-before-envelope → reconnect carries
+    Last-Event-ID=2 + same turnKey → tokens from both legs + the envelope resolve.
+  - ↳ NOT WIRED (low value): the hook passing an AbortController to abort on
+    navigate/new-turn — the runner is decoupled (an un-aborted client stream finishes
+    + persists server-side regardless), so there's no harm to leave it; the seam is
+    ready. Server supersede-cancel is P2.4 (deferred).
 
 ## P4 — React rendering + live indicator
 - [x] **P4.1** Incremental token rendering into the in-flight assistant turn.

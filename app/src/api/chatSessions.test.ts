@@ -761,4 +761,53 @@ describe("streamChatMessage (chat-response-streaming P3)", () => {
       streamChatMessage({ chatSessionId: "chat-1", newUserMessage: "x", sessionMeta: meta }),
     ).rejects.toThrow(/internal_error/);
   });
+
+  it("reconnects with Last-Event-ID when the stream drops before the envelope (P3.2)", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ chatSessionId: "chat-1" }) }) // ensure
+      // Attempt 1: meta + a token, then the stream ENDS with no envelope (a drop).
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: sseStream([frame("meta", { turnKey: "tk" }, 1), frame("token", { delta: "draft" }, 2)]),
+      })
+      // Attempt 2 (reconnect): the server replays the rest + the envelope.
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: sseStream([
+          frame("token", { delta: " more" }, 3),
+          frame(
+            "envelope",
+            {
+              userMessageId: "u1",
+              assistantMessageId: "a1",
+              reply: { mode: "rag", answer: "draft more", citations: [], suggestedActions: [] },
+              compressionRan: false,
+            },
+            4,
+          ),
+        ]),
+      });
+
+    const tokens: string[] = [];
+    const result = await streamChatMessage(
+      { chatSessionId: "chat-1", newUserMessage: "x", sessionMeta: meta },
+      { onToken: (d) => tokens.push(d) },
+    );
+
+    // ensure + TWO chat POSTs (original + reconnect).
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // The reconnect carried Last-Event-ID = 2 (the last seq seen before the drop)
+    // and the same turnKey (so the server attaches, not re-generates).
+    const reconnectInit = fetchMock.mock.calls[2][1] as RequestInit;
+    expect(new Headers(reconnectInit.headers).get("last-event-id")).toBe("2");
+    expect((JSON.parse(String(reconnectInit.body)) as { turnKey: string }).turnKey).toBe(
+      (JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)) as { turnKey: string }).turnKey,
+    );
+    // Tokens from BOTH legs reached the caller; the envelope resolved the result.
+    expect(tokens).toEqual(["draft", " more"]);
+    expect(result.reply.answer).toBe("draft more");
+  });
 });
