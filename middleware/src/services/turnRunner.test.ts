@@ -43,6 +43,25 @@ describe("TurnRunner", () => {
     expect(frames.at(-1)?.data).toMatchObject({ reply: { answer: "Hello world." } });
   });
 
+  it("runs generation to completion even when NO connection reads the buffer (decoupled)", async () => {
+    // The decoupling guarantee: a client that never attaches / disconnects does
+    // NOT stop generation — it finishes and buffers the envelope (the generate
+    // thunk's own persistence still runs in production), available for a late replay.
+    let ran = false;
+    const runner = new TurnRunner({
+      sessionId: "s1",
+      turnKey: "k-detached",
+      generate: async () => {
+        ran = true;
+        return reply("done") as never;
+      },
+    });
+    const result = await runner.completion; // never read runner.buffer
+    expect(ran).toBe(true);
+    expect(result?.reply.answer).toBe("done");
+    expect(runner.buffer.done).toBe(true);
+  });
+
   it("emits an error frame (not envelope) when generation throws, and still completes", async () => {
     const runner = new TurnRunner({
       sessionId: "s1",

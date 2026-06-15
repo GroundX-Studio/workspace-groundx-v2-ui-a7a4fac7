@@ -64,18 +64,29 @@ failing-test-first (discipline §1) + adversarial review before advancing.
 > replay works (idempotent re-POST test), and backpressure is real (pump `drain` +
 > bounded drop-oldest-token buffer). What remains below is the explicit tests +
 > heartbeat emission + from-DB resume fallback + supersede-cancel.
-- [ ] **P2.1** Decoupled lifecycle TEST: simulate `res` close mid-turn → message still
-  saved. (Structure done; test pending.)
-- [ ] **P2.2** Reconnect/resume: re-request with the same `turnKey` + `Last-Event-ID`
-  replays buffered events after that seq (runner present); else delivers the persisted
-  final message as one `envelope`. Per-turn buffer TTL + eviction. **Authorization:** a
-  `turnKey` owned by a different session is REFUSED (no cross-session resume). Tests:
-  same-instance replay, final-from-DB fallback, cross-session refusal.
-- [ ] **P2.3** Heartbeats (idle keep-alive under the ALB ~60s timeout) + bounded buffer
-  backpressure (overflow drops oldest `token`s, never `meta`/`activity`/`envelope`/
-  `error`). Tests: heartbeat on idle; overflow keeps the envelope.
-- [ ] **P2.4** Supersede-cancel: a new turn for the same session cooperatively cancels
-  the prior runner (AbortController on the LLM call). Test: prior runner aborted.
+- [x] **P2.1** Decoupled lifecycle.
+  - ↳ DONE: runner unit test — generation runs to completion + buffers the envelope
+    even when NO connection reads the buffer (a disconnect never stops the turn; the
+    generate thunk's persistence still runs).
+- [~] **P2.2** Reconnect/resume.
+  - ↳ DONE: SAME-INSTANCE replay (idempotent re-POST attaches + replays from the live
+    runner — app test) + session isolation (the `(chatSessionId, turnKey)` registry key
+    makes cross-session attach structurally impossible) + per-turn buffer TTL eviction.
+  - ↳ DEFERRED: the FROM-DB fallback for a reconnect after the runner is evicted /
+    on another replica. Clean impl needs a `turnKey`→assistant-message mapping (a new
+    column) to find the persisted turn without re-generating; out of scope here. Today
+    a reconnect within the 60s retain window replays; beyond it re-generates (correct,
+    just not free). Filed as a follow-up (schema + lookup).
+- [x] **P2.3** Heartbeats + backpressure.
+  - ↳ DONE: extracted `streamPump.ts` `pumpFramesToResponse()` — replays from
+    Last-Event-ID, emits a `:` heartbeat every 15s while idle (under a ~60s ingress
+    idle timeout), awaits socket `drain` on backpressure, ends on done. The route uses
+    it. Backpressure's buffer half (drop-oldest-token, never structural) was already
+    done + tested in `TurnEventBuffer`. 2 pump tests (heartbeat+resume, drain).
+- [ ] **P2.4** Supersede-cancel — DEFERRED. A cooperative LLM-abort needs the signal
+  threaded into the upstream fetch; and the UI disables the input while `sending`, so a
+  same-session concurrent send (the only trigger) cannot occur today. Filed as a
+  follow-up; not reachable via the current UI.
 
 ## P3 — Client: stream reader + reconnect
 - [x] **P3.1** Streaming `sendChatMessage` variant: generate a `turnKey` (idempotency

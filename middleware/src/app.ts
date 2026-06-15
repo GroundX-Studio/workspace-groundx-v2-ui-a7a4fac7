@@ -35,6 +35,7 @@ import { reportTemplateAccess } from "./services/reportTemplateAccess.js";
 import { sendUpstreamResponse, UpstreamHttpError } from "./services/http.js";
 import { fetchDocumentXray } from "./services/xrayCache.js";
 import { TurnRegistry, TurnRunner } from "./services/turnRunner.js";
+import { pumpFramesToResponse } from "./services/streamPump.js";
 import type {
   AppRepository,
   ChatSessionRecord,
@@ -1566,12 +1567,20 @@ export function createApp({
           Connection: "keep-alive",
           "X-Accel-Buffering": "no",
         });
-        for await (const frame of runner.buffer.read(lastEventId)) {
-          if (res.writableEnded) break;
-          const wrote = res.write(`id: ${frame.seq}\nevent: ${frame.type}\ndata: ${JSON.stringify(frame.data)}\n\n`);
-          if (!wrote) await once(res, "drain"); // socket backpressure (per-connection)
-        }
-        res.end();
+        // Heartbeat every 15s keeps the stream under a typical ~60s ingress idle
+        // timeout; the pump owns socket backpressure (the runner never stalls).
+        await pumpFramesToResponse(
+          runner.buffer,
+          {
+            write: (chunk) => res.write(chunk),
+            end: () => res.end(),
+            get writableEnded() {
+              return res.writableEnded;
+            },
+            onceDrain: () => once(res, "drain").then(() => undefined),
+          },
+          { lastEventId, heartbeatMs: 15_000 },
+        );
         return;
       }
 
