@@ -280,6 +280,8 @@ export interface GroundXSearchResult {
   text?: string;
   score?: number;
   fileName?: string;
+  /** GroundX `search.results[*].sourceUrl` — the original document URL. */
+  sourceUrl?: string;
   /**
    * WF-03 / multi-region-citations — normalized 0-1 boxes of the cited chunk's
    * region(s) on `pageNumber`, read off the result (or resolved from the X-Ray

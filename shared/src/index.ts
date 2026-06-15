@@ -121,6 +121,14 @@ export const citationSchema = z.object({
   tier: citationTierSchema.optional(),
   /** WF-06 Bridge B — the claim in the answer this citation supports. */
   answerSpan: z.string().optional(),
+  /**
+   * inline-footnote-citations — GroundX's human-readable display name for the
+   * source document (`search.results[*].fileName`), resolved by `documentId`.
+   * Used to LABEL the source list / name the doc in tooltips instead of a UUID.
+   */
+  fileName: z.string().optional(),
+  /** Original URL of the source document (`search.results[*].sourceUrl`). */
+  sourceUrl: z.string().optional(),
 });
 export type Citation = z.infer<typeof citationSchema>;
 

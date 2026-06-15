@@ -48,6 +48,17 @@ describe("citationsContract (merged MUST-cite contract)", () => {
     expect(c).not.toContain('"field"');
   });
 
+  it("requires inline [N] markers placed after each cited claim, index-aligned to the citations array", async () => {
+    const citationsContract = (await load())!;
+    for (const hasExtraction of [true, false]) {
+      const c = citationsContract(hasExtraction);
+      expect(c).toMatch(/inline/i);
+      expect(c).toContain("[N]");
+      expect(c).toMatch(/1-based position in the .*citations/i);
+      expect(c).toMatch(/claim or group level/i);
+    }
+  });
+
   it("frames verification as confidence tiers, not threats of dropping", async () => {
     const citationsContract = (await load())!;
     for (const hasExtraction of [true, false]) {

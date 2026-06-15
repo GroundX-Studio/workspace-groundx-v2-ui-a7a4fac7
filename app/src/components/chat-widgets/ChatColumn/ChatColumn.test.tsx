@@ -749,6 +749,10 @@ describe("ChatColumn", () => {
       await user.type(input, "what is the total?");
       await user.click(screen.getByTestId("chat-live-send"));
 
+      // inline-footnote-citations — a multi-citation reply collapses to an
+      // "N sources" SourceList; expand it to reach the per-source chips.
+      const toggle = await screen.findByRole("button", { name: /2 sources/i });
+      await user.click(toggle);
       await waitFor(() => {
         expect(screen.getByTestId("cite-chip-1")).toBeInTheDocument();
         expect(screen.getByTestId("cite-chip-2")).toBeInTheDocument();

@@ -99,6 +99,12 @@ describe("parseGroundedAnswer hardening (harden-citation-emission)", () => {
     expect(parsed.cleanedAnswer).toBe("The tax was $3.27.");
   });
 
+  it("keeps inline [N] markers in the cleanedAnswer — only the fence is stripped (Phase D 6.2)", () => {
+    const parsed = parseGroundedAnswer(`The total is $7,613.20 [1].\n\n\`\`\`json\n{"citations":[${entry}]}\n\`\`\``);
+    expect(parsed.cleanedAnswer).toBe("The total is $7,613.20 [1].");
+    expect(parsed.structuredCitations).toHaveLength(1);
+  });
+
   it("recovers citations from an UPPERCASE fence tag (JSON)", () => {
     const parsed = parseGroundedAnswer(`The tax was $3.27.\n\n\`\`\`JSON\n{"citations":[${entry}]}\n\`\`\``);
     expect(parsed.structuredCitations).toHaveLength(1);

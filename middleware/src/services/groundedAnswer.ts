@@ -524,6 +524,10 @@ export async function verifyAndTierSnippetCitation(
     regions = [{ page: cite.page, bbox: { x: 0, y: 0, w: 1, h: 1 }, tier: "ambient" }];
   }
   const first = regions[0];
+  // inline-footnote-citations — recover GroundX's display name + source URL from
+  // any snippet for this document (doc-level metadata, not page-specific), so the
+  // UI labels the source by fileName instead of a documentId UUID.
+  const docMeta = snippets.find((s) => s.documentId === cite.documentId);
   return {
     documentId: cite.documentId,
     page: cite.page,
@@ -533,6 +537,8 @@ export async function verifyAndTierSnippetCitation(
     tier: first?.tier ?? tier,
     confidence: confidenceFor(v),
     ...(cite.answerSpan ? { answerSpan: cite.answerSpan } : {}),
+    ...(docMeta?.fileName ? { fileName: docMeta.fileName } : {}),
+    ...(docMeta?.sourceUrl ? { sourceUrl: docMeta.sourceUrl } : {}),
   };
 }
 

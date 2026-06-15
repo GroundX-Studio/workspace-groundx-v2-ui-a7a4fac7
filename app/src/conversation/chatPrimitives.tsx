@@ -20,7 +20,7 @@ import { useState, type FC, type FormEvent, type ReactNode } from "react";
 
 import type { ChatSuggestedAction } from "@/api/chatSessions";
 import type { Citation, WidgetRole } from "@groundx/shared";
-import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { SourceList } from "@/components/brand/SourceList/SourceList";
 import { AnswerActions } from "@/components/conversation/AnswerActions/AnswerActions";
 import { PinToReportAction } from "@/components/chat-widgets/PinToReportAction/PinToReportAction";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
@@ -180,7 +180,10 @@ export function LiveTurnList({
           <Stack key={turn.id} spacing={1}>
             {turn.content.trim().length > 0 && (
               <BotBubble testid="chat-live-assistant">
-                <Markdown>{turn.content}</Markdown>
+                {/* inline-footnote-citations — pass citations so inline `[N]` tokens
+                    render as footnote markers. Empty while streaming → inert `[N]`
+                    text; populated on the envelope → clickable markers. */}
+                <Markdown citations={turn.citations}>{turn.content}</Markdown>
               </BotBubble>
             )}
             {/* agentic-tool-loop — muted "what the agent consulted" annotation
@@ -197,23 +200,22 @@ export function LiveTurnList({
                 {[...new Set(turn.toolActivity!.map((a) => a.label))].join(" · ")}
               </Typography>
             )}
-            {((turn.citations?.length ?? 0) > 0 || (turn.suggestedActions?.length ?? 0) > 0) && (
+            {/* inline-footnote-citations — the grouped, collapsed source list
+                replaces the flat wall of numbered chips; the inline `[N]` markers
+                in the answer prose (above) are the per-claim affordance. */}
+            {(turn.citations?.length ?? 0) > 0 && <SourceList citations={turn.citations!} />}
+            {turn.suggestedActions && turn.suggestedActions.length > 0 && (
               <Stack
                 direction="row"
                 alignItems="center"
                 sx={{ pl: 0.25, columnGap: 0.75, rowGap: 0.5, flexWrap: "wrap" }}
               >
-                {turn.citations?.map((c, idx) => (
-                  <CiteChip key={`${turn.id}-cite-${idx}`} citation={c} index={idx + 1} />
-                ))}
-                {turn.suggestedActions && turn.suggestedActions.length > 0 && (
-                  <SuggestedActionChips
-                    actions={turn.suggestedActions}
-                    role={role}
-                    scope={{ type: "none" }}
-                    onAction={(action) => onSuggestedAction(action, turn.citations)}
-                  />
-                )}
+                <SuggestedActionChips
+                  actions={turn.suggestedActions}
+                  role={role}
+                  scope={{ type: "none" }}
+                  onAction={(action) => onSuggestedAction(action, turn.citations)}
+                />
               </Stack>
             )}
             {turn.proposedSchemaField && (

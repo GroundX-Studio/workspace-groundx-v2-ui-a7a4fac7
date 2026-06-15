@@ -75,7 +75,14 @@ export function citationsContract(hasExtraction: boolean): string {
       : "") +
     "`answerSpan` is the exact phrase from YOUR answer the entry supports. " +
     "Entries that don't match the source verbatim are shown with lower " +
-    "confidence — cite anyway rather than omitting.\n\n"
+    "confidence — cite anyway rather than omitting.\n\n" +
+    "INLINE MARKERS — in addition to the block, place an inline `[N]` marker in " +
+    "your answer prose immediately after each cited claim, where N is that " +
+    "citation's 1-based position in the `citations` array (the first entry is " +
+    "`[1]`). Put the marker right after the claim its `answerSpan` quotes. Cite at " +
+    "the claim or group level — one marker per claim or grouped figure, NOT one " +
+    "per individual value — so a list answer stays readable. Markers are the only " +
+    "citation text in the prose: never write the words 'citation' or 'source'.\n\n"
   );
 }
 

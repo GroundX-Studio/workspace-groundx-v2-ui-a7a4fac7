@@ -287,6 +287,7 @@ export async function searchGroundX(
       text: typeof r.text === "string" ? r.text : undefined,
       score: typeof r.score === "number" ? r.score : undefined,
       fileName: typeof r.fileName === "string" ? r.fileName : undefined,
+      sourceUrl: typeof r.sourceUrl === "string" ? r.sourceUrl : undefined,
     };
   });
   // WF-03 fallback — results that carry NO search-side geometry resolve from

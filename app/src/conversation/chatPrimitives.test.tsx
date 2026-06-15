@@ -67,6 +67,31 @@ describe("LiveTurnList — tool-activity annotation", () => {
   });
 });
 
+describe("LiveTurnList — inline footnote citations (Phase E)", () => {
+  it("renders an inline [N] marker in the answer prose + a SourceList, not a flat chip row", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[
+          assistantTurn({
+            content: "The total is $7,613.20 [1].",
+            citations: [{ documentId: "doc-A", page: 2, fileName: "utility-bill.pdf" }],
+          }),
+        ]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    // The same citation appears twice by design: an inline footnote marker in the
+    // prose AND a pill in the source list — distinguished by data-variant.
+    const chips = screen.getAllByTestId("cite-chip-1");
+    expect(chips.some((c) => c.getAttribute("data-variant") === "footnote")).toBe(true); // inline marker
+    expect(chips.some((c) => c.getAttribute("data-variant") === "pill")).toBe(true); // source list
+    // the single-citation SourceList names the document (no UUID)
+    expect(screen.getByTestId("source-list")).toHaveTextContent("utility-bill.pdf");
+  });
+});
+
 // report-pin-affordance T1 — the pin affordance is OPT-IN and COMPACT.
 // (Uses the full providers because the pin control reads ChatStore.)
 describe("report-pin-affordance — opt-in compact pin (T1)", () => {

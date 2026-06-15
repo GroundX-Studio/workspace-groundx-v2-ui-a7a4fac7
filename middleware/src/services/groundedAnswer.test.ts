@@ -5,7 +5,11 @@ import { __clearWordMapCache } from "./wordMapCache.js";
 
 import type { ContentScope } from "@groundx/shared";
 
-import { groundedAnswerOverScope, type GroundedAnswerDeps } from "./groundedAnswer.js";
+import {
+  groundedAnswerOverScope,
+  verifyAndTierSnippetCitation,
+  type GroundedAnswerDeps,
+} from "./groundedAnswer.js";
 import type { GroundXClient, LlmClient } from "../types.js";
 
 /**
@@ -570,5 +574,36 @@ describe("extraction prompt-block truncation (harden-citation-emission)", () => 
     // The value survives truncated, not dropped to an empty object.
     expect(parsed.blob!.length).toBeGreaterThan(1_000);
     expect(parsed._truncated).toBeDefined();
+  });
+});
+
+describe("verifyAndTierSnippetCitation — source attribution (inline-footnote-citations Phase 0)", () => {
+  it("attaches fileName + sourceUrl from the matching snippet (by documentId)", async () => {
+    const snippets = [
+      {
+        documentId: "doc-1",
+        pageNumber: 2,
+        text: "Total amount due $7,613.20",
+        fileName: "utility-bill-april-2026.pdf",
+        sourceUrl: "https://files.example/doc-1.pdf",
+        bboxes: [{ x: 0, y: 0, w: 1, h: 0.1 }],
+      },
+    ];
+    const citation = await verifyAndTierSnippetCitation(
+      { documentId: "doc-1", page: 2, quote: "Total amount due $7,613.20", answerSpan: "$7,613.20" },
+      snippets,
+      {},
+    );
+    expect(citation.fileName).toBe("utility-bill-april-2026.pdf");
+    expect(citation.sourceUrl).toBe("https://files.example/doc-1.pdf");
+  });
+
+  it("omits fileName when no matching snippet carries one (FE falls back to documentId)", async () => {
+    const citation = await verifyAndTierSnippetCitation(
+      { documentId: "doc-x", page: 1, quote: "q" },
+      [{ documentId: "doc-x", pageNumber: 1, text: "q" }],
+      {},
+    );
+    expect(citation.fileName).toBeUndefined();
   });
 });
