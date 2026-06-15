@@ -1572,12 +1572,30 @@ export function createApp({
         await pumpFramesToResponse(
           runner.buffer,
           {
-            write: (chunk) => res.write(chunk),
-            end: () => res.end(),
-            get writableEnded() {
-              return res.writableEnded;
+            // Resilient to an abrupt client disconnect mid-stream: a write to a
+            // destroyed socket returns false (never throws out of the pump), and a
+            // `destroyed` socket reports `writableEnded` so the pump stops on the
+            // next frame. The runner keeps generating + persists regardless.
+            write: (chunk) => {
+              try {
+                return res.write(chunk);
+              } catch {
+                return false;
+              }
             },
-            onceDrain: () => once(res, "drain").then(() => undefined),
+            end: () => {
+              try {
+                res.end();
+              } catch {
+                /* socket already closed */
+              }
+            },
+            get writableEnded() {
+              return res.writableEnded || res.destroyed;
+            },
+            // On a closed socket no 'drain' arrives; resolve on 'error'/'close' too so
+            // the pump loops back to the writableEnded check instead of hanging.
+            onceDrain: () => once(res, "drain").then(() => undefined).catch(() => undefined),
           },
           { lastEventId, heartbeatMs: 15_000 },
         );

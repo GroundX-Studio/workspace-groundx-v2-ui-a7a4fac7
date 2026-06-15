@@ -69,6 +69,35 @@ describe("pumpFramesToResponse", () => {
     expect(writer.writableEnded).toBe(true);
   });
 
+  it("stops pumping when the socket reports closed (writableEnded) mid-stream", async () => {
+    // Abrupt client disconnect: after the first write the socket is closed; the pump
+    // must stop on the next frame (not keep writing to a dead socket / hang).
+    const buffer = new TurnEventBuffer();
+    buffer.append("token", { delta: "a" }); // seq 1
+    let closed = false;
+    const writes: string[] = [];
+    const writer: SseWriter = {
+      write(chunk: string) {
+        writes.push(chunk);
+        closed = true; // socket dies right after the first write
+        return true;
+      },
+      end() {},
+      get writableEnded() {
+        return closed;
+      },
+      onceDrain: async () => {},
+    };
+
+    const pump = pumpFramesToResponse(buffer, writer, { lastEventId: 0, heartbeatMs: 0 });
+    buffer.append("token", { delta: "b" }); // seq 2 — must NOT be written
+    buffer.append("envelope", {});
+    buffer.markDone();
+    await pump; // resolves (does not hang) despite the closed socket
+
+    expect(writes.filter((w) => w.includes("event:")).length).toBe(1);
+  });
+
   it("awaits drain when a write reports backpressure", async () => {
     const buffer = new TurnEventBuffer();
     const writer = fakeWriter();
