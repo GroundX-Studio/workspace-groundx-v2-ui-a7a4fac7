@@ -50,6 +50,19 @@ change UNIFIES them with the footnote model rather than adding a parallel one:
   would churn the durable spec) with an in-body note that "F5" is legacy. Citation rendering
   itself (markers + `SourceList`) is already app-wide via the ADDED requirement.
 
+## Source attribution (fileName / sourceUrl) — use GroundX's data, not a UUID
+GroundX returns `fileName` (display name) + `sourceUrl` on every `search.results` chunk.
+`groundxSearch.ts` already reads `fileName` (for the prompt snippet header) but it is dropped
+before the citation, and the shared `Citation` has no place for it — so the UI can only show a
+`documentId` UUID. Fix:
+- Add optional `fileName?: string` + `sourceUrl?: string` to the shared `@groundx/shared`
+  `citationSchema` (one source of truth → wire + persisted `citations_json`).
+- When the middleware resolves an LLM citation, copy `fileName` + `sourceUrl` from the matching
+  search chunk (by `documentId`).
+- `SourceList` labels each document group by `fileName` (fallback `documentId`); `CiteChip`
+  tooltip names the document; `sourceUrl` enables a later "open original" affordance.
+This recovers data GroundX already returns rather than a UUID / generic label / fabricated title.
+
 ## Generation contract (chat-routing)
 The grounded prompt's single merged citation contract is extended:
 - The model continues to emit the fenced `citations` JSON (with `documentId`, `page`/`field`,

@@ -1,3 +1,4 @@
+import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import { alpha } from "@mui/material/styles";
 import { useCallback, type FC } from "react";
@@ -18,6 +19,14 @@ import type { Citation } from "@/types/onboarding";
 
 export type CiteChipColor = "cyan" | "coral" | "green";
 
+/**
+ * inline-footnote-citations Phase A — `pill` is the standalone badge (today's
+ * default, kept for back-compat); `footnote` is a small inline superscript `[N]`
+ * marker that sits in the text flow. Both share the SAME click behavior,
+ * telemetry, tier color, and `data-*` attributes — only the presentation differs.
+ */
+export type CiteChipVariant = "pill" | "footnote";
+
 export interface CiteChipProps {
   citation: Citation;
   /** Numeric index shown in the chip (the [N] in copy). */
@@ -26,11 +35,16 @@ export interface CiteChipProps {
   onActivate?: (citation: Citation) => void;
   /**
    * Chip color. Default cyan; coral signals an anomaly / low-confidence
-   * citation (used by F3 field-rows per canonical); green is used for
-   * the primary citation in synthesis answers (F5). Maps to the design
+   * citation (used by extract field-rows per canonical); green is used for
+   * the primary citation in synthesis answers. Maps to the design
    * tokens, NOT raw hex.
    */
   color?: CiteChipColor;
+  /**
+   * Presentation variant. `pill` (default) = standalone badge; `footnote` =
+   * inline superscript marker rendered within prose. Same behavior either way.
+   */
+  variant?: CiteChipVariant;
 }
 
 /**
@@ -52,7 +66,7 @@ export interface CiteChipProps {
  * the orchestrator dispatch is suppressed — the caller's affordance
  * owns the click.
  */
-export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color = "cyan" }) => {
+export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color = "cyan", variant = "pill" }) => {
   const { dispatch } = useCanvasOrchestrator();
   // Single accent per color-key — rendered as a soft tinted pill (tint fill +
   // matching border + navy label) instead of a loud solid chip, so the
@@ -106,8 +120,55 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color
     ? `Source · ${primaryPage != null ? `page ${primaryPage}` : "location unknown"} — ${citation.snippet}`
     : `Source · ${primaryPage != null ? `page ${primaryPage}` : "location unknown"}`;
 
+  // inline-footnote-citations Phase A — the `footnote` variant is a small inline
+  // superscript `[N]` marker that lives in the prose. It shares the click handler,
+  // tooltip, telemetry (via `handle`), tier color, and `data-*` attributes with the
+  // pill — only the presentation differs (a button so it stays keyboard-accessible).
+  if (variant === "footnote") {
+    return (
+      <Box
+        component="button"
+        type="button"
+        onClick={handle}
+        title={tooltip}
+        aria-label={`Citation ${index} — page ${citation.page}`}
+        data-testid={`cite-chip-${index}`}
+        data-variant="footnote"
+        data-citation-doc={citation.documentId}
+        data-citation-page={citation.page}
+        data-color={color}
+        sx={{
+          appearance: "none",
+          fontFamily: "inherit",
+          verticalAlign: "super",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: 15,
+          height: 15,
+          ml: "2px",
+          px: 0.5,
+          py: 0,
+          lineHeight: 1,
+          borderRadius: BORDER_RADIUS_PILL,
+          fontSize: FONT_SIZE_LABEL,
+          fontWeight: FONT_WEIGHT_LABEL,
+          color: NAVY,
+          backgroundColor: alpha(accent, 0.38),
+          border: `1px solid ${alpha(accent, 0.9)}`,
+          cursor: "pointer",
+          "&:hover": { backgroundColor: alpha(accent, 0.55) },
+          "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
+        }}
+      >
+        {index}
+      </Box>
+    );
+  }
+
   return (
     <Chip
+      data-variant="pill"
       // A clean little footnote-style badge: just the number (no brackets),
       // a small circular pill with a tinted fill + accent ring. Reads as a
       // source reference, not a loud red bubble.

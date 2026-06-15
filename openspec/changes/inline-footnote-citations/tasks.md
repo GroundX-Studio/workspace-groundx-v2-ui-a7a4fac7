@@ -2,6 +2,13 @@
 
 Each task is TDD (failing test first) and ends with the standing adversarial-review gate.
 
+## 0. Source attribution: thread GroundX fileName/sourceUrl onto Citation
+- [ ] 0.1 Add optional `fileName?: string` + `sourceUrl?: string` to `@groundx/shared`
+      `citationSchema` (rebuild shared/dist). Drift-guard tests stay green.
+- [ ] 0.2 Middleware: when resolving an LLM citation, copy `fileName` + `sourceUrl` from the
+      matching `search.results` chunk (by `documentId`). Test: a resolved citation names its doc.
+- [ ] 0.3 Persisted `citations_json` round-trips the two fields (insert → rehydrate).
+
 ## 1. Marker parser + Markdown citations API (pure, shared)
 - [ ] 1.1 Add a pure parser: `(answerMarkdown, citations[]) → segments` where `[N]` (1≤N≤len)
       → a footnote-marker segment bound to `citations[N-1]`, out-of-range `[N]` → literal,
@@ -25,9 +32,9 @@ Each task is TDD (failing test first) and ends with the standing adversarial-rev
 
 ## 3. SourceList (shared `brand/` presentational component)
 - [ ] 3.1 New `SourceList` in `components/brand/` (alongside `CiteChip`): collapsed `N sources`
-      → expands to rows grouped by `documentId`, distinct pages as labeled chips, deduped by
-      region. Single citation → no collapse. Hosts the existing "Show all sources" action.
-      Per-`[N]` color matches the marker (canonical `[1]` green / `[2]–[3]` cyan / coral).
+      → expands to rows grouped by `documentId`, **labeled by `fileName`** (fallback `documentId`),
+      distinct pages as labeled chips, deduped by region. Single citation → no collapse. Hosts the
+      existing "Show all sources" action. Per-`[N]` color matches the marker (`[1]` green / `[2]–[3]` cyan / coral).
 - [ ] 3.2 Built from the FULL `citations[]` (never-drop floor), independent of marker success.
 - [ ] 3.3 As a `brand/` component it ships a sibling test + obeys `no-hardcoded-styles`; the
       widget-contract (`mode` prop / slot rules) does NOT apply (that's for chat-/viewer-widgets).

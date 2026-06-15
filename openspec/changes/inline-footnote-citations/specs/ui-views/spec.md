@@ -170,7 +170,9 @@ the citation presentation on EVERY surface that renders citations app-wide — c
 extract field rows (the Extract widget wherever it mounts, onboarding and authenticated
 alike), and report sections — with no surface-specific or frame-specific fork. Citation
 numbering SHALL be local to each rendering unit (per answer / per field row / per section),
-matching how `citations[]` is already scoped to that unit. Surfaces whose unit carries a
+matching how `citations[]` is already scoped to that unit. The `SourceList` SHALL label each
+document group by the citation's `fileName` (GroundX's display name), falling back to
+`documentId` only when `fileName` is absent. Surfaces whose unit carries a
 single citation SHALL render the inline marker plus a one-line source without collapse
 chrome.
 

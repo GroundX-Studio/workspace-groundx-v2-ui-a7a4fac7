@@ -120,6 +120,42 @@ describe("CiteChip", () => {
     );
   });
 
+  describe("footnote variant (inline-footnote-citations Phase A)", () => {
+    it("defaults to the pill variant (back-compat) when no variant is given", () => {
+      renderWithOnboardingProviders(<CiteChip citation={citation} index={2} />);
+      expect(screen.getByTestId("cite-chip-2")).toHaveAttribute("data-variant", "pill");
+    });
+
+    it("footnote variant is distinguishable and routes + tracks like the pill", async () => {
+      const user = userEvent.setup();
+      const applied: unknown[] = [];
+      const Harness = () => {
+        const { registerAdapter } = useCanvasOrchestrator();
+        useEffect(
+          () =>
+            registerAdapter({
+              kind: "highlightCitation",
+              apply: (intent) => {
+                applied.push(intent);
+              },
+            }),
+          [registerAdapter],
+        );
+        return <CiteChip citation={citation} index={2} variant="footnote" />;
+      };
+      renderWithOnboardingProviders(<Harness />);
+
+      const marker = screen.getByTestId("cite-chip-2");
+      expect(marker).toHaveAttribute("data-variant", "footnote");
+      expect(marker).toHaveTextContent("2");
+      expect(marker).toHaveAttribute("data-citation-doc", "utility-bill-2026-04");
+
+      await user.click(marker);
+      await waitFor(() => expect(applied).toHaveLength(1));
+      expect(track).toHaveBeenCalledWith("cite.peeked", expect.objectContaining({ index: 2 }));
+    });
+  });
+
   describe("viewer-jump behavior (clickable-citations Phase 5)", () => {
     /**
      * Phase 5 retired the pre-UI-04 Popover fallback. Clicking a

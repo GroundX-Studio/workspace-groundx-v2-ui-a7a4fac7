@@ -32,6 +32,13 @@ The grounded prompt is extended so the model places `[N]` markers at each cited 
 (N = 1-based index into the existing `citations` array); the existing per-citation
 `answerSpan` becomes the anchoring backup when a marker is missing.
 
+SOURCE ATTRIBUTION: GroundX returns a human-readable `fileName` (and `sourceUrl`) on every
+`search.results` chunk; the middleware reads `fileName` today but DROPS it before the citation,
+so the UI can only show a `documentId` UUID. This change threads `fileName` + `sourceUrl` onto
+the shared `Citation` (resolved by `documentId` from the matching chunk), so the `SourceList`
+labels each group with the real document name and `CiteChip` tooltips name the document — using
+data GroundX already returns rather than a UUID, a generic label, or a fabricated title.
+
 This UNIFIES — rather than parallels — the existing citation requirements: the marker
 becomes the affordance for the already-specced tiered claim model (`exact`/`paraphrase`/
 `ambient` highlight precision), and it carries the canonical index-keyed colors so the

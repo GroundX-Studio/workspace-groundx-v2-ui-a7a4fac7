@@ -21,8 +21,13 @@
 import Box from "@mui/material/Box";
 import { alpha } from "@mui/material/styles";
 import { type FC, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+import type { Citation } from "@groundx/shared";
+
+import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { remarkCitationMarkers } from "./remarkCitationMarkers";
 
 import {
   BODY_TEXT,
@@ -37,6 +42,12 @@ import {
 export interface MarkdownProps {
   /** The markdown source string. */
   children: string;
+  /**
+   * inline-footnote-citations — when present, inline `[N]` tokens in the prose
+   * render as footnote `CiteChip`s bound to `citations[N-1]` (see
+   * `remarkCitationMarkers`). Absent → the render is byte-identical to before.
+   */
+  citations?: Citation[];
 }
 
 /** Anchor override — every link opens safely in a new tab. */
@@ -46,7 +57,32 @@ const SafeLink: FC<{ href?: string; children?: ReactNode }> = ({ href, children 
   </a>
 );
 
-export const Markdown: FC<MarkdownProps> = ({ children }) => (
+/**
+ * The `sup` `components` override used only when `citations` are passed: the
+ * remark plugin emits each `[N]` marker as a `sup` carrying `data-cite-pos` /
+ * `data-cite-index`, which we render as the footnote `CiteChip`. Markdown never
+ * emits a `sup` on its own (raw HTML is disabled), so overriding it is safe; a
+ * marker whose data is missing/out-of-range falls back to a plain `<sup>`.
+ */
+function makeCitationComponents(citations: Citation[]): Components {
+  return {
+    a: SafeLink,
+    sup: ({ node, children }) => {
+      const props = (node?.properties ?? {}) as Record<string, unknown>;
+      const pos = Number(props["dataCitePos"] ?? props["data-cite-pos"]);
+      const idx = Number(props["dataCiteIndex"] ?? props["data-cite-index"]);
+      const citation = Number.isInteger(pos) ? citations[pos] : undefined;
+      if (!citation || Number.isNaN(idx)) return <sup>{children}</sup>;
+      return <CiteChip citation={citation} index={idx} variant="footnote" />;
+    },
+  };
+}
+
+export const Markdown: FC<MarkdownProps> = ({ children, citations }) => {
+  const hasCitations = Array.isArray(citations) && citations.length > 0;
+  const remarkPlugins = hasCitations ? [remarkGfm, remarkCitationMarkers(citations)] : [remarkGfm];
+  const components: Components = hasCitations ? makeCitationComponents(citations) : { a: SafeLink };
+  return (
   <Box
     data-testid="markdown"
     sx={{
@@ -98,10 +134,11 @@ export const Markdown: FC<MarkdownProps> = ({ children }) => (
       "& img": { maxWidth: "100%" },
     }}
   >
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: SafeLink }}>
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
       {typeof children === "string" ? children : String(children ?? "")}
     </ReactMarkdown>
   </Box>
-);
+  );
+};
 
 export default Markdown;
