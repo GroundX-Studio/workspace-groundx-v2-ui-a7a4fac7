@@ -73,8 +73,12 @@ export class TurnRunner {
   }
 
   /**
-   * Supersede-cancel: abort the upstream LLM call so generation throws BEFORE it
-   * persists (the partial output is discarded). Idempotent; a no-op once done.
+   * Supersede-cancel: abort the turn's in-flight upstream LLM call. This is
+   * BEST-EFFORT cooperative cancellation — if the upstream call is still in flight,
+   * generation throws before it persists and the partial output is discarded; if the
+   * call already returned (the abort lost the race), the turn completes and persists
+   * its answer, which is a valid reply to a real user message (no inconsistency — that
+   * turn's connection also receives the full envelope). Idempotent; a no-op once done.
    */
   abort(): void {
     if (!this.buffer.done) this.controller.abort();

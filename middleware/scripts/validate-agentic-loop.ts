@@ -7,7 +7,8 @@
  * unit tests cannot:
  *   (1) the model CALLS `lookup_groundx_docs` for a PRODUCT question (knowledge not in
  *       the prompt) and REFRAINS for a DOCUMENT question (answerable from the doc);
- *   (2) the `maxRounds` budget (4) is not routinely exhausted on ordinary turns;
+ *   (2) the `maxRounds` budget (4) is not routinely exhausted on ordinary turns
+ *       — reported as an APPROXIMATE, INFORMATIONAL signal only (see below);
  *   (3) retrieved skill sections are RELEVANT to the question.
  *
  * It is NOT a vitest test (so the LLM-free guarantee of the default suite is preserved)
@@ -15,8 +16,12 @@
  *
  *   UPSTREAM_TIMEOUT_MS=120000 npm --workspace middleware exec tsx scripts/validate-agentic-loop.ts
  *
- * Exit code 0 = all cases matched expectations; 1 = a mismatch to triage (e.g. the model
- * over/under-calls lookup, or rounds are exhausted — a prompt/budget signal, recorded).
+ * Exit code is gated SOLELY on requirement (1) — the lookup-decision mismatch count,
+ * which is sound (it compares the model's tool decision against the spec): 0 = every
+ * asserted case matched, 1 = at least one disagreed (the model over/under-called
+ * lookup). The rounds-budget figure (2) is APPROXIMATE — `toolActivity.length` counts
+ * executed tools, not rounds — so it is logged for eyeballing but NEVER flips the exit
+ * code (a tool-heavy-but-correct turn must not read as a regression).
  */
 import { loadEnv } from "../src/config/env.js";
 import { SAMPLE_PROJECT_ID } from "../src/db/seedSampleProject.js";
@@ -63,7 +68,13 @@ async function main() {
   const tools = toOpenAiTools(toolsForStep("interact-chat", "anonymous"));
 
   let failures = 0;
-  let roundsExhausted = 0;
+  // APPROXIMATE upper bound on tool-loop rounds. `toolActivity` is one entry per
+  // EXECUTED server tool, not per round — a single round can run several tools (and
+  // parallel calls inflate it). So `length` over-counts rounds; we report it as a
+  // heuristic "did this turn lean on the budget" signal only, and NEVER gate the exit
+  // code on it (a high count can be perfectly healthy). The exit code is gated solely
+  // on `failures` — the sound lookup-decision mismatch count.
+  let toolHeavyTurns = 0;
 
   for (const c of CASES) {
     const ans = await groundedAnswerOverScope(
@@ -93,9 +104,10 @@ async function main() {
           ? calledLookup
           : !calledLookup;
     if (c.assert !== "observe" && !ok) failures += 1;
-    // (2) rounds budget — toolActivity is one entry per executed server tool; a turn
-    // that hit the cap would show MAX_ROUNDS executions.
-    if (ans.toolActivity.length >= MAX_ROUNDS) roundsExhausted += 1;
+    // (2) rounds budget — APPROXIMATE: `toolActivity.length` counts executed tools, not
+    // rounds (it over-counts when a round runs >1 tool). Informational only; the run's
+    // pass/fail never depends on it (see SUMMARY below).
+    if (ans.toolActivity.length >= MAX_ROUNDS) toolHeavyTurns += 1;
     // (3) skill relevance — what the retriever surfaces for this question (its first line).
     const skill = retrieveGroundxKnowledge(c.q);
     const skillHead = skill ? skill.replace(/\s+/g, " ").slice(0, 90) : "(none)";
@@ -112,12 +124,15 @@ async function main() {
 
   console.log("\n=== SUMMARY ===");
   console.log(`lookup-decision mismatches (asserted cases): ${failures}`);
-  console.log(`turns that exhausted maxRounds(${MAX_ROUNDS}): ${roundsExhausted}/${CASES.length}`);
-  if (failures > 0 || roundsExhausted > 0) {
-    console.log("RESULT: NEEDS-TRIAGE (see mismatches/exhaustion above).");
+  // Informational only — NOT a pass/fail input. `toolActivity.length` over-counts
+  // rounds (multiple tools per round), so this is an upper bound on "tool-heavy" turns,
+  // a prompt/budget signal to eyeball, not a regression gate.
+  console.log(`tool-heavy turns (≥${MAX_ROUNDS} tools executed, approx — informational): ${toolHeavyTurns}/${CASES.length}`);
+  if (failures > 0) {
+    console.log("RESULT: NEEDS-TRIAGE — the loop's lookup decision disagreed with the spec (see FAIL rows above).");
     process.exit(1);
   }
-  console.log("RESULT: PASS — loop calls lookup for product Qs, refrains for document Qs, budget healthy.");
+  console.log("RESULT: PASS — loop calls lookup for product Qs, refrains for document Qs.");
 }
 
 main().catch((err) => {

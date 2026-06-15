@@ -405,9 +405,16 @@ describe("agentic secondary-extraction tool (fetch_document_fields)", () => {
   // records every request path. The search surfaces BOTH doc-a (primary) and
   // doc-b (a genuine SECOND document) so a cross-document fetch can be exercised;
   // the extract endpoint returns `extractionPayload` for whichever doc is fetched.
-  function makeRoutingGroundxClient(extractionPayload: unknown) {
+  function makeRoutingGroundxClient(extractionPayload: unknown, docProjectIds?: Record<string, string>) {
     const forward = vi.fn(async (path: string) => {
       if (path.includes("/ingest/document/extract/")) return jsonResponse(extractionPayload);
+      // document_get metadata (defense-in-depth projectId re-check) — only routed when
+      // the test supplies `docProjectIds`; otherwise this path can't be reached because
+      // the projectId check is gated on a non-null RBAC allowlist.
+      if (docProjectIds && path.includes("/ingest/document/")) {
+        const id = path.split("/ingest/document/")[1] ?? "";
+        return jsonResponse({ document: { filter: { projectId: docProjectIds[id] } } });
+      }
       return jsonResponse({
         search: {
           results: [
@@ -501,6 +508,70 @@ describe("agentic secondary-extraction tool (fetch_document_fields)", () => {
     expect(grounded.body.length).toBeGreaterThan(0);
   });
 
+  it("REFUSES a surfaced doc whose OWN project is outside the RBAC allowlist (defense-in-depth #5)", async () => {
+    // Simulates an upstream RBAC regression: doc-b leaks into the (authorized) search
+    // snippets, so it's in the in-process Set — but document_get reports its project as
+    // a FOREIGN one. The second, independent projectId layer must still refuse the fetch.
+    const { client: llm, forward: llmForward } = makeScriptedLlmClient([
+      toolCall("fx5", "doc-b"),
+      prose("I can only use documents you're authorized for."),
+    ]);
+    const { client: gx, forward: gxForward } = makeRoutingGroundxClient(
+      { secret: "FOREIGN-PROJECT-DATA" },
+      { "doc-b": "proj-FOREIGN" },
+    );
+
+    const grounded = await groundedAnswerOverScope(
+      "Compare with the other document.",
+      bucketScope,
+      {
+        llmClient: llm,
+        llmModelId: "test-model",
+        groundxClient: gx,
+        groundxApiKey: "k",
+        rbacFilter: { projectId: { $in: ["proj-authorized"] } },
+      },
+      { tools: [], toolLoop: { maxRounds: 4 }, turnPlan: { documentSearch: true, productKnowledge: false, extractionContext: false } },
+    );
+
+    // The RBAC layer refused BEFORE the extract fetch — no extraction for doc-b, no leak.
+    const docBExtracts = gxForward.mock.calls.filter((c) => String(c[0]).includes("/ingest/document/extract/doc-b"));
+    expect(docBExtracts, "foreign-project doc must NOT be extract-fetched").toHaveLength(0);
+    const round2 = JSON.parse((llmForward.mock.calls[1][1] as { body: string }).body) as {
+      messages: Array<{ role: string; content?: string }>;
+    };
+    const toolMsg = round2.messages.find((m) => m.role === "tool");
+    expect((toolMsg?.content ?? "").includes("FOREIGN-PROJECT-DATA"), "never leaks the foreign-project doc").toBe(false);
+    expect(grounded.serverToolFailures.some((f) => f.name === "fetch_document_fields"), "refusal recorded as failure").toBe(true);
+    expect(grounded.body.length).toBeGreaterThan(0);
+  });
+
+  it("ALLOWS a surfaced doc whose OWN project IS in the RBAC allowlist (defense-in-depth #5)", async () => {
+    const { client: llm } = makeScriptedLlmClient([toolCall("fx6", "doc-b"), prose("Both put the rate at 1.5%.")]);
+    const { client: gx, forward: gxForward } = makeRoutingGroundxClient(
+      { penalty_rate: "1.5% monthly" },
+      { "doc-b": "proj-authorized" },
+    );
+
+    const grounded = await groundedAnswerOverScope(
+      "Compare with the other document.",
+      bucketScope,
+      {
+        llmClient: llm,
+        llmModelId: "test-model",
+        groundxClient: gx,
+        groundxApiKey: "k",
+        rbacFilter: { projectId: { $in: ["proj-authorized"] } },
+      },
+      { tools: [], toolLoop: { maxRounds: 4 }, turnPlan: { documentSearch: true, productKnowledge: false, extractionContext: false } },
+    );
+
+    // The doc's project is authorized → the extract fetch proceeds + the activity records.
+    const docBExtracts = gxForward.mock.calls.filter((c) => String(c[0]).includes("/ingest/document/extract/doc-b"));
+    expect(docBExtracts.length, "authorized-project doc IS extract-fetched").toBeGreaterThanOrEqual(1);
+    expect(grounded.toolActivity.some((a) => a.name === "fetch_document_fields")).toBe(true);
+  });
+
   it("memoizes a repeated fetch of the SAME document within the turn (one API call)", async () => {
     const { client: llm } = makeScriptedLlmClient([
       toolCall("fx3", "doc-b"),
@@ -518,5 +589,42 @@ describe("agentic secondary-extraction tool (fetch_document_fields)", () => {
 
     const docBExtracts = gxForward.mock.calls.filter((c) => String(c[0]).includes("/ingest/document/extract/doc-b"));
     expect(docBExtracts.length, "same-doc re-fetch is memoized to ONE API call").toBe(1);
+  });
+});
+
+describe("per-turn server-tool execution budget (#6)", () => {
+  const manyLookups = (n: number) => ({
+    choices: [
+      {
+        message: {
+          content: "",
+          tool_calls: Array.from({ length: n }, (_, i) => ({
+            id: `lk${i}`,
+            type: "function",
+            function: { name: "lookup_groundx_docs", arguments: JSON.stringify({ query: `how does feature ${i} work` }) },
+          })),
+        },
+      },
+    ],
+  });
+  const prose = (content: string) => ({ choices: [{ message: { content } }] });
+
+  it("caps total server-tool executions at maxRounds*2, refusing the rest (no cost amplification)", async () => {
+    // A SINGLE round emits 10 server-tool calls (a prompt-injected "run many tools").
+    // maxRounds(4) → budget 8: the first 8 execute, the remaining 2 are refused as
+    // failures (never executed), so model output can't amplify cost without bound.
+    const { client: llm } = makeScriptedLlmClient([manyLookups(10), prose("Done.")]);
+
+    const grounded = await groundedAnswerOverScope(
+      "Tell me about many features at once.",
+      { type: "bucket", bucketId: 28454 },
+      { llmClient: llm, llmModelId: "test-model", groundxClient: makeGroundxClient(), groundxApiKey: "k" },
+      { tools: [], toolLoop: { maxRounds: 4 }, turnPlan: { documentSearch: true, productKnowledge: false, extractionContext: false } },
+    );
+
+    const executed = grounded.toolActivity.filter((a) => a.name === "lookup_groundx_docs").length;
+    expect(executed, "exactly the budget (maxRounds*2) executed").toBe(8);
+    const budgetRefusals = grounded.serverToolFailures.filter((f) => f.reason === "tool_budget_exhausted").length;
+    expect(budgetRefusals, "the over-budget calls are refused, not run").toBe(2);
   });
 });

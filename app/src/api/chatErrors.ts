@@ -21,6 +21,7 @@ export type ChatErrorKind =
   | "bug"
   | "not-found"
   | "network"
+  | "superseded"
   | "unknown";
 
 export interface ChatErrorMapping {
@@ -32,6 +33,16 @@ export interface ChatErrorMapping {
 export function chatErrorToUserCopy(err: unknown): ChatErrorMapping {
   if (err instanceof ChatApiError) {
     const status = err.status;
+    // A turn the user REPLACED with a newer message (supersede) — not a failure.
+    // Streaming surfaces it as an `error` frame ("chat stream error: superseded");
+    // the JSON branch as a 409. Soft, non-alarming, not retryable (it was replaced).
+    if (status === 409 || err.message.includes("superseded")) {
+      return {
+        kind: "superseded",
+        message: "This reply was replaced by a newer message.",
+        retryable: false,
+      };
+    }
     if (status === 401) {
       return {
         kind: "reauth",

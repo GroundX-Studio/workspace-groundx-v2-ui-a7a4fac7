@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { useApi } from "@/contexts/ApiContext";
 import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntitySessionStoreContext";
+import { cryptoRandom } from "@/lib/cryptoRandom";
 import type { FFrame } from "@/types/onboarding";
 import { compileScopeFilter, parseCanvasIntent, type ContentScope, type NormalizedBbox } from "@groundx/shared";
 
@@ -188,17 +189,6 @@ function mintMessageId(): string {
 
 function mintViewerEventId(): string {
   return `v-${cryptoRandom()}`;
-}
-
-/**
- * crypto.randomUUID() is widely available but not universal in jsdom
- * test environments. Fall back to Math.random for tests.
- */
-function cryptoRandom(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
 // ============================================================================

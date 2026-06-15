@@ -24,6 +24,7 @@
 import { csrfFetch } from "@/api/csrfFetch";
 import { readSseFrames } from "@/api/sseFrames";
 import { ChatApiError } from "@/api/chatErrors";
+import { cryptoRandom } from "@/lib/cryptoRandom";
 import { captureException } from "@/lib/sentry";
 
 export interface CreateChatSessionInput {
@@ -423,7 +424,7 @@ export async function streamChatMessage(
   // Client-supplied idempotency key: a reconnect re-POST with the same key ATTACHES
   // to the running turn server-side (no duplicate generation), and `Last-Event-ID`
   // makes the server replay only the frames missed during the drop.
-  const turnKey = crypto.randomUUID();
+  const turnKey = cryptoRandom();
   const maxRetries = opts.maxRetries ?? 2;
   let lastSeq = 0;
   let result: SendChatMessageResult | null = null;
@@ -465,31 +466,50 @@ export async function streamChatMessage(
       throw new ChatApiError("/api/chat/messages returned no stream body", 502, null);
     }
     for await (const frame of readSseFrames(res.body)) {
-      if (frame.seq != null) lastSeq = frame.seq;
-      switch (frame.event) {
-        case "meta":
-          callbacks.onMeta?.(JSON.parse(frame.data) as { turnKey: string });
-          break;
-        case "token":
-          callbacks.onToken?.((JSON.parse(frame.data) as { delta: string }).delta);
-          break;
-        case "activity":
-          callbacks.onActivity?.(JSON.parse(frame.data) as { name: string; label: string });
-          break;
-        case "envelope":
-          seen = JSON.parse(frame.data) as SendChatMessageResult;
-          break;
-        case "error": {
-          // A turn-level failure (HTTP 200 + error frame) is terminal — don't retry.
-          const code = (JSON.parse(frame.data) as { code: string }).code;
-          if (code === "chat_session_not_found") {
-            chatSessionEnsure.forgetChatSessionEnsured(input.chatSessionId);
-          }
-          throw new ChatApiError(`chat stream error: ${code}`, 500, { code });
-        }
-        default:
-          break;
+      // 1. PARSE — a COMPLETE-but-unparseable frame is a contract violation, not a
+      //    transient (the reader already discards truncated frames). Fail TERMINALLY
+      //    as a "malformed frame" — do NOT retry, and do NOT advance `lastSeq` past it.
+      let payload: unknown;
+      try {
+        payload = JSON.parse(frame.data);
+      } catch {
+        throw new ChatApiError(`malformed chat stream frame (event=${frame.event})`, 502, null);
       }
+      // 2. error frame — a turn-level failure (HTTP 200 + error frame) is terminal.
+      if (frame.event === "error") {
+        const code = (payload as { code: string }).code;
+        if (code === "chat_session_not_found") {
+          chatSessionEnsure.forgetChatSessionEnsured(input.chatSessionId);
+        }
+        throw new ChatApiError(`chat stream error: ${code}`, 500, { code });
+      }
+      // 3. DISPATCH — a throwing consumer callback is a CALLER bug, not a transport
+      //    issue, so label it honestly (not "malformed frame"); it is still TERMINAL
+      //    (a buggy callback must never trigger a server re-POST).
+      try {
+        switch (frame.event) {
+          case "meta":
+            callbacks.onMeta?.(payload as { turnKey: string });
+            break;
+          case "token":
+            callbacks.onToken?.((payload as { delta: string }).delta);
+            break;
+          case "activity":
+            callbacks.onActivity?.(payload as { name: string; label: string });
+            break;
+          case "envelope":
+            seen = payload as SendChatMessageResult;
+            break;
+          default:
+            break;
+        }
+      } catch (cbErr) {
+        if (cbErr instanceof ChatApiError) throw cbErr;
+        throw new ChatApiError(`chat stream callback threw (event=${frame.event})`, 500, null);
+      }
+      // Advance Last-Event-ID ONLY after the frame's payload is parsed + dispatched,
+      // so a frame whose content never reached the caller can't be skipped on resume.
+      if (frame.seq != null) lastSeq = frame.seq;
     }
     return seen;
   };

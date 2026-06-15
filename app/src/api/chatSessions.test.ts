@@ -810,4 +810,52 @@ describe("streamChatMessage (chat-response-streaming P3)", () => {
     expect(tokens).toEqual(["draft", " more"]);
     expect(result.reply.answer).toBe("draft more");
   });
+
+  it("fails TERMINALLY (no reconnect) on a malformed COMPLETE frame (D2/D3)", async () => {
+    // A frame that is WHOLE (blank-line terminated → the reader emits it) but whose
+    // `data:` payload is not parseable JSON. This is a contract violation, not a
+    // transient network drop: it must throw a ChatApiError and must NOT trigger a
+    // Last-Event-ID reconnect (which would re-POST forever against a server that
+    // keeps replaying the same broken frame).
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ chatSessionId: "chat-1" }) }) // ensure
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: sseStream([frame("meta", { turnKey: "tk" }, 1), `id: 2\nevent: envelope\ndata: {not-valid-json`]),
+      });
+
+    await expect(
+      streamChatMessage({ chatSessionId: "chat-1", newUserMessage: "x", sessionMeta: meta }),
+    ).rejects.toThrow(/malformed chat stream frame/);
+    // ensure + exactly ONE chat POST — the malformed frame did NOT reconnect.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a THROWING callback fails terminally with an honest label (not 'malformed', no reconnect)", async () => {
+    // A buggy consumer callback is a caller bug, not a transport/contract issue — it
+    // must be labeled honestly AND must not trigger a server re-POST.
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ chatSessionId: "chat-1" }) }) // ensure
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: sseStream([frame("meta", { turnKey: "tk" }, 1), frame("token", { delta: "hi" }, 2)]),
+      });
+
+    await expect(
+      streamChatMessage(
+        { chatSessionId: "chat-1", newUserMessage: "x", sessionMeta: meta },
+        {
+          onToken: () => {
+            throw new Error("render blew up");
+          },
+        },
+      ),
+    ).rejects.toThrow(/chat stream callback threw/);
+    // ensure + exactly ONE chat POST — a callback bug must NOT reconnect.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

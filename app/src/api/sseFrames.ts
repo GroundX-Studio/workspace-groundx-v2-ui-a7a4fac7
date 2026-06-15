@@ -38,22 +38,36 @@ export async function* readSseFrames(body: ReadableStream<Uint8Array>): AsyncGen
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (value) buffer += decoder.decode(value, { stream: true });
-    let sep: number;
-    while ((sep = buffer.indexOf("\n\n")) >= 0) {
-      const block = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      const frame = parseBlock(block);
-      if (frame) yield frame;
-    }
-    if (done) {
-      if (buffer.trim().length > 0) {
-        const frame = parseBlock(buffer);
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: true });
+      // Normalize CRLF framing (a reframing proxy/CDN) to LF on the WHOLE unconsumed
+      // buffer — not just this chunk — so a `\r\n` SPLIT across two reads (the `\r`
+      // ending one chunk, the `\n` starting the next) still collapses to the `\n\n`
+      // event boundary. A per-chunk normalize would strand the lone `\r` and lose the
+      // frame. The `\r` guard keeps the common LF-only path (our own server) regex-free.
+      if (buffer.indexOf("\r") >= 0) buffer = buffer.replace(/\r\n/g, "\n");
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        const frame = parseBlock(block);
         if (frame) yield frame;
       }
-      return;
+      if (done) {
+        // Any leftover is an INCOMPLETE frame (a complete SSE event always ends with
+        // the blank-line terminator, which the loop above already consumed). On a
+        // mid-frame stream drop it must be DISCARDED — never force-parsed into a
+        // malformed frame (which would throw downstream / poison Last-Event-ID).
+        return;
+      }
     }
+  } finally {
+    // The consumer may abandon us early — `streamChatMessage` rejects on an `error`
+    // or malformed frame, or breaks out. Cancel the body so the underlying socket is
+    // released instead of leaked until GC. On normal completion the reader is already
+    // done, so this is a harmless no-op; swallow any rejection from a double-cancel.
+    await reader.cancel().catch(() => {});
   }
 }

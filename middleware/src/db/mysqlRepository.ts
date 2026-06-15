@@ -501,7 +501,10 @@ export class MySqlAppRepository implements AppRepository {
        LIMIT 1`,
       [chatSessionId, turnKey],
     );
-    return rows.length > 0 ? rowToChatMessage(rows[0]) : null;
+    // Populate `turnKey` on the returned record (it's the known query key) so this
+    // repo matches the memory repo's contract — `turn_key` lives in chat_turn_index,
+    // not chat_messages, so the shared row mapper can't set it.
+    return rows.length > 0 ? { ...rowToChatMessage(rows[0]), turnKey } : null;
   }
 
   async markChatMessagesCompressed(messageIds: string[], summaryId: string): Promise<void> {

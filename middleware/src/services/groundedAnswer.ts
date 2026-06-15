@@ -722,6 +722,56 @@ async function fetchDocumentExtraction(
 }
 
 /**
+ * The concrete projectId allowlist an RBAC filter encodes (`{projectId:{$in:[…]}}`,
+ * from `rbacFilterForProjects`), or null when the filter doesn't constrain projectId
+ * (a partner/admin context with no RBAC scoping). Used for the secondary-extraction
+ * defense-in-depth check below.
+ */
+function rbacProjectAllowlist(rbacFilter: Record<string, unknown> | undefined): string[] | null {
+  const p = rbacFilter?.projectId;
+  // The production shape is `{projectId:{$in:[…]}}` (rbacFilterForProjects), but also
+  // accept a single `{projectId:"x"}` fast-path so a future filter-shape change can't
+  // SILENTLY disable this defense-in-depth layer. An unrecognized shape → null (skip).
+  if (typeof p === "string") return [p];
+  if (p && typeof p === "object" && Array.isArray((p as { $in?: unknown }).$in)) {
+    return (p as { $in: unknown[] }).$in.filter((x): x is string => typeof x === "string");
+  }
+  return null;
+}
+
+/**
+ * loop-tool-secondary-extraction — INDEPENDENTLY re-derive a document's project from
+ * its `document_get` metadata (`(payload.document ?? payload).filter.projectId`, the
+ * flat filter the seed/upload stamps). This is the second authorization layer for the
+ * extract fetch: unlike the in-process `authorizedDocIds` Set (derived from the SAME
+ * RBAC-filtered snippets), this asks GroundX afresh, so a foreign-project doc that
+ * leaked into snippets via an upstream RBAC regression is still caught. Returns null
+ * on any miss (no key, non-200, unexpected shape) so the check can fall back to the
+ * Set guard rather than break a legitimate cross-document answer on a transient.
+ */
+async function fetchDocumentProjectId(
+  client: GroundXClient,
+  apiKey: string | null,
+  documentId: string,
+): Promise<string | null> {
+  if (!apiKey) return null;
+  try {
+    const res = await client.forward(`/ingest/document/${encodeURIComponent(documentId)}`, {
+      method: "GET",
+      apiKey,
+    } as RequestInit & { apiKey: string });
+    if (!res.ok) return null;
+    const payload = (await res.json()) as unknown;
+    const top = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const doc = (top.document && typeof top.document === "object" ? top.document : top) as Record<string, unknown>;
+    const filter = (doc.filter && typeof doc.filter === "object" ? doc.filter : {}) as Record<string, unknown>;
+    return typeof filter.projectId === "string" ? filter.projectId : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * loop-tool-refined-research — format re-search snippets as the `role:"tool"`
  * result fed back into the grounded loop. Per-snippet cap reuses the shared
  * `RAG_SNIPPET_CHARS`; a total cap keeps a broad re-search from bloating the
@@ -856,6 +906,11 @@ export async function groundedAnswerOverScope(
     ...snippets.map((s) => s.documentId),
     ...(scope?.type === "documents" ? scope.documentIds : []),
   ]);
+  // Defense-in-depth: the RBAC project allowlist this turn is scoped to (the LOCKED
+  // filter mechanism). When present, the extract fetch is re-checked against the
+  // fetched document's OWN project below — an independent layer beyond the Set.
+  const projectAllowlist = rbacProjectAllowlist(deps.rbacFilter);
+  const docProjectMemo = new Map<string, Promise<string | null>>();
   // Per-turn memo so repeated tool fetches of the SAME document don't re-hit the
   // API across loop rounds (extraction has no module cache, unlike X-Ray). Only
   // AUTHORIZED fetches are memoized (a refusal throws before this, and is cheap).
@@ -873,6 +928,25 @@ export async function groundedAnswerOverScope(
       throw new Error("document not available in this conversation");
     }
     if (!deps.groundxClient) return "Extraction is unavailable for this turn.";
+    // Second authorization layer (only when RBAC constrains projects): independently
+    // confirm the document's OWN project is within this turn's allowlist. A foreign
+    // doc that slipped into the Set via an upstream RBAC regression is refused here.
+    // A metadata MISS (null) falls back to the Set guard — don't break a legit answer.
+    if (projectAllowlist) {
+      let pid = docProjectMemo.get(documentId);
+      if (!pid) {
+        pid = fetchDocumentProjectId(deps.groundxClient, deps.groundxApiKey ?? null, documentId);
+        docProjectMemo.set(documentId, pid);
+      }
+      const projectId = await pid;
+      if (projectId != null && !projectAllowlist.includes(projectId)) {
+        logger.warn(
+          { secondaryExtractionRbacDenied: { documentId, projectId } },
+          "secondary extraction refused: document's project is outside this turn's RBAC allowlist",
+        );
+        throw new Error("document not available in this conversation");
+      }
+    }
     let cached = extractionMemo.get(documentId);
     if (!cached) {
       cached = fetchDocumentExtraction(deps.groundxClient, deps.groundxApiKey ?? null, documentId).then(

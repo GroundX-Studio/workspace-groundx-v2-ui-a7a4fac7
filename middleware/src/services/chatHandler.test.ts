@@ -367,6 +367,87 @@ describe("handleChatMessage — router failure", () => {
     expect(messages[1].latencyMs).toBeGreaterThanOrEqual(0);
     expect(messages[1].content).toBe("");
   });
+
+  it("indexes the errored assistant row UNDER its turnKey so a reconnect attaches (no re-generate)", async () => {
+    await expect(
+      handleChatMessage(
+        { chatSessionId: "chat-1", newUserMessage: "What is RAG?", turnKey: "tk-err" },
+        {
+          repository: repo,
+          llmClient,
+          groundxClient,
+          groundxApiKey: "test-api-key",
+          samplesBucketId: 7,
+          llmModelId: "test-model",
+        },
+      ),
+    ).rejects.toMatchObject({ name: "ChatHandlerError" });
+
+    // Without the turnKey on the error row, getAssistantMessageByTurnKey would miss
+    // and a reconnect after eviction would re-generate + double-persist the user msg.
+    const found = await repo.getAssistantMessageByTurnKey("chat-1", "tk-err");
+    expect(found, "errored turn is reconnect-resumable by turnKey").not.toBeNull();
+    expect(found?.role).toBe("assistant");
+    expect(found?.errorCode).toBeTruthy();
+  });
+});
+
+describe("handleChatMessage — supersede-cancel (no junk persist)", () => {
+  let repo: MemoryAppRepository;
+  let groundxClient: GroundXClient;
+
+  beforeEach(async () => {
+    repo = new MemoryAppRepository();
+    await repo.upsertChatSession(makeSession());
+    // GroundX returns results so we reach the LLM call (which then aborts).
+    groundxClient = {
+      forward: vi.fn(async () =>
+        jsonResponse({ search: { results: [{ documentId: "d", pageNumber: 1, text: "x" }] } }),
+      ),
+    };
+  });
+
+  it("does NOT persist an assistant placeholder when the turn was superseded (aborted), and surfaces a clean 409", async () => {
+    // A newer turn for this session superseded this one mid-flight: the TurnRunner
+    // aborts the ambient signal, so the upstream LLM call throws a raw AbortError
+    // (http.ts re-throws it raw — distinct from a timeout, which it wraps). The
+    // superseding turn owns the response; the discarded turn must leave NO junk
+    // empty assistant row, and must surface as a clean ChatHandlerError(409) — the
+    // JSON branch maps that to a 409 (not a generic 500), and the SSE runner frames
+    // it `superseded` off its abort signal regardless of this error's type.
+    const { turnStreamContext } = await import("./streamSink.js");
+    const controller = new AbortController();
+    controller.abort();
+
+    const abortErr = new Error("The operation was aborted");
+    abortErr.name = "AbortError";
+    const abortingClient: LlmClient = {
+      forward: vi.fn(async () => {
+        throw abortErr;
+      }),
+    };
+
+    await expect(
+      turnStreamContext.run({ abortSignal: controller.signal }, () =>
+        handleChatMessage(
+          { chatSessionId: "chat-1", newUserMessage: "what is the total?" },
+          {
+            repository: repo,
+            llmClient: abortingClient,
+            groundxClient,
+            groundxApiKey: "k",
+            samplesBucketId: 7,
+            llmModelId: "test-model",
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({ name: "ChatHandlerError", statusCode: 409, message: "superseded" });
+
+    // Only the user message persisted — the superseded turn left no assistant row.
+    const messages = await repo.listChatMessages("chat-1");
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe("user");
+  });
 });
 
 describe("ChatHandlerError", () => {

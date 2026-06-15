@@ -21,6 +21,7 @@ import {
 } from "@/api/extractLiveData";
 import type { FieldRegion } from "@/api/fieldGeometry";
 import { isResolvedDocumentId } from "@/api/documentId";
+import { cryptoRandom } from "@/lib/cryptoRandom";
 import {
   BODY_TEXT,
   BORDER,
@@ -107,10 +108,7 @@ export interface ExtractProps {
 }
 
 function mintTemplateId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `es-${crypto.randomUUID()}`;
-  }
-  return `es-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  return `es-${cryptoRandom()}`;
 }
 
 /** The first document the scope targets, or null when the scope holds none. */

@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { chatErrorToUserCopy } from "@/api/chatErrors";
+import { cryptoRandom } from "@/lib/cryptoRandom";
 import type {
   ChatDispatchedIntent,
   ChatSessionEnsureMetadata,
@@ -241,6 +242,14 @@ export function useConversation(
   const [sending, setSending] = useState(false);
   const [firstUserMessageSent, setFirstUserMessageSent] = useState(false);
 
+  // chat-response-streaming — the in-flight stream's AbortController, so the
+  // SSE connection is CANCELLED on unmount (instead of running to completion as
+  // a zombie that mutates state on a dead component + holds the socket open).
+  // The `sending` gate already prevents a single client from overlapping turns,
+  // so this is unmount-cancel, not client-side supersede.
+  const inFlightAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => inFlightAbortRef.current?.abort(), []);
+
   // `onFirstUserSend` must fire exactly once across the lifetime of this
   // hook instance, regardless of how `opts` re-identifies between renders.
   const firstSendFiredRef = useRef(false);
@@ -359,7 +368,7 @@ export function useConversation(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || sending) return;
-      const userTurn: LiveTurn = { id: `u-${Date.now()}`, role: "user", content: trimmed };
+      const userTurn: LiveTurn = { id: `u-${cryptoRandom()}`, role: "user", content: trimmed };
       setLiveTurns((cur) => [...cur, userTurn]);
 
       // Lifecycle: fire onFirstUserSend exactly once + flip the observable
@@ -376,7 +385,7 @@ export function useConversation(
         setLiveTurns((cur) => [
           ...cur,
           {
-            id: `a-${Date.now()}`,
+            id: `a-${cryptoRandom()}`,
             role: "assistant",
             content: "No active chat session — please refresh and try again.",
             // Not pinnable (a local error turn, not a genuine answer).
@@ -388,7 +397,10 @@ export function useConversation(
       setSending(true);
       // chat-response-streaming P4 — mint the assistant turn id up front so the
       // in-flight bubble fills token-by-token and the error path targets it.
-      const assistantTurnId = `a-${Date.now()}`;
+      const assistantTurnId = `a-${cryptoRandom()}`;
+      // Fresh AbortController for THIS turn; unmount aborts it (see the effect above).
+      const abortController = new AbortController();
+      inFlightAbortRef.current = abortController;
       try {
         // widget-llm-integration Phase 5 — surface the user's current
         // ViewerStep kind so the LLM tool catalog is scoped.
@@ -440,6 +452,7 @@ export function useConversation(
                 ),
               ),
           },
+          { signal: abortController.signal },
         );
         // Finalize: the cleaned answer + full metadata replace the streamed draft
         // (the streamed text is the RAW answer; the envelope's is fence-stripped).
@@ -495,6 +508,11 @@ export function useConversation(
           });
         }
       } catch (err) {
+        // An intentional cancel (unmount) is not a failure — never render an error
+        // bubble for it (and `setLiveTurns` on an unmounting component is a no-op
+        // anyway). This also avoids the status-0 abort mapping to scary "something
+        // went wrong" copy.
+        if (abortController.signal.aborted) return;
         const mapped = chatErrorToUserCopy(err);
         // Replace the in-flight bubble with the error (or append if the stream
         // failed before it was pushed). Not pinnable (an error, not an answer).
@@ -506,6 +524,9 @@ export function useConversation(
             : [...cur, { id: assistantTurnId, role: "assistant", content: mapped.message }],
         );
       } finally {
+        // Release the controller once this turn settles so the unmount effect can't
+        // abort an already-finished stream.
+        if (inFlightAbortRef.current === abortController) inFlightAbortRef.current = null;
         setSending(false);
       }
     },

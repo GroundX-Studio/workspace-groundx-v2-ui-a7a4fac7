@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
 
 import cookieParser from "cookie-parser";
 import cors from "cors";
@@ -35,7 +34,7 @@ import { reportTemplateAccess } from "./services/reportTemplateAccess.js";
 import { sendUpstreamResponse, UpstreamHttpError } from "./services/http.js";
 import { fetchDocumentXray } from "./services/xrayCache.js";
 import { TurnRegistry, TurnRunner } from "./services/turnRunner.js";
-import { pumpFramesToResponse } from "./services/streamPump.js";
+import { onceDrainOrClose, pumpFramesToResponse } from "./services/streamPump.js";
 import type {
   AppRepository,
   ChatSessionRecord,
@@ -1537,26 +1536,50 @@ export function createApp({
       if (wantsStream && lastEventId > 0 && !chatTurnRegistry.get(payload.chatSessionId, turnKey)) {
         const saved = await repository.getAssistantMessageByTurnKey(payload.chatSessionId, turnKey);
         if (saved) {
+          // Build the WHOLE response payload BEFORE writing any header/frame: a throw
+          // after `writeHead(200)` would leave a half-open SSE stream (the route catch
+          // can't set a status on already-sent headers). All fallible work — the
+          // user-message pairing read and the citations parse — happens here, first.
+          let resumeFrames: string;
+          if (saved.errorCode) {
+            // The turn ERRORED (it was indexed by turnKey so a reconnect attaches
+            // rather than re-generating). Surface the SAME terminal `error` frame the
+            // live path emits — NOT a success envelope with an empty answer (which the
+            // client would render as a blank, non-retryable bubble).
+            resumeFrames = `event: error\ndata: ${JSON.stringify({ code: saved.errorCode })}\n\n`;
+          } else {
+            // Pair the user message (same turn = the assistant's turnIndex - 1) so the
+            // resumed envelope is the SAME shape as the live one (which returns
+            // `userMessageId`). Rare path, so one extra read is fine; "" if aged out.
+            const thread = await repository.listChatMessages(payload.chatSessionId);
+            const userMessageId =
+              thread.find((m) => m.role === "user" && m.turnIndex === saved.turnIndex - 1)?.id ?? "";
+            let citations: unknown = [];
+            try {
+              citations = saved.citationsJson ? (JSON.parse(saved.citationsJson) as unknown) : [];
+            } catch {
+              citations = []; // corrupt citations_json must not abort the resume
+            }
+            const envelope = {
+              userMessageId,
+              assistantMessageId: saved.id,
+              compressionRan: false,
+              reply: { mode: "rag" as const, answer: saved.content, citations, suggestedActions: [], intents: [], toolFailures: [] },
+            };
+            // No `id:` on the resume meta — a seq of 0 would RESET the client's
+            // Last-Event-ID cursor (it advances `lastSeq` on any non-null seq). The
+            // envelope that immediately follows resolves the turn, so no cursor needed.
+            resumeFrames =
+              `event: meta\ndata: ${JSON.stringify({ turnKey, messageId: saved.id })}\n\n` +
+              `event: envelope\ndata: ${JSON.stringify(envelope)}\n\n`;
+          }
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache, no-transform",
             Connection: "keep-alive",
             "X-Accel-Buffering": "no",
           });
-          const envelope = {
-            assistantMessageId: saved.id,
-            compressionRan: false,
-            reply: {
-              mode: "rag" as const,
-              answer: saved.content,
-              citations: saved.citationsJson ? (JSON.parse(saved.citationsJson) as unknown) : [],
-              suggestedActions: [],
-              intents: [],
-              toolFailures: [],
-            },
-          };
-          res.write(`id: 0\nevent: meta\ndata: ${JSON.stringify({ turnKey, messageId: saved.id })}\n\n`);
-          res.write(`event: envelope\ndata: ${JSON.stringify(envelope)}\n\n`);
+          res.write(resumeFrames);
           res.end();
           return;
         }
@@ -1629,9 +1652,10 @@ export function createApp({
             get writableEnded() {
               return res.writableEnded || res.destroyed;
             },
-            // On a closed socket no 'drain' arrives; resolve on 'error'/'close' too so
-            // the pump loops back to the writableEnded check instead of hanging.
-            onceDrain: () => once(res, "drain").then(() => undefined).catch(() => undefined),
+            // On a closed socket no 'drain' arrives; `onceDrainOrClose` resolves on
+            // 'close'/'error' too so the pump loops back to the writableEnded check
+            // instead of hanging forever on a graceful client disconnect.
+            onceDrain: () => onceDrainOrClose(res),
           },
           { lastEventId, heartbeatMs: 15_000 },
         );

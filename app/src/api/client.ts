@@ -6,6 +6,8 @@ import {
   listChatMessages as listChatMessagesDirect,
   sendChatMessage as sendChatMessageDirect,
   streamChatMessage as streamChatMessageDirect,
+  type SendChatMessageInput,
+  type StreamChatCallbacks,
 } from "@/api/chatSessions";
 import { listChatSessions } from "@/api/chatSessionsList";
 import { claimAnonymousChat } from "@/api/claimAnonymousChat";
@@ -79,8 +81,14 @@ const createChatSession = async (input: Parameters<typeof createChatSessionDirec
 const sendChatMessage: typeof sendChatMessageDirect = (input) =>
   sendChatMessageDirect(input, chatSessionEnsure);
 
-const streamChatMessage: typeof streamChatMessageDirect = (input, callbacks) =>
-  streamChatMessageDirect(input, callbacks, chatSessionEnsure);
+// Forward the optional `opts` (AbortSignal for unmount/supersede cancel + maxRetries)
+// to the direct impl — only `chatSessionEnsure` is injected here. The earlier wrapper
+// dropped `opts`, which left streamChatMessage's abort/cancel path unreachable.
+const streamChatMessage = (
+  input: SendChatMessageInput,
+  callbacks?: StreamChatCallbacks,
+  opts?: { signal?: AbortSignal; maxRetries?: number },
+) => streamChatMessageDirect(input, callbacks, chatSessionEnsure, opts);
 
 const listChatMessages: typeof listChatMessagesDirect = (chatSessionId, sessionMeta) =>
   listChatMessagesDirect(chatSessionId, sessionMeta, chatSessionEnsure);

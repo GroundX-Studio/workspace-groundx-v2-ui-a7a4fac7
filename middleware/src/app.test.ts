@@ -694,6 +694,77 @@ describe("middleware scaffold", () => {
     expect(llmClient.calls.length).toBe(llmCallsBefore);
   });
 
+  it("a reconnect resuming an ERRORED turn emits an error frame, NOT an empty success envelope (R1)", async () => {
+    const { agent, repository, llmClient } = await streamingChatFixture();
+    // The prior turn ERRORED but was indexed by turnKey (so a reconnect attaches
+    // instead of re-generating). Resuming it must surface the SAME terminal error the
+    // live path emits — not a success envelope with answer:"" (a blank, dead bubble).
+    await repository.appendChatMessage({
+      id: "m-errored",
+      chatSessionId: "chat-1",
+      turnIndex: 2,
+      role: "assistant",
+      content: "",
+      citationsJson: null,
+      compressedIntoSummaryId: null,
+      llmProvider: "live",
+      llmModelId: "x",
+      latencyMs: 1,
+      promptTokens: null,
+      completionTokens: null,
+      errorCode: "router_failed:boom",
+      createdAt: new Date(),
+      turnKey: "tk-errored",
+    });
+    const llmCallsBefore = llmClient.calls.length;
+
+    const res = await agent
+      .post("/api/chat/messages")
+      .set("Accept", "text/event-stream")
+      .set("Last-Event-ID", "5")
+      .send({ chatSessionId: "chat-1", newUserMessage: "reconnect", turnKey: "tk-errored" })
+      .expect(200);
+
+    expect(res.text).toContain("event: error");
+    expect(res.text).toContain("router_failed:boom");
+    expect(res.text).not.toContain("event: envelope");
+    expect(llmClient.calls.length).toBe(llmCallsBefore); // still no re-generation
+  });
+
+  it("a reconnect with a CORRUPT citations_json still resumes cleanly — no half-open stream (R2)", async () => {
+    const { agent, repository } = await streamingChatFixture();
+    // citations_json is unparseable. The resume builds its payload BEFORE writeHead and
+    // degrades a parse failure to []; it must NOT throw past writeHead (a half-open SSE).
+    await repository.appendChatMessage({
+      id: "m-corrupt",
+      chatSessionId: "chat-1",
+      turnIndex: 2,
+      role: "assistant",
+      content: "Answer with broken citations.",
+      citationsJson: "{not valid json",
+      compressedIntoSummaryId: null,
+      llmProvider: "live",
+      llmModelId: "x",
+      latencyMs: 1,
+      promptTokens: null,
+      completionTokens: null,
+      errorCode: null,
+      createdAt: new Date(),
+      turnKey: "tk-corrupt",
+    });
+
+    const res = await agent
+      .post("/api/chat/messages")
+      .set("Accept", "text/event-stream")
+      .set("Last-Event-ID", "5")
+      .send({ chatSessionId: "chat-1", newUserMessage: "reconnect", turnKey: "tk-corrupt" })
+      .expect(200);
+
+    expect(res.text).toContain("event: envelope");
+    expect(res.text).toContain("Answer with broken citations.");
+    expect(res.text).toContain('"citations":[]'); // degraded, not aborted
+  });
+
   // Finding 3 (§4 #19 follow-up) — MAJOR IDOR. The route was gated only by
   // requireSession (cookie-exists), with NO ownership check, so any visitor
   // could POST a victim's chatSessionId and write into / read the assistant

@@ -681,6 +681,13 @@ export async function callGroundedLlm(
   let lastRoundCalls: RawToolCall[] = [];
   let lastFinishReason: string | null = null;
   let round = 0;
+  // Per-turn TOTAL server-tool execution budget — `maxRounds` bounds rounds, but a
+  // single round can emit many tool calls (a prompt-injected document could ask for
+  // dozens of live searches in one round). This caps the EXECUTIONS across the whole
+  // turn so cost/latency can't be amplified by model output. Generous vs. legitimate
+  // multi-document answers (most use 1–2); over-budget calls are REFUSED, never run.
+  const maxServerToolCalls = serverToolLoop ? serverToolLoop.maxRounds * 2 : 0;
+  let serverToolCallsExecuted = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const res = await dispatch(convo);
@@ -722,7 +729,21 @@ export async function callGroundedLlm(
       })),
     });
     for (const call of serverCalls) {
+      // Over the per-turn budget → REFUSE (don't execute). Still push a tool result
+      // for EVERY call in the assistant message above (OpenAI requires one per
+      // tool_call), and record a failure so the refusal isn't silent — the model
+      // gets feedback instead of a hung/looping retrieval.
+      if (serverToolCallsExecuted >= maxServerToolCalls) {
+        logger.warn(
+          { serverToolBudgetExhausted: { executed: serverToolCallsExecuted, max: maxServerToolCalls, tool: call.name } },
+          "server-tool budget exhausted for this turn — refusing further tool executions",
+        );
+        convo.push({ role: "tool", tool_call_id: call.id, content: `${call.name} failed: tool budget exhausted for this turn` });
+        serverToolFailures.push({ name: call.name, reason: "tool_budget_exhausted" });
+        continue;
+      }
       const outcome = await serverToolLoop.execute(call);
+      serverToolCallsExecuted += 1;
       convo.push({ role: "tool", tool_call_id: call.id, content: outcome.result });
       if (outcome.activity) {
         toolActivity.push(outcome.activity);

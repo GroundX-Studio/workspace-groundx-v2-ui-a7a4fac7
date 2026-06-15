@@ -1,6 +1,8 @@
+import { EventEmitter } from "node:events";
+
 import { describe, expect, it } from "vitest";
 
-import { pumpFramesToResponse, type SseWriter } from "./streamPump.js";
+import { onceDrainOrClose, pumpFramesToResponse, type SseWriter } from "./streamPump.js";
 import { TurnEventBuffer } from "./turnEventBuffer.js";
 
 /**
@@ -114,5 +116,31 @@ describe("pumpFramesToResponse", () => {
     await pump;
     expect(writer.writableEnded).toBe(true);
     expect(writer.writes.some((w) => w.includes("event: envelope"))).toBe(true);
+  });
+});
+
+describe("onceDrainOrClose", () => {
+  it("resolves on 'drain'", async () => {
+    const res = new EventEmitter();
+    const p = onceDrainOrClose(res);
+    res.emit("drain");
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("resolves on a GRACEFUL 'close' (no 'drain', no 'error') — the hang the fix prevents", async () => {
+    const res = new EventEmitter();
+    const p = onceDrainOrClose(res);
+    res.emit("close"); // clean client FIN: only 'close', never 'drain'
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("resolves on 'error' without throwing, and removes ALL listeners after settling", async () => {
+    const res = new EventEmitter();
+    const p = onceDrainOrClose(res);
+    res.emit("error", new Error("ECONNRESET")); // the once('error') listener absorbs it
+    await expect(p).resolves.toBeUndefined();
+    expect(res.listenerCount("drain")).toBe(0);
+    expect(res.listenerCount("close")).toBe(0);
+    expect(res.listenerCount("error")).toBe(0);
   });
 });

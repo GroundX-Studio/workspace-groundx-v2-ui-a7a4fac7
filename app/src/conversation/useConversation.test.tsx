@@ -429,4 +429,32 @@ describe("streaming send (chat-response-streaming P4)", () => {
     // The hook used the streaming path, not the JSON sendChatMessage.
     expect(sendChatMessage).not.toHaveBeenCalled();
   });
+
+  it("threads an AbortSignal and aborts the in-flight stream on unmount (no zombie stream)", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const streamChatMessage = vi.fn(
+      (_input: unknown, _callbacks: unknown, opts?: { signal?: AbortSignal }) => {
+        capturedSignal = opts?.signal;
+        return new Promise(() => {}); // never resolves — stays in-flight until unmount
+      },
+    );
+
+    const { unmount } = renderWithOnboardingProviders(<Probe />, {
+      api: { chat: { streamChatMessage, sendChatMessage, listChatMessages } },
+    } as RenderOptions);
+
+    await waitFor(() => expect(screen.getByTestId("probe-session-id").textContent).not.toBe("none"));
+    act(() => {
+      screen.getByTestId("probe-send").click();
+    });
+
+    await waitFor(() => expect(streamChatMessage).toHaveBeenCalledTimes(1));
+    // The signal IS threaded through (not dropped by the client wrapper) and live.
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    // Unmount mid-stream → the controller aborts → the SSE connection is cancelled.
+    unmount();
+    expect(capturedSignal?.aborted).toBe(true);
+  });
 });

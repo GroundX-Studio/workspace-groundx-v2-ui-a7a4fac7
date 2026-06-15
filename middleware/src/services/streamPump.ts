@@ -13,7 +13,34 @@
  *
  * Decoupled from Express for testability: the route adapts `res` to `SseWriter`.
  */
+import type { EventEmitter } from "node:events";
+
 import type { TurnEventBuffer } from "./turnEventBuffer.js";
+
+/**
+ * Resolve when a backpressured socket DRAINS — or when it CLOSES or ERRORS. The
+ * route adapts this into `SseWriter.onceDrain`. The `close`/`error` arms are the
+ * crucial part: a client that disconnects GRACEFULLY (a clean FIN) emits `close`
+ * but neither `drain` nor `error`, so waiting on `drain` alone would hang the pump
+ * forever (leaking its heartbeat timer + buffer subscription). Resolving on any of
+ * the three lets the pump loop back to its `writableEnded` check and end cleanly.
+ * All three listeners are removed once one fires, so a long stream never accretes
+ * listeners; the `error` listener also prevents an unhandled-`error` crash while we
+ * wait. The waiter never REJECTS — it just stops waiting.
+ */
+export function onceDrainOrClose(res: EventEmitter): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      res.off("drain", done);
+      res.off("close", done);
+      res.off("error", done);
+      resolve();
+    };
+    res.once("drain", done);
+    res.once("close", done);
+    res.once("error", done);
+  });
+}
 
 export interface SseWriter {
   /** Write a chunk; returns false when the socket buffer is full (backpressure). */

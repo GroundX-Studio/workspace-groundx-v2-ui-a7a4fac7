@@ -5,10 +5,13 @@
  * READ from it. A reader replays everything after a given seq (resume from
  * `Last-Event-ID`) then follows live frames until the turn is `done`. The buffer
  * is BOUNDED: on overflow it drops the OLDEST `token` frames (cheap prose that a
- * caught-up reader has already seen) but NEVER meta/activity/envelope/error — a
- * reader that fell behind the dropped window resumes from the persisted final
- * message instead (handled one layer up). Generation only ever appends here, so
- * a slow/absent reader never stalls it (socket backpressure lives in the pump).
+ * caught-up reader has already seen) but NEVER meta/activity/envelope/error. A
+ * reader that resumes from before the dropped window therefore sees a NON-CONTIGUOUS
+ * token stream (a gap in streamed prose) — cosmetic only: the never-dropped terminal
+ * `envelope` carries the full final answer, so the visible result self-heals on its
+ * arrival (and a reader whose runner was evicted entirely resumes from the persisted
+ * message, handled one layer up). Generation only ever appends here, so a slow/absent
+ * reader never stalls it (socket backpressure lives in the pump).
  */
 export type StreamFrameType = "meta" | "activity" | "token" | "envelope" | "error";
 

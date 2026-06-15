@@ -47,6 +47,7 @@ import {
 import { ApiError, type ContentScope } from "@groundx/shared";
 import { runCompression, runMetaCompaction, selectActiveSummaries } from "./conversationCompressor.js";
 import { UpstreamTimeoutError } from "./http.js";
+import { turnStreamContext } from "./streamSink.js";
 import { logger } from "../lib/logger.js";
 
 export interface HandleChatMessageRequest {
@@ -425,6 +426,23 @@ export async function handleChatMessage(
       embedThreshold: deps.embedThreshold,
     });
   } catch (err) {
+    // Supersede-cancel: a newer turn for this session aborted this one's upstream
+    // call mid-flight (the user moved on). The superseding turn owns the response —
+    // so DON'T persist a junk empty assistant row for the discarded turn. Express
+    // the outcome ONCE as a ChatHandlerError(409): the SSE TurnRunner frames the
+    // turn `superseded` off its abort SIGNAL (not this error's type, so the frame
+    // is unchanged), while the JSON branch maps this ChatHandlerError to a clean
+    // 409 through the same machinery every other handler error uses — instead of a
+    // raw AbortError falling through to a generic 500. The ambient abort signal is
+    // the source of truth (the runner sets it for every turn); a direct caller with
+    // no runner has no store, so this never fires outside the supersede path.
+    if (turnStreamContext.getStore()?.abortSignal?.aborted) {
+      logger.debug(
+        { chatSessionId: request.chatSessionId, ownerUserId: session.ownerUserId, ownerAnonId: session.ownerAnonId },
+        "chat turn superseded — discarding partial output (no persist)",
+      );
+      throw new ChatHandlerError("superseded", 409);
+    }
     // Record the failure as an assistant message so the conversation
     // history stays consistent. The status code we re-throw depends on
     // why we failed:
@@ -451,6 +469,12 @@ export async function handleChatMessage(
       errorCode,
       latencyMs: Date.now() - startedAt,
       createdAt: new Date(),
+      // Record the turnKey on the ERROR row too (the success path already does):
+      // without it `chat_turn_index` has no entry for an errored streaming turn, so a
+      // late reconnect after runner eviction can't attach — it would re-generate and
+      // double-persist the user message. Indexing the errored outcome makes a reconnect
+      // resume it instead.
+      turnKey: request.turnKey ?? null,
     });
     if (err instanceof ChatRouteNotImplementedError) {
       throw new ChatHandlerError(`mode_not_implemented:${err.mode}`, 501);
