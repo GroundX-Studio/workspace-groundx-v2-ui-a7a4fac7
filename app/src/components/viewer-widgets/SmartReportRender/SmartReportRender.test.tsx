@@ -197,8 +197,11 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
 
   it("renders a CiteChip in a section footer (reuses the shipped clickable-citation path)", async () => {
     renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
-    const chip = await screen.findByTestId("cite-chip-1");
-    expect(chip).toHaveAttribute("data-citation-doc", "utility-bill-2026-04");
+    // inline-footnote-citations — each section's SourceList numbers per-section, so
+    // every single-citation section renders its own `cite-chip-1`; the first section's
+    // chip carries the source document id and routes via the shipped click path.
+    const chips = await screen.findAllByTestId("cite-chip-1");
+    expect(chips[0]).toHaveAttribute("data-citation-doc", "utility-bill-2026-04");
   });
 
   it("locks export/Save for an anonymous viewer (preview-only sample)", async () => {

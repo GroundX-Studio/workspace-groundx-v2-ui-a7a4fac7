@@ -131,7 +131,7 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color
         type="button"
         onClick={handle}
         title={tooltip}
-        aria-label={`Citation ${index} — page ${citation.page}`}
+        aria-label={primaryPage != null ? `Citation ${index} — page ${primaryPage}` : `Citation ${index} — location unknown`}
         data-testid={`cite-chip-${index}`}
         data-variant="footnote"
         data-citation-doc={citation.documentId}

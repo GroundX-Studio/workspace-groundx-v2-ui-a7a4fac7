@@ -1233,7 +1233,9 @@ describe("OnboardingShell", () => {
     // Humanized heading + a citation chip prove the section rendered with a
     // grounded body (no coupling to a specific generated value).
     expect(screen.getByText("Billing Summary")).toBeInTheDocument();
-    expect(screen.getByTestId("cite-chip-1")).toBeInTheDocument();
+    // inline-footnote-citations — each report section's SourceList numbers per-section,
+    // so a single-citation section renders its own cite-chip-1 (one per section).
+    expect(screen.getAllByTestId("cite-chip-1").length).toBeGreaterThan(0);
   });
 
   // ── report-empty-state T1(c) — Report routing is template-aware ──

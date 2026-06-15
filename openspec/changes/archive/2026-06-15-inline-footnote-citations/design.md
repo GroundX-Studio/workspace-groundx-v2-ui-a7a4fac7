@@ -89,11 +89,11 @@ A small pure parser turns the answer markdown + `citations[]` into render segmen
 - Duplicate `[N]` for the same N → fine, both bind to the same citation.
 - **Alignment check (handles MIS-binding, not just out-of-range):** when `citations[N-1]`
   has an `answerSpan`, the parser trusts the `[N]→citation` binding only if that `answerSpan`
-  text appears at/just-before the marker's position in the prose. On mismatch the binding is
-  NOT trusted: the parser re-anchors that citation by its `answerSpan` instead (inject a
-  marker after the span), and if the span can't be located either, the citation is left to
-  the `SourceList` only. This stops a model that mis-numbers `[2]` from pointing the marker
-  at the wrong source. Citations with no `answerSpan` keep the positional binding (best effort).
+  text appears in the marker's preceding block text. On mismatch the binding is NOT trusted:
+  the `[N]` is rendered as literal text and the citation is left to the `SourceList` floor —
+  NO marker is fabricated or re-injected (simpler + safe; the floor guarantees reachability).
+  This stops a model that mis-numbers `[2]` from pointing the marker at the wrong source.
+  Citations with no `answerSpan` keep the positional binding (best effort).
   Matching is NORMALIZED before comparison — collapse whitespace and strip surrounding
   markdown emphasis (`**`/`*`/`` ` ``) — so a span like `$7,613.20` still matches prose that
   renders it as `**$7,613.20**`. A normalized match that still fails is safe (re-anchor →

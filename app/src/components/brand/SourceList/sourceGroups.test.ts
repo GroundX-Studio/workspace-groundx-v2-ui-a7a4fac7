@@ -28,6 +28,17 @@ describe("groupSources", () => {
     expect(groups[1].entries).toEqual([{ index: 4, page: 1, citation: groups[1].entries[0].citation }]);
   });
 
+  it("never-drop: two distinct claims on the SAME page merge their regions into one entry", () => {
+    const r = (p: number, x: number) => ({ page: p, bbox: { x, y: 0, w: 0.1, h: 0.1 }, tier: "exact" as const });
+    const groups = groupSources([
+      cite({ documentId: "d", page: 1, regions: [r(1, 0.1)] }),
+      cite({ documentId: "d", page: 1, regions: [r(1, 0.5)] }), // same page, different region
+    ]);
+    expect(groups[0].entries).toHaveLength(1); // one page entry…
+    // …but BOTH regions survive on it, so clicking lights every region on the page.
+    expect(groups[0].entries[0].citation.regions).toHaveLength(2);
+  });
+
   it("carries the document's fileName onto its group", () => {
     const groups = groupSources([
       cite({ documentId: "doc-1", page: 1, fileName: "utility-bill-april-2026.pdf" }),

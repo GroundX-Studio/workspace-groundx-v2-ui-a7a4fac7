@@ -27,6 +27,7 @@ import remarkGfm from "remark-gfm";
 import type { Citation } from "@groundx/shared";
 
 import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { citationColor } from "./citationFootnotes";
 import { remarkCitationMarkers } from "./remarkCitationMarkers";
 
 import {
@@ -73,7 +74,8 @@ function makeCitationComponents(citations: Citation[]): Components {
       const idx = Number(props["dataCiteIndex"] ?? props["data-cite-index"]);
       const citation = Number.isInteger(pos) ? citations[pos] : undefined;
       if (!citation || Number.isNaN(idx)) return <sup>{children}</sup>;
-      return <CiteChip citation={citation} index={idx} variant="footnote" />;
+      // Same index/confidence-keyed color as the SourceList pill (one shared rule).
+      return <CiteChip citation={citation} index={idx} variant="footnote" color={citationColor(idx, citation)} />;
     },
   };
 }

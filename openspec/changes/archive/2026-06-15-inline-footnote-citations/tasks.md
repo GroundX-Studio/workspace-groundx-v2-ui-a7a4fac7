@@ -13,11 +13,12 @@ Each task is TDD (failing test first) and ends with the standing adversarial-rev
 - [ ] 1.1 Add a pure parser: `(answerMarkdown, citations[]) → segments` where `[N]` (1≤N≤len)
       → a footnote-marker segment bound to `citations[N-1]`, out-of-range `[N]` → literal,
       duplicates allowed. Must NOT treat a real markdown link label `[N](url)` as a marker.
-- [ ] 1.2 `answerSpan` anchoring backup: a citation with no inline `[N]` gets a marker
-      injected after the verbatim `answerSpan`; unmatched → no marker (lives in SourceList).
+- [ ] 1.2 `answerSpan` is the ALIGNMENT signal (not marker injection): a citation whose
+      `[N]` can't be trusted is left to the SourceList floor — no marker is fabricated.
 - [ ] 1.3 ALIGNMENT check (mis-binding, not just out-of-range): trust `[N]→citations[N-1]`
-      only if that citation's `answerSpan` sits at/just-before the marker; on mismatch
-      re-anchor by `answerSpan` (or fall to SourceList). Never point a marker at the wrong source.
+      only if that citation's `answerSpan` (normalized) appears in the marker's preceding block
+      text; on mismatch the `[N]` is rendered as literal text (the citation stays in the
+      SourceList). Never point a marker at the wrong source.
 - [ ] 1.4 `Markdown` primitive gains an OPTIONAL `citations?: Citation[]` prop: a custom
       `remark` plugin tokenizes `[N]` → a node a `components` override renders as
       `<CiteChip variant="footnote">` wired to the dispatch. Absent `citations` → byte-identical
@@ -58,6 +59,9 @@ Each task is TDD (failing test first) and ends with the standing adversarial-rev
 - [ ] 5.1 Extract widget field-row values use the `footnote` variant (wherever the widget
       mounts — onboarding AND authenticated). Test: same component, routes like chat.
 - [ ] 5.2 Report sections use inline markers + `SourceList`. Test: shared components, no fork.
+- [ ] 5.3 DEFERRED (tracked): extraction-form citation `fileName` attach — `verifyExtractionCitation`
+      doesn't receive snippets, so threading the doc's fileName there is a separate change; the
+      never-blank `documentId` fallback covers this rare chat path (citing EXTRACTED FIELDS) for now.
 
 ## 6. Generation contract (chat-routing prompts module)
 - [ ] 6.1 Extend the grounded prompt's merged citation contract to require inline `[N]` markers

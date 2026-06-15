@@ -16,16 +16,11 @@ import { useState, type FC } from "react";
 
 import type { Citation } from "@groundx/shared";
 
-import { CiteChip, type CiteChipColor } from "@/components/brand/CiteChip/CiteChip";
+import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { citationColor } from "@/components/primitives/Markdown/citationFootnotes";
 import { FONT_SIZE_LABEL, MUTED_ON_LIGHT, NAVY } from "@/constants";
 
 import { groupSources } from "./sourceGroups";
-
-/** Canonical index-keyed colors: `[1]` green (primary), low-confidence coral, else cyan. */
-function colorForIndex(index: number, c: Citation): CiteChipColor {
-  if (c.confidence != null && c.confidence < 0.5) return "coral";
-  return index === 1 ? "green" : "cyan";
-}
 
 export interface SourceListProps {
   citations: Citation[];
@@ -86,7 +81,7 @@ export const SourceList: FC<SourceListProps> = ({ citations, onShowAll }) => {
                     citation={e.citation}
                     index={e.index}
                     variant="pill"
-                    color={colorForIndex(e.index, e.citation)}
+                    color={citationColor(e.index, e.citation)}
                   />
                   <Typography component="span" variant="caption" sx={{ color: NAVY }}>
                     {e.page != null ? `p.${e.page}` : "location unknown"}

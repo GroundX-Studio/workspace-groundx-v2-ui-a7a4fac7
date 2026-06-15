@@ -42,7 +42,8 @@ The same shared components are used on every surface (no per-surface fork).
 
 - **GIVEN** a turn whose `citations` array has an entry with no matching `[N]` in the prose and no anchorable `answerSpan`
 - **WHEN** the reply renders
-- **THEN** that citation still appears in the grouped source list and routes to the viewer on click
+- **THEN** that citation's grounding is still reachable in the grouped source list — as its own page entry, or (when another claim shares its page) folded into that page's entry whose regions include it
+- **AND** clicking that entry routes to the viewer and lights the citation's region(s)
 
 ### Requirement: Citation chips SHALL survive a refresh
 

@@ -966,6 +966,15 @@ entries side by side in the same `citations` array. The contract SHALL
 describe verification outcomes as confidence tiers, not as entries being
 "dropped".
 
+The contract SHALL ALSO require an INLINE `[N]` marker placed in the answer
+prose immediately after each cited claim, where `N` is that citation's
+1-based position in the `citations` array. The guidance SHALL direct the
+model to cite at the claim / group level rather than once per atomic value,
+so dense list answers do not accrue a marker per line item. The existing
+per-entry `answerSpan` (the verbatim phrase from the answer the entry
+supports) SHALL be retained — it both verifies the entry and serves as the
+renderer's anchoring backup when an inline `[N]` is missing.
+
 #### Scenario: Content claims are MUST-cite
 
 - **GIVEN** the grounded system prompt is built with an extraction block
@@ -977,6 +986,13 @@ describe verification outcomes as confidence tiers, not as entries being
 - **GIVEN** the grounded system prompt
 - **THEN** the only omission license names non-content turns (greetings/small-talk/product questions)
 - **AND** no contract text says the model "may" skip citing a content claim.
+
+#### Scenario: Inline markers are required and index-aligned
+
+- **GIVEN** the grounded system prompt's citations contract
+- **THEN** it instructs the model to place an inline `[N]` marker after each cited claim, `N` being the citation's 1-based position in the `citations` array
+- **AND** it directs claim/group-level citing (not one marker per atomic value)
+- **AND** it retains `answerSpan` as both a verification field and the renderer's anchoring backup
 
 ### Requirement: The grounded answer parser SHALL recover the citations block across fence variations
 
@@ -1364,4 +1380,19 @@ The chat stream SHALL emit a live `activity` frame as each server-executed tool 
 - **WHEN** the tool executes
 - **THEN** the stream emits the tool's `activity` frame (e.g. "Checked GroundX docs") BEFORE the subsequent answer tokens
 - **AND** the completed reply's `envelope` carries the same entry in `toolActivity[]`
+
+### Requirement: Chat citations SHALL carry the source document's fileName and sourceUrl
+
+Each resolved chat citation SHALL include the source document's `fileName` (GroundX's
+human-readable display name) and `sourceUrl`, copied from the matching `search.results`
+chunk by `documentId` — GroundX returns both on every chunk and the middleware already
+reads `fileName` for the prompt. Both ride the shared `@groundx/shared` `Citation` as
+optional fields, to the wire and the persisted `citations_json`. A citation whose chunk
+has no `fileName` SHALL fall back to the `documentId` for display (never blank).
+
+#### Scenario: A resolved citation names its document
+
+- **GIVEN** a `search.results` chunk with `fileName` `"utility-bill-april-2026.pdf"` for `documentId` D
+- **WHEN** the middleware resolves a citation for D
+- **THEN** the citation carries `fileName` `"utility-bill-april-2026.pdf"` and the chunk's `sourceUrl`
 

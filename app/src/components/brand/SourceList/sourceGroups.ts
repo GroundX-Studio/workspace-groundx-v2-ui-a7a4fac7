@@ -28,6 +28,22 @@ function pageOf(c: Citation): number | undefined {
   return c.page ?? citationRegions(c)[0]?.page;
 }
 
+/**
+ * Fold `extra`'s regions into `base` so a same-page collision keeps EVERY region
+ * (never-drop). Regions are deduped by page+bbox; `base`'s other fields win.
+ */
+function mergeRegions(base: Citation, extra: Citation): Citation {
+  const all = [...citationRegions(base), ...citationRegions(extra)];
+  const seen = new Set<string>();
+  const regions = all.filter((r) => {
+    const k = `${r.page}:${r.bbox.x},${r.bbox.y},${r.bbox.w},${r.bbox.h}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return { ...base, regions };
+}
+
 export function groupSources(citations: Citation[]): SourceGroup[] {
   const groups: SourceGroup[] = [];
   const byDoc = new Map<string, SourceGroup>();
@@ -41,10 +57,17 @@ export function groupSources(citations: Citation[]): SourceGroup[] {
       groups.push(group);
     }
     if (!group.fileName && citation.fileName) group.fileName = citation.fileName;
-    // Dedupe by page within the document (first wins); regionless entries dedupe
-    // under a single "no page" key so a document lists one "location unknown" row.
+    // Collapse to one entry per page within the document (regionless entries
+    // collapse under a single "no page" key → one "location unknown" row). But
+    // never-drop: a second citation on the SAME page MERGES its regions into the
+    // kept entry, so clicking the page entry lights EVERY region on that page — no
+    // grounding is lost just because two claims share a page.
     const pageKey = page == null ? "none" : String(page);
-    if (group.entries.some((e) => (e.page == null ? "none" : String(e.page)) === pageKey)) return;
+    const existing = group.entries.find((e) => (e.page == null ? "none" : String(e.page)) === pageKey);
+    if (existing) {
+      existing.citation = mergeRegions(existing.citation, citation);
+      return;
+    }
     group.entries.push({ index, page, citation });
   });
   return groups;

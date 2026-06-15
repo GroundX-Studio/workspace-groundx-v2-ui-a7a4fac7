@@ -1262,6 +1262,9 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                                       <CiteChip
                                         citation={c}
                                         index={idx + 1}
+                                        // inline-footnote-citations — the same footnote marker
+                                        // used in chat/report, app-wide (no Extract-specific chip).
+                                        variant="footnote"
                                         onActivate={(citation) => handleFieldCitationActivate(field.id, citation)}
                                       />
                                     </Box>

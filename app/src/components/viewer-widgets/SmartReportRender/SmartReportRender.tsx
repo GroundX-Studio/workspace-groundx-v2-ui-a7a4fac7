@@ -54,7 +54,7 @@ import { type FC, useCallback, useEffect, useRef, useState } from "react";
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 import { widgetRoleCanEdit } from "@groundx/shared";
 
-import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import { SourceList } from "@/components/brand/SourceList/SourceList";
 import { Markdown } from "@/components/primitives/Markdown/Markdown";
 import {
   BODY_TEXT,
@@ -456,7 +456,9 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
               </Box>
 
               <Box sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION }}>
-                <Markdown>{section.result.body}</Markdown>
+                {/* inline-footnote-citations — same footnote model as chat: inline
+                    `[N]` markers in the section prose + a grouped SourceList below. */}
+                <Markdown citations={section.result.citations}>{section.result.body}</Markdown>
               </Box>
 
               {section.result.warnings && section.result.warnings.length > 0 ? (
@@ -468,25 +470,11 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
                 </Box>
               ) : null}
 
+              {/* inline-footnote-citations — the grouped, collapsed source list
+                  (same component as chat); the inline `[N]` markers in the section
+                  prose above are the per-claim affordance. Numbering is per-section. */}
               {section.result.citations.length > 0 ? (
-                <Stack direction="row" spacing={0.75} sx={{ flexWrap: "wrap" }}>
-                  {section.result.citations.map((citation, ci) => (
-                    <CiteChip
-                      key={`${section.sectionId}-${ci}`}
-                      citation={citation}
-                      // Global 1-based chip index across the report so the
-                      // Phase-0 `cite-chip-1` testid resolves on the first chip.
-                      index={
-                        report.sections
-                          .slice(0, i)
-                          .reduce((n, s) => n + s.result.citations.length, 0) +
-                        ci +
-                        1
-                      }
-                      color={section.result.warnings && section.result.warnings.length > 0 ? "coral" : "cyan"}
-                    />
-                  ))}
-                </Stack>
+                <SourceList citations={section.result.citations} />
               ) : null}
             </Box>
           ))}

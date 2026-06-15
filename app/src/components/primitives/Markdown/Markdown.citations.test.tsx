@@ -48,6 +48,14 @@ describe("Markdown citations (inline footnote markers)", () => {
     expect(screen.getByTestId("markdown")).toHaveTextContent("plain [1] text");
   });
 
+  it("colors inline markers by the shared index/confidence rule ([1] green, [2] cyan)", () => {
+    renderWithOnboardingProviders(
+      <Markdown citations={[cite(), cite({ page: 2 })]}>{"a [1] and b [2]"}</Markdown>,
+    );
+    expect(screen.getByTestId("cite-chip-1")).toHaveAttribute("data-color", "green");
+    expect(screen.getByTestId("cite-chip-2")).toHaveAttribute("data-color", "cyan");
+  });
+
   it("leaves an out-of-range [N] as literal text", () => {
     renderWithOnboardingProviders(<Markdown citations={[cite()]}>{"note [3] here"}</Markdown>);
     expect(screen.queryByTestId("cite-chip-3")).not.toBeInTheDocument();
