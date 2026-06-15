@@ -5,12 +5,21 @@ SSE-framed, best-effort in-memory replay + MySQL-final resume). Phased; each tas
 failing-test-first (discipline §1) + adversarial review before advancing.
 
 ## P1 — Server: SSE framing + decoupled runner + content negotiation
-- [ ] **P1.0** Upstream LLM streaming mode in the LLM client (`stream: true`): parse the
+- [x] **P1.0** Upstream LLM streaming mode in the LLM client (`stream: true`): parse the
   provider's TEXT deltas AND TOOL-CALL deltas; accumulate tool-call deltas to a complete
   call. Graceful fallback to a single full-text chunk when a provider can't stream. This
-  is what makes `token` frames real (not post-hoc chunking). Failing test first: a
-  streamed completion yields ordered text deltas + a reconstructed tool call; fallback
-  yields one chunk.
+  is what makes `token` frames real (not post-hoc chunking).
+  - ↳ DONE (parser): `chatCompletionStream.ts` `consumeChatCompletionStream(response,
+    {onText})` → `{rawAnswer, toolCalls, finishReason}` (same shape as the non-stream
+    dispatch); accumulates tool-call deltas by index; robust to frames split across
+    reads; ignores SSE comments. 5 tests.
+  - ↳ DONE (dispatch): `callGroundedLlm` gains an opt-in `stream:{onToken}` param →
+    `dispatch` sends `stream:true` + consumes via the parser when the response is
+    `text/event-stream`, re-emitting each delta via `onToken`; a streaming-requested
+    provider that returns JSON falls back to the unchanged JSON parse (provider-
+    agnostic). Non-streaming path byte-identical (no `stream` key). 3 tests. Parser is
+    now CONSUMED (not dormant). Threading `onToken` up through `groundedAnswerOverScope`
+    → the runner is P1.2.
 - [ ] **P1.1** Content negotiation on `POST /api/chat/messages`: BOTH branches drive the
   SAME runner (one generation path, persist once). `Accept: text/event-stream` → stream;
   else run to completion → JSON. Failing test first: a non-streaming POST still returns
@@ -24,6 +33,14 @@ failing-test-first (discipline §1) + adversarial review before advancing.
   a duplicate generation/persist. Test: frame order + ids; the `envelope` frame equals
   the non-streaming `ChatReply` byte-for-byte; `activity` frames mirror `toolActivity[]`;
   a duplicate POST with the same `turnKey` does NOT create a second turn/message.
+  - ↳ DONE (event buffer): `turnEventBuffer.ts` `TurnEventBuffer` — seq-stamped
+    append; `read(afterSeq)` replays then follows live frames until `markDone()`;
+    BOUNDED (`maxEvents`) dropping oldest `token`s but never structural frames;
+    no-missed-wakeup waiter. 5 tests. This is the resume + backpressure core the
+    runner + pump build on.
+  - ↳ PENDING: the runner itself (drive `handleChatMessage`/grounded generation,
+    emit frames to a buffer, persist once on completion) + the session-scoped
+    `turnKey` registry.
 - [ ] **P1.3** Connection-as-subscriber: SSE writer that subscribes to a runner buffer
   and writes frames. Streaming headers set (`text/event-stream`, `no-cache`,
   `X-Accel-Buffering: no`). Test: headers + a full happy-path stream.

@@ -24,6 +24,7 @@ import {
   type ViewerStepKind,
 } from "./toolCatalog.js";
 import { toOpenAiTools, type OpenAiFunctionTool } from "./zodToJsonSchema.js";
+import { consumeChatCompletionStream } from "./chatCompletionStream.js";
 import { buildGroundedSystem } from "./prompts/grounded.js";
 import { buildToolNotes } from "./prompts/toolNotes.js";
 import { snippetHeader } from "./prompts/fragments.js";
@@ -551,6 +552,15 @@ export async function callGroundedLlm(
   toolNotes?: string | null,
   /** agentic-tool-loop — bounded server-tool loop controller (chat path only). */
   serverToolLoop?: ServerToolLoop,
+  /**
+   * chat-response-streaming P1.1 — when present, the upstream completion is
+   * requested with `stream: true` and each content delta is re-emitted via
+   * `onToken` (the TurnRunner turns these into `token` SSE frames). Absent →
+   * today's non-streaming JSON dispatch, byte-identical. A streaming-requested
+   * provider that returns non-SSE falls back to JSON parsing (onToken just never
+   * fires) so the transport stays provider-agnostic.
+   */
+  stream?: { onToken: (delta: string) => void },
 ): Promise<{ answer: string; toolCalls: RawToolCall[]; toolActivity: ToolActivity[]; serverToolFailures: ToolFailure[]; truncated: boolean }> {
   const system = buildGroundedSystem({ extraction, skillKnowledge, structuredContext, toolNotes });
 
@@ -609,6 +619,9 @@ export async function callGroundedLlm(
       requestBody.tools = tools;
       if (tools.length > 0) requestBody.tool_choice = "auto";
     }
+    // chat-response-streaming P1.1 — ask the provider to stream when a caller
+    // wants live tokens. The request is otherwise identical.
+    if (stream) requestBody.stream = true;
     const response = await llmClient.forward("/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -617,6 +630,14 @@ export async function callGroundedLlm(
     if (!response.ok) {
       const text = await response.text().catch(() => "<unreadable>");
       throw new Error(`grounded llm call failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`);
+    }
+    // Streaming path: consume SSE deltas, re-emitting each as `onToken`. We only
+    // take this branch when the provider actually returned an event-stream — a
+    // provider that ignored `stream:true` and returned JSON falls through to the
+    // unchanged JSON parse below (graceful, provider-agnostic fallback).
+    if (stream && (response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      const streamed = await consumeChatCompletionStream(response, { onText: stream.onToken });
+      return { rawAnswer: streamed.rawAnswer, toolCalls: streamed.toolCalls, finishReason: streamed.finishReason };
     }
     const payload = (await response.json()) as {
       choices?: Array<{

@@ -209,3 +209,70 @@ describe("callGroundedLlm completion bounds (harden-citation-emission)", () => {
     expect((res as { truncated?: boolean }).truncated).toBe(true);
   });
 });
+
+describe("callGroundedLlm streaming (chat-response-streaming P1.1)", () => {
+  const SSE_HEADERS = { "content-type": "text/event-stream" };
+  const frame = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`;
+
+  it("sends stream:true and re-emits each content delta via onToken; assembles the same answer", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const llmClient: LlmClient = {
+      forward: vi.fn(async (_path: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        bodies.push(body);
+        const sse =
+          frame({ choices: [{ delta: { content: "Hello " }, index: 0 }] }) +
+          frame({ choices: [{ delta: { content: "world." }, index: 0 }] }) +
+          frame({ choices: [{ delta: {}, finish_reason: "stop", index: 0 }] }) +
+          "data: [DONE]\n\n";
+        return new Response(sse, { status: 200, headers: SSE_HEADERS });
+      }),
+    };
+    const tokens: string[] = [];
+    const res = await callGroundedLlm(
+      "q", [], llmClient, "test-model",
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      { onToken: (d) => tokens.push(d) },
+    );
+    expect(bodies[0].stream).toBe(true);
+    expect(tokens).toEqual(["Hello ", "world."]);
+    expect(res.answer).toBe("Hello world.");
+  });
+
+  it("falls back to JSON parsing when a streaming-requested provider returns non-SSE", async () => {
+    // Provider ignored stream:true and returned ordinary JSON — the dispatch must
+    // still parse it (graceful fallback), and onToken simply never fires.
+    const tokens: string[] = [];
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () =>
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: "Plain JSON answer." }, finish_reason: "stop" }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    };
+    const res = await callGroundedLlm(
+      "q", [], llmClient, "test-model",
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      { onToken: (d) => tokens.push(d) },
+    );
+    expect(res.answer).toBe("Plain JSON answer.");
+    expect(tokens).toEqual([]);
+  });
+
+  it("does NOT send stream:true when no streaming option is given (JSON path unchanged)", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const llmClient: LlmClient = {
+      forward: vi.fn(async (_path: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "plain" }, finish_reason: "stop" }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    };
+    const res = await callGroundedLlm("q", [], llmClient, "test-model");
+    expect(bodies[0]).not.toHaveProperty("stream");
+    expect(res.answer).toBe("plain");
+  });
+});
