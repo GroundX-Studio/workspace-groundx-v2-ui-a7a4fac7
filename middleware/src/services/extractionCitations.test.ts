@@ -81,7 +81,14 @@ function mkClients(
       }
       return jsonOk({
         search: {
-          results: [{ documentId: "d1", text: "general account and service information" }],
+          results: [
+            {
+              documentId: "d1",
+              text: "general account and service information",
+              fileName: "utility-bill.pdf",
+              sourceUrl: "https://files.example/d1.pdf",
+            },
+          ],
         },
       });
     }),
@@ -132,6 +139,10 @@ describe("extraction-grounded citations (user-visible)", () => {
     });
     expect(reply.citations[0].bbox).toMatchObject({ x: 0.1, y: 0.2, w: 0.2, h: 0.04 });
     expect(reply.citations[0].confidence).toBeGreaterThan(0);
+    // inline-footnote-citations follow-up — an EXTRACTION-form (field) citation also
+    // labels by GroundX's fileName, resolved from the matching snippet by documentId.
+    expect(reply.citations[0].fileName).toBe("utility-bill.pdf");
+    expect(reply.citations[0].sourceUrl).toBe("https://files.example/d1.pdf");
     // And the user gets the "Show all sources" affordance.
     expect(reply.suggestedActions.find((a) => a.key === "show-source")).toBeDefined();
   });
