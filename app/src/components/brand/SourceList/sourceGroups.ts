@@ -23,7 +23,13 @@ export interface SourceGroup {
   entries: SourceEntry[];
 }
 
-/** The citation's primary page (legacy alias, else the first region's page). */
+/**
+ * The citation's primary page (legacy alias, else the first region's page). A
+ * citation that spans multiple pages (a multi-region extraction citation) is
+ * LABELED by this primary page only — but never-drop still holds: its other
+ * regions ride along on the entry's `citation`, so clicking the page row lights
+ * EVERY region the citation supports (the label is first-page, the action is all).
+ */
 function pageOf(c: Citation): number | undefined {
   return c.page ?? citationRegions(c)[0]?.page;
 }

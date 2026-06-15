@@ -204,6 +204,42 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     expect(chips[0]).toHaveAttribute("data-citation-doc", "utility-bill-2026-04");
   });
 
+  it("renders an inline [N] footnote marker inside a section body that carries one (report inline-marker render path)", async () => {
+    // inline-footnote-citations — a report section body routes through
+    // `groundedAnswerOverScope`, which applies the `[N]` citation contract, so a
+    // LIVE section body can contain inline markers. The fixtures above are all
+    // marker-free, so this is the one test that proves the SmartReportRender →
+    // `<Markdown citations>` wiring turns a `[N]` in a section body into a
+    // clickable footnote-variant CiteChip (not just a SourceList pill).
+    const reportWithMarker: RenderedReport = {
+      ...UTILITY_REPORT,
+      sections: [
+        {
+          sectionId: "billing_summary",
+          name: "billing_summary",
+          renderAs: "PARAGRAPH",
+          result: {
+            sectionId: "billing_summary",
+            body: "The April 2026 statement totals **$18,742.16**[1].",
+            citations: [
+              { documentId: "utility-bill-2026-04", page: 1, snippet: "Total Amount Due", tier: "exact" },
+            ],
+          },
+        },
+      ],
+    };
+    vi.mocked(renderReport).mockResolvedValue({ gated: false, report: reportWithMarker });
+
+    renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+
+    // A single-citation section renders BOTH the inline footnote marker (from the
+    // `[1]` in the body) and a SourceList pill, so disambiguate by `data-variant`.
+    const chips = await screen.findAllByTestId("cite-chip-1");
+    const marker = chips.find((c) => c.getAttribute("data-variant") === "footnote");
+    expect(marker, "section body [1] should render a footnote-variant CiteChip").toBeTruthy();
+    expect(marker).toHaveAttribute("data-citation-doc", "utility-bill-2026-04");
+  });
+
   it("locks export/Save for an anonymous viewer (preview-only sample)", async () => {
     renderWithTemplate(<SmartReportRender role="anonymous" scope={UTILITY_SCOPE} />);
     expect(await screen.findByTestId("smart-report-preview-badge")).toBeInTheDocument();

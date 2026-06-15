@@ -16,8 +16,7 @@ import { useState, type FC } from "react";
 
 import type { Citation } from "@groundx/shared";
 
-import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
-import { citationColor } from "@/components/primitives/Markdown/citationFootnotes";
+import { CiteChip, citationColor } from "@/components/brand/CiteChip/CiteChip";
 import { FONT_SIZE_LABEL, MUTED_ON_LIGHT, NAVY } from "@/constants";
 
 import { groupSources } from "./sourceGroups";

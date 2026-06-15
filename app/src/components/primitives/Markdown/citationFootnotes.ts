@@ -13,18 +13,6 @@
  */
 import type { Citation } from "@groundx/shared";
 
-import type { CiteChipColor } from "@/components/brand/CiteChip/CiteChip";
-
-/**
- * The canonical index/confidence-keyed citation color, SHARED by the inline
- * footnote marker and the SourceList pill so a citation reads as one unit:
- * `[1]` green (primary), low-confidence coral, else cyan.
- */
-export function citationColor(index: number, c: Citation): CiteChipColor {
-  if (c.confidence != null && c.confidence < 0.5) return "coral";
-  return index === 1 ? "green" : "cyan";
-}
-
 export type FootnoteSegment =
   | { kind: "text"; value: string }
   | { kind: "marker"; index: number; citationIndex: number };

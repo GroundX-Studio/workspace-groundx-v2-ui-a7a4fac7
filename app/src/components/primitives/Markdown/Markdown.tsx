@@ -26,8 +26,7 @@ import remarkGfm from "remark-gfm";
 
 import type { Citation } from "@groundx/shared";
 
-import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
-import { citationColor } from "./citationFootnotes";
+import { CiteChip, citationColor } from "@/components/brand/CiteChip/CiteChip";
 import { remarkCitationMarkers } from "./remarkCitationMarkers";
 
 import {

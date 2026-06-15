@@ -20,6 +20,21 @@ import type { Citation } from "@/types/onboarding";
 export type CiteChipColor = "cyan" | "coral" | "green";
 
 /**
+ * inline-footnote-citations — the canonical index/confidence-keyed citation color,
+ * SHARED by the inline footnote marker and the `SourceList` pill so a citation
+ * reads as one unit: `[1]` green (primary), low-confidence coral, else cyan.
+ *
+ * Lives here (with `CiteChip`) because it is a citation-color concern: both the
+ * `Markdown` footnote override and the `brand/SourceList` consume it, and housing
+ * it here keeps the color rule one-directional (both depend on `brand/CiteChip`)
+ * rather than coupling `brand` to a helper in `primitives/Markdown`.
+ */
+export function citationColor(index: number, c: Citation): CiteChipColor {
+  if (c.confidence != null && c.confidence < 0.5) return "coral";
+  return index === 1 ? "green" : "cyan";
+}
+
+/**
  * inline-footnote-citations Phase A — `pill` is the standalone badge (today's
  * default, kept for back-compat); `footnote` is a small inline superscript `[N]`
  * marker that sits in the text flow. Both share the SAME click behavior,
