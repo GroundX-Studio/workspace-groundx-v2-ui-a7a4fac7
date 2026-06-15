@@ -54,6 +54,7 @@ import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
 import type { ContentScope, NormalizedBbox, WidgetRole } from "@groundx/shared";
 import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity";
 import { containContentRect, overlayPxRect } from "./overlayGeometry";
+import { mergeAdjacentRegions } from "./mergeRegions";
 import { ZOOM_MIN, ZOOM_MAX, clampPan, stepZoom, zoomAtPoint, type Vec2 } from "./zoomPan";
 import {
   BORDER,
@@ -113,12 +114,25 @@ export interface PdfViewerWidgetProps {
    *   - `exact`      → solid (tight) word-level box,
    *   - `paraphrase` → translucent, dashed chunk-region overlay (the
    *                    lower-confidence visual),
-   *   - `ambient`    → NO inline span (source chip only) — the overlay
-   *                    is suppressed even when a `highlightBbox` is present.
+   *   - `ambient`    → a whole-page "unconfirmed" marker (when the bbox spans
+   *                    the page) or a faint soft region (chunk-level ambient).
    * Absent → the default solid box (back-compat with pre-WF-06b
    * scenario/citation fixtures that carry a bbox but no tier).
    */
   highlightTier?: import("@/types/onboarding").CitationTier;
+  /**
+   * multi-region-citations P2.1 — ALL of a clicked/auto-highlighted citation's
+   * proof regions, each with its OWN tier. The overlay draws every region whose
+   * `page` matches the active page, each at its tier's precision (exact tight
+   * box / paraphrase chunk box / ambient page-marker). Supersedes the single
+   * `highlightBbox` when present; `highlightBbox`+`highlightTier` remain the
+   * legacy single-region fallback.
+   */
+  highlightRegions?: Array<{
+    page: number;
+    bbox: NormalizedBbox;
+    tier?: import("@/types/onboarding").CitationTier;
+  }>;
   /**
    * WF-01 C5 (2026-05-28). When true, paint a top→bottom sweeping
    * scan-line over the active page image. Used by F2 UnderstandView
@@ -154,6 +168,7 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   targetPage,
   highlightBbox,
   highlightTier,
+  highlightRegions,
   showScanAnimation = false,
   litRegions,
 }) => {
@@ -225,7 +240,23 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   // chunk-region ("approximate source area") rather than nothing — for this
   // corpus the backend frequently returns ambient, so suppressing it made
   // citations look broken (a click/auto-jump that highlighted nothing).
-  const shouldRenderHighlight = Boolean(highlightBbox) && activePage === highlightPage;
+  // multi-region-citations P2.1 — the regions to paint for the active citation:
+  // every explicit `highlightRegions` entry, or (legacy) the single
+  // `highlightBbox` as one region on the target/active page. Each renders at its
+  // OWN tier; only the active page's regions are drawn.
+  const effectiveHighlightRegions =
+    highlightRegions && highlightRegions.length > 0
+      ? highlightRegions
+      : highlightBbox
+        ? [{ page: highlightPage, bbox: highlightBbox, tier: highlightTier }]
+        : [];
+  // Combine overlapping/adjacent same-tier regions so a "show every occurrence"
+  // citation (dozens of duplicate/touching boxes) renders as a few clean
+  // regions; distinct occurrences stay separate. Display-only — the citation's
+  // region data is unchanged.
+  const regionsOnActivePage = mergeAdjacentRegions(
+    effectiveHighlightRegions.filter((r) => r.page === activePage),
+  );
 
   // Measure the page-image pane so the citation / lit-region overlays can be
   // positioned in PX over the ACTUAL `object-fit: contain` content rect. The
@@ -500,36 +531,69 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                 backgroundColor: WHITE,
               }}
             />
-            {shouldRenderHighlight && highlightBbox && (
-              // Cite overlay — absolute-positioned tint over the cited region.
-              // WF-06b — precision tracks the citation tier: `paraphrase`
-              // (verified, chunk-level) draws a more-translucent dashed box;
-              // `exact` (and legacy/no-tier) draws the tight solid box.
-              // `ambient` suppresses the overlay (guarded above).
-              <Box
-                data-testid="pdf-viewer-highlight"
-                data-highlight-tier={highlightTier}
-                aria-hidden
-                style={{
-                  ...overlayStyleFor(highlightBbox),
-                  // Emphasis by tier: exact (and legacy/no-tier) = tight solid
-                  // box; paraphrase = chunk-level dashed; ambient = faint dashed
-                  // "approximate source area".
-                  backgroundColor:
-                    highlightTier === "ambient"
-                      ? `${CYAN}1f`
-                      : highlightTier === "paraphrase"
-                        ? `${CYAN}33`
-                        : `${CYAN}55`,
-                  border:
-                    highlightTier === "exact" || highlightTier == null
-                      ? `2px solid ${CYAN}`
-                      : `1px dashed ${CYAN}`,
-                  borderRadius: BORDER_RADIUS_SM,
-                  pointerEvents: "none",
-                }}
-              />
-            )}
+            {/* multi-region-citations P2.1 — ONE overlay per proof region of the
+                active citation, each at its OWN tier. A whole-page `ambient`
+                region renders as a lightweight "unconfirmed" page-marker (NOT a
+                full-page wash); every other region is a tier-styled box: `exact`
+                (and legacy/no-tier) = tight solid, `paraphrase` = chunk dashed,
+                chunk-level `ambient` = faint dashed "approximate source area". */}
+            {regionsOnActivePage.map((region, idx) => {
+              const tier = region.tier;
+              // A SYNTHESIZED page-level region means "we know the page, not the
+              // exact spot" — render a lightweight page-marker, NEVER a full-page
+              // wash. It covers an unverified quote (`ambient` → "unconfirmed")
+              // and a verified-but-box-less citation (review #5 → "source on this
+              // page"). It is created as EXACTLY {0,0,1,1}; we match that exactly
+              // (not `>= 0.99`) so an organically-MERGED near-full-page box —
+              // a real multi-region highlight — is NOT mistaken for a marker.
+              const b = region.bbox;
+              const isWholePage = b.x === 0 && b.y === 0 && b.w === 1 && b.h === 1;
+              if (isWholePage) {
+                const markerLabel =
+                  tier === "ambient"
+                    ? "Unconfirmed — somewhere on this page"
+                    : "Source — on this page";
+                return (
+                  <Box
+                    key={`hl-${idx}`}
+                    data-testid="pdf-viewer-ambient-marker"
+                    data-highlight-tier={tier ?? "none"}
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      padding: "2px 8px",
+                      backgroundColor: `${CYAN}14`,
+                      borderBottom: `1px dashed ${CYAN}`,
+                      color: NAVY,
+                      fontSize: FONT_SIZE_LABEL,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {markerLabel}
+                  </Box>
+                );
+              }
+              return (
+                <Box
+                  key={`hl-${idx}`}
+                  data-testid="pdf-viewer-highlight"
+                  data-highlight-tier={tier}
+                  data-region-index={idx}
+                  aria-hidden
+                  style={{
+                    ...overlayStyleFor(region.bbox),
+                    backgroundColor:
+                      tier === "ambient" ? `${CYAN}1f` : tier === "paraphrase" ? `${CYAN}33` : `${CYAN}55`,
+                    border: tier === "exact" || tier == null ? `2px solid ${CYAN}` : `1px dashed ${CYAN}`,
+                    borderRadius: BORDER_RADIUS_SM,
+                    pointerEvents: "none",
+                  }}
+                />
+              );
+            })}
             {/* WF-01 C10 (2026-05-28). One <Box> per litRegion whose
                 page matches the currently active page. The color
                 tokens map to the same palette as the corresponding

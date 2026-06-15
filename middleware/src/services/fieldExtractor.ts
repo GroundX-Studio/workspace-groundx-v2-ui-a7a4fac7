@@ -22,6 +22,10 @@ import { logger } from "../lib/logger.js";
 import type { GroundXClient, LlmClient } from "../types.js";
 
 import { searchGroundX } from "./chatRouter.js";
+import type { GroundXSearchResult } from "./chatRouterTypes.js";
+import { verifyAndTierSnippetCitation } from "./groundedAnswer.js";
+import type { Embedder } from "./attribution.js";
+import type { WordMap } from "./citationGeometry.js";
 import { buildExtractorPrompt } from "./prompts/extractor.js";
 import type { ContentScope, ExtractFieldResult, TemplateFieldType } from "@groundx/shared";
 
@@ -64,6 +68,21 @@ export interface ExtractFieldDeps {
    * same way chatRouter handles it.
    */
   rbacFilter?: Record<string, unknown>;
+  /**
+   * unify-extract-citations — the SAME citation-verification seam the grounded
+   * chat/report paths use. The emitted citation's quote is verified against the
+   * retrieved snippets and tiered via `verifyAndTierSnippetCitation`; these are
+   * the optional embedding gate (`quoteEmbedder`/`embedThreshold`) and the
+   * word-level upgrade fetch (`wordMapFetch`), passed by the composition root.
+   * Absent → lexical-only verification (never-fail), exactly like grounded.
+   */
+  quoteEmbedder?: Embedder;
+  embedThreshold?: number;
+  wordMapFetch?: (
+    client: GroundXClient,
+    apiKey: string,
+    documentId: string,
+  ) => Promise<WordMap | null>;
 }
 
 /** Conservative cap on snippet text length the focused LLM sees. */
@@ -108,16 +127,37 @@ function coerceValue(raw: unknown, type: SchemaFieldType): string | number | boo
 // Prompt construction moved to `prompts/extractor.ts#buildExtractorPrompt`
 // (chat-architecture-hardening Task 2).
 
+/** The LLM's emitted citation, validated to a known document — pre-verification. */
+interface RawExtractionCitation {
+  documentId: string;
+  page: number;
+  quote: string;
+}
+
+interface ParsedExtraction {
+  value: string | number | boolean | null;
+  confidence: number;
+  /**
+   * The emitted citation after the trust-boundary check (documentId must be in
+   * the retrieved snippet set), BEFORE verify+tier. `null` when the model cited
+   * nothing or an unretrieved document. `extractField` runs this through the
+   * shared `verifyAndTierSnippetCitation` to produce the final tiered `Citation`.
+   */
+  rawCitation: RawExtractionCitation | null;
+}
+
 /**
  * Parse the LLM's JSON-only response. Lenient: a stray markdown fence
  * wrapper is stripped before parsing so models that ignored the
- * "no fences" instruction still produce a usable result.
+ * "no fences" instruction still produce a usable result. The emitted citation
+ * is validated (documentId in the snippet set) but NOT yet verified/tiered —
+ * that is the shared pipeline's job, applied in `extractField`.
  */
 function parseLlmOutput(
   raw: string,
   fieldType: SchemaFieldType,
   allowedDocIds: Set<string>,
-): ExtractFieldResult {
+): ParsedExtraction {
   let body = raw.trim();
   const fence = body.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
   if (fence) body = fence[1].trim();
@@ -125,28 +165,28 @@ function parseLlmOutput(
   try {
     parsed = JSON.parse(body) as typeof parsed;
   } catch {
-    return { value: null, confidence: 0, citation: null };
+    return { value: null, confidence: 0, rawCitation: null };
   }
   const value = coerceValue(parsed?.value, fieldType);
   const confidence =
     typeof parsed?.confidence === "number" && parsed.confidence >= 0 && parsed.confidence <= 1
       ? parsed.confidence
       : 0;
-  let citation: ExtractFieldResult["citation"] = null;
+  let rawCitation: RawExtractionCitation | null = null;
   const c = parsed?.citation as
     | { documentId?: unknown; page?: unknown; quote?: unknown }
     | null
     | undefined;
   if (c && typeof c === "object" && typeof c.documentId === "string" && typeof c.page === "number") {
     if (allowedDocIds.has(c.documentId)) {
-      citation = {
+      rawCitation = {
         documentId: c.documentId,
         page: c.page,
-        snippet: typeof c.quote === "string" ? c.quote : undefined,
+        quote: typeof c.quote === "string" ? c.quote : "",
       };
     }
   }
-  return { value, confidence, citation };
+  return { value, confidence, rawCitation };
 }
 
 /**
@@ -169,7 +209,7 @@ export async function extractField(
   // Search query — name + description biases GroundX to the right
   // snippets even when the user didn't word the proposal that way.
   const searchQuery = `${request.field.name}: ${request.field.description}`;
-  let snippets: Array<{ documentId: string; pageNumber?: number; text?: string; fileName?: string }> = [];
+  let snippets: GroundXSearchResult[] = [];
   try {
     const raw = await searchGroundX(
       searchQuery,
@@ -217,7 +257,15 @@ export async function extractField(
   };
   const raw = payload.choices?.[0]?.message?.content?.trim() ?? "";
   const allowedDocIds = new Set(snippets.map((s) => s.documentId));
-  const result = parseLlmOutput(raw, request.field.type, allowedDocIds);
+  const parsed = parseLlmOutput(raw, request.field.type, allowedDocIds);
+  // unify-extract-citations — verify + tier the emitted citation through the
+  // SAME pipeline chat/report use, so an Extract citation carries the same
+  // verification + precision tier as every other grounded citation. An
+  // unverifiable quote survives at `ambient`; no citation → null.
+  const citation = parsed.rawCitation
+    ? await verifyAndTierSnippetCitation(parsed.rawCitation, snippets, deps)
+    : null;
+  const result: ExtractFieldResult = { value: parsed.value, confidence: parsed.confidence, citation };
   logger.info(
     {
       extractField: {

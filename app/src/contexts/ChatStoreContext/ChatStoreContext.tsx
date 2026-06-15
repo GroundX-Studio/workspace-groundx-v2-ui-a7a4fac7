@@ -1377,6 +1377,30 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     return resolution;
   }, []);
 
+  // report-default-template — standalone setter for the active session's
+  // `reportOverlay.templateId` (the render surface's template source). The
+  // onboarding experience calls this with the seeded default for the utility
+  // scenario; `undefined` clears it (empty state). Idempotent: a no-op if the
+  // value is already what's set, so a re-render-driven call doesn't churn.
+  const setReportTemplateId = useCallback((templateId: string | undefined) => {
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      if (current.reportOverlay.templateId === templateId) return prev;
+      const nextOverlay = { ...current.reportOverlay };
+      if (templateId === undefined) delete nextOverlay.templateId;
+      else nextOverlay.templateId = templateId;
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        reportOverlay: nextOverlay,
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+  }, []);
+
   const enqueueReportProposal = useCallback(
     (proposal: Omit<import("./types").ReportSectionProposal, "id">) => {
       setState((prev) => {
@@ -1621,6 +1645,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       bbox?: NormalizedBbox;
       sourceCitationIndex?: number;
       tier?: import("@/types/onboarding").CitationTier;
+      regions?: ReadonlyArray<import("@groundx/shared").CitationSourceRegion>;
     }) => {
       setState((prev) => {
         if (!prev.activeSessionId) return prev;
@@ -1633,13 +1658,23 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
           ...(input.bbox ? { bbox: input.bbox } : {}),
           ...(input.sourceCitationIndex != null ? { sourceCitationIndex: input.sourceCitationIndex } : {}),
           ...(input.tier ? { tier: input.tier } : {}),
+          ...(input.regions && input.regions.length > 0 ? { regions: input.regions } : {}),
         };
         // Same-document case → mutate the active step in place.
         if (top != null && top.kind === "doc-viewer" && top.documentId === input.documentId) {
-          // Reference-equality short-circuit when the highlight slot
-          // would be identical (prevents render churn from rapid
-          // re-clicks on the same chip).
-          if (JSON.stringify(top.highlight) === JSON.stringify(highlight) && top.page === input.page) {
+          // Short-circuit a rapid re-click of the SAME chip (prevents render
+          // churn). The signature must distinguish DISTINCT citations: a
+          // first-region box + count proxy collides for multi-region citations
+          // (many on a tabular/list answer share the same first container box
+          // AND region count), which wrongly short-circuited the switch to a
+          // different citation and froze the highlight on the prior one. Use a
+          // compact per-region signature — cheap because `regions` are small
+          // after dedupe, and exact enough that only a true re-click matches.
+          const sig = (h?: typeof highlight) =>
+            `${h?.page}|${h?.bbox ? `${h.bbox.x},${h.bbox.y},${h.bbox.w},${h.bbox.h}` : ""}|${h?.tier ?? ""}|${(h?.regions ?? [])
+              .map((r) => `${r.page},${r.bbox.x},${r.bbox.y},${r.bbox.w},${r.bbox.h},${r.tier}`)
+              .join(";")}`;
+          if (sig(top.highlight) === sig(highlight) && top.page === input.page) {
             return prev;
           }
           const nextHistory = current.viewer.history.slice();
@@ -1860,6 +1895,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       editReportSection,
       removeReportSection,
       pinToReport,
+      setReportTemplateId,
       enqueueReportProposal,
       acceptReportProposal,
       dismissReportProposal,
@@ -1899,6 +1935,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       editReportSection,
       removeReportSection,
       pinToReport,
+      setReportTemplateId,
       enqueueReportProposal,
       acceptReportProposal,
       dismissReportProposal,

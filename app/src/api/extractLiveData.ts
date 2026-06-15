@@ -11,9 +11,9 @@
  * The three group keys map 1:1 to `SchemaCategoryDef.type`.
  */
 
-import type { Citation, ExtractedFieldValue } from "@groundx/shared";
+import { citationRegions, type Citation, type ExtractedFieldValue } from "@groundx/shared";
 
-import type { ResolvedFieldGeometry } from "@/api/fieldGeometry";
+import type { FieldRegion } from "@/api/fieldGeometry";
 import type { ExtractionSchemaDef, SchemaCategoryDef, SchemaFieldDef } from "@/types/scenarios";
 
 type Loose = Record<string, unknown>;
@@ -155,23 +155,38 @@ export function extractToValues(
  * `documentId:` prop and a regex can't tell that from an object-literal key.
  */
 export function citationsForJson(
-  citations: ReadonlyArray<{ documentId: string; page: number }> | undefined,
-): Array<{ documentId: string; page: number }> {
-  return (citations ?? []).map((c) => ({ documentId: c.documentId, page: c.page }));
+  citations: ReadonlyArray<Citation> | undefined,
+): Array<{ documentId: string; page: number | null }> {
+  // multi-region: project to the citation's primary page (first region, or the
+  // legacy alias); a regionless "location unknown" citation emits `page: null`.
+  return (citations ?? []).map((c) => ({
+    documentId: c.documentId,
+    page: c.page ?? citationRegions(c)[0]?.page ?? null,
+  }));
 }
 
 export function liveValuesToFieldValues(
   documentId: string,
   liveValues: Record<string, string | number | boolean | null>,
-  liveGeometry: ReadonlyMap<string, ResolvedFieldGeometry>,
+  liveGeometry: ReadonlyMap<string, FieldRegion[]>,
 ): Map<string, ExtractedFieldValue> {
   const map = new Map<string, ExtractedFieldValue>();
   for (const [fieldId, value] of Object.entries(liveValues)) {
-    const geo = liveGeometry.get(fieldId);
-    const citations: Citation[] =
-      geo && geo.bbox
-        ? [{ documentId, page: geo.page, bbox: geo.bbox }]
-        : [];
+    // multi-region-citations P1.3b — a field's value can appear in several
+    // chunks; carry EVERY region so the grid's source highlight lights all of
+    // them (chunk-level → `paraphrase`). The legacy page/bbox alias = region[0].
+    const regions = liveGeometry.get(fieldId) ?? [];
+    const citations: Citation[] = regions.length
+      ? [
+          {
+            documentId,
+            page: regions[0].page,
+            bbox: regions[0].bbox,
+            tier: "paraphrase",
+            regions: regions.map((r) => ({ page: r.page, bbox: r.bbox, tier: "paraphrase" as const })),
+          },
+        ]
+      : [];
     map.set(fieldId, { fieldId, value, citations });
   }
   return map;

@@ -451,6 +451,68 @@ describe("CanvasOrchestratorContext", () => {
       if (top?.kind === "doc-viewer") expect(top.highlight?.page).toBe(3);
     });
 
+    // multi-region-citations regression — clicking a DIFFERENT citation that
+    // happens to share the active citation's FIRST region box must SWITCH to it
+    // (show its regions), not be misread as a re-click of the active one and
+    // cleared. Many citations on a tabular/list answer legitimately share the
+    // same first region (the container chunk dozens of values fall inside), so
+    // the toggle must compare the WHOLE region set, not just the first box.
+    it("switches to a different citation sharing the first box but with different regions (does NOT toggle off)", () => {
+      const { result } = renderHook(
+        () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),
+        { wrapper: busWrapper },
+      );
+      act(() => result.current.store.newSession({ isOnboardingSession: true }));
+      const sharedFirst = { x: 0.095, y: 0.029, w: 0.851, h: 0.17 };
+      const citeA = {
+        kind: "highlightCitation" as const,
+        documentId: "doc-A",
+        page: 2,
+        bbox: sharedFirst,
+        tier: "paraphrase" as const,
+        regions: [
+          { page: 2, bbox: sharedFirst, tier: "paraphrase" as const },
+          { page: 2, bbox: { x: 0.21, y: 0.27, w: 0.72, h: 0.65 }, tier: "paraphrase" as const },
+        ],
+      };
+      const citeB = {
+        kind: "highlightCitation" as const,
+        documentId: "doc-A",
+        page: 2,
+        bbox: sharedFirst, // SAME first-region box as citeA…
+        tier: "paraphrase" as const,
+        regions: [
+          { page: 2, bbox: sharedFirst, tier: "paraphrase" as const },
+          // …but a DIFFERENT second region (on page 3) — this is a different citation.
+          { page: 3, bbox: { x: 0.088, y: 0.088, w: 0.406, h: 0.604 }, tier: "paraphrase" as const },
+        ],
+      };
+      const topStep = () => {
+        const s = result.current.store.state.sessions.get(result.current.store.state.activeSessionId!);
+        return s ? s.viewer.history[s.viewer.currentStep.stepIndex] : null;
+      };
+
+      act(() => result.current.bus.dispatch(citeA, "user"));
+      let top = topStep();
+      if (top?.kind === "doc-viewer") expect(top.highlight?.regions?.length).toBe(2);
+
+      // Click citeB — a DIFFERENT citation that shares citeA's first box.
+      act(() => result.current.bus.dispatch(citeB, "user"));
+      top = topStep();
+      expect(top?.kind).toBe("doc-viewer");
+      if (top?.kind === "doc-viewer") {
+        // Must have SWITCHED to citeB, not cleared.
+        expect(top.highlight).toBeDefined();
+        expect(top.highlight?.regions?.length).toBe(2);
+        expect(top.highlight?.regions?.[1]?.page).toBe(3); // citeB's distinct region
+      }
+
+      // Re-click the SAME citation (citeB) → toggles off (dismiss), unchanged.
+      act(() => result.current.bus.dispatch(citeB, "user"));
+      top = topStep();
+      if (top?.kind === "doc-viewer") expect(top.highlight).toBeUndefined();
+    });
+
     it("agent auto-highlight does NOT toggle off on an identical repeat", () => {
       const { result } = renderHook(
         () => ({ bus: useCanvasOrchestrator(), store: useChatStore() }),

@@ -11,7 +11,7 @@ import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type SyntheticEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import type { ContentScope, ExtractBody, WidgetRole } from "@groundx/shared";
+import { citationRegions, type ContentScope, type ExtractBody, type WidgetRole } from "@groundx/shared";
 
 import {
   citationsForJson,
@@ -19,7 +19,7 @@ import {
   liveValuesToFieldValues,
   workflowToSchema,
 } from "@/api/extractLiveData";
-import type { ResolvedFieldGeometry } from "@/api/fieldGeometry";
+import type { FieldRegion } from "@/api/fieldGeometry";
 import { isResolvedDocumentId } from "@/api/documentId";
 import {
   BODY_TEXT,
@@ -286,7 +286,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
   const { getDocument, getDocumentExtract } = useDocumentsContext();
   const [liveSchema, setLiveSchema] = useState<ExtractionSchemaDef | null>(null);
   const [liveValues, setLiveValues] = useState<Record<string, string | number | boolean | null>>({});
-  const [liveGeometry, setLiveGeometry] = useState<Map<string, ResolvedFieldGeometry>>(new Map());
+  const [liveGeometry, setLiveGeometry] = useState<Map<string, FieldRegion[]>>(new Map());
   // Monotonic load sequence: each scope-identity change bumps it; a resumed
   // async load from a stale scope checks the sequence before committing state,
   // so a slow prior load can't overwrite the current scope's data
@@ -328,10 +328,10 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
           queries.map(({ value, label }) => ({ value, label })),
         );
         if (isStale()) return;
-        const geoMap = new Map<string, ResolvedFieldGeometry>();
+        const geoMap = new Map<string, FieldRegion[]>();
         queries.forEach((q, i) => {
           const g = geos[i];
-          if (g) geoMap.set(q.fieldId, g);
+          if (g && g.length) geoMap.set(q.fieldId, g);
         });
         setLiveGeometry(geoMap);
       } catch {
@@ -820,6 +820,8 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
                 targetPage={activeCitation?.page ?? undefined}
                 highlightBbox={activeCitation?.bbox ?? null}
                 highlightTier={activeCitation?.tier}
+                // multi-region-citations P1.3b — light EVERY place the field value appears.
+                highlightRegions={activeCitation ? citationRegions(activeCitation) : undefined}
               />
             ) : (
               <Stack spacing={1} sx={{ p: 2 }}>

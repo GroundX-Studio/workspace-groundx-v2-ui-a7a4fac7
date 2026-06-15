@@ -280,15 +280,24 @@ export interface GroundXSearchResult {
   text?: string;
   score?: number;
   fileName?: string;
-  /** WF-03 — normalized 0-1 bbox of the cited region, read off the result. */
-  bbox?: NormalizedBbox;
+  /**
+   * WF-03 / multi-region-citations — normalized 0-1 boxes of the cited chunk's
+   * region(s) on `pageNumber`, read off the result (or resolved from the X-Ray
+   * when the result is bare). One box PER line/region, never unioned to one
+   * envelope. The snippet citation lights every box.
+   */
+  bboxes?: NormalizedBbox[];
 }
 
 // ────────────────────────────────────────────────────────────────────
 // Shared tuning constants (used by groundxSearch + ragPipeline)
 // ────────────────────────────────────────────────────────────────────
 
-export const RAG_SEARCH_LIMIT = 6;
+// Default RAG retrieval breadth — the `n` sent to GroundX for every grounded
+// query (chat · report · hybrid all route through `searchGroundX`). 20 matches
+// GroundX's own default and gives the model enough context for most queries;
+// `n` can go up to 100 and should be widened when a scope spans many documents.
+export const RAG_SEARCH_LIMIT = 20;
 export const RAG_SNIPPET_CHARS = 600;
 /**
  * Relevance floor for the zero-result retry. GroundX's default relevance
@@ -301,17 +310,19 @@ export const RAG_SNIPPET_CHARS = 600;
  */
 export const RAG_FALLBACK_RELEVANCE = Number(process.env.GROUNDX_RAG_FALLBACK_RELEVANCE ?? -100);
 /**
- * CF-06 token-budget guard. Caps the assembled snippet block fed to
- * the grounded LLM so a long document set can't blow past the context
- * window. With `RAG_SEARCH_LIMIT = 6` snippets × `RAG_SNIPPET_CHARS =
- * 600`, the natural worst case is ~3600 chars; this cap is set a hair
- * above that as a hard ceiling. When snippets exceed the cap, trailing
- * ones are dropped (the search ranking puts most-relevant first).
+ * CF-06 token-budget guard. A SAFETY ceiling on the assembled snippet
+ * block, not a working limit: deliberately set so high it never trims a
+ * realistic scope (20 snippets × 600 chars ≈ 12,000 chars worst case, and
+ * even `n` widened toward 100 stays well under it). It exists only so a
+ * pathological document set can't blow past the model's context window.
+ * When snippets DO exceed it, trailing ones are dropped (search ranking
+ * puts most-relevant first).
  *
- * Conservatively sized for ~1.2k tokens at 4 chars/token. Tune
- * upward via deps when wiring smaller-context models if cost permits.
+ * 200,000 chars ≈ 50k tokens at 4 chars/token — within current large-context
+ * models. The value is in CHARS because truncation slices chars; the 50k-token
+ * intent is the cap. Tune downward via deps only for a smaller-context model.
  */
-export const MAX_SNIPPET_BLOCK_CHARS = 4800;
+export const MAX_SNIPPET_BLOCK_CHARS = 200_000;
 
 /**
  * CF-06 refusal calibration. When the snippets don't contain the

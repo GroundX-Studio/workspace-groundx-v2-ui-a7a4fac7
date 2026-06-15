@@ -110,6 +110,26 @@ describe("ChatStoreContext", () => {
     expect(sessionB).toBeDefined();
   });
 
+  // report-default-template T6 — the standalone setter the onboarding experience
+  // uses to load the seeded default template; `undefined` clears it.
+  it("setReportTemplateId() sets the active session's reportOverlay.templateId; undefined clears it", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    act(() => {
+      result.current.newSession();
+    });
+    const overlay = () =>
+      result.current.state.sessions.get(result.current.state.activeSessionId!)!.reportOverlay;
+    expect(overlay().templateId).toBeUndefined();
+    act(() => {
+      result.current.setReportTemplateId("rt-sample-utility-bill");
+    });
+    expect(overlay().templateId).toBe("rt-sample-utility-bill");
+    act(() => {
+      result.current.setReportTemplateId(undefined);
+    });
+    expect(overlay().templateId).toBeUndefined();
+  });
+
   it("appendMessage is a no-op when no session is active", () => {
     const { result } = renderHook(() => useChatStore(), { wrapper });
     act(() => {

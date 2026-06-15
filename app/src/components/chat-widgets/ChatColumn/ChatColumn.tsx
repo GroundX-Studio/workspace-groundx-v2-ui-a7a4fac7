@@ -128,6 +128,11 @@ export const ChatColumn: FC<ChatColumnProps> = ({
   const thinkingScript = scenario?.manifest.thinkingScript;
   const experienceFileName = scenario?.documents[0]?.fileName ?? "sample.pdf";
   const experienceTitle = scenario?.manifest.hero?.title ?? scenarioId ?? "Sample";
+  // report-default-template — config-driven (NOT a hardcoded `"utility"` gate):
+  // the scenario's manifest carries the seeded default report template id; the
+  // onboarding experience loads it onto the session's reportOverlay. Scenarios
+  // without one (loan/solar) leave it undefined → empty-state default.
+  const experienceReportTemplateId = scenario?.manifest.reportTemplateId;
   const onboardingExperience = useMemo(() => {
     if (!scenarioId || !scenario) return undefined;
     return chatExperienceRegistry.byId("onboarding")?.create({
@@ -138,8 +143,9 @@ export const ChatColumn: FC<ChatColumnProps> = ({
       // useConversation). Derived here exactly as that fork did.
       fileName: experienceFileName,
       scenarioTitle: experienceTitle,
+      ...(experienceReportTemplateId ? { reportTemplateId: experienceReportTemplateId } : {}),
     });
-  }, [scenarioId, scenario, thinkingScript, experienceFileName, experienceTitle]);
+  }, [scenarioId, scenario, thinkingScript, experienceFileName, experienceTitle, experienceReportTemplateId]);
 
   // A non-onboarding session is the steady chat — the bare ConversationFlow,
   // no experience, no placeholders.

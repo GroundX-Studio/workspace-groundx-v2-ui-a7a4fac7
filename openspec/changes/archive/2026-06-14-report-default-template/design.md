@@ -43,11 +43,19 @@ THREE sections, all groundable against the real bill:
 - **charges_by_service** (TABLE) — total charges per utility service (electric /
   water / sewer / irrigation).
 - **service_accounts** (TABLE) — each metered account: meter id, utility type,
-  rate plan, usage, total charges.
+  rate plan, usage. **The per-meter "total charges" column was DROPPED at T7
+  (live-verify finding):** it is a DERIVED sum of each meter's `meter_charges[]`
+  line items — there is no extracted leaf to cite, so the citation targets the
+  meter OBJECT (a branch node), gets dropped by `verifyExtractionCitation`, and
+  `degradeSection` blanks the whole (0-citation) section. Restricting the section
+  to the four leaf fields makes every per-row citation survive (live-verified: 40
+  citations, pages 1–2). Per-service totals already live in `charges_by_service`.
 
 T1 evidence (extract of doc `c3bfff49…`): KWIK TRIP (1147), City of Windom,
 `issued_on` 2025-07-08, `period_total` 7613.20, `payment_deadline` 2025-07-30, 8
-`meters[]` (electric/water/sewer/irrigation) with per-`line_label` charges. The
+`meters[]` (electric/water/sewer/irrigation), each with leaf fields
+(`meter_id`/`utility_kind`/`rate_plan`/`usage_amount`+`usage_unit`) and a
+`meter_charges[]` line-item array (NO per-meter total leaf). The
 bill has NO balance-forward/prior-payment/payments-through fields, so
 **`account_activity` was DROPPED** (ungroundable → would render `—`) and
 **`billing_summary` trimmed** of "balance forward, payments".
@@ -121,30 +129,48 @@ sourced from the real template, not the deleted fixture). Effective rows = base
 FORKS to a new member-owned id (§C2.2) — editing the sample never writes the
 sample row.
 
-## E. Experience-driven wiring (5c) — config-carried, NOT a hardcoded scenario branch
+## E. Experience-driven wiring (5c) — RE-DERIVED against the post-`standardize-viewer-widget-shell` arch (2026-06-13)
 
 PHILOSOPHY (AGENTS.md → `real-data-rewire-gap.md`): the entry point selects the
 experience and the canvas is driven by the active experience's data — NOT a
-bespoke `if scenario === "utility"` branch in the shell. So the template id is
-**experience/scenario CONFIG**, resolved generically:
+bespoke `if scenario === "utility"` branch in the shell. The
+`standardize-viewer-widget-shell` change (now archived) BUILT this: a
+`ChatExperience` catalog (onboarding / project / workspace / scoped) composed in
+`ChatColumn.tsx` and a shared `ScopedCanvas` that mounts `SmartReportRender` for
+the `report` step kind. So the template id is **experience CONFIG**, resolved
+generically. VERIFIED current structure + the four concrete edits:
 
-- Add an optional `reportTemplateId?: string` to the scenario config
-  (`scenarioSchema` in `@groundx/shared`, the same per-experience carrier that
-  already holds `hero`/`thinkingScript`/`chatSeeds`). The UTILITY scenario's
-  config sets it to `SAMPLE_REPORT_TEMPLATE_ID`; loan/solar simply omit it.
-- The bootstrap reads `activeScenario.reportTemplateId` and, when present, calls
-  a new generic `setReportTemplateId` ChatStore action — so a scenario WITH a
-  configured template loads it and one WITHOUT gets the empty state. No scenario
-  is special-cased in code; the config is the only place utility differs. This is
-  the SAME path a future authenticated Project experience uses (it carries its
-  own `reportTemplateId`), so the base experience reuses the mechanism, not a
-  fork.
+1. **Scenario manifest carries it.** Add optional `reportTemplateId?: string` to
+   `scenarioManifestSchema` in `@groundx/shared` (the per-scenario carrier that
+   already holds `hero`/`thinkingScript`/`chatSeeds`; NOTE: it is named
+   `scenarioManifestSchema`, not `scenarioSchema`). The UTILITY scenario sets it
+   to `SAMPLE_REPORT_TEMPLATE_ID` server-side (`middleware/src/scenarios/sampleScenarios.ts`);
+   loan/solar omit it.
+2. **`setReportTemplateId` ChatStore action.** A standalone setter that writes
+   `reportOverlay.templateId` on the active session (mirrors the `pinToReport`
+   write at `ChatStoreContext.tsx` — the only writer today; onboarding isn't
+   pinning). Add to the ChatStore type + provider.
+3. **`OnboardingExperienceConfig` carries it.** Extend the config
+   (`experiences/onboarding/experience.tsx`, alongside `scenarioId`/`thinkingScript`)
+   with `reportTemplateId?: string`; the onboarding experience fires
+   `setReportTemplateId(config.reportTemplateId)` from a once-on-mount effect
+   (the same lifecycle shape as the existing `firstUserMessageSent` effect in the
+   onboarding Choreography), guarded so it runs once when the active session
+   exists.
+4. **`ChatColumn` threads it.** At the composition site
+   (`ChatColumn.tsx:131-142`, `chatExperienceRegistry.byId("onboarding").create({…})`)
+   pass `reportTemplateId: scenario.manifest.reportTemplateId` — READ FROM CONFIG,
+   no literal `"utility"` gate. A scenario WITHOUT the field → no set → empty
+   state. This is the SAME mechanism a future scoped/project experience uses (it
+   carries its own template id, resolved from the scope/project), so the base
+   experience reuses the path, not a fork.
 
-AS-BUILT (from `report-empty-state`): the pin path ALREADY writes
-`reportOverlay.templateId`, and the render ALREADY has a `templateId`-change
-re-render effect — so the re-trigger concern is closed and a late set is picked
-up. `setReportTemplateId` is a standalone setter (onboarding isn't pinning).
-Steady-mode with no configured/selected template → empty state.
+AS-BUILT (from `report-empty-state`, still present): the pin path writes
+`reportOverlay.templateId`, and `SmartReportRender` has a `templateId`-change
+re-render effect — so a late set from the mount effect is picked up (no
+stale-empty). Onboarding sessions are NON-scope-keyed; scope-keyed (steady)
+sessions get the empty state until the deferred base flow resolves a template
+from their scope.
 RESET: `reportOverlay.templateId` is a field in the ALREADY-cleared ChatStore
 namespace — likely no new clearing code; ADD a reset test (touch
 `resetExperience.ts` only if the test shows a gap; `feedback_debug_reset_exhaustive`).
@@ -155,9 +181,10 @@ namespace — likely no new clearing code; ADD a reset test (touch
 state and DELETED two that need rendered content (the edit-§N hand-off ~1219 and
 the Extract→Report scope-content ~1254). Once §E wires utility → `templateId`,
 utility Report renders the seeded sections again, so this change RE-CREATES them
-— but asserting the NEW section names: **billing summary / charges by service /
-service accounts / account activity**. The old `charge breakdown` / `anomalies`
-/ `recommendation` sections were DROPPED (§B) — no restored test may assert them.
+— but asserting the THREE T1-verified section names: **billing summary / charges
+by service / service accounts**. `account activity` was DROPPED at T1
+(ungroundable), and the old `charge breakdown` / `anomalies` / `recommendation`
+sections were DROPPED (§B) — no restored test may assert any of them.
 Section bodies are cited from the live render (no hardcoded numbers).
 `billing_summary` survives as the first section, so the edit-§N
 hand-off's `report-section-edit-billing_summary` →

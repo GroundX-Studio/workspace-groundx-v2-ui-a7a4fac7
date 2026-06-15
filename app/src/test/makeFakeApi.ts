@@ -1,7 +1,66 @@
 import { vi } from "vitest";
 
 import type { ContentScope } from "@groundx/shared";
+import { SAMPLE_REPORT_TEMPLATE_ID } from "@groundx/shared";
 import { realApi, type Api } from "@/api/client";
+
+/**
+ * report-default-template — the seeded default report template's three sections
+ * (the T1-verified names: billing summary / charges by service / service
+ * accounts). ONE source for both the `renderReport` seam (rendered bodies +
+ * citations) and the `getReportTemplate` seam (the builder's editable section
+ * definitions), so the section ids the OnboardingShell content tests + the
+ * edit-§N hand-off assert stay consistent across both fakes. This is test infra
+ * (a deterministic test double), NOT a client fixture — the report-empty-state
+ * no-fixture guard stays green.
+ */
+const SAMPLE_REPORT_SECTIONS = [
+  {
+    id: "billing_summary",
+    renderAs: "PARAGRAPH" as const,
+    question: "Summarize the billing statement.",
+    body: "KWIK TRIP (1147) — City of Windom, statement 2025-07-08, total due **$7,613.20**, due 2025-07-30.",
+  },
+  {
+    id: "charges_by_service",
+    renderAs: "TABLE" as const,
+    question: "Break down the charges by service.",
+    body: "| Service | Amount |\n| --- | --- |\n| Electric | $5,193.30 |",
+  },
+  {
+    id: "service_accounts",
+    // Leaf-citable fields only — mirrors the reframed seed (the per-meter total
+    // is a derived sum with no extracted leaf, so it's omitted; per-service
+    // totals live in charges_by_service).
+    renderAs: "TABLE" as const,
+    question: "List each metered service account: meter id, utility type, rate plan, and usage.",
+    body: "| Meter ID | Utility type | Rate plan | Usage |\n| --- | --- | --- | --- |\n| 70182657 | electric | Industrial Electric | 60,960 kWh |",
+  },
+];
+
+const SAMPLE_REPORT_CITE = [{ documentId: "c3bfff49", page: 1, tier: "exact" as const }];
+
+/**
+ * A `RenderedReport` over the seeded default template, scoped to `scope` —
+ * the shape the live render endpoint returns for the utility onboarding path.
+ * Exported so a test that records the render `scope` (Extract→Report scope-carry)
+ * can return real content without duplicating the section bodies.
+ */
+export const sampleSeededReport = (scope: ContentScope) => ({
+  reportId: "rr-sample-utility-bill",
+  templateId: SAMPLE_REPORT_TEMPLATE_ID,
+  scope,
+  status: "complete" as const,
+  previewOnly: true,
+  resolvedVariables: {},
+  exportFormats: ["pdf", "md", "link"],
+  sections: SAMPLE_REPORT_SECTIONS.map((s) => ({
+    sectionId: s.id,
+    name: s.id,
+    renderAs: s.renderAs,
+    result: { sectionId: s.id, body: s.body, citations: SAMPLE_REPORT_CITE },
+  })),
+});
 
 /**
  * One injected test fake for the whole `Api` surface.
@@ -105,8 +164,9 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
     return { value: null, confidence: 0, citation: null };
   }
   if (name === "fetchFieldGeometry") {
+    // multi-region P1.3b — returns the field's region set ([] = no geometry).
     const fields = Array.isArray(args[1]) ? args[1] : [];
-    return fields.map(() => null);
+    return fields.map(() => []);
   }
   if (name === "saveTemplate") {
     const input = args[0] as { id?: string; name?: string } | undefined;
@@ -119,10 +179,14 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
   if (name === "renderReport") {
     const input = args[0] as { templateId?: string; scope?: ContentScope } | undefined;
     const scope = input?.scope ?? { type: "documents", documentIds: [] };
-    // No client-side fixture (the locked no-seed decision). The fake returns the
-    // graceful no-template/empty render. `report-default-template` extends this
-    // to return the seeded template's sections when `templateId` is the seeded
-    // default (so the utility onboarding render shows real content).
+    // report-default-template — when the SEEDED default template is rendered
+    // (the utility onboarding path), the fake mirrors the live render: the three
+    // T1-verified sections, each with a cited body over the sample invoice. This
+    // is test infra (not a client fixture), so the no-fixture guard stays green.
+    // Any other id → the graceful no-template/empty render (the new-customer norm).
+    if (input?.templateId === SAMPLE_REPORT_TEMPLATE_ID) {
+      return { gated: false, report: sampleSeededReport(scope) };
+    }
     return {
       gated: false,
       report: {
@@ -144,6 +208,32 @@ const defaultApiResult = (path: string[], args: unknown[]): unknown => {
       name: input?.name ?? "Test report",
       updatedAt: "2026-06-03T00:00:00Z",
     };
+  }
+  if (name === "getReportTemplate") {
+    // report-default-template — the builder's section-load seam. The seeded
+    // default template returns its three editable sections (NOT owned → the
+    // builder forks-on-edit); any other id → null (no template / new-customer
+    // norm). Section ids mirror `sampleSeededReport` so the edit-§N hand-off's
+    // `report-section-edit-billing_summary` → `report-builder-editor-billing_summary`
+    // round-trip resolves.
+    const id = args[0] as string | undefined;
+    if (id === SAMPLE_REPORT_TEMPLATE_ID) {
+      return {
+        template: {
+          id: SAMPLE_REPORT_TEMPLATE_ID,
+          name: "Utility Bill Summary",
+          sections: SAMPLE_REPORT_SECTIONS.map((s) => ({
+            id: s.id,
+            name: s.id,
+            renderAs: s.renderAs,
+            question: s.question,
+            variables: [],
+          })),
+        },
+        owned: false,
+      };
+    }
+    return null;
   }
   if (name.startsWith("list") || name.startsWith("search")) {
     if (path.includes("groundxBuckets") || path.includes("partnerBuckets")) return { buckets: [] };

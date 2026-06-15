@@ -171,6 +171,9 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({
           targetPage: step.highlight?.page ?? step.page ?? null,
           highlightBbox: step.highlight?.bbox ?? null,
           highlightTier: step.highlight?.tier,
+          // multi-region-citations P2.1 — the clicked citation's every region,
+          // each at its own tier (the viewer lights all on the matching page).
+          highlightRegions: step.highlight?.regions ? [...step.highlight.regions] : undefined,
           // "Show all sources" — every citation region, drawn at once.
           litRegions: step.litRegions ? [...step.litRegions] : undefined,
           // WF-01 C5 — the F2 "reading" sweep. Only the F2 doc-viewer step

@@ -372,6 +372,110 @@ describe("PdfViewerWidget", () => {
       expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
     });
 
+    // multi-region-citations P2.1 — a citation with several proof regions lights
+    // EVERY region on the active page, each at its own tier.
+    it("renders one overlay PER region of a multi-region citation, each at its tier", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(
+        <PdfViewerWidget
+          scope={docScope("doc-1")}
+          role="member"
+          targetPage={1}
+          highlightRegions={[
+            { page: 1, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 }, tier: "exact" },
+            { page: 1, bbox: { x: 0.1, y: 0.5, w: 0.3, h: 0.04 }, tier: "paraphrase" },
+            { page: 2, bbox: { x: 0.1, y: 0.1, w: 0.3, h: 0.04 }, tier: "paraphrase" }, // off active page
+          ]}
+        />,
+        { wrapper },
+      );
+      const overlays = await screen.findAllByTestId("pdf-viewer-highlight");
+      // Only the two page-1 regions render (the page-2 one is inert).
+      expect(overlays).toHaveLength(2);
+      const tiers = overlays.map((o) => o.getAttribute("data-highlight-tier")).sort();
+      expect(tiers).toEqual(["exact", "paraphrase"]);
+      // The exact region is a solid box; the paraphrase region is dashed.
+      const exact = overlays.find((o) => o.getAttribute("data-highlight-tier") === "exact")!;
+      const para = overlays.find((o) => o.getAttribute("data-highlight-tier") === "paraphrase")!;
+      expect(exact.getAttribute("style") ?? "").toMatch(/border:\s*2px solid/);
+      expect(para.getAttribute("style") ?? "").toMatch(/border:\s*1px dashed/);
+    });
+
+    // review #8 — a whole-page `ambient` region is an "unconfirmed" PAGE MARKER,
+    // NOT a full-page solid wash (which would read as a bug).
+    it("renders a whole-page ambient region as a page-marker, not a full-page highlight box", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(
+        <PdfViewerWidget
+          scope={docScope("doc-1")}
+          role="member"
+          targetPage={1}
+          highlightRegions={[{ page: 1, bbox: { x: 0, y: 0, w: 1, h: 1 }, tier: "ambient" }]}
+        />,
+        { wrapper },
+      );
+      const marker = await screen.findByTestId("pdf-viewer-ambient-marker");
+      expect(marker.textContent).toMatch(/unconfirmed/i);
+      // It must NOT render as a full-page tinted highlight box.
+      expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
+    });
+
+    // review #5 — a VERIFIED (non-ambient) citation that resolved only to a
+    // whole-page box still renders as a page-marker, NOT a full-page wash.
+    it("renders a whole-page NON-ambient region as a 'source on this page' marker, not a wash", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(
+        <PdfViewerWidget
+          scope={docScope("doc-1")}
+          role="member"
+          targetPage={1}
+          highlightRegions={[{ page: 1, bbox: { x: 0, y: 0, w: 1, h: 1 }, tier: "paraphrase" }]}
+        />,
+        { wrapper },
+      );
+      const marker = await screen.findByTestId("pdf-viewer-ambient-marker");
+      expect(marker.textContent).toMatch(/source.*this page/i);
+      expect(marker.getAttribute("data-highlight-tier")).toBe("paraphrase");
+      expect(screen.queryByTestId("pdf-viewer-highlight")).not.toBeInTheDocument();
+    });
+
+    // review #3 (pass 3) — an organically-MERGED near-full-page box (NOT the
+    // synthesized {0,0,1,1} marker) must render as a real highlight, not collapse
+    // into a page-marker. Only the exact synthesized box is a marker.
+    it("renders a near-full-page (merged) box as a highlight, not a page-marker", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(
+        <PdfViewerWidget
+          scope={docScope("doc-1")}
+          role="member"
+          targetPage={1}
+          highlightRegions={[{ page: 1, bbox: { x: 0.01, y: 0.01, w: 0.98, h: 0.98 }, tier: "paraphrase" }]}
+        />,
+        { wrapper },
+      );
+      const overlay = await screen.findByTestId("pdf-viewer-highlight");
+      expect(overlay.getAttribute("data-highlight-tier")).toBe("paraphrase");
+      expect(screen.queryByTestId("pdf-viewer-ambient-marker")).not.toBeInTheDocument();
+    });
+
+    // Back-compat: a legacy single `highlightBbox` still renders exactly one box.
+    it("renders the legacy single highlightBbox as one region when no highlightRegions are given", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      render(
+        <PdfViewerWidget
+          scope={docScope("doc-1")}
+          role="member"
+          targetPage={1}
+          highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
+          highlightTier="paraphrase"
+        />,
+        { wrapper },
+      );
+      const overlays = await screen.findAllByTestId("pdf-viewer-highlight");
+      expect(overlays).toHaveLength(1);
+      expect(overlays[0].getAttribute("data-highlight-tier")).toBe("paraphrase");
+    });
+
     it("thumb clicks still update activePage after a controlled targetPage mount (no lock-out)", async () => {
       getXrayMock.mockResolvedValue(fakeXray);
       const user = (await import("@testing-library/user-event")).default.setup();

@@ -32,13 +32,17 @@ export type AuthState = "anonymous" | "signed-in";
 export type { ContentScope, ScopeFilter } from "@groundx/shared";
 
 /**
- * WF-06 / WF-06b — graduated source-attribution precision.
+ * WF-06 / WF-06b — graduated source-attribution precision (PER region,
+ * multi-region-citations).
  *   exact      verified verbatim quote + atom box → tight word-level highlight
- *   paraphrase verified quote → chunk-region highlight (translucent, lower-confidence)
- *   ambient    unverified / retrieved-only → source chip, no inline span
- * The middleware emits `paraphrase`/`ambient` today; `exact` is dormant
- * until WF-05 1b's `-118-map` atom resolver lands. The render handles all
- * three regardless, so `exact` lights up automatically once it ships.
+ *   paraphrase verified quote / located value → chunk-region highlight (translucent)
+ *   ambient    location uncertain (NOT truth uncertain) — two honest forms:
+ *              (a) an unverified QUOTE → a whole-PAGE marker ("unconfirmed");
+ *              (b) a validated-but-unlocatable extraction VALUE → a label-located
+ *                  region, or a REGIONLESS source chip when even that fails.
+ *              A real grounding always shows SOMETHING — never silently vanishes.
+ * Mirrors the shared `citationTierSchema`. The render handles all three; the
+ * page-marker / regionless rendering lands in multi-region-citations P2.
  */
 // `Citation`, `CitationTier`, and `NormalizedBbox` now live in the shared wire
 // contract (`@groundx/shared`, schema-as-source-of-truth). Re-exported here so

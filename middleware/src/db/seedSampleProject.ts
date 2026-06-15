@@ -112,10 +112,17 @@ const SAMPLE_REPORT_TEMPLATE: ReportTemplate = {
       id: "service_accounts",
       name: "service_accounts",
       renderAs: "TABLE",
+      // Leaf-citable fields ONLY (meter id / utility type / rate plan / usage):
+      // each is an extracted leaf on the `meters[]` rows, so the per-row
+      // citations survive validation. The per-meter TOTAL is deliberately
+      // omitted — it is a derived sum of each meter's `meter_charges[]` line
+      // items (no extracted leaf to cite → the citation would target the meter
+      // object, a branch node, and get dropped, blanking the section). Per-
+      // service totals already live in `charges_by_service`.
       question:
-        "List each metered service account on the bill: the meter id, the utility " +
-        "type, the rate plan, the usage (with its unit), and the total charges for " +
-        "that meter.",
+        "List each metered service account on the bill. For each meter, give the " +
+        "meter id, the utility type, the rate plan, and the usage with its unit — " +
+        "exactly as written on the bill.",
       variables: [],
     },
   ],

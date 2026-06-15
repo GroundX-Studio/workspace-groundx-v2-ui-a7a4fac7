@@ -11,6 +11,8 @@
  * source); `scripts/scenarios/<id>.json` keeps only the seed-time file mapping
  * (`documents[].filePath`).
  */
+import { SAMPLE_REPORT_TEMPLATE_ID } from "@groundx/shared";
+
 import type { ScenarioManifest } from "./types.js";
 
 export interface SampleScenarioConfig {
@@ -25,6 +27,9 @@ export const SAMPLE_SCENARIOS: readonly SampleScenarioConfig[] = [
     order: 1,
     manifest: {
       id: "utility",
+      // report-default-template — the utility scenario loads the seeded default
+      // report template on its Report surface (loan/solar omit it → empty state).
+      reportTemplateId: SAMPLE_REPORT_TEMPLATE_ID,
       hero: {
         title: "Utility Bill",
         shortDesc: "a single billing statement with 8 meters and 56 charges across 3 pages",

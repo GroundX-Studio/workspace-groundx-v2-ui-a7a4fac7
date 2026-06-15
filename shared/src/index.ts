@@ -52,10 +52,15 @@ export class ApiError extends Error {
 }
 
 /**
- * WF-06b — graduated source-attribution precision.
+ * WF-06b — graduated source-attribution precision (PER region, multi-region-citations).
  *   exact      verified verbatim quote + atom box → word-level highlight
- *   paraphrase verified quote → chunk-region highlight (translucent)
- *   ambient    unverified / retrieved-only → source chip, no inline span
+ *   paraphrase verified quote / located value → chunk-region highlight (translucent)
+ *   ambient    location uncertain (NOT truth uncertain) — two honest forms:
+ *              (a) an unverified QUOTE → a whole-PAGE marker ("unconfirmed");
+ *              (b) a validated-but-unlocatable extraction VALUE → a label-located
+ *                  region, or a REGIONLESS source chip when even that fails.
+ *              Never "no inline span by default" — a real grounding always shows
+ *              SOMETHING (page marker or chip), never silently vanishes.
  */
 export const citationTierSchema = z.enum(["exact", "paraphrase", "ambient"]);
 export type CitationTier = z.infer<typeof citationTierSchema>;
@@ -70,21 +75,49 @@ export const normalizedBboxSchema = z.object({
 export type NormalizedBbox = z.infer<typeof normalizedBboxSchema>;
 
 /**
+ * ONE on-page proof location supporting a citation, carrying its OWN precision
+ * `tier` (multi-region-citations). A citation can have several — every place a
+ * cited value/quote appears, each at its own precision. Distinct from the
+ * color-keyed overlay `CitationRegion` below, which is a RENDER concept (the
+ * "show all sources" litRegions palette); this is the canonical DATA shape on a
+ * `Citation`. The front end maps these proof regions onto the overlay at render.
+ */
+export const citationSourceRegionSchema = z.object({
+  /** 1-indexed page number this region sits on. */
+  page: z.number(),
+  /** Normalized 0-1 page-relative box. */
+  bbox: normalizedBboxSchema,
+  /** Precision tier of THIS region (exact word-box / paraphrase chunk / ambient page). */
+  tier: citationTierSchema,
+});
+export type CitationSourceRegion = z.infer<typeof citationSourceRegionSchema>;
+
+/**
  * A source citation attached to an answer/field. The single canonical shape
  * across the app, the middleware wire, and the persisted `citations_json`.
+ *
+ * multi-region-citations: `regions` is the canonical multi-region proof shape;
+ * the legacy single `page`/`bbox`/`tier` are RETAINED as a derived first-region
+ * alias for the migration window (`parseCitations` keeps both in sync —
+ * producers dual-write the first-region fields). `page` is OPTIONAL: the one
+ * permitted pageless case (a validated-but-unlocatable extraction value,
+ * review #8) survives as a regionless source chip ("location unknown") rather
+ * than being dropped. Every other citation carries a page (its first region's).
  */
 export const citationSchema = z.object({
-  /** Source document id. */
+  /** Source document id (the trust anchor — always required). */
   documentId: z.string(),
-  /** 1-indexed page number. */
-  page: z.number(),
-  /** Source region on the page (normalized 0-1). */
+  /** All on-page proof locations, each with its own tier (canonical shape). */
+  regions: z.array(citationSourceRegionSchema).optional(),
+  /** Legacy first-region alias: 1-indexed page number (absent only for the regionless pageless case). */
+  page: z.number().optional(),
+  /** Legacy first-region alias: source region on the page (normalized 0-1). */
   bbox: normalizedBboxSchema.optional(),
   /** Snippet text shown in the peek/tooltip. */
   snippet: z.string().optional(),
   /** Confidence [0,1] from the quote-verification gate. */
   confidence: z.number().optional(),
-  /** Attribution tier driving highlight precision. */
+  /** Legacy first-region alias: attribution tier driving highlight precision. */
   tier: citationTierSchema.optional(),
   /** WF-06 Bridge B — the claim in the answer this citation supports. */
   answerSpan: z.string().optional(),
@@ -92,18 +125,57 @@ export const citationSchema = z.object({
 export type Citation = z.infer<typeof citationSchema>;
 
 /**
+ * The proof regions of a citation, regardless of which shape it was stored in.
+ * Returns `regions` when present; else synthesizes a single region from the
+ * legacy `page`/`bbox` (tier defaulting to `paraphrase` — a located chunk box);
+ * else `[]` (a regionless source chip — the unlocatable validated-value case).
+ * The one place readers should go for "where does this citation point?".
+ */
+export function citationRegions(c: Citation): CitationSourceRegion[] {
+  if (c.regions && c.regions.length > 0) return c.regions;
+  if (c.page != null && c.bbox) return [{ page: c.page, bbox: c.bbox, tier: c.tier ?? "paraphrase" }];
+  return [];
+}
+
+/**
+ * Normalize a validated `Citation` so BOTH shapes are in sync (migration
+ * window): synthesize `regions` from the legacy fields when absent, and
+ * back-fill the legacy `page`/`bbox`/`tier` from `regions[0]` when absent — so
+ * old readers (`.page`/`.bbox`/`.tier`) and new readers (`.regions`) both work
+ * off the same citation. A regionless citation (no regions, no bbox) is left
+ * untouched (the permitted pageless case).
+ */
+function normalizeCitation(c: Citation): Citation {
+  const hasRegions = !!c.regions && c.regions.length > 0;
+  if (hasRegions) {
+    const first = c.regions![0];
+    return {
+      ...c,
+      page: c.page ?? first.page,
+      bbox: c.bbox ?? first.bbox,
+      tier: c.tier ?? first.tier,
+    };
+  }
+  if (c.page != null && c.bbox) {
+    return { ...c, regions: [{ page: c.page, bbox: c.bbox, tier: c.tier ?? "paraphrase" }] };
+  }
+  return c;
+}
+
+/**
  * Sanitize an untrusted value (e.g. a JSON column read back from the DB, or a
  * wire payload) into a typed `Citation[]`. Each element is validated
  * independently — malformed entries are dropped rather than failing the whole
- * batch, and unknown keys are stripped. Replaces the unvalidated
- * `as unknown[]` hydration projection.
+ * batch, and unknown keys are stripped — then NORMALIZED so the multi-region
+ * `regions` and the legacy first-region alias stay in sync. Replaces the
+ * unvalidated `as unknown[]` hydration projection.
  */
 export function parseCitations(input: unknown): Citation[] {
   if (!Array.isArray(input)) return [];
   const out: Citation[] = [];
   for (const item of input) {
     const parsed = citationSchema.safeParse(item);
-    if (parsed.success) out.push(parsed.data);
+    if (parsed.success) out.push(normalizeCitation(parsed.data));
   }
   return out;
 }
@@ -482,22 +554,19 @@ export function parseGeneratedResult(input: unknown): GeneratedResult | null {
 
 // ──────────────────────────────────────────────────────────────────────
 // ExtractFieldResult — 2026-05-31-core-data-followups §4 #13. The
-// `/api/extract-field` response body. It was declared byte-identically on BOTH
+// `/api/extract-field` response body. It is declared byte-identically on BOTH
 // sides of the wire (app `api/extractField.ts` + middleware
-// `services/fieldExtractor.ts`); both now import this one shape so the twin
-// cannot drift. The `citation` slot is a deliberate STRUCTURAL SUBSET of the
-// full `Citation` (just `{documentId, page, snippet?}`) — the field-extract
-// path never carries bbox/tier/confidence on the citation — so it is typed
-// narrowly here rather than reusing `citationSchema` (which would widen the
-// wire contract). Single best-match citation, or `null`.
+// `services/fieldExtractor.ts`); both import this one shape so the twin cannot
+// drift. The `citation` slot IS the one shared `Citation` (unify-extract-citations,
+// 2026-06-14): the field-extract path now verifies + tiers its citation through
+// the SAME pipeline as chat/report (`verifyAndTierSnippetCitation`), so it
+// carries the same `tier`/`confidence`/`bbox`. This REVERSES the former
+// deliberately-narrow `{documentId, page, snippet?}` subset — there is now ONE
+// citation shape across every grounded path. Single best-match citation, or `null`.
 // ──────────────────────────────────────────────────────────────────────
 
-/** The single best-match citation on an extract-field result. */
-export const extractFieldCitationSchema = z.object({
-  documentId: z.string(),
-  page: z.number(),
-  snippet: z.string().optional(),
-});
+/** The single best-match citation on an extract-field result — the one shared `Citation`. */
+export const extractFieldCitationSchema = citationSchema;
 export type ExtractFieldCitation = z.infer<typeof extractFieldCitationSchema>;
 
 /** The `/api/extract-field` response body — one shape, both sides of the wire. */
@@ -852,6 +921,9 @@ export const canvasIntentSchema = z.discriminatedUnion("kind", [
     page: z.number(),
     bbox: normalizedBboxSchema.optional(),
     tier: citationTierSchema.optional(),
+    // multi-region-citations P2.1 — ALL of the citation's proof regions (each
+    // its own tier); page/bbox/tier remain the first-region alias.
+    regions: z.array(citationSourceRegionSchema).optional(),
   }),
   // "Show all sources" — light up every citation region of an answer at once
   // (color-coded), on the cited document. Distinct from highlightCitation,
@@ -1105,6 +1177,13 @@ export const scenarioManifestSchema = z.object({
   sampleChatScript: z.array(sampleChatTurnSchema).optional(),
   /** Capability flag — wire carrier for `ScenarioConfig.supportsJsonRender`. */
   supportsJsonRender: z.boolean().optional(),
+  /**
+   * report-default-template — the seeded default report template this scenario
+   * loads on the Report surface (the onboarding experience sets
+   * `reportOverlay.templateId` to it). Utility = `SAMPLE_REPORT_TEMPLATE_ID`;
+   * scenarios without a seeded template omit it (empty-state default).
+   */
+  reportTemplateId: z.string().optional(),
 });
 export type ScenarioManifest = z.infer<typeof scenarioManifestSchema>;
 

@@ -30,9 +30,9 @@ import {
   type ReportSectionRenderAs,
   type ReportTemplate,
 } from "./services/reportRenderer.js";
+import { reportTemplateAccess } from "./services/reportTemplateAccess.js";
 import { sendUpstreamResponse, UpstreamHttpError } from "./services/http.js";
 import { fetchDocumentXray } from "./services/xrayCache.js";
-import { SAMPLE_TEMPLATE_OWNER } from "./db/seedSampleProject.js";
 import type {
   AppRepository,
   ChatSessionRecord,
@@ -1246,6 +1246,11 @@ export function createApp({
             groundxClient,
             groundxApiKey: groundxApiKey ?? undefined,
             llmModelId: env.LLM_MODEL_ID,
+            // unify-extract-citations — the same citation verify+tier seam the
+            // chat/report routes pass, so the extract citation is verified and
+            // tiered identically (absent embedder → lexical-only, never-fail).
+            ...(quoteEmbedder ? { quoteEmbedder } : {}),
+            ...(embedThreshold !== undefined ? { embedThreshold } : {}),
           },
         );
         res.status(200).json(result);
@@ -1314,9 +1319,10 @@ export function createApp({
         const groundxApiKey = sessionApiKey(reqSession) ?? env.GROUNDX_PARTNER_API_KEY ?? null;
         // RBAC (same server-side resolution as the chat route): restrict the
         // report's per-section retrieval to the caller's authorized projects.
+        const reportCallerUsername = sessionUsername(reqSession);
         const reportAuthorizedProjects = await authorizedProjectIds(
           repository,
-          sessionUsername(reqSession),
+          reportCallerUsername,
         );
         const result = await renderReport(
           {
@@ -1332,9 +1338,17 @@ export function createApp({
             samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
             // The template loader is the server source of truth for section
             // questions; a `null` result is the graceful no-template state.
+            // harden-report-render-template-access — ACCESS-SCOPED by the SAME
+            // rule as the builder read endpoint: load only a template the caller
+            // may read (public sample or own). An inaccessible id resolves to
+            // null → the no-template empty render, leaking no existence signal
+            // (closes the read-side IDOR before private member templates exist).
             getTemplate: async (id) => {
               const record = await repository.getTemplate(id);
-              return record ? reportTemplateFromRecord(record) : null;
+              if (!record || !reportTemplateAccess(record, reportCallerUsername).accessible) {
+                return null;
+              }
+              return reportTemplateFromRecord(record);
             },
             llmClient,
             groundxClient,
@@ -1366,14 +1380,16 @@ export function createApp({
     async (req, res, next) => {
       try {
         const record = await repository.getTemplate(req.params.id);
-        if (!record || record.kind !== "report") {
+        if (!record) {
           res.status(404).json({ error: "template_not_found" });
           return;
         }
-        const callerUsername = sessionUsername(req.session!);
-        const isSample = record.groundxUsername === SAMPLE_TEMPLATE_OWNER;
-        const isOwn = callerUsername != null && record.groundxUsername === callerUsername;
-        if (!isSample && !isOwn) {
+        // harden-report-render-template-access — ONE shared access rule (also
+        // applied by the render path's template load): the public sample or the
+        // caller's own; anything else 404 (existence not leaked). `owned` drives
+        // the builder's fork-on-edit.
+        const { accessible, owned } = reportTemplateAccess(record, sessionUsername(req.session!));
+        if (!accessible) {
           res.status(404).json({ error: "template_not_found" });
           return;
         }
@@ -1382,7 +1398,7 @@ export function createApp({
           res.status(404).json({ error: "template_not_found" });
           return;
         }
-        res.status(200).json({ template, owned: isOwn });
+        res.status(200).json({ template, owned });
       } catch (error) {
         next(error);
       }
@@ -1542,8 +1558,10 @@ export function createApp({
   // `document_getextract` returns field VALUES only (no geometry, ever), so a
   // field's source region is recovered by matching its value against the
   // X-Ray chunks (`resolveFieldGeometry`). The app posts the active fields
-  // ({value,label}); we return a parallel `geometry[]` (null where no chunk
-  // matches → highlight degrades to none). X-Ray fetch is cached per doc.
+  // ({value,label}); we return a parallel `geometry[]` where each entry is the
+  // field's REGIONS (`{page,bbox}[]`, multi-region-citations — every chunk the
+  // value appears in; `[]` where no chunk matches → highlight degrades to none).
+  // X-Ray fetch is cached per doc.
   app.post<{ documentId: string }>(
     "/api/documents/:documentId/field-geometry",
     apiLimiter,
@@ -1564,7 +1582,7 @@ export function createApp({
         }
         const xray = await fetchDocumentXray(groundxClient, apiKey, documentId);
         const geometry = fields.map((f) => {
-          if (!xray) return null;
+          if (!xray) return [];
           const value =
             typeof f.value === "string" || typeof f.value === "number" || typeof f.value === "boolean"
               ? f.value

@@ -41,6 +41,7 @@ function verificationRank(v: QuoteVerification): number {
 }
 import {
   normalizeText,
+  dedupeGeometryRegions,
   resolveFieldGeometry,
   resolveWordGeometry,
   type NormalizedBbox,
@@ -74,7 +75,7 @@ import {
 import type { GroundXClient, LlmClient } from "../types.js";
 import { logger } from "../lib/logger.js";
 
-import type { ContentScope, GeneratedResult } from "@groundx/shared";
+import type { ContentScope, GeneratedResult, CitationSourceRegion } from "@groundx/shared";
 import { type OpenAiFunctionTool } from "./zodToJsonSchema.js";
 
 /** Dependencies the grounded-answer pipeline needs. Mirrors the RAG / Extract
@@ -247,14 +248,47 @@ export function resolveExtractionPath(
 }
 
 /**
+ * Collect the scalar leaf VALUES (string/number) of an extraction node, walking
+ * objects + arrays generically (multi-region-citations — the former
+ * `branchNode` drop descends here instead). Booleans + null are skipped (not
+ * locatable as document text). Depth-bounded against pathological nesting.
+ * SCHEMA-AGNOSTIC: keys are never inspected — only the values are collected.
+ */
+export function collectScalarLeaves(node: unknown, out: Array<string | number>, depth = 0): void {
+  if (depth > 8) return;
+  if (typeof node === "string" || typeof node === "number") {
+    out.push(node);
+  } else if (Array.isArray(node)) {
+    for (const child of node) collectScalarLeaves(child, out, depth + 1);
+  } else if (node != null && typeof node === "object") {
+    for (const child of Object.values(node)) collectScalarLeaves(child, out, depth + 1);
+  }
+}
+
+/**
+ * Upper bound on how many DISTINCT leaf values of a container citation we
+ * locate. Locating is O(leaves × X-Ray chunks) on the blocking chat turn, and a
+ * citation of a very large container (or the root) on a big-schema document
+ * could otherwise spike latency. 200 distinct values is already far more than a
+ * highlight set should show; beyond it we bound the work (and log).
+ */
+const MAX_CONTAINER_LEAVES = 200;
+
+/**
  * Validate + resolve ONE extraction-sourced citation (2026-06-11-extraction-
- * grounded-citations). The trust boundary is the REAL extraction payload —
- * never model output: the documentId must be the extraction's document, the
- * `field` path must resolve, and the cited `value` must match the payload
- * value (exact, else normalized). Geometry comes from the WF-05 field
- * resolver over the cached document X-Ray; a citation ships ONLY when it can
- * point at a page (geometry miss ⇒ dropped — no pageless citation form).
- * Best-effort throughout: any failure returns null, never a failed turn.
+ * grounded-citations; multi-region-citations P1.3). The trust boundary is the
+ * REAL extraction payload — never model output: the documentId must be the
+ * extraction's document, the `field` path must resolve, and (for a scalar) the
+ * cited `value` must match the payload value (exact, else normalized). Those
+ * checks reject FABRICATED claims (Bucket A → dropped).
+ *
+ * A REAL grounding is NEVER dropped (Bucket B): a container path descends to its
+ * scalar leaves and locates each; geometry comes from the multi-region field
+ * resolver over the cached X-Ray (a region per occurrence). When a validated
+ * value can't be located (reformatted/derived/too-common, or the X-Ray is
+ * unfetchable), it degrades — last-resort label-locate, else a REGIONLESS
+ * `ambient` source chip ("location unknown") — but is not dropped. Best-effort
+ * throughout: any failure degrades, never a failed turn.
  */
 /** harden-citation-emission U4 — the per-turn citation funnel (the shared
  * `ChatReplyDebug["citations"]` shape). Every silent discard increments a
@@ -290,94 +324,216 @@ async function verifyExtractionCitation(
     return null;
   }
   const actual = resolved.value;
-  if (actual == null || (typeof actual !== "string" && typeof actual !== "number" && typeof actual !== "boolean")) {
-    // Citing a branch node (object/array) is not a groundable claim.
-    drop("branchNode");
-    return null;
-  }
-  const cited = String(c.value);
-  const matches =
-    String(actual) === cited || normalizeText(String(actual)) === normalizeText(cited);
-  // Minimum-length guard (adversarial review F2): a 1-character value ("2",
-  // a count) token-matches almost ANY chunk in the fuzzy X-Ray fallback,
-  // producing a confident-looking highlight on an unrelated region. Too
-  // short to locate honestly ⇒ dropped (mirrors the snippet arm's
-  // MIN_QUOTE_LEN gate, scaled to field values).
-  if (!matches || normalizeText(cited).length < 2) {
-    drop("value");
-    return null;
-  }
+  const label = c.field.split(".").pop()?.replace(/\[\d+\]/g, "") ?? "";
 
-  // The structural check is exact → verified-level confidence; the chunk box
-  // (below) keeps the tier at `paraphrase` (chunk precision).
-  const v: QuoteVerification =
-    String(actual) === cited
-      ? { verified: true, method: "exact", score: 1 }
-      : { verified: true, method: "normalized", score: 0 };
-
-  if (!deps.groundxClient || !deps.groundxApiKey) {
-    drop("geometry");
-    return null;
-  }
-  try {
-    const xray = await fetchDocumentXray(deps.groundxClient, deps.groundxApiKey, c.documentId);
-    if (!xray) {
-      drop("geometry");
+  // Determine WHAT to locate + how the value verifies. A scalar is validated
+  // against the cited value (a mismatch is Bucket A → dropped). A CONTAINER (the
+  // former `branchNode` drop) is real proof by virtue of the path resolving —
+  // descend to its scalar leaves and locate each (no per-leaf value to validate).
+  let valuesToLocate: Array<string | number>;
+  let v: QuoteVerification;
+  let displayValue: string;
+  const isScalar =
+    typeof actual === "string" || typeof actual === "number" || typeof actual === "boolean";
+  if (isScalar) {
+    const cited = String(c.value);
+    const matches = String(actual) === cited || normalizeText(String(actual)) === normalizeText(cited);
+    if (!matches) {
+      drop("value"); // Bucket A — the cited value isn't the extracted value
       return null;
     }
-    const label = c.field.split(".").pop()?.replace(/\[\d+\]/g, "") ?? "";
-    const geo = resolveFieldGeometry(actual, label, xray);
-    if (!geo) {
-      drop("geometry");
-      return null;
+    v = String(actual) === cited ? { verified: true, method: "exact", score: 1 } : { verified: true, method: "normalized", score: 0 };
+    // A boolean isn't locatable document text; it degrades to the fallback below.
+    valuesToLocate = typeof actual === "boolean" ? [] : [actual];
+    displayValue = String(actual);
+  } else if (actual != null && typeof actual === "object") {
+    const leaves: Array<string | number> = [];
+    collectScalarLeaves(actual, leaves);
+    const distinct = [...new Map(leaves.map((l) => [String(l), l])).values()]; // dedupe by string form
+    // Bound the located-leaf count (O(leaves × chunks) on the blocking turn). The
+    // citation still ships — its location set is just capped — and we log it.
+    if (distinct.length > MAX_CONTAINER_LEAVES) {
+      logger.warn(
+        { field: c.field, leafCount: distinct.length, cap: MAX_CONTAINER_LEAVES },
+        "verifyExtractionCitation: container has many distinct leaf values; locating a bounded subset",
+      );
     }
+    valuesToLocate = distinct.slice(0, MAX_CONTAINER_LEAVES);
+    v = { verified: true, method: "normalized", score: 0 }; // chunk-level (no single verbatim value)
+    displayValue = label;
+  } else {
+    drop("value"); // a null/undefined leaf — nothing to ground
+    return null;
+  }
 
-    // Word-level upgrade (the spec's named evolution, wired 2026-06-11): the
-    // validated `value` is verbatim by construction, so resolve it through the
-    // document's `-118-map` exactly like the snippet-quote arm — an atom-run
-    // hit replaces the chunk envelope with the tight word box and lights
-    // `exact`. Best-effort: any miss/failure keeps the chunk geometry at
-    // `paraphrase`; it never drops a citation that already resolved.
-    let page = geo.page;
-    let bbox = geo.bbox;
-    let hasAtomBox = false;
-    try {
-      const wordMapFetch = deps.wordMapFetch ?? fetchDocumentWordMap;
-      const map = await wordMapFetch(deps.groundxClient, deps.groundxApiKey, c.documentId);
-      if (map) {
-        const wordGeo = resolveWordGeometry(String(actual), map);
-        if (wordGeo) {
-          page = wordGeo.page;
-          bbox = wordGeo.bbox;
-          hasAtomBox = true;
-        }
-      }
-    } catch (err) {
-      logger.warn({ err }, "verifyExtractionCitation: word-map upgrade failed; keeping chunk geometry");
-    }
-
-    // No usable box (chunk page dims missing AND no word-map hit) is a miss
-    // too — the spec defines exactly two outcomes for the extraction arm:
-    // page+bbox, or dropped (adversarial review F3).
-    if (!bbox) {
-      drop("geometry");
-      return null;
-    }
-
+  // Build the citation that ships when geometry can't be resolved: a REGIONLESS
+  // `ambient` source chip ("location unknown"). Never a drop — the value/path is
+  // validated, so the proof is real even when its on-page spot is unknown.
+  const regionlessChip = (): Citation => ({
+    documentId: c.documentId,
+    snippet: `${label}: ${displayValue}`.slice(0, RAG_SNIPPET_CHARS),
+    tier: "ambient",
+    confidence: confidenceFor(v),
+    ...(c.answerSpan ? { answerSpan: c.answerSpan } : {}),
+  });
+  const shipRegions = (regions: CitationSourceRegion[]): Citation => {
+    const first = regions[0];
     return {
       documentId: c.documentId,
-      page,
-      bbox,
-      snippet: `${label}: ${String(actual)}`.slice(0, RAG_SNIPPET_CHARS),
-      tier: assignTier(v, { hasAtomBox }),
+      page: first.page,
+      bbox: first.bbox,
+      regions,
+      snippet: `${label}: ${displayValue}`.slice(0, RAG_SNIPPET_CHARS),
+      tier: first.tier,
       confidence: confidenceFor(v),
       ...(c.answerSpan ? { answerSpan: c.answerSpan } : {}),
     };
-  } catch (err) {
-    logger.warn({ err }, "verifyExtractionCitation: geometry resolution failed; dropping citation");
-    drop("geometry");
-    return null;
+  };
+
+  if (!deps.groundxClient || !deps.groundxApiKey) {
+    return regionlessChip(); // can't fetch the X-Ray → location unknown, not dropped
   }
+  try {
+    const xray = await fetchDocumentXray(deps.groundxClient, deps.groundxApiKey, c.documentId);
+    if (!xray) return regionlessChip();
+
+    // multi-region: a region for EVERY chunk where each value appears (D1),
+    // located by the numeric/whole-token match — never one union box, never
+    // narrowed by the label.
+    const collected: ReturnType<typeof resolveFieldGeometry> = [];
+    for (const val of valuesToLocate) collected.push(...resolveFieldGeometry(val, label, xray));
+    // Several leaves of a container often land in the SAME chunk → identical
+    // boxes; collapse the exact duplicates so the persisted/wire region set
+    // isn't bloated (distinct occurrences are kept).
+    const fieldRegions = dedupeGeometryRegions(collected);
+
+    if (fieldRegions.length === 0) {
+      // Never-drop fallback (review #8): (1) last-resort locate by the GENERIC
+      // field label; (2) else a regionless `ambient` chip.
+      const labelText = label.replace(/[_-]+/g, " ").trim();
+      const labelRegions = labelText.length >= 2 ? resolveFieldGeometry(labelText, "", xray) : [];
+      if (labelRegions.length > 0) {
+        return shipRegions(labelRegions.map((g) => ({ page: g.page, bbox: g.bbox, tier: "ambient" as const })));
+      }
+      return regionlessChip();
+    }
+
+    const chunkTier = assignTier(v, { hasAtomBox: false });
+    let regions: CitationSourceRegion[] = fieldRegions.map((g) => ({ page: g.page, bbox: g.bbox, tier: chunkTier }));
+
+    // Word-level upgrade — only for a SINGLE scalar value (a verbatim span): an
+    // atom-run hit yields a tight word box that supersedes the FIRST chunk
+    // region and lights `exact`. Best-effort; never drops.
+    if (isScalar && typeof actual !== "boolean") {
+      try {
+        const wordMapFetch = deps.wordMapFetch ?? fetchDocumentWordMap;
+        const map = await wordMapFetch(deps.groundxClient, deps.groundxApiKey, c.documentId);
+        if (map) {
+          const wordGeo = resolveWordGeometry(String(actual), map);
+          if (wordGeo) {
+            regions = [
+              { page: wordGeo.page, bbox: wordGeo.bbox, tier: assignTier(v, { hasAtomBox: true }) },
+              ...regions.slice(1),
+            ];
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, "verifyExtractionCitation: word-map upgrade failed; keeping chunk geometry");
+      }
+    }
+
+    return shipRegions(regions);
+  } catch (err) {
+    // A real grounding is never dropped on a transient geometry failure — it
+    // degrades to the location-unknown chip (and never fails the turn).
+    logger.warn({ err }, "verifyExtractionCitation: geometry resolution failed; degrading to regionless chip");
+    return regionlessChip();
+  }
+}
+
+/**
+ * Verify ONE emitted snippet citation against its same-page candidate chunks
+ * and build the tiered `Citation`. This is the SINGLE home for snippet-citation
+ * verification, shared by the grounded answer path (`verifiedCitations`) and the
+ * field-extraction path (`fieldExtractor`) — one citation approach everywhere.
+ *
+ * WF-03: search routinely returns several chunks for the same (documentId,
+ * page), so the quote must verify against ALL of them (checking only the first
+ * demoted verbatim quotes from a sibling chunk to `ambient`, observed live
+ * 2026-06-12). An emitted-but-unverified quote survives as `ambient` (it is NOT
+ * dropped); the verified chunk's bbox pairs with the match, with a word-level
+ * (`exact`) upgrade via the `-118-map` word resolver when available.
+ */
+export async function verifyAndTierSnippetCitation(
+  cite: { documentId: string; page: number; quote: string; answerSpan?: string },
+  snippets: GroundXSearchResult[],
+  deps: Pick<
+    GroundedAnswerDeps,
+    "quoteEmbedder" | "embedThreshold" | "groundxClient" | "groundxApiKey" | "wordMapFetch"
+  >,
+): Promise<Citation> {
+  const candidates = snippets.filter(
+    (s) => s.documentId === cite.documentId && (s.pageNumber ?? 1) === cite.page,
+  );
+  let v: QuoteVerification = { verified: false, method: "none", score: 0 };
+  // multi-region: the chunk's per-line boxes (one region each, no union). Start
+  // from the first same-page candidate; switch to the candidate that verifies.
+  let bboxes: NormalizedBbox[] = candidates[0]?.bboxes ?? [];
+  for (const candidate of candidates) {
+    // The embedder is a LIVE blocking call; once ANY candidate verified, scan
+    // the rest with lexical gates only (an embedding pass can't out-rank a held
+    // lexical match — same tier either way).
+    const cv = await verifyQuote(
+      cite.quote,
+      candidate.text ?? "",
+      v.verified ? undefined : deps.quoteEmbedder,
+      deps.embedThreshold,
+    );
+    if (verificationRank(cv) > verificationRank(v)) {
+      v = cv;
+      if (cv.verified) bboxes = candidate.bboxes ?? [];
+    }
+    if (cv.method === "exact") break; // can't do better
+  }
+  const tier = assignTier(v, { hasAtomBox: false });
+  let regions: CitationSourceRegion[];
+  if (v.verified) {
+    // Each chunk-line box → its own region, all at the citation's tier.
+    regions = bboxes.map((b) => ({ page: cite.page, bbox: b, tier }));
+    // Word-level tighten: a verified quote's verbatim span resolves to ONE tight
+    // box that supersedes the loose chunk-line regions (lights `exact`).
+    const wordMapFetch = deps.wordMapFetch ?? fetchDocumentWordMap;
+    if (deps.groundxClient && deps.groundxApiKey) {
+      const map = await wordMapFetch(deps.groundxClient, deps.groundxApiKey, cite.documentId);
+      if (map) {
+        const geo = resolveWordGeometry(cite.quote, map);
+        if (geo) regions = [{ page: geo.page, bbox: geo.bbox, tier: assignTier(v, { hasAtomBox: true }) }];
+      }
+    }
+    // A VERIFIED quote whose chunk carried no resolvable box still gets a
+    // whole-page marker on its page (at the verified tier) — so a confirmed
+    // citation is never LESS visible than an unverified one (review #5).
+    if (regions.length === 0) {
+      regions = [{ page: cite.page, bbox: { x: 0, y: 0, w: 1, h: 1 }, tier }];
+    }
+  } else {
+    // Unverified quote (exact + normalized + embedding all failed) — keep a
+    // whole-PAGE `ambient` marker on the CLAIMED page (review #8 / R2), never a
+    // guessed chunk box and never dropped: it shows what the model leaned on so
+    // a bad pick is visible, without faking sub-page precision.
+    regions = [{ page: cite.page, bbox: { x: 0, y: 0, w: 1, h: 1 }, tier: "ambient" }];
+  }
+  const first = regions[0];
+  return {
+    documentId: cite.documentId,
+    page: cite.page,
+    snippet: cite.quote.slice(0, RAG_SNIPPET_CHARS),
+    ...(regions.length ? { regions } : {}),
+    ...(first ? { bbox: first.bbox } : {}),
+    tier: first?.tier ?? tier,
+    confidence: confidenceFor(v),
+    ...(cite.answerSpan ? { answerSpan: cite.answerSpan } : {}),
+  };
 }
 
 async function verifiedCitations(
@@ -406,16 +562,6 @@ async function verifiedCitations(
   const validatedCitations = snippetFormEntries.filter((c) => allowedDocIds.has(c.documentId));
   funnel.dropReasons.docId += snippetFormEntries.length - validatedCitations.length;
 
-  // WF-03 — candidate snippets for a citation, by documentId + page. Search
-  // routinely returns SEVERAL chunks for the same page (the utility sample
-  // returns 2-3 page-2 chunks), so a citation must verify against ALL of them
-  // — checking only the first demoted verbatim quotes from a sibling chunk to
-  // `ambient` (observed live 2026-06-12).
-  const snippetsFor = (documentId: string, page: number): GroundXSearchResult[] =>
-    snippets.filter((s) => s.documentId === documentId && (s.pageNumber ?? 1) === page);
-
-  const wordMapFetch = deps.wordMapFetch ?? fetchDocumentWordMap;
-
   if (validatedCitations.length === 0 && extractionEntries.length === 0) {
     // No invented citations (2026-06-11). The model is instructed to emit the
     // citations block only for content claims and to SKIP it for non-content
@@ -441,58 +587,7 @@ async function verifiedCitations(
   ).filter((c): c is Citation => c !== null);
 
   const snippetCitations = await Promise.all(
-    validatedCitations.map(async (c) => {
-      // Verify against every same-page chunk and keep the best result
-      // (exact > normalized > embedding > none, then score), pairing the
-      // bbox with the chunk that actually verified.
-      const candidates = snippetsFor(c.documentId, c.page);
-      let v: QuoteVerification = { verified: false, method: "none", score: 0 };
-      let bbox: NormalizedBbox | undefined = candidates[0]?.bbox;
-      for (const candidate of candidates) {
-        // The embedder is a LIVE blocking HTTP call (2s abort budget per
-        // call) and an embedding pass can never out-rank a held lexical
-        // match — so once ANY candidate verified, scan the rest with the
-        // lexical gates only. (Trade-off: a later candidate's higher cosine
-        // won't replace an earlier embedding-verified result; same tier
-        // either way.)
-        const cv = await verifyQuote(
-          c.quote,
-          candidate.text ?? "",
-          v.verified ? undefined : deps.quoteEmbedder,
-          deps.embedThreshold,
-        );
-        if (verificationRank(cv) > verificationRank(v)) {
-          v = cv;
-          // The verified chunk's bbox EVEN IF undefined — a sibling chunk's
-          // box would highlight the wrong region; geometry-less is the spec
-          // posture, and the word-map upgrade below can still resolve one.
-          if (cv.verified) bbox = candidate.bbox;
-        }
-        if (cv.method === "exact") break; // can't do better
-      }
-      let hasAtomBox = false;
-      // Word-level upgrade — verified citations only.
-      if (v.verified && deps.groundxClient && deps.groundxApiKey) {
-        const map = await wordMapFetch(deps.groundxClient, deps.groundxApiKey, c.documentId);
-        if (map) {
-          const geo = resolveWordGeometry(c.quote, map);
-          if (geo) {
-            bbox = geo.bbox;
-            hasAtomBox = true;
-          }
-        }
-      }
-      const tier = assignTier(v, { hasAtomBox });
-      return {
-        documentId: c.documentId,
-        page: c.page,
-        snippet: c.quote.slice(0, RAG_SNIPPET_CHARS),
-        bbox,
-        tier,
-        confidence: confidenceFor(v),
-        ...(c.answerSpan ? { answerSpan: c.answerSpan } : {}),
-      };
-    }),
+    validatedCitations.map((c) => verifyAndTierSnippetCitation(c, snippets, deps)),
   );
 
   const citations = [...snippetCitations, ...extractionCitations];

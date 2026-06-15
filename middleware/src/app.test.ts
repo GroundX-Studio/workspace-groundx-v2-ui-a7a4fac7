@@ -141,9 +141,9 @@ describe("middleware scaffold", () => {
       content: "answer",
       citationsJson: JSON.stringify([
         { documentId: "d1", page: 1, snippet: "ok", extraneous: "stripped" }, // valid
-        { documentId: "d2" }, // malformed: missing page
-        { page: 3 }, // malformed: missing documentId
-        { documentId: "d4", page: "nope" }, // malformed: page wrong type
+        { documentId: "d2", tier: "ambient", snippet: "x" }, // valid: regionless "location unknown" (page now optional, P1.3)
+        { page: 3 }, // malformed: missing documentId (the trust anchor)
+        { documentId: "d4", page: "nope" }, // malformed: page wrong TYPE
       ]),
       compressedIntoSummaryId: null,
       llmProvider: null,
@@ -157,9 +157,15 @@ describe("middleware scaffold", () => {
 
     const res = await agent.get("/api/chat-sessions/cs-b1/messages").expect(200);
     const cites = res.body.messages[0].citations;
-    expect(cites).toHaveLength(1); // only the valid citation survives validation
-    expect(cites[0]).toMatchObject({ documentId: "d1", page: 1, snippet: "ok" });
-    expect(cites[0]).not.toHaveProperty("extraneous"); // unknown keys stripped by the schema
+    // The page-bearing citation AND the regionless ambient chip survive; the
+    // entries missing a documentId / with a wrong-type page are dropped.
+    expect(cites).toHaveLength(2);
+    const d1 = cites.find((c: { documentId: string }) => c.documentId === "d1");
+    const d2 = cites.find((c: { documentId: string }) => c.documentId === "d2");
+    expect(d1).toMatchObject({ documentId: "d1", page: 1, snippet: "ok" });
+    expect(d1).not.toHaveProperty("extraneous"); // unknown keys stripped by the schema
+    expect(d2).toMatchObject({ documentId: "d2", tier: "ambient" }); // regionless, no page
+    expect(d2.page).toBeUndefined();
   });
 
   it("skips request logging for kube-probe and Prometheus endpoints", async () => {
@@ -1157,7 +1163,7 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 â€
     await repository.saveTemplate({
       id: "rt-utility-ic-brief",
       kind: "report",
-      groundxUsername: "owner",
+      groundxUsername: SAMPLE_TEMPLATE_OWNER,
       name: "Utility IC Brief",
       bodyJson: JSON.stringify(UTILITY_TEMPLATE_BODY),
       createdAt: now,
@@ -1235,6 +1241,31 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 â€
       .expect(403);
   });
 
+  it("does NOT render a member-owned template for another caller (read-side IDOR closed)", async () => {
+    // harden-report-render-template-access â€” a private template owned by a
+    // member who is NOT the (anonymous) caller, and is NOT the public sample.
+    const { app, repository } = await renderSetup();
+    const now = new Date();
+    await repository.saveTemplate({
+      id: "rt-private",
+      kind: "report",
+      groundxUsername: "other-member",
+      name: "Private brief",
+      bodyJson: JSON.stringify(UTILITY_TEMPLATE_BODY),
+      createdAt: now,
+      updatedAt: now,
+    });
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody({ template_id: "rt-private" }))
+      .expect(200);
+    // Indistinguishable from a non-existent template: empty no-template render,
+    // never the private template's sections.
+    expect(res.body.sections).toEqual([]);
+    expect(res.body.reason).toBe("no_template");
+  });
+
   it("returns the four ordered Utility sections (snake_case wire), preview_only", async () => {
     const { app } = await renderSetup();
     const agent = await ownedAgent(app);
@@ -1284,7 +1315,7 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 â€
     await repository.saveTemplate({
       id: "rt-solar-portfolio",
       kind: "report",
-      groundxUsername: "owner",
+      groundxUsername: SAMPLE_TEMPLATE_OWNER,
       name: "Solar Portfolio",
       bodyJson: JSON.stringify({ sections: [UTILITY_TEMPLATE_BODY.sections[0]] }),
       createdAt: now,
@@ -1392,7 +1423,7 @@ describe("POST /api/widgets/smart-report/reports/render â€” live path (2026-06-0
     await repository.saveTemplate({
       id: "rt-persisted-1",
       kind: "report",
-      groundxUsername: "owner",
+      groundxUsername: SAMPLE_TEMPLATE_OWNER,
       name: "Persisted Report",
       bodyJson: JSON.stringify({
         sections: [

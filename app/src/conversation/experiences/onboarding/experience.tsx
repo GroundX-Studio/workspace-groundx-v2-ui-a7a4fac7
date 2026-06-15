@@ -64,6 +64,14 @@ export interface OnboardingExperienceConfig {
    */
   fileName?: string;
   scenarioTitle?: string;
+  /**
+   * report-default-template — the seeded default report template id for this
+   * scenario (`scenario.manifest.reportTemplateId`). When present, the
+   * experience loads it onto the active session's `reportOverlay.templateId` so
+   * the Report render surface fills the real sample invoice. Absent → the
+   * empty-state default (loan/solar). Config-driven; NO scenario is hardcoded.
+   */
+  reportTemplateId?: string;
 }
 
 interface PickViewOption {
@@ -392,12 +400,25 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
  * the journey). A user already at/past F5 (e.g. clicked the "Show me chat"
  * pill) is not bounced.
  */
-function makeOnboardingChoreography(): FC<ChatExperienceComponentProps> {
+function makeOnboardingChoreography(reportTemplateId?: string): FC<ChatExperienceComponentProps> {
   const OnboardingChoreography: FC<ChatExperienceComponentProps> = ({ conversation }) => {
     const { advanceFrame, state: onboardingState } = useOnboardingSession();
+    const { state: chatState, setReportTemplateId } = useChatStore();
     const firstSendFiredRef = useRef(false);
     const currentFrameRef = useRef(onboardingState.currentFrame);
     currentFrameRef.current = onboardingState.currentFrame;
+
+    // report-default-template — load this scenario's configured default report
+    // template onto the active session ONCE (the render surface reads
+    // `reportOverlay.templateId`; the templateId-change re-render effect picks it
+    // up). Config-driven: a scenario WITHOUT `reportTemplateId` never sets it
+    // (empty state). Guarded on the active session existing.
+    const templateLoadedRef = useRef(false);
+    useEffect(() => {
+      if (templateLoadedRef.current || !reportTemplateId || !chatState.activeSessionId) return;
+      templateLoadedRef.current = true;
+      setReportTemplateId(reportTemplateId);
+    }, [chatState.activeSessionId, setReportTemplateId]);
 
     const { firstUserMessageSent } = conversation;
     useEffect(() => {
@@ -425,7 +446,7 @@ export function makeOnboardingExperience(config: OnboardingExperienceConfig): Ch
       : undefined;
   return {
     Intro: makeOnboardingIntro(config),
-    Choreography: makeOnboardingChoreography(),
+    Choreography: makeOnboardingChoreography(config.reportTemplateId),
     ...(scopeHint ? { scopeHint } : {}),
     // Fallback label for ensure-create when the session is title-less; the
     // session's own title ("Onboarding") wins in the engine.
@@ -439,6 +460,10 @@ const onboardingConfigSchema = z.object({
   thinkingScript: z.array(z.string()),
   fileName: z.string().optional(),
   scenarioTitle: z.string().optional(),
+  // report-default-template — preserved through the registry's `.parse()` (a
+  // z.object strips unknown keys, so it MUST be declared here or the
+  // ChatColumn→create→makeOnboardingExperience path would drop it).
+  reportTemplateId: z.string().optional(),
 });
 
 /**

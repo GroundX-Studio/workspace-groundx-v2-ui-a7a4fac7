@@ -4,16 +4,22 @@
  * `document_getextract` returns field VALUES only (no geometry), so the F3/F4
  * field-click source highlight is resolved by matching each field value
  * against the document X-Ray server-side (`POST /api/documents/:id/
- * field-geometry`). Returns a parallel array (null where no chunk matched →
- * the field highlight degrades to none). Best-effort: any failure returns all
- * nulls so the extract UI never breaks on a geometry miss.
+ * field-geometry`).
+ *
+ * multi-region-citations P1.3b: the endpoint returns, per field, the field's
+ * REGIONS (`{page,bbox}[]` — every chunk the value appears in). This client
+ * returns the FULL region set per field so the Extract value grid lights every
+ * occurrence (the PdfViewer's render-time merge collapses adjacent boxes).
+ * Best-effort: any failure returns all-empty so the extract UI never breaks on a
+ * geometry miss.
  */
 import { csrfFetch } from "@/api/csrfFetch";
 import type { NormalizedBbox } from "@groundx/shared";
 
-export interface ResolvedFieldGeometry {
+/** A resolved source region for a field (multi-region wire element). */
+export interface FieldRegion {
   page: number;
-  bbox: NormalizedBbox | null;
+  bbox: NormalizedBbox;
 }
 
 export interface FieldGeometryQuery {
@@ -21,10 +27,21 @@ export interface FieldGeometryQuery {
   label: string;
 }
 
+/** Coerce one field's wire `regions[]` into typed `FieldRegion[]`, dropping malformed entries. */
+function parseFieldRegions(raw: unknown): FieldRegion[] {
+  if (!Array.isArray(raw)) return [];
+  const out: FieldRegion[] = [];
+  for (const r of raw) {
+    const reg = r as Partial<FieldRegion>;
+    if (typeof reg?.page === "number" && reg.bbox) out.push({ page: reg.page, bbox: reg.bbox });
+  }
+  return out;
+}
+
 export async function fetchFieldGeometry(
   documentId: string,
   fields: FieldGeometryQuery[],
-): Promise<Array<ResolvedFieldGeometry | null>> {
+): Promise<Array<FieldRegion[]>> {
   if (!fields.length) return [];
   try {
     const res = await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}/field-geometry`, {
@@ -33,10 +50,12 @@ export async function fetchFieldGeometry(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields }),
     });
-    if (!res.ok) return fields.map(() => null);
-    const json = (await res.json()) as { geometry?: Array<ResolvedFieldGeometry | null> };
-    return Array.isArray(json.geometry) ? json.geometry : fields.map(() => null);
+    if (!res.ok) return fields.map(() => []);
+    const json = (await res.json()) as { geometry?: unknown[] };
+    return Array.isArray(json.geometry)
+      ? fields.map((_, i) => parseFieldRegions(json.geometry![i]))
+      : fields.map(() => []);
   } catch {
-    return fields.map(() => null);
+    return fields.map(() => []);
   }
 }

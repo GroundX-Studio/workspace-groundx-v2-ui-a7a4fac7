@@ -76,6 +76,10 @@ describe("CiteChip", () => {
           documentId: "utility-bill-2026-04",
           page: 3,
           bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 },
+          // multi-region-citations P2.1 — the citation's regions ride along so
+          // the viewer lights every one; a legacy {page,bbox} citation
+          // synthesizes a single first-region (tier defaults to paraphrase).
+          regions: [{ page: 3, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 }, tier: "paraphrase" }],
         },
       ]);
       expect(screen.getByTestId("last-intent-id")).toHaveTextContent("1");

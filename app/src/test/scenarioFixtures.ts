@@ -6,6 +6,8 @@
  * Production code MUST NOT import this file. Views read from the registry.
  */
 
+import { SAMPLE_REPORT_TEMPLATE_ID } from "@groundx/shared";
+
 import type { ScenarioConfig } from "@/types/scenarios";
 
 export const utilityTestScenario: ScenarioConfig = {
@@ -17,6 +19,9 @@ export const utilityTestScenario: ScenarioConfig = {
   ],
   manifest: {
     id: "utility",
+    // report-default-template — mirrors production `sampleScenarios.ts`: the
+    // utility scenario loads the seeded default report template.
+    reportTemplateId: SAMPLE_REPORT_TEMPLATE_ID,
     hero: {
       title: "Utility Bill",
       shortDesc: "a single billing statement with 8 meters and 56 charges across 3 pages",

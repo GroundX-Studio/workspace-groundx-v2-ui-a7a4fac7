@@ -31,7 +31,7 @@ import type {
   ChatSuggestedAction,
   ProposedSchemaField,
 } from "@/api/chatSessions";
-import type { Citation, ToolActivity } from "@groundx/shared";
+import { citationRegions, type Citation, type ToolActivity } from "@groundx/shared";
 import { useApi } from "@/contexts/ApiContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
@@ -154,12 +154,21 @@ export interface ConversationApi {
  * sidesteps the guard without weakening it.
  */
 export function citationToHighlightIntent(c: Citation): CanvasIntent {
+  // multi-region-citations: a regionless "location unknown" citation has no page
+  // to jump to — open the document without a highlight.
+  const regions = citationRegions(c);
+  const page = c.page ?? regions[0]?.page;
+  if (page == null) {
+    return { kind: "openDocument", ["documentId"]: c.documentId };
+  }
   return {
     kind: "highlightCitation",
     ["documentId"]: c.documentId,
-    page: c.page,
+    page,
     ...(c.bbox ? { bbox: c.bbox } : {}),
     ...(c.tier ? { tier: c.tier } : {}),
+    // multi-region-citations P2.1 — light every region of the auto-highlighted citation.
+    ...(regions.length > 0 ? { regions } : {}),
   };
 }
 
@@ -261,12 +270,15 @@ export function useConversation(
       if (action.key === "show-source") {
         const cites = citations ?? [];
         const primary = cites[0];
-        if (primary) {
+        // multi-region: the page to show is the primary citation's first region
+        // (or its legacy page). Skip when even that is unknown (regionless only).
+        const showPage = primary ? primary.page ?? citationRegions(primary)[0]?.page : undefined;
+        if (primary && showPage != null) {
           dispatchIntent(
             {
               kind: "showCitations",
               documentId: primary.documentId,
-              page: primary.page,
+              page: showPage,
               regions: litRegionsFromCitations(cites),
             },
             "user",

@@ -79,17 +79,25 @@ The `citations: Citation[]` array returned by `routeChat` SHALL pass
 through the `/api/chat/messages` route, the `sendChatMessage` client
 wrapper, and the `ChatReply.citations` consumer surface without
 re-shaping or filtering. Each `Citation` SHALL carry at minimum
-`documentId: string` + `page: number`, with `snippet: string | null`
-and `bbox?: {x,y,w,h}` as optional enrichment. The chat router already
-emits this payload on every RAG and hybrid reply; this requirement
-formalizes the transport contract end-to-end.
+`documentId: string` plus a `regions: { page: number; bbox: {x,y,w,h};
+tier }[]` array — each region carrying its own page, normalized bbox, and
+tier — with `snippet: string | null` as optional enrichment. The legacy
+top-level `page` / `bbox?` / `tier?` fields SHALL be retained as a derived
+FIRST-REGION alias for the migration window, so every current reader keeps
+working while new readers consume `regions`. A `Citation` MAY carry zero
+regions ONLY in the single permitted pageless case — a validated extraction
+value whose on-page location is genuinely unknown (see the claim-level
+citations requirement); every other citation carries at least one region.
+The chat router already emits this payload on every RAG and hybrid reply;
+this requirement formalizes the transport contract end-to-end.
 
 #### Scenario: Citation round-trip end-to-end (Rule 9 closure)
 
-- **GIVEN** the chat router returns a reply with `citations: [{documentId: "X", page: 7, snippet: "...", bbox: {...}}]`
+- **GIVEN** the chat router returns a reply with `citations: [{documentId: "X", regions: [{page: 7, bbox: {...}, tier: "paraphrase"}], snippet: "..."}]`
 - **WHEN** the client receives the `sendChatMessage` result
-- **THEN** `result.reply.citations[0]` carries the same documentId, page, snippet, and bbox values byte-for-byte
-- **AND** the `chat_messages.citations_json` row holds the same JSON shape
+- **THEN** `result.reply.citations[0]` carries the same documentId, regions (page/bbox/tier), and snippet values byte-for-byte
+- **AND** the derived legacy `page`/`bbox`/`tier` fields equal the first region's values
+- **AND** the `chat_messages.citations_json` row holds the same JSON shape.
 
 ### Requirement: Chat replies SHALL carry intents and toolFailures when the LLM uses function-calling
 
@@ -198,36 +206,39 @@ preserved for one release as a back-compat shim, then removed.
 
 ### Requirement: Chat citations SHALL carry page + normalized bbox resolved from X-Ray or the search result
 
-The chat router SHALL populate each SNIPPET-SOURCED `reply.citations[*]` with the correct `page`
-and a normalized
-`bbox` (0-1 page-relative `{x,y,w,h}`). When the search result already carries geometry
-(`boundingBoxes` + `pages`), the router SHALL read it directly: page from
-`boundingBoxes[0].pageNumber` (falling back to `pages[0].number`), and bbox from the union of the
-result's pixel `boundingBoxes` **on the cited page** (grouped by `pageNumber`, never unioned across
-pages) normalized by that page's `width`/`height`. When the result carries no `boundingBoxes`, the
-router SHALL resolve geometry from the document's X-Ray by matching the citation snippet against
-`chunks[].text`, taking the page from the
-matched chunk's `pageNumbers[0]` and normalizing the chunk's cited-page `boundingBoxes`; the X-Ray
-SHALL be fetched at most once per document (cached). The router SHALL NOT read a top-level
-`pageNumber` field — the deployed API does not return one, so doing so silently defaults every
-citation to page 1. On no match the citation SHALL ship geometry-less. Resolution MUST be
-best-effort: a resolver error MUST NOT fail the chat turn.
+The chat router SHALL populate each SNIPPET-SOURCED `reply.citations[*]` with one or more `regions`,
+each carrying the correct `page` and a normalized `bbox` (0-1 page-relative `{x,y,w,h}`). When the
+search result already carries geometry (`boundingBoxes` + `pages`), the router SHALL read it directly:
+page from `boundingBoxes[0].pageNumber` (falling back to `pages[0].number`), and a SEPARATE region per
+pixel `boundingBox` **on the cited page** (grouped by `pageNumber`, never unioned across pages AND never
+unioned into a single enclosing envelope), each normalized by that page's `width`/`height`. When the
+result carries no `boundingBoxes`, the router SHALL resolve geometry from the document's X-Ray by
+matching the citation snippet against `chunks[].text`, taking the page from the matched chunk's
+`pageNumbers[0]` and emitting a region per the chunk's cited-page `boundingBoxes`; the X-Ray SHALL be
+fetched at most once per document (cached). The router SHALL NOT read a top-level `pageNumber` field —
+the deployed API does not return one, so doing so silently defaults every citation to page 1. When a
+snippet matches no chunk (an emitted-but-unverified quote), the citation SHALL ship a single `ambient`
+region covering the CLAIMED PAGE (a whole-page marker) — never geometry-less, never dropped. Resolution
+MUST be best-effort: a resolver error MUST NOT fail the chat turn.
 
-EXTRACTION-SOURCED citations (which carry no quote and no snippet geometry) SHALL resolve
-geometry via the WF-05 field resolver instead: `resolveFieldGeometry(value, label, xray)` over
-the same cached document X-Ray, with `label` = the field path's last segment — the same
-mechanism the Extract widget's `/api/documents/:documentId/field-geometry` route uses. A
-resolver hit SHALL set the citation's `page` + chunk-envelope `bbox`; on a miss the entry SHALL
-be dropped (per the claim-level citations requirement — no pageless citation form). The X-Ray
-cache SHALL be shared with the snippet path (still at most one fetch per document per turn).
+EXTRACTION-SOURCED citations (which carry no quote and no snippet geometry) SHALL resolve geometry via
+the shared field resolver over the same cached document X-Ray, locating the cited VALUE by the
+value-exact match rule (numeric for numbers, normalized whole-token for words — see the multi-region
+requirement) and emitting a region for EVERY chunk in which it appears (never unioned to one envelope,
+never narrowed by the field label). On a miss — a reformatted/derived/too-common value that matches no
+chunk — the router SHALL fall back: (1) a last-resort locate by the generic field label, on a hit
+attaching that chunk region at `tier: "ambient"`; (2) failing that, keep a REGIONLESS `ambient` citation
+(validated against the payload, location unknown). The entry SHALL NOT be dropped (this REPLACES the
+former drop-on-geometry-miss / "no pageless citation form" rule, per the 2026-06-14 user decision). The
+X-Ray cache SHALL be shared with the snippet path (still at most one fetch per document per turn).
 
 #### Scenario: Geometry read directly off a result that carries it
 
 - **GIVEN** a RAG reply whose search result carries `boundingBoxes`
   `(362,593)-(1601,2031)` with `pageNumber: 2` and a `pages` entry `{number:2, width:1700, height:2200}`
 - **WHEN** the chat router assembles the reply
-- **THEN** the citation carries `page: 2`
-- **AND** `bbox` is approximately `{x:0.213, y:0.270, w:0.729, h:0.654}` (px ÷ page dims)
+- **THEN** the citation carries a region with `page: 2`
+- **AND** that region's `bbox` is approximately `{x:0.213, y:0.270, w:0.729, h:0.654}` (px ÷ page dims)
 - **AND** no X-Ray fetch is needed for that citation.
 
 #### Scenario: A result lacking geometry resolves via X-Ray, once per document
@@ -235,22 +246,21 @@ cache SHALL be shared with the snippet path (still at most one fetch per documen
 - **GIVEN** a reply with two citations from one document whose search results carry no `boundingBoxes`
 - **WHEN** geometry is resolved for both
 - **THEN** the document's X-Ray is fetched at most once (cached)
-- **AND** each citation whose snippet matches an X-Ray chunk carries the chunk's normalized geometry.
+- **AND** each citation whose snippet matches an X-Ray chunk carries that chunk's normalized per-box region(s).
 
-#### Scenario: Unresolvable citation ships geometry-less without failing
+#### Scenario: An unmatched snippet ships a whole-page ambient region without failing
 
 - **GIVEN** a citation whose result has no `boundingBoxes` and matches no X-Ray chunk
 - **WHEN** the chat router assembles the reply
-- **THEN** the citation is returned with no `bbox`
+- **THEN** the citation carries a single `ambient` region covering the claimed page (not geometry-less, not dropped)
 - **AND** the chat turn still succeeds (no thrown error).
 
-#### Scenario: An extraction citation resolves page and bbox via the field resolver
+#### Scenario: An extraction citation resolves a region per occurrence via the field resolver
 
-- **GIVEN** a validated extraction-sourced citation whose `value` appears in an X-Ray chunk with
-  bounding boxes on page 2
+- **GIVEN** a validated extraction-sourced citation whose `value` appears in X-Ray chunks on page 2 (one or more places)
 - **WHEN** the chat router assembles the reply
-- **THEN** the citation carries `page: 2` and the chunk-envelope normalized `bbox`
-- **AND** `tier` is `"paraphrase"`
+- **THEN** the citation carries a region per chunk where the value appears, each `page: 2` with the chunk's normalized `bbox`
+- **AND** each such region's `tier` is `"paraphrase"` (or `"exact"` after a word-level upgrade)
 - **AND** the same turn's snippet citations for that document reuse the one cached X-Ray fetch.
 
 ### Requirement: RAG citations SHALL be claim-level, quote-verified, and tiered by attribution confidence
@@ -281,13 +291,15 @@ embedding gate SHALL run
 only after both lexical gates miss, SHALL compare the quote against the chunk's sentences in one
 batched provider call with per-text vectors cached under a TTL, and SHALL verify at or above the
 configured threshold (`EMBEDDINGS_VERIFY_THRESHOLD`, default 0.82). The resulting citation
-SHALL carry a `tier` of `exact`, `paraphrase`, or `ambient` plus a `confidence`. A verified quote
-SHALL resolve at `paraphrase` with the chunk-level `bbox` (WF-03); an embedding-verified quote
+SHALL carry one or more `regions`, EACH with its own `tier` of `exact`, `paraphrase`, or `ambient`,
+plus a citation-level `confidence`. A verified quote SHALL resolve at `paraphrase` with the chunk's
+per-line region(s) (WF-03, no union envelope); an embedding-verified quote
 SHALL NOT exceed `paraphrase` and SHALL carry its cosine score as `confidence`; when the
-word-level atom resolver is present, a verbatim raw-`text` quote MAY upgrade to `exact` with a
+word-level atom resolver is present, a verbatim raw-`text` quote MAY upgrade a region to `exact` with a
 word-level `bbox`.
-An `ambient` citation is an EMITTED-but-unverified quote — the model cited, verification failed —
-never an invented one.
+An EMITTED-but-unverified quote — the model cited, all three checks (exact, normalized, embedding)
+failed — SHALL NOT be invented and SHALL NOT be dropped: it SHALL be kept as a single `ambient` region
+covering the claimed PAGE (a whole-page marker rendered "unconfirmed"), never a guessed chunk/word box.
 
 **Extraction-sourced form** (`documentId`, `field`, `value`, `answerSpan` — no `page`, no
 `quote`): permitted ONLY when the grounded prompt carries an EXTRACTED FIELDS block; the prompt
@@ -301,160 +313,73 @@ extraction-sourced entry against the PARSED extraction payload it fetched — ne
 output: the `documentId` SHALL equal the extraction's document, the `field` path SHALL resolve in
 the payload, and the cited `value` SHALL match the payload value at that path under the field
 normalization rules (string coercion; case/whitespace/currency tolerance). An entry failing ANY
-check SHALL be DROPPED entirely (not degraded to `ambient` — a failed check means the citation
-has no real referent; `ambient` remains reserved for emitted-but-unverified quotes against real
-snippets). A validated extraction citation SHALL carry the verified-level `confidence` and SHALL
-resolve geometry per the citation-geometry requirement: a field-resolver hit ships `page` + chunk
-`bbox` at `tier: "paraphrase"`; on a geometry miss (or an unfetchable X-Ray) the entry SHALL be
-DROPPED — a citation ships only when it can point at a page (user decision 2026-06-11; no
-pageless/document-level citation form, the shared `Citation` shape is unchanged) — and the drop
-MUST NOT fail the chat turn. After
-the field resolver ships chunk geometry, the router SHALL attempt the word-level upgrade
-(2026-06-11 — the formerly named evolution, now wired): the validated `value` is verbatim by
+of these payload checks SHALL be DROPPED entirely (a failed check means the citation has no real
+referent — Bucket A). When the `field` path resolves to a CONTAINER (object/array — the former
+`branchNode` drop), the router SHALL descend the path to its scalar leaf values (a generic tree walk)
+and locate EACH leaf, rather than dropping; it SHALL NOT anchor on a chosen identifier field. A
+validated extraction citation SHALL carry the verified-level `confidence` and SHALL
+resolve geometry per the multi-region citation-geometry rule: a region for every chunk where the value
+appears, at `tier: "paraphrase"` (chunk) or `exact` (word-level upgrade). A validated value that
+matches no chunk (reformatted/derived/too-common) SHALL NOT be dropped — it SHALL fall back to a
+label-located `ambient` region, else a regionless `ambient` citation (validated, location unknown); this
+is the ONE pageless citation form, permitted only for a validated-but-unlocatable extraction value (the
+former drop-on-geometry-miss rule and "no pageless citation form" clause are superseded, 2026-06-14).
+After a region resolves at chunk level, the router SHALL attempt the word-level upgrade
+(2026-06-11): the validated `value` is verbatim by
 construction, so it SHALL be resolved through the document's `-118-map` word map via the atom
 resolver, the same upgrade path the snippet-quote form uses. When a consecutive atom run resolves,
-the citation SHALL ship that run's tight word-level `bbox` (+ its page), and its tier follows the
+the region SHALL ship that run's tight word-level `bbox` (+ its page), and its tier follows the
 attribution tiering rule: `exact` when the cited `value` matched the payload exactly; a
 normalized-only value match keeps `tier: "paraphrase"` (with the tighter box). A
 word-map miss — unfetchable map, no verbatim atom run, or any resolver failure — SHALL keep the
-chunk geometry at `tier: "paraphrase"` and MUST NOT drop the citation or fail the turn: the
-drop-on-miss rule applies ONLY to the chunk-level field resolver; the word-level pass is a
-best-effort upgrade on top of an already-shippable citation.
+chunk geometry at `tier: "paraphrase"` and MUST NOT drop the citation or fail the turn.
 
 Verification + any geometry fetches MUST be best-effort and cached per
 `documentId`; any failure — including any embeddings-provider error, timeout, or
-misconfiguration — SHALL drop the claim one tier (or drop an extraction entry whose
-payload validation cannot run) and MUST NOT fail the chat turn.
+misconfiguration — SHALL drop the claim one tier (or, for an extraction entry whose payload
+validation cannot run, drop that entry as a Bucket-A failure) and MUST NOT fail the chat turn.
 
-#### Scenario: Verbatim claim upgrades to a word-level exact tier when the atom resolver is wired
+#### Scenario: A container-level extraction citation descends to its leaves instead of dropping
 
-- **GIVEN** the `-118-map` atom resolver is available
-- **AND** an answer claim whose `supportingQuote` is a verbatim substring of chunk[2]'s raw `text`
-- **WHEN** the chat router assembles citations
-- **THEN** the claim's citation has `tier: "exact"`
-- **AND** its `bbox` is the union of the matched atoms' boxes (tighter than the chunk box).
+- **GIVEN** an extraction citation whose `field` path resolves to a container (object/array) holding scalar leaf values that appear in the document
+- **WHEN** the router validates and resolves geometry
+- **THEN** the citation descends to the container's scalar leaves and carries a region for every place each leaf value appears
+- **AND** it is NOT dropped as a `branchNode`.
 
-#### Scenario: Paraphrased claim degrades to chunk-level
+#### Scenario: An unverified quote is kept as a whole-page ambient region
 
-- **GIVEN** a claim whose `supportingQuote` matches chunk[2]'s `suggestedText` but no raw-text span
-- **WHEN** the chat router assembles citations
-- **THEN** the citation has `tier: "paraphrase"`
-- **AND** its `bbox` is the chunk-level `boundingBoxes` envelope.
+- **GIVEN** an emitted snippet quote that fails the exact, normalized, AND embedding checks
+- **WHEN** the router assembles citations
+- **THEN** the citation is kept with a single `ambient` region covering the claimed page (rendered "unconfirmed")
+- **AND** it is neither invented nor dropped.
 
-#### Scenario: Meaning-level paraphrase verifies via embeddings at the paraphrase tier
+#### Scenario: A validated extraction value that is not printed findably is kept, not dropped
 
-- **GIVEN** a claim whose `supportingQuote` matches no exact or normalized span but whose best
-  sentence cosine clears the configured threshold
-- **WHEN** the chat router assembles citations
-- **THEN** the citation has `tier: "paraphrase"` with the chunk-level `bbox`
-- **AND** its `confidence` equals the cosine score
-- **AND** the embedding gate was not invoked for any claim a lexical gate already verified.
+- **GIVEN** a validated extraction citation whose value matches no X-Ray chunk (a reformatted or derived value)
+- **WHEN** geometry is resolved
+- **THEN** the router attaches a label-located `ambient` region if the field label matches a chunk, else keeps a regionless `ambient` citation (location unknown)
+- **AND** the entry is NOT dropped and NOT treated as a Bucket-A fabrication.
 
-#### Scenario: Embeddings provider failure degrades to ambient without failing the turn
+#### Scenario: A fabricated extraction citation is still dropped
 
-- **GIVEN** the embeddings provider errors, returns malformed data, exceeds `EMBEDDINGS_TIMEOUT_MS`, or the embedder implementation rejects
-- **AND** a claim whose `supportingQuote` clears no lexical gate
-- **WHEN** the chat router assembles citations
-- **THEN** that citation has `tier: "ambient"`
-- **AND** the reply is delayed by at most the embeddings timeout budget
-- **AND** the chat turn still succeeds (no thrown error).
-
-#### Scenario: Production boot requires the embeddings provider
-
-- **GIVEN** `NODE_ENV=production` and either `EMBEDDINGS_BASE_URL` or `EMBEDDINGS_MODEL_ID` unset
-- **WHEN** the middleware loads its env
-- **THEN** boot fails fast with a validation error naming the missing variable.
-
-#### Scenario: A keyless self-hosted embeddings provider is valid
-
-- **GIVEN** `EMBEDDINGS_BASE_URL` + `EMBEDDINGS_MODEL_ID` set and `EMBEDDINGS_API_KEY` unset
-- **WHEN** the middleware boots and the embedding gate fires
-- **THEN** production boot succeeds
-- **AND** the embeddings request is sent with no auth header.
-
-#### Scenario: Emitted-but-unverified quote degrades to ambient
-
-- **GIVEN** an answer whose emitted citation quote clears no verification threshold
-- **WHEN** the chat router assembles citations
-- **THEN** that citation has `tier: "ambient"`
-- **AND** the chat turn still succeeds (no thrown error).
-
-#### Scenario: An uncited answer carries zero citations
-
-- **GIVEN** an answer with NO emitted citations block (small talk, a joke, a product question)
-- **WHEN** the chat router assembles the reply
-- **THEN** `reply.citations` is empty
-- **AND** no "Show all sources" suggested action is seeded.
-
-#### Scenario: An extraction-grounded answer carries citations
-
-- **GIVEN** a turn whose prompt carries the EXTRACTED FIELDS block listing
-  `meters[0].meter_number = "49099992"`
-- **AND** the model answers from the extraction only and emits
-  `{"documentId": "<the extraction's doc>", "field": "meters[0].meter_number", "value": "49099992", "answerSpan": "meter 49099992"}`
-- **WHEN** the chat router assembles the reply
-- **THEN** `reply.citations` carries the validated citation
-- **AND** the "Show all sources" suggested action is seeded.
-
-#### Scenario: A fabricated extraction field path is dropped
-
-- **GIVEN** an extraction-sourced entry whose `field` path does not resolve in the fetched
-  extraction payload, or whose `value` does not match the payload value at that path
-- **WHEN** the chat router assembles citations
-- **THEN** that entry is dropped entirely (no `ambient` downgrade)
-- **AND** the chat turn still succeeds.
-
-#### Scenario: Extraction form is unavailable without an extraction block
-
-- **GIVEN** a turn whose prompt carries NO EXTRACTED FIELDS block (no primary document, fetch
-  failure, or a turn plan that skipped the extraction fetch)
-- **WHEN** the grounded prompt is built and the reply is assembled
-- **THEN** the prompt contains no extraction-citations contract copy
-- **AND** any extraction-sourced entry the model emits anyway is dropped (no payload to validate
-  against).
-
-#### Scenario: A validated extraction citation upgrades to the word-level exact tier
-
-- **GIVEN** a validated extraction-sourced citation whose `value` matched the payload exactly and
-  whose chunk geometry resolved via the field resolver
-- **AND** the document's `-118-map` word map carries a consecutive atom run spelling out the
-  cited `value`
-- **WHEN** the chat router assembles the reply
-- **THEN** the citation has `tier: "exact"`
-- **AND** its `bbox` is the atom-run union (tighter than the chunk envelope) with the word map's
-  page.
-
-#### Scenario: A word-map miss keeps the chunk-level paraphrase citation
-
-- **GIVEN** a validated extraction-sourced citation whose chunk geometry resolved
-- **AND** the `-118-map` is unfetchable, the fetch throws, or no atom run spells out the value
-- **WHEN** the chat router assembles the reply
-- **THEN** the citation ships with `tier: "paraphrase"` and the chunk-envelope `bbox`
-- **AND** the citation is NOT dropped
-- **AND** the chat turn still succeeds.
-
-#### Scenario: Geometry miss drops the extraction citation without failing the turn
-
-- **GIVEN** a validated extraction-sourced citation whose `value` matches no X-Ray chunk (or the
-  X-Ray is unfetchable)
-- **WHEN** the chat router assembles the reply
-- **THEN** that entry is absent from `reply.citations`
-- **AND** other citations on the reply are unaffected
-- **AND** the chat turn still succeeds.
+- **GIVEN** an extraction citation whose documentId is not the extraction's document, or whose field path does not resolve, or whose value does not match the payload
+- **WHEN** the router validates the entry
+- **THEN** it is dropped (Bucket A — no real referent)
+- **AND** its drop is counted in the citation funnel.
 
 ### Requirement: Chat citations SHALL resolve a word-level bbox from the document `-118-map` when a verbatim quote is verified
 
 The chat router SHALL, for any citation whose supporting verbatim quote has already verified against
-its cited chunk, attempt to tighten the citation's geometry to a word-level box by fetching the
-document's `-118-map.json` word-map and calling the shipped `resolveWordGeometry(quote, map)`
-resolver. When the resolver returns a box, the router SHALL replace the citation's `bbox` with that
-tighter word-level box and SHALL assign the citation's tier via `assignTier(v, { hasAtomBox: true })`
-so the `exact` tier lights. The word-map SHALL be fetched at most once per document (cached), and
+its cited chunk, attempt to tighten the corresponding REGION's geometry to a word-level box by fetching
+the document's `-118-map.json` word-map and calling the shipped `resolveWordGeometry(quote, map)`
+resolver. When the resolver returns a box, the router SHALL replace that region's `bbox` with the
+tighter word-level box and SHALL set that region's tier via `assignTier(v, { hasAtomBox: true })` so the
+`exact` tier lights. The word-map SHALL be fetched at most once per document (cached), and
 the lookup SHALL fire ONLY for already-verified citations — an unverified citation pays no word-map
 fetch. Resolution MUST be best-effort: a missing or unfetchable word-map, malformed JSON, or a quote
-that is not present verbatim in the map MUST leave the citation at its X-Ray `paraphrase` chunk box
-(or geometry-less), and MUST NOT fail the chat turn. The router SHALL NOT re-implement the
-resolver — it consumes the shipped pure `resolveWordGeometry`.
+that is not present verbatim in the map MUST leave the region at its X-Ray `paraphrase` chunk box
+(never collapsing a real grounding to no geometry), and MUST NOT fail the chat turn. The router SHALL
+NOT re-implement the resolver — it consumes the shipped pure `resolveWordGeometry`.
 
 #### Scenario: A verified verbatim quote resolves to the tighter word-level box and lights `exact`
 
@@ -462,9 +387,9 @@ resolver — it consumes the shipped pure `resolveWordGeometry`.
 - **AND** the cited document has a fetchable `-118-map.json` in which the quote's tokens appear as a
   consecutive atom run
 - **WHEN** the chat router assembles the reply
-- **THEN** the citation's `bbox` is the word-level union box from the matched atoms (strictly tighter
+- **THEN** the citation's matched region carries the word-level union box from the matched atoms (strictly tighter
   than the X-Ray chunk box for the same chunk)
-- **AND** the citation's `tier` is `exact`.
+- **AND** that region's `tier` is `exact`.
 
 #### Scenario: Word-map fetched at most once per document
 
@@ -477,15 +402,15 @@ resolver — it consumes the shipped pure `resolveWordGeometry`.
 - **GIVEN** a reply whose only citation is unverified (the verbatim quote did not verify)
 - **WHEN** the chat router assembles the reply
 - **THEN** no `-118-map.json` fetch is performed for that document
-- **AND** the citation resolves at the `ambient` tier as before.
+- **AND** the citation resolves at the `ambient` tier with its whole-page region (not geometry-less).
 
-#### Scenario: Fallback chain degrades cleanly to the chunk box
+#### Scenario: Fallback chain degrades cleanly to the chunk region
 
 - **GIVEN** a verified citation whose document has no fetchable word-map, OR whose quote is not
   present verbatim in the word-map
 - **WHEN** the chat router assembles the reply
-- **THEN** the citation keeps its X-Ray chunk-level `bbox`
-- **AND** the citation's `tier` is `paraphrase`
+- **THEN** the citation keeps its X-Ray chunk-level region(s)
+- **AND** that region's `tier` is `paraphrase`
 - **AND** the chat turn still succeeds (no thrown error).
 
 ### Requirement: Per-entity RAG scope SHALL be persisted by a producer and read back, never read-only
@@ -564,16 +489,18 @@ is left read-only.
 ### Requirement: Citation geometry SHALL resolve to word-level atom boxes when available
 
 The citation geometry pipeline SHALL resolve a cited verbatim span to a **word-level `bbox`** using
-the document's `-118-map.json` word atoms, falling back to the X-Ray chunk box and then to none. The
-resolved tight box SHALL populate `Citation.bbox`, so the WF-06b `exact` tier lights a word-level
+the document's `-118-map.json` word atoms, falling back to the X-Ray chunk region(s) and then — for a
+real grounding — to the never-drop floor (a snippet's claimed-page `ambient` region, or an extraction
+value's label-located / regionless `ambient` citation), NEVER to nothing. The resolved tight box SHALL
+populate the corresponding REGION's `bbox`, so the WF-06b `exact` tier lights a word-level
 highlight. Resolution SHALL be verbatim-only (no paraphrase inference).
 
 #### Scenario: A verbatim citation gets a tight box
 
 - **GIVEN** an answer citing a verbatim span present in the document
 - **WHEN** citation geometry resolves
-- **THEN** `Citation.bbox` is the word-level union from `-118-map` (tighter than the chunk box)
-- **AND** when the word map is unavailable it falls back to the X-Ray chunk box, then to no box.
+- **THEN** the region's `bbox` is the word-level union from `-118-map` (tighter than the chunk box)
+- **AND** when the word map is unavailable it falls back to the X-Ray chunk region, then to the never-drop floor (not to no box for a real grounding).
 
 ### Requirement: Chat wire types SHALL be single-sourced from @groundx/shared with a compile-time drift guard
 
@@ -1161,4 +1088,195 @@ in-progress indicator is deferred to the streaming requirement, where
 - **WHEN** the reply renders
 - **THEN** `reply.toolActivity` is empty or absent (the app reads `?? []`)
 - **AND** the failed call appears on `toolFailures[]` only.
+
+### Requirement: Citations SHALL preserve all real proof as multiple page regions, never dropping a validated grounding
+
+A citation SHALL carry ALL of the on-page locations that support its claim — not
+a single box — and SHALL NEVER be discarded when the underlying grounding is
+real. The `Citation` shape SHALL carry `regions: { page, bbox, tier }[]` — each
+region carrying its OWN tier (the legacy single `page`/`bbox`/`tier` retained as a
+derived first-region alias during migration).
+
+This requirement applies to EVERY citation the system produces — chat answers,
+report sections, extracted-field values, AND the Extract value grid (the
+`/api/documents/:id/field-geometry` path) — through the ONE shared `Citation`
+shape and the ONE shared geometry resolver; there SHALL be no per-surface
+exception. There SHALL be NO cap on the number of regions: a value appearing on
+many rows lights every one, and a container fans out to all its values' places;
+persistence, transport, and rendering SHALL handle arbitrary region counts
+without truncation. EXACT-duplicate regions (identical page + box, e.g. one chunk
+matched by several of a container's leaf values) MAY be collapsed — they are one
+occurrence, not many — but DISTINCT occurrences SHALL NOT be dropped. For DISPLAY
+only, a renderer MAY combine OVERLAPPING / adjacent same-tier regions into their
+bounding box so a many-region citation reads cleanly, provided distinct (non-
+adjacent) occurrences stay separate and the citation's underlying region data is
+unchanged. The cross-citation "show all sources" overview MAY mark one region per
+citation (color-keyed by citation), while a single citation's click lights all of
+its regions — both are valid renderings of the same region data.
+Geometry resolution SHALL emit individual per-line / per-chunk boxes and SHALL
+NOT union them into a single enclosing envelope. A cited chunk ALWAYS has bounding
+boxes — from the retrieved search chunk (RAG), or, when the search result is bare,
+fetched from the document X-Ray (which always carries chunk boxes); there is NO
+bare-chunk path that drops a citation for lack of geometry. The router SHALL
+highlight EVERY chunk/span where the cited value or quote appears (RAG: the
+retrieved chunks; extraction: every chunk whose NORMALIZED text contains the
+NORMALIZED value), so a value present in several places lights each. A word-level box
+(`-118-map`) SHALL tighten a region when available; its absence keeps the
+chunk-level region — never an empty citation.
+
+Geometry resolution SHALL be SCHEMA-AGNOSTIC: it SHALL key off the cited/resolved
+VALUES (a generic tree walk + the value-exact match rule below — numeric for
+numbers, normalized whole-token for words), and SHALL NOT hardcode any
+attribute or field name — the same logic SHALL serve any document or extraction
+schema, not one sample's fields. Any label used SHALL be the generic last segment
+of the cited path, never a baked-in name.
+
+A VALIDATED grounding SHALL NEVER be dropped for want of a precise box:
+- When a cited extraction `field` resolves to a container (object/array — the
+  former `branchNode` drop), the router SHALL descend to the container's scalar
+  leaf values (a generic tree walk) and locate EACH value's text in the X-Ray,
+  highlighting every place each appears; it SHALL NOT drop the citation and SHALL
+  NOT anchor on a chosen identifier field.
+- A validated value that is PRINTED in the document SHALL resolve to at least its
+  X-Ray chunk region(s) (the former `geometry` drop of a printed validated value
+  does not occur); a word-level box tightens it when available.
+- A validated value that matches NO chunk (a REFORMATTED value — e.g. an ISO date
+  printed long-form — or a DERIVED value never printed) SHALL NOT be dropped. The
+  router SHALL: (1) attempt a last-resort locate by the generic field LABEL and, on
+  a hit, attach that chunk region at `tier: "ambient"`; (2) failing that, keep the
+  citation with NO region at `tier: "ambient"` (validated against the payload,
+  location unknown) — a source chip, NOT a drop and NOT a Bucket-A fabrication. This
+  pageless form is permitted ONLY for a validated-but-unlocatable extraction value
+  (a quote citation always carries its claimed page). The label-locator here is a
+  last resort when there are ZERO value matches and SHALL NOT be used to narrow
+  AMONG several value matches.
+
+The value-LOCATION match (finding a value in the X-Ray for geometry) SHALL be
+value-exact and whole-token, NOT semantic similarity, NOT a loose token-overlap,
+and NOT a raw substring:
+- **Numbers** SHALL be compared NUMERICALLY: parse the cited value AND each numeric
+  token in the chunk to actual numbers and compare as numbers, matching a value as
+  a WHOLE numeric token. This connects the extraction's plain-stored number to the
+  document's formatted rendering (`7613.2` SHALL match `7,613.20` and `$7,613.20`)
+  by principle rather than by the current resolver's brittle candidate-string +
+  raw-substring workaround, and it SHALL match a value only as a whole numeric token
+  (so it does NOT false-match a value inside a longer number, which the current
+  substring test does).
+- **Words / strings** SHALL be matched by NORMALIZED whole-token-sequence (strip
+  whitespace / punctuation / currency, collapse spaces; require the value's tokens
+  to appear as a whole sequence, not a substring).
+
+It SHALL tolerate formatting noise (an extra space, `$`/comma/trailing-zero
+differences) but SHALL NOT match a DIFFERENT value (`18.43` SHALL NOT match
+`18.44`) NOR a value embedded inside a larger token (`18.43` SHALL NOT match within
+`118.437`). It SHALL NOT use the field LABEL to narrow to a single chunk when a
+value appears in several (the current resolver's label tiebreaker is removed — D1
+requires every occurrence, and the label is schema-specific). A too-short or
+too-common value (the existing minimum-distinctiveness guard) SHALL be treated as
+NOT distinctly locatable and routed to the unlocatable-value fallback (below)
+rather than flooding the page with matches of a common token; this is a
+locatability precondition, NOT a cap on legitimate repeats. Embedding similarity
+SHALL NOT be used for location — it would match near-miss numbers. (Embedding
+similarity remains ONLY on the snippet/quote VERIFICATION arm, where a quote may
+legitimately be a paraphrase; an extracted value is a datum, verified by
+exact/normalized equality.)
+
+This SHALL NOT relax the rejection of FABRICATED citations: an entry whose
+`documentId` was not retrieved, whose `field` path does not resolve, or whose
+cited `value` does not match the payload (exact/normalized equality), and a
+malformed citations block (`parse`), SHALL still be rejected — there is no real
+proof to preserve. The rate of these fabricated-claim drops
+SHALL be treated as a PROMPT signal: when material, the citations-contract prompt
+SHALL be tightened to steer the model toward leaf field paths and retrieved
+document ids, with dropping retained only as the safety net.
+
+`tier` SHALL be a property of EACH region, not the citation, set by a verification
+ladder (strictest first): `exact` = the quote's words are in the chunk verbatim
+(tight word box); `paraphrase` = same words ignoring formatting OR same meaning by
+the embedding check (the matched chunk's region — embeddings confirm a reworded
+quote HERE, a real region at lower confidence); `ambient` = all three failed (not
+in the chunk by words or meaning) — the quote SHALL still be kept as a region for
+the CLAIMED PAGE (a whole-page marker on the cited document's page), tagged
+`ambient` and rendered as **"unconfirmed"** (an emitted-but-unverified quote is not
+dropped — it shows what the model leaned on so a wrong pick is visible). The region
+SHALL be page-level, NOT a guessed chunk/word box: every more-precise check failed,
+so there is no verified basis to claim chunk-level precision; the page is the
+finest location the system can stand behind. For a QUOTE, `ambient` is therefore a
+region tier (the unconfirmed claimed PAGE), not a no-region state — every quote
+citation has at least one region. A very short quote MAY skip the embedding step
+(meaning-match of a tiny fragment is unreliable) and go straight to a page-level
+`ambient` region. An extracted VALUE does not reach `ambient` through the
+quote-verification ladder (it is validated against the payload, never
+embedding-matched); it reaches `ambient` ONLY through the unlocatable-value
+fallback above (a label-located region, or — uniquely — a regionless source chip
+when its on-page location is genuinely unknown). A single citation MAY carry
+regions of differing tiers and each SHALL render at its own precision.
+
+#### Scenario: A "list everything" answer keeps its citations as multiple regions
+
+- **GIVEN** a grounded answer that lists many values from one chunk and cites them at the container level (the former `branchNode` all-drop)
+- **WHEN** the router assembles citations
+- **THEN** the citation descends to the container's scalar leaf values and carries a region for every place each value appears, rather than being dropped
+- **AND** the answer ships with citations rather than zero.
+
+#### Scenario: A validated value with no word-level box still carries its chunk region
+
+- **GIVEN** a validated extraction citation whose value cannot be pinned to a word-level box
+- **WHEN** geometry is resolved
+- **THEN** the citation carries the value's X-Ray chunk region(s) at `tier: "paraphrase"`
+- **AND** it is NOT dropped.
+
+#### Scenario: A validated value that is not printed verbatim is kept, never dropped
+
+- **GIVEN** a validated extraction value that matches no chunk by numeric or text comparison (a reformatted date printed long-form, or a derived value never printed verbatim)
+- **WHEN** geometry is resolved
+- **THEN** the router attempts a last-resort locate by the generic field label and, on a hit, attaches that chunk region at `tier: "ambient"`
+- **AND** if even the label does not locate, the citation is kept with NO region at `tier: "ambient"` (validated, location unknown) — a source chip
+- **AND** it is NOT dropped and NOT counted as a fabricated-claim (Bucket-A) drop.
+
+#### Scenario: A number is located by numeric comparison through formatting, but not when it differs or is embedded
+
+- **GIVEN** an extracted number stored plain as `7613.2` whose document text renders it as `$7,613.20` (currency, comma, trailing zero)
+- **WHEN** the value is located in the X-Ray
+- **THEN** the numeric comparison parses both sides to the same number and highlights that chunk
+- **AND** the same number with a stray space after the currency mark (`$ 7,613.20`) is also matched (the digit run is tokenized independent of surrounding `$`/spaces)
+- **AND** a near-miss number (`18.43` against a document's `18.44`) does NOT match
+- **AND** a number embedded in a larger token (`18.43` within `118.437`) does NOT match — it is not a whole numeric token (the current raw-substring matcher DOES false-match here; this scenario pins the fix).
+
+#### Scenario: An unverified quote is kept as an unconfirmed page-level region, not dropped
+
+- **GIVEN** an emitted quote that matches its chunk neither verbatim, nor under normalization, nor by embedding meaning
+- **WHEN** the router assembles citations
+- **THEN** the citation keeps a PAGE-LEVEL region (a whole-page marker on the cited document's claimed page) tagged `tier: "ambient"`
+- **AND** that region is NOT a guessed chunk or word box (every more-precise check failed, so no sub-page precision is claimed)
+- **AND** it is rendered as "unconfirmed", not dropped
+- **AND** the `ambient` decision is reached only after the exact and near and embedding checks all fail.
+
+#### Scenario: A citation's regions render at their own tiers
+
+- **GIVEN** a citation whose answer draws on two values — one resolved to a tight word-level box, one only to its chunk
+- **WHEN** the citation is assembled
+- **THEN** the first region carries `tier: "exact"` and the second `tier: "paraphrase"`
+- **AND** each is rendered at its own precision (no single citation-level tier flattens them).
+
+#### Scenario: A value repeated across the document highlights every chunk it appears in
+
+- **GIVEN** a cited extraction value that appears in several X-Ray chunks (e.g. the same charge on multiple meters)
+- **WHEN** geometry is resolved
+- **THEN** the citation carries one region per chunk where the value appears
+- **AND** no occurrence is collapsed into a single union box.
+
+#### Scenario: A fabricated citation is still rejected
+
+- **GIVEN** an emitted citation whose documentId was not retrieved, or whose field path or value does not match the payload
+- **WHEN** the router validates citations
+- **THEN** the entry is dropped (no real proof to preserve)
+- **AND** its drop is counted as a prompt-quality signal.
+
+#### Scenario: Geometry resolution hardcodes no attribute names
+
+- **GIVEN** an extraction payload with a non-utility shape (no `meters` / `meter_id` — e.g. a loan packet or a BYO upload's fields)
+- **WHEN** a value or a container from it is cited
+- **THEN** the resolver locates the value(s) by text and highlights them
+- **AND** it references no sample-specific field name (the same code serves any schema).
 

@@ -13,6 +13,7 @@ import type { GroundXClient } from "../types.js";
 import { logger } from "../lib/logger.js";
 import {
   bboxForResult,
+  pageOf,
   parseBoundingBoxes,
   parsePages,
   resolveGeometryFromXray,
@@ -274,28 +275,32 @@ export async function searchGroundX(
     // WF-03: the deployed API does NOT return a top-level `r.pageNumber`.
     // Page + bbox live in `r.boundingBoxes[]` (px corners + pageNumber) and
     // `r.pages[]` (page dims). Read geometry off the result and normalize.
-    const { page, bbox } = bboxForResult(parseBoundingBoxes(r.boundingBoxes), parsePages(r.pages));
+    // multi-region: per-box regions on the cited page (no union envelope).
+    const bb = parseBoundingBoxes(r.boundingBoxes);
+    const pg = parsePages(r.pages);
+    const regions = bboxForResult(bb, pg);
     return {
       documentId: typeof r.documentId === "string" ? r.documentId : String(r.documentId ?? ""),
-      pageNumber: page,
-      bbox: bbox ?? undefined,
+      // The cited page is known even when geometry doesn't normalize (default 1).
+      pageNumber: regions[0]?.page ?? pageOf({ boundingBoxes: bb, pages: pg }),
+      bboxes: regions.length ? regions.map((g) => g.bbox) : undefined,
       text: typeof r.text === "string" ? r.text : undefined,
       score: typeof r.score === "number" ? r.score : undefined,
       fileName: typeof r.fileName === "string" ? r.fileName : undefined,
     };
   });
   // WF-03 fallback — results that carry NO search-side geometry resolve from
-  // the document's X-Ray (cached per doc). Fires ONLY when `bbox` is absent,
+  // the document's X-Ray (cached per doc). Fires ONLY when `bboxes` is absent,
   // so the common layout-doc path (geometry already on the result) pays no
   // X-Ray fetch. Best-effort: a failed fetch/parse leaves the citation bare.
   for (const r of mapped) {
-    if (r.bbox || !r.text || !r.documentId) continue;
+    if (r.bboxes || !r.text || !r.documentId) continue;
     const xray = await fetchDocumentXray(client, apiKey, r.documentId);
     if (!xray) continue;
-    const geo = resolveGeometryFromXray(r.text, xray);
-    if (geo) {
-      r.pageNumber = geo.page;
-      if (geo.bbox) r.bbox = geo.bbox;
+    const regions = resolveGeometryFromXray(r.text, xray);
+    if (regions.length) {
+      r.pageNumber = regions[0].page;
+      r.bboxes = regions.map((g) => g.bbox);
     }
   }
   // Result summary for dev visibility. Carries ONLY non-sensitive telemetry

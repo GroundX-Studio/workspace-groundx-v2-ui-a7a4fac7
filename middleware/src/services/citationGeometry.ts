@@ -96,29 +96,69 @@ export function groupByPage(boxes: BoundingBox[]): Map<number, BoundingBox[]> {
   return map;
 }
 
+/** A normalized 0-1 page-relative box paired with its 1-indexed page. */
+export interface GeometryRegion {
+  page: number;
+  bbox: NormalizedBbox;
+}
+
 /**
- * Union one page's boxes into an envelope and normalize by the page's
- * pixel dims → 0-1 `{x,y,w,h}`. Returns null when there are no boxes or the
- * page dims are unusable.
+ * Normalize ONE page-pixel box to 0-1 `{x,y,w,h}` against its page's dims.
+ * Returns null when the page dims are missing/unusable.
+ *
+ * multi-region-citations: a chunk's boxes are NO LONGER unioned into one loose
+ * envelope — each box becomes its own region (see `normalizeBoxes`). The
+ * envelope union survives only in `resolveWordGeometry`, where a single cited
+ * SPAN's consecutive atoms legitimately tighten into one word-run box.
  */
-export function normalizeBox(boxesOnOnePage: BoundingBox[], page: PageDim | undefined): NormalizedBbox | null {
-  if (!boxesOnOnePage.length || !page || page.width <= 0 || page.height <= 0) return null;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const b of boxesOnOnePage) {
-    minX = Math.min(minX, b.topLeftX);
-    minY = Math.min(minY, b.topLeftY);
-    maxX = Math.max(maxX, b.bottomRightX);
-    maxY = Math.max(maxY, b.bottomRightY);
-  }
+export function normalizeBox(b: BoundingBox, page: PageDim | undefined): NormalizedBbox | null {
+  if (!page || page.width <= 0 || page.height <= 0) return null;
+  // Clamp into the page: a malformed/inverted X-Ray box (a corner outside the
+  // page, or bottomRight < topLeft) must not draw an off-page, negative, or
+  // oversized overlay. x/y clamp to [0,1]; w/h clamp to [0, 1-origin].
+  const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const x = clamp01(b.topLeftX / page.width);
+  const y = clamp01(b.topLeftY / page.height);
   return {
-    x: minX / page.width,
-    y: minY / page.height,
-    w: (maxX - minX) / page.width,
-    h: (maxY - minY) / page.height,
+    x,
+    y,
+    w: Math.min(clamp01((b.bottomRightX - b.topLeftX) / page.width), 1 - x),
+    h: Math.min(clamp01((b.bottomRightY - b.topLeftY) / page.height), 1 - y),
   };
+}
+
+/**
+ * Per-box regions for a set of page-pixel boxes — ONE region PER box (no
+ * union-to-one-envelope). Each box is normalized against its own page's dims;
+ * a box whose page dims are missing is skipped.
+ */
+export function normalizeBoxes(boxes: BoundingBox[], pageDims: PageDim[]): GeometryRegion[] {
+  const out: GeometryRegion[] = [];
+  for (const b of boxes) {
+    const bbox = normalizeBox(b, pageDims.find((p) => p.number === b.pageNumber));
+    if (bbox) out.push({ page: b.pageNumber, bbox });
+  }
+  return out;
+}
+
+/**
+ * Drop regions with an identical page + box (multi-region-citations). A
+ * container citation that descends to many leaf values often matches the SAME
+ * chunk repeatedly (one box per leaf), so the raw region set is heavy with exact
+ * duplicates; this collapses them, preserving first-seen order. It removes only
+ * EXACT duplicates — distinct occurrences are untouched (visual adjacency
+ * merging is a separate, render-time concern).
+ */
+export function dedupeGeometryRegions(regions: GeometryRegion[]): GeometryRegion[] {
+  const seen = new Set<string>();
+  const out: GeometryRegion[] = [];
+  for (const r of regions) {
+    const key = `${r.page}|${r.bbox.x}|${r.bbox.y}|${r.bbox.w}|${r.bbox.h}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
 }
 
 /** The cited page for a result: `boundingBoxes[0].pageNumber` → `pages[0].number` → 1. */
@@ -127,17 +167,14 @@ export function pageOf(result: { boundingBoxes?: BoundingBox[]; pages?: PageDim[
 }
 
 /**
- * Resolve a result's cited page + normalized bbox from its boxes + page dims.
- * `bbox` is null when geometry is absent (caller leaves the citation geometry-less).
+ * Per-box regions resolved from a result's own boxes + page dims, on the cited
+ * page (`pageOf`). Empty when geometry is absent (caller leaves the citation
+ * geometry-less). multi-region: one region per box, never a union envelope.
  */
-export function bboxForResult(
-  boundingBoxes: BoundingBox[],
-  pages: PageDim[],
-): { page: number; bbox: NormalizedBbox | null } {
+export function bboxForResult(boundingBoxes: BoundingBox[], pages: PageDim[]): GeometryRegion[] {
   const page = pageOf({ boundingBoxes, pages });
   const onPage = groupByPage(boundingBoxes).get(page) ?? [];
-  const pageDim = pages.find((p) => p.number === page);
-  return { page, bbox: normalizeBox(onPage, pageDim) };
+  return normalizeBoxes(onPage, pages);
 }
 
 // --- X-Ray fallback resolver (WF-03 task 4) -------------------------------
@@ -224,9 +261,9 @@ export function resolveGeometryFromXray(
   snippet: string,
   xray: XrayDoc,
   threshold = 0.5,
-): { page: number; bbox: NormalizedBbox | null } | null {
+): GeometryRegion[] {
   const snippetNorm = normalizeText(snippet);
-  if (!snippetNorm || !Array.isArray(xray.chunks)) return null;
+  if (!snippetNorm || !Array.isArray(xray.chunks)) return [];
 
   let best: XrayChunk | null = null;
   let bestScore = 0;
@@ -241,8 +278,11 @@ export function resolveGeometryFromXray(
       best = chunk;
     }
   }
-  if (!best || bestScore < threshold) return null;
+  if (!best || bestScore < threshold) return [];
 
+  // multi-region: emit a region per box on the matched chunk's cited page (no
+  // union envelope). The snippet is matched lexically (it's prose); the VALUE
+  // path (`resolveFieldGeometry`) uses the stricter numeric/whole-token match.
   const boxes = parseBoundingBoxes(best.boundingBoxes);
   const page = boxes[0]?.pageNumber ?? best.pageNumbers?.[0] ?? 1;
   const pageDims: PageDim[] = (xray.documentPages ?? []).map((p) => ({
@@ -251,31 +291,89 @@ export function resolveGeometryFromXray(
     height: p.height,
   }));
   const onPage = groupByPage(boxes).get(page) ?? [];
-  return { page, bbox: normalizeBox(onPage, pageDims.find((p) => p.number === page)) };
+  return normalizeBoxes(onPage, pageDims);
+}
+
+// --- WF-05 value→chunk matching (multi-region-citations R1) ----------------
+// LOCATING a cited extraction VALUE in a chunk is value-exact and whole-token,
+// NOT a raw substring and NOT loose token-overlap. This REPLACES the former
+// `fieldValueCandidates` + `raw.includes(candidate)` matcher, whose substring
+// test false-matched a value INSIDE a larger number (`18.43` ⊂ `118.437`).
+//   - Numbers: parse the value AND each numeric token in the chunk to actual
+//     numbers; match a WHOLE numeric token (`7613.2` == `7,613.20` == `$7,613.20`
+//     and even `$ 7,613.20`; `18.43` ≠ `18.44`; `18.43` ∉ `118.437`).
+//   - Words/strings: normalized whole-token-SEQUENCE (a contiguous run of tokens,
+//     not a substring of one token — `cat` does not match `category`).
+
+const FLOAT_EPSILON = 1e-9;
+
+/**
+ * Parse a value to a number IFF it is a "pure number" form (optional currency
+ * mark / sign / thousands commas / decimal / percent). Returns null for values
+ * that aren't a bare number (e.g. `"Net 30"`, `"2024-01-15"`) — those go through
+ * the word path. The distinctiveness floor: a number with fewer than 2 digits
+ * (e.g. the integer `2`) is NOT distinctly locatable (it would match every `2`
+ * on the page) → treated as non-numeric-locatable (returns null; the caller's
+ * word path then also rejects it on length).
+ */
+function asLocatableNumber(value: string | number): number | null {
+  const n =
+    typeof value === "number"
+      ? value
+      : /^[$£€\s]*-?\d[\d,\s]*\.?\d*\s*%?$/.test(value.trim())
+        ? Number(value.replace(/[^0-9.-]/g, ""))
+        : NaN;
+  if (!Number.isFinite(n)) return null;
+  if (String(Math.abs(n)).replace(/\D/g, "").length < 2) return null; // F2 distinctiveness floor
+  return n;
 }
 
 /**
- * Candidate string forms of a field value for RAW-substring matching against
- * chunk text. A numeric value (e.g. 7613.2) is also rendered with thousands
- * separators + 2 decimals so it matches a chunk printed as "$7,613.20".
- * (`normalizeText` alone can't — it splits "7,613.20" into "7 613 20".)
+ * Whole numeric tokens of a text, parsed to numbers (digit runs w/ commas + one
+ * decimal; `$`/spaces are boundaries). A leading `-` is read as a SIGN only when
+ * it is NOT preceded by a digit or dot — so a credit `-50.00` parses to `-50`,
+ * while the hyphens in a date/range (`2024-01-15`) are separators, not signs.
+ * An accounting-style parenthesized amount `(50.00)` is read as negative `-50`.
  */
-function fieldValueCandidates(value: string | number | boolean | null): string[] {
-  if (value == null || typeof value === "boolean") return [];
-  const s = String(value).trim();
-  if (!s) return [];
-  const out = new Set<string>([s]);
-  const cleaned = s.replace(/[^0-9.-]/g, "");
-  if (cleaned && /\d/.test(cleaned)) {
-    const n = Number(cleaned);
-    if (Number.isFinite(n)) {
-      out.add(String(n));
-      out.add(n.toFixed(2));
-      out.add(n.toLocaleString("en-US"));
-      out.add(n.toLocaleString("en-US", { minimumFractionDigits: 2 }));
-    }
+function numericTokens(text: string): number[] {
+  // Accounting convention: a number tightly wrapped in parens is negative. The
+  // leading space ensures the synthesized `-` is read as a sign even when the
+  // `(` abutted a digit (e.g. `5(50.00)` → `5 -50.00`); the space is a token
+  // boundary, so it doesn't merge with the prior number.
+  const normalized = text.replace(/\(\s*(\d[\d,]*(?:\.\d+)?)\s*\)/g, " -$1");
+  const out: number[] = [];
+  for (const m of normalized.matchAll(/(?<![\d.])-?\d[\d,]*(?:\.\d+)?/g)) {
+    const n = Number(m[0].replace(/,/g, ""));
+    if (Number.isFinite(n)) out.push(n);
   }
-  return [...out].filter((c) => c.length >= 2);
+  return out;
+}
+
+/** Is `needle` a contiguous run of tokens inside `hay`? */
+function tokenSequenceContained(needle: string[], hay: string[]): boolean {
+  if (!needle.length || needle.length > hay.length) return false;
+  for (let i = 0; i + needle.length <= hay.length; i++) {
+    let ok = true;
+    for (let j = 0; j < needle.length; j++) {
+      if (hay[i + j] !== needle[j]) { ok = false; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+/**
+ * Does the cited VALUE appear in the chunk text? Numbers compare numerically as
+ * whole tokens; words/strings compare as a normalized whole-token-sequence.
+ */
+export function valueMatchesChunk(value: string | number, chunkText: string): boolean {
+  const num = asLocatableNumber(value);
+  if (num !== null) {
+    return numericTokens(chunkText).some((t) => Math.abs(t - num) < FLOAT_EPSILON);
+  }
+  const needle = normalizeText(String(value)).split(" ").filter(Boolean);
+  if (needle.join("").length < 2) return false; // F2 distinctiveness floor (words)
+  return tokenSequenceContained(needle, normalizeText(chunkText).split(" ").filter(Boolean));
 }
 
 // --- WF-05b: word-level `-118-map` atom resolver -------------------------
@@ -456,51 +554,48 @@ export function resolveWordGeometry(
  * WF-05 — resolve an extract FIELD's source geometry from the document X-Ray.
  *
  * `document_getextract` returns field VALUES only (no geometry, ever — see
- * project_groundx_search_geometry.md), so a field's source region must be
- * recovered by matching its value against the X-Ray chunks. Primary match is a
- * raw-substring hit of any value candidate (handles currency/comma/decimal
- * formatting); the field `label` is a secondary tiebreaker when a value is
- * ambiguous (the same number appears in multiple chunks). Returns the
- * chunk-envelope box (covers the paragraph/table the value sits in),
- * normalized 0–1. Returns null on no match / empty value (caller ships the
- * field citation-less; highlight degrades to none).
+ * project_groundx_search_geometry.md), so a field's source region is recovered
+ * by matching its value against the X-Ray chunks. multi-region-citations: the
+ * value is located by `valueMatchesChunk` (numeric whole-token for numbers,
+ * normalized whole-token-sequence for words — NOT a raw substring, NOT loose
+ * token-overlap, NOT semantic similarity), and EVERY matching chunk yields its
+ * per-box regions (D1 — show every occurrence; no narrowing to one chunk, and no
+ * union-to-one envelope). Returns `[]` on no match / empty value (the caller
+ * decides the fallback — P1.3 adds the label-locate + regionless degrade so a
+ * validated value is never simply dropped).
+ *
+ * `label` is RESERVED for P1.3's last-resort locator (a value that matches no
+ * chunk falls back to locating the field's label); it is intentionally unused
+ * here — the value match no longer uses the label as a tiebreaker (that narrowed
+ * "every occurrence" to one and was schema-specific).
  */
 export function resolveFieldGeometry(
   value: string | number | boolean | null,
   label: string,
   xray: XrayDoc,
-  threshold = 0.5,
-): { page: number; bbox: NormalizedBbox | null } | null {
-  if (!Array.isArray(xray.chunks)) return null;
-  const candidates = fieldValueCandidates(value);
-  if (!candidates.length) return null;
-  const valueNorm = normalizeText(String(value));
-  const labelNorm = normalizeText(label ?? "");
+): GeometryRegion[] {
+  void label;
+  if (!Array.isArray(xray.chunks)) return [];
+  if (value == null || typeof value === "boolean") return [];
 
-  let best: XrayChunk | null = null;
-  let bestScore = 0;
-  for (const chunk of xray.chunks) {
-    if (!Array.isArray(chunk.boundingBoxes) || chunk.boundingBoxes.length === 0) continue;
-    const raw = `${chunk.text ?? ""} ${chunk.suggestedText ?? ""}`;
-    const chunkNorm = normalizeText(raw);
-    // Primary: raw-substring hit of any candidate, else fuzzy token overlap.
-    let score = candidates.some((c) => raw.includes(c)) ? 1 : matchScore(valueNorm, chunkNorm);
-    // Secondary: nudge toward the chunk that also mentions the field label.
-    if (labelNorm) score += matchScore(labelNorm, chunkNorm) * 0.25;
-    if (score > bestScore) {
-      bestScore = score;
-      best = chunk;
-    }
-  }
-  if (!best || bestScore < threshold) return null;
-
-  const boxes = parseBoundingBoxes(best.boundingBoxes);
-  const page = boxes[0]?.pageNumber ?? best.pageNumbers?.[0] ?? 1;
   const pageDims: PageDim[] = (xray.documentPages ?? []).map((p) => ({
     number: p.pageNumber,
     width: p.width,
     height: p.height,
   }));
-  const onPage = groupByPage(boxes).get(page) ?? [];
-  return { page, bbox: normalizeBox(onPage, pageDims.find((p) => p.number === page)) };
+
+  const out: GeometryRegion[] = [];
+  for (const chunk of xray.chunks) {
+    if (!Array.isArray(chunk.boundingBoxes) || chunk.boundingBoxes.length === 0) continue;
+    const text = `${chunk.text ?? ""} ${chunk.suggestedText ?? ""}`;
+    if (!valueMatchesChunk(value, text)) continue;
+    const boxes = parseBoundingBoxes(chunk.boundingBoxes);
+    const page = boxes[0]?.pageNumber ?? chunk.pageNumbers?.[0] ?? 1;
+    const onPage = groupByPage(boxes).get(page) ?? [];
+    out.push(...normalizeBoxes(onPage, pageDims));
+  }
+  // Dedupe identical boxes (redundant X-Ray boxes, or a value matched in chunks
+  // that share a box) so every caller — incl. the Extract `/field-geometry`
+  // endpoint — gets a clean region set, not just the grounded chat arm.
+  return dedupeGeometryRegions(out);
 }

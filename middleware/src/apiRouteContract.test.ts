@@ -696,13 +696,22 @@ describe("middleware API route contract", () => {
       expect(assistant.citations).toBeDefined();
       expect(Array.isArray(assistant.citations)).toBe(true);
       expect(assistant.citations).toHaveLength(2);
+      // multi-region-citations P1.1 — a legacy {page,bbox} citation round-trips
+      // with a synthesized first-region alias (regions[0] === the legacy box,
+      // tier defaulting to paraphrase), and the legacy fields are preserved.
       expect(assistant.citations[0]).toEqual({
         documentId: "doc-A",
         page: 7,
         snippet: "the total is $214.07",
         bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 },
+        regions: [{ page: 7, bbox: { x: 0.1, y: 0.2, w: 0.5, h: 0.05 }, tier: "paraphrase" }],
       });
+      // The legacy first-region alias matches regions[0] byte-for-byte.
+      expect(assistant.citations[0].page).toBe(assistant.citations[0].regions[0].page);
+      expect(assistant.citations[0].bbox).toEqual(assistant.citations[0].regions[0].bbox);
+      // A citation with a page but no bbox has no synthesizable region (stays region-less).
       expect(assistant.citations[1]).toMatchObject({ documentId: "doc-A", page: 12 });
+      expect(assistant.citations[1].regions).toBeUndefined();
       // Null `citations_json` projects to an empty array, not null,
       // so callers don't have to null-check on every render.
       const user = response.body.messages.find((m: { id: string }) => m.id === "c1");
@@ -1691,10 +1700,13 @@ describe("middleware API route contract", () => {
         .send({ fields: [{ value: 7613.2, label: "balance_payable" }, { value: "no such value zzz", label: "x" }] })
         .expect(200);
 
+      // multi-region-citations: each field's geometry is now its REGIONS array
+      // (`{page,bbox}[]`) — every chunk the value appears in; `[]` when no match.
       expect(res.body.geometry).toHaveLength(2);
-      expect(res.body.geometry[0]).toMatchObject({ page: 1 });
-      expect(res.body.geometry[0].bbox.x).toBeCloseTo(100 / 1700, 2);
-      expect(res.body.geometry[1]).toBeNull(); // unmatched value → no geometry
+      expect(res.body.geometry[0]).toHaveLength(1);
+      expect(res.body.geometry[0][0]).toMatchObject({ page: 1 });
+      expect(res.body.geometry[0][0].bbox.x).toBeCloseTo(100 / 1700, 2);
+      expect(res.body.geometry[1]).toEqual([]); // unmatched value → no regions
     });
 
     it("400s when fields is missing", async () => {

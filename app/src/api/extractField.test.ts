@@ -39,6 +39,26 @@ describe("extractField shared contracts (§4 #12/#13)", () => {
     });
     expect(parsed.success).toBe(true);
   });
+
+  it("the extract-field citation carries the verified tier/confidence/bbox like every other citation (unify-extract-citations)", () => {
+    // The wire citation is now the one shared `Citation` — the field-extract
+    // path verifies + tiers it through the same pipeline as chat/report, so a
+    // tiered citation must round-trip the result schema.
+    const parsed = extractFieldResultSchema.safeParse({
+      value: 14.07,
+      confidence: 0.92,
+      citation: {
+        documentId: "d1",
+        page: 1,
+        snippet: "Tax: $14.07",
+        tier: "paraphrase",
+        confidence: 0.9,
+        bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.04 },
+      },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.citation?.tier).toBe("paraphrase");
+  });
 });
 
 const originalFetch = global.fetch;

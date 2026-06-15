@@ -4,6 +4,10 @@ import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ContentScope } from "@groundx/shared";
+import { SAMPLE_REPORT_TEMPLATE_ID } from "@groundx/shared";
+
+import { sampleSeededReport } from "@/test/makeFakeApi";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useEntitySessionStore } from "@/contexts/EntitySessionStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
@@ -1182,26 +1186,69 @@ describe("OnboardingShell", () => {
     });
   });
 
-  // report-empty-state: the former "Phase 0" test (clicking Report → f4 render
-  // with the fixture's billing summary / charge breakdown / anomalies /
-  // recommendation sections) is REMOVED — there is no client fixture, and with
-  // no template a Report click now lands on the empty BUILDER (covered by the
-  // template-aware routing tests below). The content-render version is
-  // re-created against the REAL seeded template in `report-default-template`
-  // (with the new section names: billing summary / charges by service / service
-  // accounts / account activity).
+  // report-default-template T6 — the END-TO-END onboarding render. The former
+  // "Phase 0" test rendered a CLIENT fixture; there is no client fixture now.
+  // Instead the utility scenario's manifest carries the SEEDED default template
+  // id (`reportTemplateId`), the onboarding experience loads it onto the active
+  // session's `reportOverlay.templateId`, so clicking Report routes to the f4
+  // RENDER surface (not the empty builder) and the render endpoint returns the
+  // template's sections. This proves the whole T6 wiring chain through the real
+  // ChatColumn → experience → ChatStore → routing → SmartReportRender path.
+  it("report-default-template: the utility onboarding scenario loads its seeded template, so Report renders the template's sections", async () => {
+    const user = userEvent.setup();
+    // The active session's reportOverlay.templateId is set by the onboarding
+    // experience's once-on-mount effect (T6). Probe it so we click Report only
+    // after the template has loaded — the routing decision reads it at click time.
+    let loadedTemplateId: string | undefined;
+    const TemplateProbe = () => {
+      const { state } = useChatStore();
+      const session = state.activeSessionId ? state.sessions.get(state.activeSessionId) : null;
+      loadedTemplateId = session?.reportOverlay.templateId;
+      return null;
+    };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <TemplateProbe />
+      </>,
+      { initialFrame: "f3", initialScenario: "utility" },
+    );
 
-  // ── report-empty-state T1(c) — RED until Report routing is template-aware ──
+    // T6 wiring: the experience injects the manifest's reportTemplateId. Assert
+    // against the shared source-of-truth constant so the test can't drift from
+    // the seeded id (which makeFakeApi keys its cited sections on).
+    await waitFor(() => expect(loadedTemplateId).toBe(SAMPLE_REPORT_TEMPLATE_ID));
+
+    await user.click(screen.getByText("Report"));
+
+    // A template is present → the render surface (f4), never the builder (f4a).
+    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-builder")).not.toBeInTheDocument();
+
+    // The render endpoint returns the seeded template's three sections (the
+    // T1-verified names): billing summary / charges by service / service accounts.
+    expect(await screen.findByTestId("report-section-billing_summary")).toBeInTheDocument();
+    expect(screen.getByTestId("report-section-charges_by_service")).toBeInTheDocument();
+    expect(screen.getByTestId("report-section-service_accounts")).toBeInTheDocument();
+    // Humanized heading + a citation chip prove the section rendered with a
+    // grounded body (no coupling to a specific generated value).
+    expect(screen.getByText("Billing Summary")).toBeInTheDocument();
+    expect(screen.getByTestId("cite-chip-1")).toBeInTheDocument();
+  });
+
+  // ── report-empty-state T1(c) — Report routing is template-aware ──
   //
   // With no real report template (the new-customer norm + the locked no-seed
   // decision), activating the Report step must land on the EMPTY BUILDER (f4a),
-  // not the render surface (f4). Today `handleSubstepClick` routes "report" → f4
-  // unconditionally, so this is RED.
+  // not the render surface (f4). Uses `loan` — a scenario that carries NO
+  // `reportTemplateId` in its manifest (unlike utility, which `report-default-
+  // template` wires to the seeded default — see the render test above). This is
+  // the precise either/or for the no-template arm: builder present, render absent.
   it("report-empty-state: clicking Report with no template lands on the empty builder (f4a), not the render", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, {
       initialFrame: "f3",
-      initialScenario: "utility",
+      initialScenario: "loan",
     });
     await user.click(screen.getByText("Report"));
     // No template → the builder (f4a), never the render surface (f4).
@@ -1252,11 +1299,31 @@ describe("OnboardingShell", () => {
     expect(reportPill).not.toHaveAttribute("aria-disabled");
   });
 
-  // report-empty-state: the anon "previews the render surface with export/Save
-  // locked" test is REMOVED here — with no template, an anon Report click lands
-  // on the empty builder (no rendered report to lock). The
-  // export-lock-over-real-content version is re-created against the seeded
-  // template in `report-default-template`.
+  // report-default-template T6b — an ANONYMOUS viewer previews the seeded
+  // utility report (content renders), but export + Save are LOCKED and the
+  // "Preview only · sign in to export" badge shows. With the seeded default
+  // template now wired (T6), there IS rendered content over which to assert the
+  // anon lock (the `report-empty-state` change had removed this — no template
+  // meant no rendered report to lock).
+  it("report-default-template: anonymous viewer sees the rendered report but export/Save are locked", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      initialAuthState: "anonymous",
+    });
+    await user.click(screen.getByText("Report"));
+
+    // Content renders for anon (the seeded template is preview-able pre-sign-in).
+    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
+    expect(await screen.findByTestId("report-section-billing_summary")).toBeInTheDocument();
+
+    // …but export + Save are locked, with the preview badge.
+    expect(screen.getByTestId("smart-report-preview-badge")).toBeInTheDocument();
+    const exportControl = screen.getByTestId("smart-report-export");
+    expect(exportControl).toHaveAttribute("aria-disabled");
+    expect(exportControl).toHaveTextContent("🔒");
+  });
 
   it("Phase 1: Report pill is reachable on the Loan scenario too (not chapter-gated)", async () => {
     const user = userEvent.setup();
@@ -1305,12 +1372,72 @@ describe("OnboardingShell", () => {
     await waitFor(() => expect(snapshot.frame).toBe("f4"));
   });
 
-  // report-empty-state: the render→builder `✎ edit §N` hand-off test and the
-  // "Extract → Report carries the source ContentScope" test both required a
-  // RENDERED report (the fixture's billing-summary sections). With the fixture
-  // gone, the render is empty until a real template is seeded, so both are
-  // re-created against the seeded template in `report-default-template` (the
-  // edit hand-off in its T5, the scope-carry in its T6b).
+  // report-default-template T6b — the render→builder `✎ edit §N` hand-off and
+  // the "Extract → Report carries the scenario content scope" tests both need a
+  // RENDERED report (the seeded template's sections). `report-empty-state` had
+  // deleted them when the fixture was removed; with T6 wiring utility → the
+  // seeded template, they are re-created here against the real render path.
+
+  it("report-default-template: navigating Extract → Report renders the template's sections over the scenario's content scope", async () => {
+    const user = userEvent.setup();
+    // Record the scope the render endpoint is called with (the scope-carry
+    // assertion) while still returning the seeded template's real content.
+    let renderedScope: ContentScope | null = null;
+    const renderReport = vi.fn(async (input: { templateId: string; scope: ContentScope }) => {
+      renderedScope = input.scope;
+      return { gated: false, report: sampleSeededReport(input.scope) };
+    });
+    renderWithOnboardingProviders(<OnboardingShell />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      api: { report: { renderReport } },
+    });
+
+    // Start on the Extract workbench (the scenario's source context).
+    expect(await screen.findByTestId("extract-workbench")).toBeInTheDocument();
+
+    // Navigate Extract → Report.
+    await user.click(screen.getByText("Report"));
+
+    // The render surface mounts and shows the seeded template's three sections.
+    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
+    expect(await screen.findByTestId("report-section-billing_summary")).toBeInTheDocument();
+    expect(screen.getByTestId("report-section-charges_by_service")).toBeInTheDocument();
+    expect(screen.getByTestId("report-section-service_accounts")).toBeInTheDocument();
+
+    // …rendered over the SCENARIO's content scope (bucket + project filter),
+    // carried from the same onboarding session that drove Extract.
+    expect(renderReport).toHaveBeenCalled();
+    expect(renderedScope).toMatchObject({ type: "bucket", filter: { projectId: "proj_utility" } });
+  });
+
+  it("report-default-template: clicking ✎ edit on a rendered section opens that section in the builder", async () => {
+    const user = userEvent.setup();
+    let snapshot = { sessionId: null as string | null, frame: "" };
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <SessionProbe onSnapshot={(next) => (snapshot = next)} />
+      </>,
+      {
+        initialFrame: "f3",
+        initialScenario: "utility",
+      },
+    );
+
+    // Reach the render surface the same way a user does — via the Report pill.
+    // (The utility journey re-enters at f2 on mount, so we don't start at f4.)
+    await user.click(screen.getByText("Report"));
+    expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
+    const editBillingSummary = await screen.findByTestId("report-section-edit-billing_summary");
+
+    // ✎ edit §1 → the builder (f4a), with billing_summary's inline editor open.
+    await user.click(editBillingSummary);
+    await waitFor(() => expect(snapshot.frame).toBe("f4a"));
+    expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
+    expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("report-builder-editor-billing_summary")).toBeInTheDocument();
+  });
 
   // ── 2026-05-30-onboarding-shell-shared-view Phase 3a ──────────────
   //

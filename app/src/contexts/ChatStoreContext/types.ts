@@ -404,10 +404,16 @@ export type ViewerStep =
         /**
          * WF-06b — attribution tier of the citation that produced this
          * highlight. The viewer pane renders the overlay at the tier's
-         * precision (solid word-level for `exact`, translucent
-         * chunk-region for `paraphrase`, none for `ambient`).
+         * precision (solid word-level for `exact`, translucent chunk-region
+         * for `paraphrase`, whole-page "unconfirmed" marker for `ambient`).
          */
         tier?: import("@/types/onboarding").CitationTier;
+        /**
+         * multi-region-citations P2.1 — ALL of the citation's proof regions,
+         * each with its own tier; the viewer lights every one on the matching
+         * page. `page`/`bbox`/`tier` above stay the first-region alias.
+         */
+        regions?: ReadonlyArray<import("@groundx/shared").CitationSourceRegion>;
       };
       /**
        * "Show all sources" — every citation region of an answer, drawn at once
@@ -746,6 +752,15 @@ export interface ChatStoreApi {
   pinToReport: (input: PinToReportInput) => import("./resolvePinTarget").PinResolution;
 
   /**
+   * report-default-template — set the active session's `reportOverlay.templateId`
+   * (the template the render surface renders). A standalone setter (the
+   * onboarding experience supplies the seeded default for the utility scenario;
+   * onboarding isn't pinning). `undefined` clears it (no-template / empty state).
+   * No-op when no session is active.
+   */
+  setReportTemplateId: (templateId: string | undefined) => void;
+
+  /**
    * smart-report Phase 5 — enqueue an LLM-proposed section into the active
    * session's `reportOverlay.pendingFieldProposals` (the report sibling of
    * `enqueueFieldProposal`). Idempotent on `name`. The builder surfaces a
@@ -837,6 +852,8 @@ export interface ChatStoreApi {
     sourceCitationIndex?: number;
     /** WF-06b — attribution tier threaded into the step's highlight slot. */
     tier?: import("@/types/onboarding").CitationTier;
+    /** multi-region-citations P2.1 — all proof regions, each its own tier. */
+    regions?: ReadonlyArray<import("@groundx/shared").CitationSourceRegion>;
   }) => void;
   /**
    * "Show all sources" sink for `CanvasIntent.showCitations`: open the cited

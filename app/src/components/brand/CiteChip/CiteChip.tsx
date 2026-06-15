@@ -13,6 +13,7 @@ import {
 } from "@/constants";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { track } from "@/lib/analytics";
+import { citationRegions } from "@groundx/shared";
 import type { Citation } from "@/types/onboarding";
 
 export type CiteChipColor = "cyan" | "coral" | "green";
@@ -58,39 +59,52 @@ export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color
   // citation reads as a refined source tag in the answer footer.
   const accent = color === "coral" ? CORAL : color === "green" ? GREEN : CYAN;
 
+  // multi-region-citations: the citation's primary page (first region, or the
+  // legacy alias). A regionless "location unknown" citation has none.
+  const primaryPage = citation.page ?? citationRegions(citation)[0]?.page;
+
   const handle = useCallback(() => {
     // OB-02 — cite.peeked fires on every citation chip activation
     // regardless of which surface it sits in (F3 fields, F5 chat, etc.).
     track("cite.peeked", {
       documentId: citation.documentId,
-      page: citation.page,
+      page: primaryPage,
       index,
     });
     if (onActivate) {
       onActivate(citation);
       return;
     }
+    // A regionless citation (validated value, location unknown) can't jump to a
+    // page — open the document without a highlight.
+    if (primaryPage == null) {
+      dispatch({ kind: "openDocument", documentId: citation.documentId }, "user");
+      return;
+    }
     // The orchestrator's built-in handler picks this up (no adapter
     // registration required) and calls ChatStore.gotoDocViewer to
     // push/swap a doc-viewer step. Shells re-render with the new
     // step → PdfViewerWidget mounts with targetPage + highlightBbox.
+    const regions = citationRegions(citation);
     dispatch(
       {
         kind: "highlightCitation",
         documentId: citation.documentId,
-        page: citation.page,
+        page: primaryPage,
         ...(citation.bbox ? { bbox: citation.bbox } : {}),
         // WF-06b — thread the attribution tier so the viewer overlay
         // renders at the citation's precision (ambient → chip only).
         ...(citation.tier ? { tier: citation.tier } : {}),
+        // multi-region-citations P2.1 — light EVERY region the citation supports.
+        ...(regions.length > 0 ? { regions } : {}),
       },
       "user",
     );
-  }, [citation, dispatch, onActivate, index]);
+  }, [citation, dispatch, onActivate, index, primaryPage]);
 
   const tooltip = citation.snippet
-    ? `Source · page ${citation.page} — ${citation.snippet}`
-    : `Source · page ${citation.page}`;
+    ? `Source · ${primaryPage != null ? `page ${primaryPage}` : "location unknown"} — ${citation.snippet}`
+    : `Source · ${primaryPage != null ? `page ${primaryPage}` : "location unknown"}`;
 
   return (
     <Chip

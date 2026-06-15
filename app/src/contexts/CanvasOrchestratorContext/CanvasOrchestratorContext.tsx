@@ -139,17 +139,47 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             // add-citation-toggle — a USER click on the citation that's already
             // the active highlight clears it (click again to dismiss). The
             // automatic `agent` highlight always sets, never toggles.
-            // (Task 5: shared togglesOffOnRepeat predicate; the compared slot
-            // here is the active {page, bbox} highlight.)
+            // (Task 5: shared togglesOffOnRepeat predicate.)
+            //
+            // multi-region-citations: the compared slot is the citation's WHOLE
+            // region set, NOT just its first {page, bbox}. Many distinct
+            // citations on a tabular/list answer legitimately share the same
+            // first region (the container chunk dozens of values fall inside);
+            // comparing only the first box made clicking a DIFFERENT citation
+            // look like a re-click of the active one, so it cleared instead of
+            // switching. A compact per-region signature distinguishes citations
+            // reliably while staying cheap to stringify (regions are small after
+            // dedupe). Legacy single-bbox citations fall back to a one-region
+            // signature, so their toggle behavior is unchanged.
+            const regionSig = (
+              rs?: ReadonlyArray<{ page: number; bbox?: NormalizedBbox | null; tier?: string }> | null,
+            ) =>
+              (rs ?? []).map(
+                (r) =>
+                  `${r.page}:${r.bbox ? `${r.bbox.x},${r.bbox.y},${r.bbox.w},${r.bbox.h}` : ""}:${r.tier ?? ""}`,
+              );
             const activeDocViewer = activeDocViewerStep(chatStore);
+            const currentRegions = activeDocViewer?.highlight
+              ? (activeDocViewer.highlight.regions ??
+                (activeDocViewer.highlight.bbox
+                  ? [
+                      {
+                        page: activeDocViewer.highlight.page,
+                        bbox: activeDocViewer.highlight.bbox,
+                        tier: activeDocViewer.highlight.tier,
+                      },
+                    ]
+                  : []))
+              : null;
+            const incomingRegions =
+              intent.regions ??
+              (intent.bbox ? [{ page: intent.page, bbox: intent.bbox, tier: intent.tier }] : []);
             const matchesActiveHighlight = togglesOffOnRepeat({
               source,
               activeDocViewer,
               documentId: intent.documentId,
-              current: activeDocViewer?.highlight
-                ? { page: activeDocViewer.highlight.page, bbox: activeDocViewer.highlight.bbox ?? null }
-                : null,
-              incoming: { page: intent.page, bbox: intent.bbox ?? null },
+              current: currentRegions ? regionSig(currentRegions) : null,
+              incoming: regionSig(incomingRegions),
             });
             if (matchesActiveHighlight) {
               chatStore.clearCitationHighlight();
@@ -161,6 +191,9 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
                 // WF-06b — carry the citation tier so the viewer renders the
                 // overlay at the right precision (or suppresses it for ambient).
                 ...(intent.tier ? { tier: intent.tier } : {}),
+                // multi-region-citations P2.1 — all the citation's regions so the
+                // viewer lights every place its claim is supported, each at its tier.
+                ...(intent.regions && intent.regions.length > 0 ? { regions: intent.regions } : {}),
               });
             }
           }

@@ -18,6 +18,7 @@ import {
   searchGroundX,
   type ChatRouterRequest,
 } from "./chatRouter.js";
+import { RAG_SNIPPET_CHARS } from "./chatRouterTypes.js";
 
 // Back-compat alias: CF-06 renamed the parser. Keep the old name in
 // the test file to make the CF-07 test block read continuously.
@@ -345,7 +346,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     await searchGroundX("hello", { type: "bucket", bucketId: 42 }, client, "k");
     // First call is the default-relevance search (no `relevance` field).
     expect(calls[0].path).toBe("/search/42");
-    expect(calls[0].body).toEqual({ query: "hello", n: 6 });
+    expect(calls[0].body).toEqual({ query: "hello", n: 20 });
     expect(calls[0].apiKey).toBe("k");
   });
 
@@ -356,8 +357,8 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     const { client, calls } = spyClient();
     await searchGroundX("what is the total amount", { type: "bucket", bucketId: 42 }, client, "k");
     expect(calls).toHaveLength(2);
-    expect(calls[0].body).toEqual({ query: "what is the total amount", n: 6 });
-    expect(calls[1].body).toEqual({ query: "what is the total amount", n: 6, relevance: -100 });
+    expect(calls[0].body).toEqual({ query: "what is the total amount", n: 20 });
+    expect(calls[1].body).toEqual({ query: "what is the total amount", n: 20, relevance: -100 });
   });
 
   it("non-empty first result → no retry (normal prose docs pay one round-trip)", async () => {
@@ -383,7 +384,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     expect(calls[0].path).toBe("/search/42");
     expect(calls[0].body).toEqual({
       query: "hello",
-      n: 6,
+      n: 20,
       filter: { projectId: "proj-A" },
     });
   });
@@ -398,7 +399,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     );
     expect(calls[0].body).toEqual({
       query: "hello",
-      n: 6,
+      n: 20,
       filter: { projectId: { $in: ["A", "B", "C"] } },
     });
   });
@@ -407,7 +408,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     const { client, calls } = spyClient();
     await searchGroundX("hello", { type: "group", groupId: 99 }, client, "k");
     expect(calls[0].path).toBe("/search/99");
-    expect(calls[0].body).toEqual({ query: "hello", n: 6 });
+    expect(calls[0].body).toEqual({ query: "hello", n: 20 });
   });
 
   it("documents scope → POST /v1/search/documents + documentIds in body", async () => {
@@ -416,7 +417,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     expect(calls[0].path).toBe("/search/documents");
     expect(calls[0].body).toEqual({
       query: "hello",
-      n: 6,
+      n: 20,
       documentIds: ["d1", "d2"],
     });
   });
@@ -444,21 +445,23 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     };
     const results = await searchGroundX("demand charge", { type: "bucket", bucketId: 28454 }, client, "k");
     expect(results).toHaveLength(1);
+    // multi-region: per-box regions on the cited page (a single box → one region).
     expect(results[0].pageNumber).toBe(2);
-    expect(results[0].bbox).toBeDefined();
-    expect(results[0].bbox!.x).toBeCloseTo(0.213, 2);
-    expect(results[0].bbox!.y).toBeCloseTo(0.27, 2);
-    expect(results[0].bbox!.w).toBeCloseTo(0.729, 2);
-    expect(results[0].bbox!.h).toBeCloseTo(0.654, 2);
+    expect(results[0].bboxes).toBeDefined();
+    expect(results[0].bboxes).toHaveLength(1);
+    expect(results[0].bboxes![0].x).toBeCloseTo(0.213, 2);
+    expect(results[0].bboxes![0].y).toBeCloseTo(0.27, 2);
+    expect(results[0].bboxes![0].w).toBeCloseTo(0.729, 2);
+    expect(results[0].bboxes![0].h).toBeCloseTo(0.654, 2);
   });
 
-  it("WF-03: a result without boundingBoxes ships geometry-less (page 1, no bbox)", async () => {
+  it("WF-03: a result without boundingBoxes ships geometry-less (page 1, no bboxes)", async () => {
     const client: GroundXClient = {
       forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "flat", text: "t" }] } })),
     };
     const results = await searchGroundX("q", { type: "bucket", bucketId: 1 }, client, "k");
     expect(results[0].pageNumber).toBe(1);
-    expect(results[0].bbox).toBeUndefined();
+    expect(results[0].bboxes).toBeUndefined();
   });
 
   it("WF-03 fallback: a geometry-less result resolves bbox from the doc's X-Ray", async () => {
@@ -481,8 +484,8 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     };
     const results = await searchGroundX("demand", { type: "bucket", bucketId: 28454 }, client, "k");
     expect(results[0].pageNumber).toBe(2);
-    expect(results[0].bbox).toBeDefined();
-    expect(results[0].bbox!.x).toBeCloseTo(0.213, 2);
+    expect(results[0].bboxes).toBeDefined();
+    expect(results[0].bboxes![0].x).toBeCloseTo(0.213, 2);
   });
 
   it("documents scope with empty documentIds throws (programming bug guard)", async () => {
@@ -497,7 +500,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
     const { client, calls } = spyClient();
     await searchGroundX("hello", null, client, "k");
     expect(calls[0].path).toBe("/search/documents");
-    expect(calls[0].body).toEqual({ query: "hello", n: 6 });
+    expect(calls[0].body).toEqual({ query: "hello", n: 20 });
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no scope/));
   });
 
@@ -519,7 +522,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       );
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         filter: {
           $and: [
             { orgId: "org-X" },
@@ -540,7 +543,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       );
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         filter: {
           $and: [{ orgId: "org-X" }, { projectId: "solo" }],
         },
@@ -558,7 +561,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       );
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         filter: { orgId: "org-X" },
       });
     });
@@ -574,7 +577,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       );
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         filter: { projectId: "P1" },
       });
     });
@@ -591,7 +594,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       expect(calls[0].path).toBe("/search/99");
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         filter: { tenant: "t-7" },
       });
     });
@@ -607,7 +610,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       );
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         documentIds: ["d1"],
         filter: { tenant: "t-7" },
       });
@@ -634,7 +637,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       // flattened, each key appears exactly once.
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         filter: {
           $and: [{ region: "us-east-1" }, { tier: { $in: ["pro", "enterprise"] } }, { projectId: "P1" }],
         },
@@ -654,7 +657,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX("hello", { type: "group", groupId: 99, filter: { fund: "f3" } }, client, "k");
       expect(calls[0].path).toBe("/search/99");
-      expect(calls[0].body).toEqual({ query: "hello", n: 6, filter: { fund: "f3" } });
+      expect(calls[0].body).toEqual({ query: "hello", n: 20, filter: { fund: "f3" } });
     });
 
     it("documents scope + filter → body.filter alongside documentIds", async () => {
@@ -668,7 +671,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       expect(calls[0].path).toBe("/search/documents");
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         documentIds: ["d1"],
         filter: { folder: { $in: ["a", "b"] } },
       });
@@ -684,7 +687,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       );
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         filter: { $and: [{ projectId: { $in: ["A", "B"] } }, { fund: "f3" }] },
       });
     });
@@ -700,7 +703,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       );
       expect(calls[0].body).toEqual({
         query: "hello",
-        n: 6,
+        n: 20,
         filter: { $and: [{ orgId: "org-X" }, { fund: "f3" }] },
       });
     });
@@ -710,7 +713,7 @@ describe("searchGroundX (ContentScope dispatch)", () => {
       const { client, calls } = spyClient();
       await searchGroundX("hello", null, client, "k", { rbacFilter: { orgId: "org-X" } });
       expect(calls[0].path).toBe("/search/documents");
-      expect(calls[0].body).toEqual({ query: "hello", n: 6, filter: { orgId: "org-X" } });
+      expect(calls[0].body).toEqual({ query: "hello", n: 20, filter: { orgId: "org-X" } });
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no scope/));
     });
   });
@@ -1080,9 +1083,11 @@ describe("CF-06 token-budget guard in callGroundedLlm", () => {
   }
 
   it("snippet block fed to the LLM stays under MAX_SNIPPET_BLOCK_CHARS even with many long snippets", async () => {
-    // 12 snippets × 600 chars each = ~7200 chars. Cap is 4800.
-    const longText = "x".repeat(600);
-    const results = Array.from({ length: 12 }, (_, i) => ({
+    // Enough full-size snippets to exceed the block cap, derived from the
+    // constant so this test never needs re-tuning when the budget changes.
+    const longText = "x".repeat(RAG_SNIPPET_CHARS);
+    const snippetCount = Math.ceil(MAX_SNIPPET_BLOCK_CHARS / RAG_SNIPPET_CHARS) + 12;
+    const results = Array.from({ length: snippetCount }, (_, i) => ({
       documentId: `d${i}`,
       pageNumber: i + 1,
       text: longText,
@@ -1123,8 +1128,13 @@ describe("CF-06 token-budget guard in callGroundedLlm", () => {
   });
 
   it("drops trailing snippets when the cap is hit (keeps the highest-priority ones)", async () => {
-    const longText = "x".repeat(800);
-    const results = Array.from({ length: 8 }, (_, i) => ({
+    // Enough full-size snippets to exceed the block cap (derived from the
+    // constant), so trailing snippets are dropped (ranking keeps the
+    // most-relevant first). Robust to future budget changes.
+    const longText = "x".repeat(RAG_SNIPPET_CHARS);
+    const snippetCount = Math.ceil(MAX_SNIPPET_BLOCK_CHARS / RAG_SNIPPET_CHARS) + 12;
+    const lastDocId = `doc-${snippetCount - 1}`;
+    const results = Array.from({ length: snippetCount }, (_, i) => ({
       documentId: `doc-${i}`,
       pageNumber: i + 1,
       text: longText,
@@ -1147,10 +1157,10 @@ describe("CF-06 token-budget guard in callGroundedLlm", () => {
 
     const body = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body);
     const userContent = body.messages.find((m: { role: string }) => m.role === "user").content;
-    // The first snippet (`doc-0`) is preserved; the last (`doc-7`)
+    // The first snippet (`doc-0`) is preserved; the last one
     // gets dropped — assert the kept-then-dropped contract.
     expect(userContent).toContain("doc=doc-0");
-    expect(userContent).not.toContain("doc=doc-7");
+    expect(userContent).not.toContain(`doc=${lastDocId}`);
   });
 });
 
@@ -1774,7 +1784,7 @@ describe("_debug payload (dev-only visibility into RAG pipeline)", () => {
     expect(reply._debug?.groundx).not.toBeNull();
     expect(reply._debug?.groundx?.path).toBe("/search/42");
     expect(reply._debug?.groundx?.query).toBe("what is the bill total?");
-    expect(reply._debug?.groundx?.n).toBe(6);
+    expect(reply._debug?.groundx?.n).toBe(20);
     expect(reply._debug?.groundx?.resultCount).toBe(2);
     // topSnippets is capped at 3 and truncates text — verify shape.
     expect(reply._debug?.groundx?.topSnippets).toHaveLength(2);

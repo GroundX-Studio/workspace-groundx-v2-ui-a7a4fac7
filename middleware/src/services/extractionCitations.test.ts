@@ -161,14 +161,14 @@ describe("extraction-grounded citations (user-visible)", () => {
     expect(reply.suggestedActions.find((a) => a.key === "show-source")).toBeUndefined();
   });
 
-  it("a geometry miss drops the extraction citation without failing the turn", async () => {
+  it("a geometry miss keeps the extraction citation as a regionless ambient chip (never dropped)", async () => {
     const llmAnswer = [
       "The invoice number is 10295809.",
       "",
       "```json",
-      // Validates against the payload, but the X-Ray endpoint errors → no
-      // page to point at → dropped (user decision 2026-06-11: no pageless
-      // citation form).
+      // Validates against the payload, but the X-Ray endpoint errors → no page
+      // to point at. multi-region-citations P1.3 (review #8): a validated value
+      // is never dropped — it degrades to a "location unknown" ambient chip.
       '{"citations":[{"documentId":"d1","field":"invoice_number","value":"10295809"}]}',
       "```",
     ].join("\n");
@@ -177,7 +177,10 @@ describe("extraction-grounded citations (user-visible)", () => {
     const reply = await routeChat(makeRequest({ newUserMessage: "invoice number?" }), routeDeps(clients));
 
     expect(reply.answer).toBe("The invoice number is 10295809.");
-    expect(reply.citations).toHaveLength(0);
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0]).toMatchObject({ documentId: "d1", tier: "ambient" });
+    expect(reply.citations[0].bbox).toBeUndefined();
+    expect(reply.citations[0].regions ?? []).toEqual([]);
   });
 
   it("a joke turn still carries zero citations (no-invented-citations holds)", async () => {
@@ -190,12 +193,99 @@ describe("extraction-grounded citations (user-visible)", () => {
   });
 });
 
+describe("multi-region-citations P1.3 — never drop a real grounding (Bucket B)", () => {
+  it("a CONTAINER-level citation descends to its scalar leaves instead of dropping", async () => {
+    // The model cites the container `meters[0]` (the former `branchNode` drop).
+    // Its scalar leaf `meter_number: "49099992"` IS in the X-Ray → the citation
+    // descends and ships a region, rather than being dropped.
+    const llmAnswer = [
+      "The first meter is listed below.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"d1","field":"meters[0]","value":"meters[0]"}]}',
+      "```",
+    ].join("\n");
+    const clients = mkClients(llmAnswer);
+
+    const reply = await routeChat(makeRequest({ newUserMessage: "list the first meter" }), routeDeps(clients));
+
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0]).toMatchObject({ documentId: "d1" });
+    expect(reply.citations[0].regions?.length ?? 0).toBeGreaterThan(0);
+    expect(reply.citations[0].regions![0]).toMatchObject({ page: 2 });
+  });
+
+  it("an UNVERIFIED snippet quote is kept as a whole-page ambient region, not dropped", async () => {
+    // The quote appears in NEITHER the snippet nor (by page) any candidate, so
+    // it fails exact/normalized/embedding → kept as an `ambient` whole-page marker.
+    const llmAnswer = [
+      "Rates rose sharply this quarter.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"d1","page":2,"quote":"rates rose sharply this quarter according to the summary"}]}',
+      "```",
+    ].join("\n");
+    const clients = mkClients(llmAnswer);
+
+    const reply = await routeChat(makeRequest({ newUserMessage: "did rates rise?" }), routeDeps(clients));
+
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0].tier).toBe("ambient");
+    expect(reply.citations[0].regions).toEqual([
+      { page: 2, bbox: { x: 0, y: 0, w: 1, h: 1 }, tier: "ambient" },
+    ]);
+  });
+
+  it("a VALIDATED value absent from the X-Ray is kept as a regionless ambient chip, not dropped", async () => {
+    // `invoice_number: "10295809"` validates against the payload but is NOT in
+    // the X-Ray chunk text (which only mentions the meter number), and its label
+    // "invoice number" isn't there either → regionless `ambient` chip.
+    const llmAnswer = [
+      "The invoice number is 10295809.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"d1","field":"invoice_number","value":"10295809"}]}',
+      "```",
+    ].join("\n");
+    const clients = mkClients(llmAnswer);
+
+    const reply = await routeChat(makeRequest({ newUserMessage: "invoice number?" }), routeDeps(clients));
+
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0]).toMatchObject({ documentId: "d1", tier: "ambient" });
+    expect(reply.citations[0].bbox).toBeUndefined();
+    expect(reply.citations[0].regions ?? []).toEqual([]);
+    // Still surfaced as a source (the chip), not silently dropped.
+    expect(reply.suggestedActions.find((a) => a.key === "show-source")).toBeDefined();
+  });
+
+  it("a FABRICATED extraction citation (wrong value / bad path / wrong doc) is STILL dropped (Bucket A)", async () => {
+    const llmAnswer = [
+      "Made-up claims.",
+      "",
+      "```json",
+      JSON.stringify({
+        citations: [
+          { documentId: "d1", field: "meters[9].meter_number", value: "49099992" }, // unknown path
+          { documentId: "d1", field: "invoice_number", value: "00000000" }, // wrong value
+          { documentId: "d2", field: "invoice_number", value: "10295809" }, // wrong doc
+        ],
+      }),
+      "```",
+    ].join("\n");
+    const clients = mkClients(llmAnswer);
+
+    const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), routeDeps(clients));
+    expect(reply.citations).toHaveLength(0);
+  });
+});
+
 // ────────────────────────────────────────────────────────────────────
 // Unit coverage: parser arms, path resolver, fabrication on a
 // no-extraction turn, X-Ray fetched once per document per turn.
 // ────────────────────────────────────────────────────────────────────
 import { parseGroundedAnswer } from "./ragPipeline.js";
-import { resolveExtractionPath } from "./groundedAnswer.js";
+import { collectScalarLeaves, resolveExtractionPath } from "./groundedAnswer.js";
 import { isExtractionCitation } from "./chatRouterTypes.js";
 
 describe("parseGroundedAnswer citation arms", () => {
@@ -224,6 +314,25 @@ describe("parseGroundedAnswer citation arms", () => {
     );
     expect(parsed.structuredCitations).toHaveLength(1);
     expect(parsed.structuredCitations![0]).toMatchObject({ field: "invoice_number" });
+  });
+});
+
+describe("collectScalarLeaves (container-descend walk)", () => {
+  it("collects nested string/number leaves, skipping booleans + null + keys", () => {
+    const out: Array<string | number> = [];
+    collectScalarLeaves(
+      { meter_id: "M-1", usage: 60960, paid: true, note: null, charges: [{ amt: 18.43 }, { amt: 2218.75 }] },
+      out,
+    );
+    expect(out).toEqual(["M-1", 60960, 18.43, 2218.75]); // booleans/null/keys excluded
+  });
+
+  it("is depth-bounded against pathological nesting", () => {
+    let deep: unknown = "leaf";
+    for (let i = 0; i < 20; i++) deep = { next: deep };
+    const out: Array<string | number> = [];
+    collectScalarLeaves(deep, out);
+    expect(out).toEqual([]); // below the depth guard → not collected, no crash
   });
 });
 
@@ -423,9 +532,15 @@ describe("extraction-citation hardening", () => {
     ].join("\n");
     const clients = mkClients(llmAnswer);
     const reply = await routeChat(makeRequest({ newUserMessage: "Q" }), routeDeps(clients));
-    // The meter number resolves (it's in the X-Ray chunk); the invoice number
-    // is validated but absent from the X-Ray → dropped.
-    expect(reply.citations).toHaveLength(1);
+    // The meter number resolves (it's in the X-Ray chunk → a region); the
+    // invoice number is validated but absent from the X-Ray → kept as a
+    // regionless ambient chip (never dropped, P1.3). Both share the ONE cached
+    // X-Ray fetch (the label-locate fallback reuses it, no extra fetch).
+    expect(reply.citations).toHaveLength(2);
+    const located = reply.citations.find((c) => (c.regions?.length ?? 0) > 0);
+    const chip = reply.citations.find((c) => (c.regions?.length ?? 0) === 0);
+    expect(located).toMatchObject({ documentId: "d1", page: 2 });
+    expect(chip).toMatchObject({ documentId: "d1", tier: "ambient" });
     const xrayCalls = (clients.groundxClient.forward as ReturnType<typeof vi.fn>).mock.calls.filter(
       (c: unknown[]) => String(c[0]).startsWith("/ingest/document/xray/"),
     );
@@ -473,9 +588,10 @@ describe("adversarial-review hardening", () => {
     expect(parsed.cleanedAnswer).toContain('"projectId"');
   });
 
-  // F2 — a 1-character value (a count) would fuzzy-match almost any chunk;
-  // too short to locate honestly → dropped even though it validates.
-  it("drops an extraction citation whose value is too short to locate (count of 2)", async () => {
+  // F2 / P1.3 — a too-short value (a count of 2) isn't distinctly locatable (it
+  // would match every "2"), so it can't resolve a region — but it's validated,
+  // so it's kept as a regionless "location unknown" ambient chip, NOT dropped.
+  it("keeps a too-short validated value as a regionless ambient chip (count of 2)", async () => {
     const llmAnswer = [
       "There are 2 meters.",
       "",
@@ -486,12 +602,15 @@ describe("adversarial-review hardening", () => {
     const clients = mkClients(llmAnswer);
     const reply = await routeChat(makeRequest({ newUserMessage: "how many meters?" }), routeDeps(clients));
     expect(reply.answer).toBe("There are 2 meters.");
-    expect(reply.citations).toHaveLength(0);
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0]).toMatchObject({ documentId: "d1", tier: "ambient" });
+    expect(reply.citations[0].bbox).toBeUndefined();
   });
 
-  // F3 — chunk matches but the X-Ray has no usable page dims (no box) and no
-  // word-map: page-without-bbox is a miss → dropped, turn succeeds.
-  it("drops an extraction citation when the X-Ray match yields no usable box", async () => {
+  // F3 / P1.3 — chunk matches but the X-Ray has no usable page dims (no box) and
+  // the label can't resolve a box either: the validated value is kept as a
+  // regionless ambient chip, NOT dropped; turn succeeds.
+  it("keeps a validated value as a regionless ambient chip when the X-Ray yields no usable box", async () => {
     const llmAnswer = [
       "The meter number is 49099992.",
       "",
@@ -500,11 +619,13 @@ describe("adversarial-review hardening", () => {
       "```",
     ].join("\n");
     const clients = mkClients(llmAnswer, {
-      xrayBody: { ...XRAY_PAYLOAD, documentPages: [] }, // no page dims → normalizeBox null
+      xrayBody: { ...XRAY_PAYLOAD, documentPages: [] }, // no page dims → no normalized box
     });
     const reply = await routeChat(makeRequest({ newUserMessage: "meter number?" }), routeDeps(clients));
     expect(reply.answer).toBe("The meter number is 49099992.");
-    expect(reply.citations).toHaveLength(0);
+    expect(reply.citations).toHaveLength(1);
+    expect(reply.citations[0]).toMatchObject({ documentId: "d1", tier: "ambient" });
+    expect(reply.citations[0].bbox).toBeUndefined();
   });
 
   // F4 — extract endpoint fails WHILE a primary document exists: there is no
