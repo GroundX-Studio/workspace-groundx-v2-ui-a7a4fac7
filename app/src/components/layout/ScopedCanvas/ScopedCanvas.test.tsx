@@ -43,7 +43,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("doc-viewer step → PdfViewerWidget, fed the scope", () => {
     const step: ViewerStep = { kind: "doc-viewer", documentId: "doc-1" };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" experience="onboarding" />,
     );
     const widget = screen.getByTestId("pdf-viewer-widget");
     expect(widget).toBeInTheDocument();
@@ -55,7 +55,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("wraps built CanvasKind widgets in the shared viewer frame", () => {
     const step: ViewerStep = { kind: "doc-viewer", documentId: "doc-1" };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" experience="onboarding" />,
     );
 
     const canvas = screen.getByTestId("scoped-canvas");
@@ -74,7 +74,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("doc-viewer step with scanning:true → PdfViewer mounted with the scan animation on", () => {
     const step: ViewerStep = { kind: "doc-viewer", documentId: "doc-1", scanning: true };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" experience="onboarding" />,
     );
     expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "true");
   });
@@ -82,7 +82,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("doc-viewer step without scanning → scan animation off", () => {
     const step: ViewerStep = { kind: "doc-viewer", documentId: "doc-1" };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" experience="onboarding" />,
     );
     expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "false");
   });
@@ -97,7 +97,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
       highlight: { page: 2, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.05 } },
     };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" />,
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="anonymous" experience="onboarding" />,
     );
     expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-scan-animation", "false");
   });
@@ -105,7 +105,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("report step → SmartReportRender, fed the scope", () => {
     const step: ViewerStep = { kind: "report" };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" />,
+      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" experience="onboarding" />,
     );
     const widget = screen.getByTestId("smart-report-render");
     expect(widget).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("report step + reportSurface='builder' → SmartReportBuilder (report-builder kind)", () => {
     const step: ViewerStep = { kind: "report" };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" reportSurface="builder" />,
+      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" reportSurface="builder" experience="onboarding" />,
     );
     expect(screen.getByTestId("smart-report-builder")).toBeInTheDocument();
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
@@ -124,7 +124,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("report step surface='builder' selects SmartReportBuilder without route-owned frame state", () => {
     const step: ViewerStep = { kind: "report", surface: "builder", selectedSectionId: "anomalies" };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" />,
+      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" experience="onboarding" />,
     );
     expect(screen.getByTestId("smart-report-builder")).toBeInTheDocument();
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
@@ -133,7 +133,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("interact-chat step → the doc viewer (the canvas shows the cited source)", () => {
     const step: ViewerStep = { kind: "interact-chat", scenarioId: "utility" };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={DOC_SCOPE} step={step} role="member" />,
+      <ScopedCanvas scope={DOC_SCOPE} step={step} role="member" experience="onboarding" />,
     );
     expect(screen.getByTestId("pdf-viewer-widget")).toBeInTheDocument();
     expect(screen.queryByTestId("scoped-canvas-unavailable")).not.toBeInTheDocument();
@@ -149,7 +149,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
       documentIds: ["utility-bill-2026-04"],
     };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={utilityDocScope} step={step} role="member" />,
+      <ScopedCanvas scope={utilityDocScope} step={step} role="member" experience="onboarding" />,
       { initialFrame: "f3", initialScenario: "utility" },
     );
     const widget = screen.getByTestId("extract-workbench");
@@ -162,7 +162,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   it("integrate step → the packaged Integrate connectors widget, fed the scope (Phase 3b)", () => {
     const step: ViewerStep = { kind: "integrate" };
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" />,
+      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" experience="onboarding" />,
       { initialFrame: "f7", initialScenario: "utility" },
     );
     const widget = screen.getByTestId("integrate");
@@ -181,7 +181,7 @@ describe("ScopedCanvas — undeclared kinds hit the placeholder (no crash)", () 
     { kind: "ingest-picker" },
   ])("renders a labelled placeholder for $kind", (step) => {
     renderWithOnboardingProviders(
-      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" />,
+      <ScopedCanvas scope={UTILITY_SCOPE} step={step} role="member" experience="onboarding" />,
     );
     const placeholder = screen.getByTestId("scoped-canvas-unavailable");
     expect(placeholder).toBeInTheDocument();

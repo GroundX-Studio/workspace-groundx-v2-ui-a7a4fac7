@@ -76,6 +76,13 @@ export interface ScopedViewerWidgetComponentProps {
   highlightTier?: CitationTier;
   /** report-builder hand-off — section row to open when the builder mounts. */
   selectedSectionId?: string;
+  /**
+   * doc-viewer nav-name single-source — the viewer reports its resolved
+   * `fileName` (from the X-Ray it already fetches) up to `<ScopedCanvas>`, which
+   * feeds the nav. Lets the shell drop its duplicate `getDocument` fetch.
+   * Optional, so every other widget's `FC<{ scope, role }>` stays assignable.
+   */
+  onFileNameResolved?: (fileName: string) => void;
 }
 
 /**

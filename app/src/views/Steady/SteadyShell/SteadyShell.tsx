@@ -166,7 +166,7 @@ export const SteadyShell: FC = () => {
         sx={{ height: "100%", width: "100%", backgroundColor: WHITE }}
         aria-label="Canvas"
       >
-        <ScopedCanvas scope={canvasScope} step={activeStep} role={widgetRole} reportSurface={reportSurface} />
+        <ScopedCanvas scope={canvasScope} step={activeStep} role={widgetRole} reportSurface={reportSurface} experience="steady" />
       </Box>
     ) : (
       <Box

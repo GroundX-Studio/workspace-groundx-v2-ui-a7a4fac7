@@ -505,7 +505,10 @@ describe("OnboardingShell", () => {
 
   it("makes the Understand pill reachable once a scenario is picked", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
-    const understandPill = screen.getByText("Understand").closest('[role="button"]');
+    // Scope to the step strip: "Understand" now also appears as the viewer-nav
+    // eyebrow on F2 (viewer-nav-redesign), so an unscoped getByText is ambiguous.
+    const strip = within(screen.getByTestId("step-strip-wrapper"));
+    const understandPill = strip.getByText("Understand").closest('[role="button"]');
     // Active on F2; aria-disabled should be absent.
     expect(understandPill).not.toHaveAttribute("aria-disabled");
   });

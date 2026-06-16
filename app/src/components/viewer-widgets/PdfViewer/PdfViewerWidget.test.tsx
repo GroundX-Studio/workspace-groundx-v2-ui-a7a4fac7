@@ -239,6 +239,56 @@ describe("PdfViewerWidget", () => {
     await waitFor(() => expect(screen.getByTestId("pdf-viewer-error")).toBeInTheDocument());
   });
 
+  // viewer-nav-redesign dedupe — the viewer is the authoritative resolver of
+  // the document's fileName (it fetches the X-Ray regardless). It reports that
+  // name UP so the shell's nav can drop its own duplicate `getDocument` fetch.
+  describe("onFileNameResolved (nav-name single-source)", () => {
+    it("reports the resolved fileName up once the xray resolves", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      const onFileNameResolved = vi.fn();
+
+      render(
+        <PdfViewerWidget scope={docScope("doc-1")} role="anonymous" onFileNameResolved={onFileNameResolved} />,
+        { wrapper },
+      );
+
+      await waitFor(() => expect(onFileNameResolved).toHaveBeenCalledWith(fakeXray.fileName));
+    });
+
+    it("does NOT report a name for an unresolved scenario:* placeholder id (no fetch fires)", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+      const onFileNameResolved = vi.fn();
+
+      render(
+        <PdfViewerWidget
+          scope={docScope("scenario:utility")}
+          role="anonymous"
+          onFileNameResolved={onFileNameResolved}
+        />,
+        { wrapper },
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(getXrayMock).not.toHaveBeenCalled();
+      expect(onFileNameResolved).not.toHaveBeenCalled();
+    });
+
+    it("does NOT report a name when the xray carries no fileName", async () => {
+      getXrayMock.mockResolvedValue({ ...fakeXray, fileName: "" });
+      const onFileNameResolved = vi.fn();
+
+      render(
+        <PdfViewerWidget scope={docScope("doc-1")} role="anonymous" onFileNameResolved={onFileNameResolved} />,
+        { wrapper },
+      );
+
+      await waitFor(() => expect(screen.getByTestId("pdf-viewer-page-image")).toBeInTheDocument());
+      expect(onFileNameResolved).not.toHaveBeenCalled();
+    });
+  });
+
   // ── clickable-citations Phase 4 — controlled targetPage + bbox overlay
   describe("controlled targetPage + highlightBbox (clickable-citations Phase 4)", () => {
     it("mounts at targetPage when supplied (overrides default initialPage)", async () => {

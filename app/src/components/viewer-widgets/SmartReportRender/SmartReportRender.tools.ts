@@ -58,9 +58,10 @@ export const descriptor = defineScopedViewerWidget({
   kind: "report",
   slot: "viewer-widgets",
   viewerFrame: {
+    // No `eyebrow`: sourced from the journey catalog in onboarding, empty in
+    // steady (viewer-nav-redesign).
     chromePolicy: "framed",
     contentMode: "padded-scroll",
-    eyebrow: "Report",
     title: "Smart report",
     subtitle: "Render a scoped, citation-backed brief from the active documents.",
   },

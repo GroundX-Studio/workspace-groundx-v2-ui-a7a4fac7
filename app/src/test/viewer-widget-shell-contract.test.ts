@@ -229,9 +229,8 @@ describe("viewer widget shell contract", () => {
     ).toEqual([]);
   });
 
-  it("hostless legacy GateValueProp is not mounted by the live onboarding shell", () => {
+  it("the onboarding shell mounts the sign-up overlay through the shared ViewerWidgetFrame", () => {
     const shell = readFileSync(join(SRC, "views", "Onboarding", "OnboardingShell.tsx"), "utf8");
-    expect(shell).not.toContain("GateValueProp");
     expect(shell).toContain("SignUpWidget");
     expect(shell).toContain("ViewerWidgetFrame");
   });

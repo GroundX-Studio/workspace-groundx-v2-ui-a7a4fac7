@@ -57,9 +57,10 @@ export const descriptor = defineScopedViewerWidget({
   kind: "extract-workbench",
   slot: "viewer-widgets",
   viewerFrame: {
+    // No `eyebrow`: the viewer nav sources it from the journey catalog in
+    // onboarding and leaves it empty in steady (viewer-nav-redesign).
     chromePolicy: "framed",
     contentMode: "padded-scroll",
-    eyebrow: "Analyze",
     title: "Extract",
     subtitle: "Review structured fields and citations for the active scope.",
   },

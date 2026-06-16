@@ -109,6 +109,47 @@ describe("ViewerWidgetFrame", () => {
     expect(within(frame).queryByTestId("book-call-close")).not.toBeInTheDocument();
   });
 
+  it("renders the back/close action as an icon-only button, labelled for a11y (un-cramped)", () => {
+    render(
+      <ViewerWidgetFrame
+        widgetId="sign-up"
+        active
+        chromePolicy="framed"
+        contentMode="centered-panel"
+        eyebrow="Unlock the full workspace"
+        title="Create your account"
+        closeAction={{ id: "close", label: "Back to samples", onClick: vi.fn() }}
+      >
+        <div>content</div>
+      </ViewerWidgetFrame>,
+    );
+    const frame = screen.getByTestId("viewer-widget-frame");
+    const close = within(frame).getByTestId("viewer-frame-close");
+    expect(close).toHaveAccessibleName("Back to samples");
+    // Icon-only: the label is the accessible name, not visible button text.
+    expect(within(frame).queryByText("Back to samples")).not.toBeInTheDocument();
+  });
+
+  it("is compact: with no subtitle, eyebrow + title render on the header", () => {
+    render(
+      <ViewerWidgetFrame
+        widgetId="extract"
+        active
+        chromePolicy="framed"
+        contentMode="padded-scroll"
+        eyebrow="Analyze"
+        title="Extract"
+      >
+        <div data-testid="body">content</div>
+      </ViewerWidgetFrame>,
+    );
+    const header = screen.getByTestId("viewer-frame-header");
+    expect(within(header).getByText("Analyze")).toBeInTheDocument();
+    expect(within(header).getByText("Extract")).toBeInTheDocument();
+    // No close control when there's no close action.
+    expect(within(header).queryByTestId("viewer-frame-close")).not.toBeInTheDocument();
+  });
+
   it("renders secondary frame actions supplied by the host with their declared icons", () => {
     const onSecondary = vi.fn();
 

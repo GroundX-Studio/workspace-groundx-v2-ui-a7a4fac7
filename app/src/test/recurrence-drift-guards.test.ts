@@ -89,8 +89,6 @@ const SCOPED_VIEWER_WIDGET_EXEMPT: Record<string, string> = {
   SignUpWidget: "sign-up gate surface — session-scoped, mounted by the gate flow (not a CanvasKind)",
   // Calendly booking iframe — opened by the book-call overlay, not scope-bound.
   BookCallView: "book-call surface — opened by the book-call overlay (not a CanvasKind)",
-  // Gate value-prop panel — the locked-feature teaser; session-scoped overlay.
-  GateValueProp: "gate value-prop teaser — session-scoped overlay (not a CanvasKind)",
 };
 
 function listViewerWidgetDirs(): string[] {
@@ -349,6 +347,60 @@ describe("§5(d) — every app *Error class extends the shared ApiError", () => 
       offenders.length === 0,
       `An app error class extends Error directly — extend the shared \`ApiError\` ` +
         `base (@groundx/shared) instead (§2):\n  ${offenders.join("\n  ")}`,
+    ).toBe(true);
+  });
+});
+
+// ── Guard (f) — single source for the journey vocabulary ────────────────────
+//
+// viewer-nav-redesign (2026-06-16): the StepStrip pill labels AND the
+// `ViewerStep.kind → journey step` mapping live ONCE, in
+// `components/layout/StepStrip/journeyCatalog.ts`. A second hand-maintained copy
+// (the tell: the old `OnboardingShell` `VIEWER_STEP_KIND_TO_STEP_ID` literal, or
+// re-typed "1 Ingest"/"2 Understand"/"4 Integrate" pill labels) is the drift
+// this guard forbids. Proven to fire by temporarily re-adding a copy to
+// OnboardingShell, then reverted.
+describe("§nav — journey vocabulary has a single source (journeyCatalog)", () => {
+  const CATALOG_REL = join("components", "layout", "StepStrip", "journeyCatalog.ts");
+  const files = listSourceFiles(SRC);
+
+  it("the journey catalog exists and is the one definition site", () => {
+    expect(files.some((f) => f.endsWith(CATALOG_REL))).toBe(true);
+  });
+
+  it("the StepStrip pill labels appear ONLY in the catalog", () => {
+    const labels = ["1 Ingest", "2 Understand", "4 Integrate"];
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (file.endsWith(CATALOG_REL)) continue;
+      const src = readFileSync(file, "utf8");
+      for (const label of labels) {
+        if (src.includes(`"${label}"`) || src.includes(`'${label}'`)) {
+          offenders.push(`${file.slice(SRC.length + 1)} › "${label}"`);
+        }
+      }
+    }
+    expect(
+      offenders.length === 0,
+      `A StepStrip pill label is duplicated outside journeyCatalog.ts — read it from ` +
+        `JOURNEY_CATALOG instead (single source):\n  ${offenders.join("\n  ")}`,
+    ).toBe(true);
+  });
+
+  it("the viewer-step → journey-step mapping is not re-declared outside the catalog", () => {
+    // The old OnboardingShell map's tell: `"doc-viewer": "understand"` (kind →
+    // bare StepId). The catalog uses `"doc-viewer": { step: "understand" }`, a
+    // different shape, so it does not match this signature.
+    const tell = /["']doc-viewer["']\s*:\s*["']understand["']/;
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (file.endsWith(CATALOG_REL)) continue;
+      if (tell.test(readFileSync(file, "utf8"))) offenders.push(file.slice(SRC.length + 1));
+    }
+    expect(
+      offenders.length === 0,
+      `A viewer-step→journey-step mapping is re-declared outside journeyCatalog.ts — ` +
+        `use VIEWER_STEP_TO_JOURNEY (single source):\n  ${offenders.join("\n  ")}`,
     ).toBe(true);
   });
 });

@@ -91,7 +91,13 @@ widget root surfaces the value for test introspection.
 
 ## Events
 
-None today. The viewer is read-only — citation-jump flows in via
+- **`onFileNameResolved?(fileName)`** — fired once the X-Ray resolves with a
+  non-empty `fileName` (and only for a resolved id — placeholder ids never
+  fetch, so never report). The viewer is the authoritative resolver of the
+  document name, so the host nav (`ScopedCanvas`) consumes this instead of
+  issuing its own duplicate `getDocument` round-trip. One document → one fetch.
+
+Otherwise the viewer is read-only — citation-jump flows in via
 `targetPage` + `highlightBbox` props, sourced from the active
 `doc-viewer` ViewerStep on the chat session.
 

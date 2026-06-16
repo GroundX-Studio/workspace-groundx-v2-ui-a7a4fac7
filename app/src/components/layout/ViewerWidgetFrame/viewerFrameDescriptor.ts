@@ -41,18 +41,6 @@ export interface ViewerWidgetFrameProps extends ViewerFrameDescriptor {
   readonly children: ReactNode;
 }
 
-export interface DescribedViewerFrame {
-  readonly id: string;
-  readonly viewerFrame: ViewerFrameDescriptor;
-}
-
-export function framePropsFromDescriptor(
-  descriptor: DescribedViewerFrame,
-  props: Omit<ViewerWidgetFrameProps, keyof ViewerFrameDescriptor | "widgetId">,
-): ViewerWidgetFrameProps {
-  return {
-    widgetId: descriptor.id,
-    ...descriptor.viewerFrame,
-    ...props,
-  };
-}
+// `framePropsFromDescriptor` + `DescribedViewerFrame` were removed by
+// viewer-nav-redesign (2026-06-16): they were an unused descriptor-merge helper.
+// `resolveViewerNav` is now the single descriptor-merge path.

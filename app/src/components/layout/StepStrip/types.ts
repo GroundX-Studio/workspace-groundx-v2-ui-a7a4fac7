@@ -21,7 +21,7 @@ export type AnalyzeSubstep = "extract" | "interact" | "report";
 
 export interface StepDescriptor {
   id: StepId;
-  /** Display label e.g. "1 Ingest". */
+  /** Display label (sourced from `journeyCatalog.ts`; e.g. the Ingest pill text). */
   label: string;
   state: StepPillState;
   /** When provided + state is active, the chip nests these substeps. */

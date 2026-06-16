@@ -25,6 +25,7 @@ import { OnboardingNav } from "@/components/layout/OnboardingNav/OnboardingNav";
 import type { OnboardingNavItemKey } from "@/components/layout/OnboardingNav/OnboardingNav";
 import { StepStrip } from "@/components/layout/StepStrip";
 import type { StepDescriptor, StepId, StepPillState } from "@/components/layout/StepStrip";
+import { JOURNEY_CATALOG, VIEWER_STEP_TO_JOURNEY } from "@/components/layout/StepStrip/journeyCatalog";
 import type { FFrame, Scenario } from "@/types/onboarding";
 
 import type { ContentScope } from "@groundx/shared";
@@ -137,10 +138,11 @@ function analyzeSubsteps(
   // Extract/Interact/Report). The currently active sub-pill always stays active.
   const subState = (active: boolean): StepPillState =>
     active ? "active" : analyzeReached ? "reachable-todo" : "disabled";
+  const substeps = JOURNEY_CATALOG.analyze.substeps!;
   return [
-    { id: "extract", label: "Extract", state: subState(extractActive) },
-    { id: "interact", label: "Interact", state: subState(interactActive) },
-    { id: "report", label: "Report", state: subState(reportActive) },
+    { id: "extract", label: substeps.extract.label, state: subState(extractActive) },
+    { id: "interact", label: substeps.interact.label, state: subState(interactActive) },
+    { id: "report", label: substeps.report.label, state: subState(reportActive) },
   ];
 }
 
@@ -190,21 +192,14 @@ export const OnboardingShell: FC = () => {
   const signupSurfaceActiveEarly = routeSignUpActive || signupOverlayEarly != null;
   const activeEntityKeyEarly = activeChatSessionEarly?.activeEntityKey ?? null;
   const latestViewerStepEarly = selectActiveStep(activeChatSessionEarly);
-  // ViewerStep → StepStrip pill mapping. Clickable citations push a
-  // `doc-viewer` step which maps to the Understand pill, so the nav
-  // indicator matches what the canvas surfaces.
-  const VIEWER_STEP_KIND_TO_STEP_ID: Record<string, StepId> = {
-    "ingest-picker": "ingest",
-    "doc-viewer": "understand",
-    "extract-workbench": "analyze",
-    "interact-chat": "analyze",
-    report: "analyze",
-    integrate: "integrate",
-  };
+  // ViewerStep → StepStrip pill mapping comes from the shared journey catalog
+  // (`VIEWER_STEP_TO_JOURNEY`) — single source, also read by the viewer nav.
+  // Clickable citations push a `doc-viewer` step which maps to the Understand
+  // pill, so the nav indicator matches what the canvas surfaces.
   const currentStep: StepId =
     signupSurfaceActiveEarly && session.scenario == null
       ? "ingest"
-      : (latestViewerStepEarly && VIEWER_STEP_KIND_TO_STEP_ID[latestViewerStepEarly.kind]) ??
+      : (latestViewerStepEarly && VIEWER_STEP_TO_JOURNEY[latestViewerStepEarly.kind]?.step) ??
         FRAME_TO_STEP[session.currentFrame];
   const isF1 = session.currentFrame === "f1" && !bookCallActive && !signupSurfaceActiveEarly;
 
@@ -347,15 +342,15 @@ export const OnboardingShell: FC = () => {
     const analyzeReached =
       stepRank(currentStep) >= stepRank("analyze") || completedSteps.has("analyze");
     return [
-      { id: "ingest", label: "1 Ingest", state: pillState("ingest", currentStep, completedSteps, signedIn, scenarioPicked) },
-      { id: "understand", label: "2 Understand", state: pillState("understand", currentStep, completedSteps, signedIn, scenarioPicked) },
+      { id: "ingest", label: JOURNEY_CATALOG.ingest.stepLabel, state: pillState("ingest", currentStep, completedSteps, signedIn, scenarioPicked) },
+      { id: "understand", label: JOURNEY_CATALOG.understand.stepLabel, state: pillState("understand", currentStep, completedSteps, signedIn, scenarioPicked) },
       {
         id: "analyze",
-        label: "Analyze",
+        label: JOURNEY_CATALOG.analyze.stepLabel,
         state: pillState("analyze", currentStep, completedSteps, signedIn, scenarioPicked),
         substeps: analyzeSubsteps(session.currentFrame, session.gate.status === "open", analyzeReached),
       },
-      { id: "integrate", label: "4 Integrate", state: pillState("integrate", currentStep, completedSteps, signedIn, scenarioPicked) },
+      { id: "integrate", label: JOURNEY_CATALOG.integrate.stepLabel, state: pillState("integrate", currentStep, completedSteps, signedIn, scenarioPicked) },
     ];
   }, [currentStep, completedSteps, appMode.authState, session.currentFrame, session.scenario, session.gate.status]);
 
@@ -709,6 +704,7 @@ export const OnboardingShell: FC = () => {
         role={widgetRole}
         reportSurface={reportSurface}
         active={!(signupSurfaceActive || bookCallActive)}
+        experience="onboarding"
       />
     );
   }, [

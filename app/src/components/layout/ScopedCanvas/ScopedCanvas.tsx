@@ -25,16 +25,23 @@
  * are widget mounts the shell handles, NOT views routed through here.)
  */
 import Box from "@mui/material/Box";
-import type { FC } from "react";
+import { useState, type FC } from "react";
 
 import type { CanvasKind, ContentScope, WidgetRole } from "@groundx/shared";
 
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Heading } from "@/components/primitives/Heading/Heading";
 import { ViewerWidgetFrame } from "@/components/layout/ViewerWidgetFrame/ViewerWidgetFrame";
+import { resolveViewerNav } from "@/components/layout/ViewerWidgetFrame/resolveViewerNav";
+import type { ViewerNavContext } from "@/components/layout/ViewerWidgetFrame/viewerNavContext";
+import { useDocumentName } from "@/components/layout/ViewerWidgetFrame/useDocumentName";
+import { INGEST_LIVE_LABEL, VIEWER_STEP_TO_JOURNEY } from "@/components/layout/StepStrip/journeyCatalog";
 import { BORDER_RADIUS_CARD, NAVY, WARM_OFFWHITE, WHITE } from "@/constants";
 import type { ViewerStep } from "@/contexts/ChatStoreContext";
 import { mountForKind } from "@/widgets/scopedViewerWidgetRegistryProduction";
+
+/** Which shell mounted this canvas — drives whether the nav shows journey words. */
+export type ViewerExperience = "onboarding" | "steady";
 
 export interface ScopedCanvasProps {
   /** The active content scope the mounted widget renders over. */
@@ -50,6 +57,12 @@ export interface ScopedCanvasProps {
   reportSurface?: "render" | "builder";
   /** Whether this canvas is the foreground viewer frame. */
   active?: boolean;
+  /**
+   * Which shell mounted this canvas. `"onboarding"` shows the journey step as
+   * the nav eyebrow; `"steady"` shows none. Passed explicitly by every shell
+   * (no inference) — the nav's journey-words toggle (NOT the chatExperienceRegistry).
+   */
+  experience: ViewerExperience;
 }
 
 /**
@@ -100,8 +113,30 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({
   role,
   reportSurface,
   active = true,
+  experience,
 }) => {
   const kind = stepToCanvasKind(step, reportSurface);
+
+  // Resolve the document name BEFORE any early return (Rules of Hooks). Gate on
+  // the STEP kind (`doc-viewer` = Understand / steady doc view), NOT the canvas
+  // kind — `interact-chat` also maps to the doc-viewer canvas but shows the
+  // "Interact" sub-step title, so it must NOT trigger a name fetch. Take the id
+  // from the SCOPE (the resolved GroundX UUID the PdfViewer reads), never the
+  // step's id, which can be a scenario placeholder (`scenario:utility`).
+  const documentId =
+    step.kind === "doc-viewer" && scope.type === "documents" ? scope.documentIds[0] : undefined;
+  // Single-source the doc name: the PdfViewer this canvas mounts already fetches
+  // the X-Ray (which carries `fileName`) and reports it up here — so the nav opts
+  // OUT of `useDocumentName`'s own `getDocument` fetch (`fetchFallback: false`)
+  // to avoid a duplicate round-trip. The hook still resolves synchronously from
+  // already-loaded state (steady's instant title); the viewer-reported name
+  // fills the onboarding gap where state carries no name. Keyed PER id (mirrors
+  // the hook's own `fetched` cache) so switching documents can never flash the
+  // previous doc's name — only the active id's reported name is read.
+  const [viewerNames, setViewerNames] = useState<Record<string, string>>({});
+  const documentName =
+    useDocumentName(documentId, { fetchFallback: false }) ??
+    (documentId ? viewerNames[documentId] : undefined);
 
   if (kind === null) {
     return (
@@ -180,12 +215,41 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({
           // carries `scanning`; cite-jump steps omit it, so the sweep plays
           // exactly during the reading beat and never on a citation jump.
           showScanAnimation: step.scanning ?? false,
+          // nav-name single-source — the viewer reports its resolved fileName
+          // up (keyed by the active id) so the nav (above) can drop its own
+          // duplicate metadata fetch. The widget only reports for the current
+          // scope (it drops stale in-flight results), so this id is correct.
+          onFileNameResolved: (fileName: string) => {
+            if (!documentId) return;
+            setViewerNames((prev) =>
+              prev[documentId] === fileName ? prev : { ...prev, [documentId]: fileName },
+            );
+          },
         }
       : {};
   const reportBuilderProps =
     step.kind === "report" && step.selectedSectionId
       ? { selectedSectionId: step.selectedSectionId }
       : {};
+
+  // Nav context: onboarding shows the journey step/sub-step (from the shared
+  // catalog); steady shows no eyebrow. The frame chrome is then resolved once,
+  // through `resolveViewerNav`, from the widget's intrinsic descriptor.
+  const navContext: ViewerNavContext =
+    experience === "onboarding"
+      ? {
+          kind: "onboarding-step",
+          ...(VIEWER_STEP_TO_JOURNEY[step.kind] ?? { step: "understand" }),
+          documentName,
+        }
+      : { kind: "steady-canvas", widget: kind, documentName };
+
+  // The F2 ingest beat: show the live "reading" line via the frame's existing
+  // loading slot. It coexists with the PdfViewer's in-page scan animation.
+  const loading =
+    experience === "onboarding" && step.kind === "doc-viewer" && step.scanning
+      ? { label: INGEST_LIVE_LABEL }
+      : undefined;
 
   return (
     <Box
@@ -196,7 +260,8 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({
       <ViewerWidgetFrame
         widgetId={mount.descriptor.id}
         active={active}
-        {...mount.descriptor.viewerFrame}
+        loading={loading}
+        {...resolveViewerNav(navContext, mount.descriptor.viewerFrame)}
       >
         <Widget scope={scope} role={role} {...docViewerHighlight} {...reportBuilderProps} />
       </ViewerWidgetFrame>

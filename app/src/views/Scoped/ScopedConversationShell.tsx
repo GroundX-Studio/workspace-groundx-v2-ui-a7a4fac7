@@ -190,7 +190,7 @@ export const ScopedConversationShell: FC<ScopedConversationShellProps> = ({
       aria-label="Canvas"
     >
       {canvasScope ? (
-        <ScopedCanvas scope={canvasScope} step={canvasStep} role={widgetRole} reportSurface={reportSurface} />
+        <ScopedCanvas scope={canvasScope} step={canvasStep} role={widgetRole} reportSurface={reportSurface} experience="steady" />
       ) : (
         <Box data-testid="scoped-project-canvas-loading" sx={{ color: NAVY, fontSize: FONT_SIZE_CAPTION, fontWeight: FONT_WEIGHT_LABEL }}>
           Loading project

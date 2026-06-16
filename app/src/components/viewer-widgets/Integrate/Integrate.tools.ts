@@ -52,10 +52,11 @@ export const descriptor = defineScopedViewerWidget({
   kind: "integrate",
   slot: "viewer-widgets",
   viewerFrame: {
+    // No `eyebrow`: sourced from the journey catalog in onboarding, empty in
+    // steady (viewer-nav-redesign). Title is "Connect" (not a repeat of the step).
     chromePolicy: "framed",
     contentMode: "padded-scroll",
-    eyebrow: "Integrate",
-    title: "Integrate",
+    title: "Connect",
     subtitle: "Connect this GroundX scope to agents, apps, and API workflows.",
   },
   tools,

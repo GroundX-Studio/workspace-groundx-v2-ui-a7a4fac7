@@ -7,8 +7,8 @@ export const viewerOverlayFrameDescriptors: Record<ViewerOverlayKind, ViewerFram
   "sign-up": {
     chromePolicy: "framed",
     contentMode: "centered-panel",
-    eyebrow: "Save your work",
-    title: "Create an account",
+    eyebrow: "UNLOCK THE FULL WORKSPACE",
+    title: "Create your account",
     subtitle: "Your chat, viewer state, and sample progress stay together after sign-in.",
   },
   "book-call": {

@@ -159,6 +159,15 @@ export interface PdfViewerWidgetProps {
     h: number;
     color: "green" | "cyan" | "coral";
   }>;
+  /**
+   * viewer-nav-redesign dedupe — report the document's resolved `fileName`
+   * up to the host once the X-Ray resolves. The viewer is the authoritative
+   * resolver of the name (it fetches the X-Ray regardless), so the shell's nav
+   * consumes THIS instead of issuing its own duplicate lightweight
+   * `getDocument` round-trip. Fires only for a real resolved id (the X-Ray
+   * gate) and only when the X-Ray actually carries a non-empty name.
+   */
+  onFileNameResolved?: (fileName: string) => void;
 }
 
 export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
@@ -171,7 +180,13 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   highlightRegions,
   showScanAnimation = false,
   litRegions,
+  onFileNameResolved,
 }) => {
+  // Read the report-up callback through a ref so the (async) scope-adapter
+  // resolution always calls the latest one without re-running the adapter on
+  // a fresh callback identity (it fires only on scope-identity change).
+  const onFileNameResolvedRef = useRef(onFileNameResolved);
+  onFileNameResolvedRef.current = onFileNameResolved;
   // Resolve the single document the viewer renders from the scope. Only the
   // `documents` shape carries a concrete id today; any other scope (bucket /
   // group) resolves to an empty id and holds the neutral loading state. The
@@ -221,6 +236,9 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
       if (loadSeqRef.current !== loadSeq) return;
       if (result.isSuccess && result.response) {
         setXray(result.response);
+        // Report the resolved name up so the host nav can drop its own
+        // duplicate metadata fetch (single source = the viewer's X-Ray).
+        if (result.response.fileName) onFileNameResolvedRef.current?.(result.response.fileName);
       } else {
         setError(result.error ?? new Error("xray fetch failed"));
       }

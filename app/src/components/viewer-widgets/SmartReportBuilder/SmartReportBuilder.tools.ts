@@ -156,9 +156,10 @@ export const descriptor = defineScopedViewerWidget({
   kind: "report-builder",
   slot: "viewer-widgets",
   viewerFrame: {
+    // No `eyebrow`: sourced from the journey catalog in onboarding, empty in
+    // steady (viewer-nav-redesign).
     chromePolicy: "framed",
     contentMode: "padded-scroll",
-    eyebrow: "Report",
     title: "Report builder",
     subtitle: "Edit report sections and review proposed changes for this scope.",
   },
