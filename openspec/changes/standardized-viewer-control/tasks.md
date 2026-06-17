@@ -171,7 +171,10 @@ only after its adversarial review gate passes against the plan AND the real code
       persisted snapshot + the intent corpus); affordances are server-validated and
       share one `suggestedActions` list; the seam is the sole viewer-mutation path;
       the cornerstone + a Chrome DevTools spot-check pass on the live preview.
-- **Gate:** review passes; any finding returns the relevant task to in-progress.
+- [ ] **Closeout:** delete `RESUME.md` (the transient handoff note in this folder) —
+      it is not part of the plan and must not linger once the change is complete.
+- **Gate:** review passes; `RESUME.md` is deleted; any finding returns the relevant
+      task to in-progress.
 
 ## Deferred (tracked, not in this change)
 
