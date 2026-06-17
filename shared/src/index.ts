@@ -634,6 +634,11 @@ export const suggestedActionSchema = z.object({
   key: z.string(),
   label: z.string(),
   detail: z.record(z.unknown()).optional(),
+  // standardized-viewer-control — optional inline-binding phrase. When present,
+  // the action renders as clickable text wrapping the FIRST occurrence of this
+  // phrase in the answer prose (falling back to a pill when not found); absent
+  // renders as a follow-up pill.
+  anchor: z.string().optional(),
 });
 export type SuggestedAction = z.infer<typeof suggestedActionSchema>;
 
@@ -943,7 +948,15 @@ export const canvasIntentSchema = z.discriminatedUnion("kind", [
     regions: z.array(citationRegionSchema),
   }),
   z.object({ kind: z.literal("jumpToPage"), documentId: z.string(), page: z.number() }),
-  z.object({ kind: z.literal("showExtract"), scope: contentScopeSchema, schemaId: z.string() }),
+  z.object({
+    kind: z.literal("showExtract"),
+    scope: contentScopeSchema,
+    schemaId: z.string(),
+    // standardized-viewer-control — the schema category to focus when the
+    // extraction workbench opens (or re-focus if it is already shown). Optional:
+    // absent leaves the focus unchanged / defaults to the first category.
+    focusedCategoryId: z.string().optional(),
+  }),
   z.object({ kind: z.literal("editSchema"), schemaId: z.string() }),
   z.object({ kind: z.literal("showIntegrate"), scope: contentScopeSchema }),
   z.object({ kind: z.literal("showReport"), templateId: z.string(), scope: contentScopeSchema }),

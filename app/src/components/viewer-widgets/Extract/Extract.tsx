@@ -105,6 +105,13 @@ export interface ExtractProps {
    * affordances; surfaced via `data-role` on the root.
    */
   role: WidgetRole;
+  /**
+   * standardized-viewer-control — the schema category to focus, forwarded from
+   * the active `extract-workbench` viewer step. When present it wins over the
+   * widget's own default, so a `showExtract` intent that mutates/pushes the step
+   * re-focuses the live workbench. Absent leaves the existing default.
+   */
+  focusedCategoryId?: string;
 }
 
 function mintTemplateId(): string {
@@ -200,7 +207,7 @@ const detailLabelSx = {
 // (~360) + a comfortable schema (~380) + the column gap.
 const SIDE_BY_SIDE_MIN_PX = 760;
 
-export const Extract: FC<ExtractProps> = ({ scope, role }) => {
+export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focusedCategoryIdProp }) => {
   const api = useApi();
   const { state: appMode } = useAppMode();
   const onboardingSession = useOnboardingSessionOptional();
@@ -500,7 +507,11 @@ export const Extract: FC<ExtractProps> = ({ scope, role }) => {
   }
 
   const focusParam = searchParams.get("focus");
+  // standardized-viewer-control — the active step's focused category (forwarded
+  // prop) WINS, so a `showExtract` intent re-focuses the live workbench. Falls
+  // back to the (legacy) overlay / `?focus` / first category.
   const focusedCategoryId =
+    (focusedCategoryIdProp && schema.categories.find((c) => c.id === focusedCategoryIdProp)?.id) ??
     overlay?.focusedCategoryId ??
     (focusParam && schema.categories.find((c) => c.id === focusParam)?.id) ??
     schema.categories[0]?.id ??

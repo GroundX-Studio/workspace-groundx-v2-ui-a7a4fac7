@@ -35,6 +35,7 @@ import type { ChatExperience, ChatExperienceComponentProps } from "@/conversatio
 import { BotBubble, PickViewPill, UserBubble } from "@/conversation/chatPrimitives";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useWidgetRole } from "@/lib/widgetRole";
 
@@ -105,6 +106,7 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
     const { advanceFrame, state: onboardingState } = useOnboardingSession();
     const { byId, state: registryState } = useScenarioRegistry();
     const { state: chatState } = useChatStore();
+    const { dispatch: dispatchIntent } = useCanvasOrchestrator();
     const widgetRole = useWidgetRole();
     const navigate = useNavigate();
 
@@ -370,8 +372,23 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
                           advanceFrame("f5");
                           return;
                         }
-                        advanceFrame("f3");
-                        navigate({ search: `?focus=${view.key}` }, { replace: false });
+                        // standardized-viewer-control — dispatch showExtract with
+                        // the category through the orchestrator (the one seam), so
+                        // it opens Extract focused on that category AND re-focuses
+                        // the live workbench when already shown (replaces the
+                        // non-reactive `?focus=` URL steer).
+                        const docId = scenario?.documents?.[0]?.documentId;
+                        dispatchIntent(
+                          {
+                            kind: "showExtract",
+                            scope: docId
+                              ? { type: "documents", documentIds: [docId] }
+                              : { type: "documents", documentIds: [] },
+                            schemaId: scenarioId,
+                            focusedCategoryId: view.key,
+                          },
+                          "user",
+                        );
                       }}
                     />
                   ))}

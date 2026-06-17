@@ -231,6 +231,13 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({
     step.kind === "report" && step.selectedSectionId
       ? { selectedSectionId: step.selectedSectionId }
       : {};
+  // standardized-viewer-control — forward the extract-workbench step's focused
+  // category so the canvas is a pure function of the active step (the widget
+  // re-focuses live when a `showExtract` intent mutates/pushes the step).
+  const extractProps =
+    step.kind === "extract-workbench" && step.focusedCategoryId
+      ? { focusedCategoryId: step.focusedCategoryId }
+      : {};
 
   // Nav context: onboarding shows the journey step/sub-step (from the shared
   // catalog); steady shows no eyebrow. The frame chrome is then resolved once,
@@ -263,7 +270,7 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({
         loading={loading}
         {...resolveViewerNav(navContext, mount.descriptor.viewerFrame)}
       >
-        <Widget scope={scope} role={role} {...docViewerHighlight} {...reportBuilderProps} />
+        <Widget scope={scope} role={role} {...docViewerHighlight} {...reportBuilderProps} {...extractProps} />
       </ViewerWidgetFrame>
     </Box>
   );

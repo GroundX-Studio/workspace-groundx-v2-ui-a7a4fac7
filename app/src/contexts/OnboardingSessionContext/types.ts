@@ -45,7 +45,10 @@ export interface OnboardingSessionApi {
    * the report section the builder (f4a) should pre-open — the render→builder
    * `✎ edit §N` hand-off uses it. Advancing to any non-f4a frame clears it.
    */
-  advanceFrame: (frame: FFrame, options?: { selectedReportSectionId?: string }) => void;
+  advanceFrame: (
+    frame: FFrame,
+    options?: { selectedReportSectionId?: string; focusedCategoryId?: string },
+  ) => void;
   /**
    * Open the F6 gate. Pass `options.cause` to mark the post-commit
    * intent so an effect can fire the dropped action after sign-in

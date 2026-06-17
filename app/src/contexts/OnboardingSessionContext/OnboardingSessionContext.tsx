@@ -26,6 +26,7 @@ const OnboardingSessionContext = createContext<OnboardingSessionApi | null>(null
 export function frameToStepStandalone(
   frame: FFrame,
   scenario: Scenario | null,
+  focusedCategoryId?: string,
 ): import("@/contexts/ChatStoreContext").ViewerStep {
   switch (frame) {
     case "f1":
@@ -44,7 +45,11 @@ export function frameToStepStandalone(
       };
     case "f3":
     case "f3a":
-      return { kind: "extract-workbench", scenarioId: scenario ?? "unknown" };
+      return {
+        kind: "extract-workbench",
+        scenarioId: scenario ?? "unknown",
+        ...(focusedCategoryId ? { focusedCategoryId } : {}),
+      };
     // 2026-05-29-smart-report-screen Phase 1 — f4 = Report render (S3),
     // f4a = Report builder (S3a). Both project to the `report` ViewerStep
     // kind (the render surface reads the active scenario's scope); f4 used
@@ -210,7 +215,7 @@ function useSessionFacade(): OnboardingSessionApi {
   // level function (hoisted above the hook); see top of file.
 
   const advanceFrame = useCallback(
-    (frame: FFrame, options?: { selectedReportSectionId?: string }) => {
+    (frame: FFrame, options?: { selectedReportSectionId?: string; focusedCategoryId?: string }) => {
       // Carry (or clear) the builder's pre-selected section. Only the builder
       // frame (f4a) keeps a selection; advancing anywhere else clears it so a
       // stale section can't pre-open a later builder visit.
@@ -285,7 +290,7 @@ function useSessionFacade(): OnboardingSessionApi {
       const scenarioFromKey = entityKeyAtAdvance?.startsWith("sample:")
         ? (entityKeyAtAdvance.slice("sample:".length) as Scenario)
         : null;
-      pushStep(frameToStepStandalone(frame, scenarioFromKey));
+      pushStep(frameToStepStandalone(frame, scenarioFromKey, options?.focusedCategoryId));
       // OB-02 — understand.completed when leaving F2 (the scan
       // animation finished and the user advanced).
       if (frame === "f3" || frame === "f3a") {

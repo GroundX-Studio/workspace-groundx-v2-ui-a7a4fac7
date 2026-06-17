@@ -323,8 +323,18 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // canvas move as the on-screen control. Soft-fail in the steady tree
         // (no OnboardingSessionProvider).
         case "showExtract":
-          if (routeThroughOnboarding) onboardingSession?.advanceFrame("f3");
-          else if (chatStore) chatStore.pushStep({ kind: "extract-workbench", scenarioId: "utility" });
+          if (routeThroughOnboarding) {
+            onboardingSession?.advanceFrame(
+              "f3",
+              intent.focusedCategoryId ? { focusedCategoryId: intent.focusedCategoryId } : undefined,
+            );
+          } else if (chatStore) {
+            chatStore.pushStep({
+              kind: "extract-workbench",
+              scenarioId: "utility",
+              ...(intent.focusedCategoryId ? { focusedCategoryId: intent.focusedCategoryId } : {}),
+            });
+          }
           break;
         // 2026-05-30-onboarding-shell-shared-view Phase 3b — the
         // `show_integrate` canvas-dispatch tool MOVES the canvas to the

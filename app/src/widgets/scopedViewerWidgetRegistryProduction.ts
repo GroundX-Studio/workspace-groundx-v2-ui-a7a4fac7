@@ -77,6 +77,13 @@ export interface ScopedViewerWidgetComponentProps {
   /** report-builder hand-off — section row to open when the builder mounts. */
   selectedSectionId?: string;
   /**
+   * extract-workbench sub-position — the schema category to focus, forwarded
+   * from the active viewer step (standardized-viewer-control). The widget reads
+   * focus from this prop so the canvas is a function of the step; absent leaves
+   * the widget's own default.
+   */
+  focusedCategoryId?: string;
+  /**
    * doc-viewer nav-name single-source — the viewer reports its resolved
    * `fileName` (from the X-Ray it already fetches) up to `<ScopedCanvas>`, which
    * feeds the nav. Lets the shell drop its duplicate `getDocument` fetch.
