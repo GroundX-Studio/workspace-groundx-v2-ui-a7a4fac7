@@ -66,6 +66,12 @@ interface PdfViewerWidgetProps {
    * `CiteChip` click surfaces the cited region.
    */
   highlightBbox?: { x: number; y: number; w: number; h: number } | null;
+  /**
+   * Optional outbound name readout (see Events). Fired with the X-Ray's
+   * `fileName` once it resolves, so the host nav can reuse it instead of a
+   * duplicate `getDocument` fetch (viewer-nav spec).
+   */
+  onFileNameResolved?: (fileName: string) => void;
 }
 ```
 

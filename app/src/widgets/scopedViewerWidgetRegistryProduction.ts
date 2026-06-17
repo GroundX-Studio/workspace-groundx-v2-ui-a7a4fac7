@@ -81,6 +81,13 @@ export interface ScopedViewerWidgetComponentProps {
    * `fileName` (from the X-Ray it already fetches) up to `<ScopedCanvas>`, which
    * feeds the nav. Lets the shell drop its duplicate `getDocument` fetch.
    * Optional, so every other widget's `FC<{ scope, role }>` stays assignable.
+   *
+   * This is a passive DATA READOUT (it only updates the nav title for display),
+   * NOT a control whose effect lives in the host — so it is correctly a callback
+   * here and does NOT fall under the orchestrator-intent rule for on-canvas
+   * controls (app-architecture spec "controls drive effects through the
+   * orchestrator, not callback props"). The `viewer-nav` spec mandates this
+   * "viewer reports the name up" mechanism explicitly.
    */
   onFileNameResolved?: (fileName: string) => void;
 }

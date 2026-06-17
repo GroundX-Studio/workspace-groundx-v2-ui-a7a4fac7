@@ -15,6 +15,18 @@ Execution discipline (per `docs/agents/discipline.md` §9–11):
 
 ---
 
+> **Post-archive addendum (2026-06-16).** The design's **Dedupe (R2)** item
+> (`design.md` — the doc-viewer nav reuses the viewer's X-Ray `fileName` via
+> `PdfViewer onFileNameResolved` + `useDocumentName(…, { fetchFallback: false })`,
+> instead of a second `getDocument` round-trip) landed in commit `972b7db` and is
+> covered by `ScopedCanvas.docname-dedupe.test.tsx`. It conforms to the durable
+> `openspec/specs/viewer-nav/spec.md` requirement "The document name SHALL be
+> resolved from existing state, then an authoritative fetch." The unchecked boxes
+> below are a not-ticked-at-archive artifact; the change shipped in
+> `972b7db` / `b42e42b`.
+
+---
+
 ## Task 1 — Cornerstone failing test (ONBOARDING content) · SEQUENTIAL
 
 **Files:** `app/src/components/layout/ScopedCanvas/ScopedCanvas.navcontent.test.tsx` (create)
