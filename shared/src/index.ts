@@ -643,6 +643,42 @@ export const suggestedActionSchema = z.object({
 export type SuggestedAction = z.infer<typeof suggestedActionSchema>;
 
 // ──────────────────────────────────────────────────────────────────────
+// offerAs — standardized-viewer-control T2. The ONE shared shape for the
+// OPTIONAL `offerAs` field on every navigation tool's input schema. When the
+// LLM sets it, the tool call is NOT auto-dispatched: the middleware routes it
+// to a `suggestedActions` entry (a clickable "→ go there" chip / inline anchor)
+// built from the tool's `intentBuilder` + this `label` (+ optional `anchor`),
+// so the user — not the model — triggers the canvas move. Absent ⇒ the tool
+// auto-dispatches per its category (today's behavior).
+//
+// Declared ONCE here so the app `*.tools.ts` and the middleware `toolCatalog.ts`
+// import the IDENTICAL Zod node and the full-shape app↔server JSON-Schema parity
+// holds BY CONSTRUCTION (it is added to N navigation tools — N×2 drift surfaces
+// otherwise). The per-tool wiring + the route-to-`suggestedActions` disposition
+// (and the `intentBuilder` IGNORING `offerAs`) are T7; this is the carrier shape
+// only. Both fields carry `.describe()` (the nested `label`/`anchor` are not
+// `check-tool-quality`-guarded — top-level only — but described anyway for
+// parity and prompt clarity).
+// ──────────────────────────────────────────────────────────────────────
+
+/** The optional `offerAs` disposition on a navigation tool's input — one shape, app + server. */
+export const offerAsSchema = z.object({
+  label: z
+    .string()
+    .min(1)
+    .describe(
+      "Render this navigation as an OFFER the user can click (a suggested-action chip / inline anchor) instead of auto-moving the canvas. This is the visible label of the offer, e.g. \"→ open the report\".",
+    ),
+  anchor: z
+    .string()
+    .optional()
+    .describe(
+      "Optional phrase in the answer prose to wrap as inline clickable text (first occurrence; falls back to a chip when not found). Omit to render the offer as a follow-up chip.",
+    ),
+});
+export type OfferAs = z.infer<typeof offerAsSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
 // ProposedSchemaField — 2026-05-31-core-data-followups §4 #18. The
 // `proposal-envelope` wire shape the grounded LLM emits ("add a field for total
 // tax"). Declared on BOTH sides of the app↔middleware wire (app
@@ -958,6 +994,13 @@ export const canvasIntentSchema = z.discriminatedUnion("kind", [
     focusedCategoryId: z.string().optional(),
   }),
   z.object({ kind: z.literal("editSchema"), schemaId: z.string() }),
+  // standardized-viewer-control T2 — move the canvas to the Interact (chat-with-
+  // sources) surface for a scope. Mirrors `showIntegrate` (scope-only payload);
+  // the orchestrator resolves a document from the scope so the interact-chat
+  // canvas (the shared PdfViewer) isn't doc-less. The dedicated `show_interact`
+  // navigation tool that emits it is wired in T7; the orchestrator handler is
+  // refined in T5.
+  z.object({ kind: z.literal("showInteract"), scope: contentScopeSchema }),
   z.object({ kind: z.literal("showIntegrate"), scope: contentScopeSchema }),
   z.object({ kind: z.literal("showReport"), templateId: z.string(), scope: contentScopeSchema }),
   z.object({ kind: z.literal("editTemplate"), templateId: z.string(), selectedSectionId: z.string().optional() }),

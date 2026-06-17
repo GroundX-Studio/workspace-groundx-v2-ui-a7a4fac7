@@ -232,11 +232,16 @@ export const ScopedCanvas: FC<ScopedCanvasProps> = ({
       ? { selectedSectionId: step.selectedSectionId }
       : {};
   // standardized-viewer-control — forward the extract-workbench step's focused
-  // category so the canvas is a pure function of the active step (the widget
-  // re-focuses live when a `showExtract` intent mutates/pushes the step).
+  // category AND its `surface` sub-position (T5/R7 — "fields" | "design") so the
+  // canvas is a pure function of the active step: the widget re-focuses live when
+  // a `showExtract` intent mutates/pushes the step, and opens the schema DESIGN
+  // surface when `editSchema` flips `surface` to "design" (in BOTH experiences).
   const extractProps =
-    step.kind === "extract-workbench" && step.focusedCategoryId
-      ? { focusedCategoryId: step.focusedCategoryId }
+    step.kind === "extract-workbench"
+      ? {
+          ...(step.focusedCategoryId ? { focusedCategoryId: step.focusedCategoryId } : {}),
+          ...(step.surface ? { surface: step.surface } : {}),
+        }
       : {};
 
   // Nav context: onboarding shows the journey step/sub-step (from the shared

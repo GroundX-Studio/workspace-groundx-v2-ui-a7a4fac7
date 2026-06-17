@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
-import { useChatStore } from "@/contexts/ChatStoreContext";
+import { useChatStore, type ViewerStep } from "@/contexts/ChatStoreContext";
 import { track } from "@/lib/analytics";
 import { gaSetDefaults } from "@/lib/ga";
 import {
@@ -214,15 +214,59 @@ function useSessionFacade(): OnboardingSessionApi {
   // post-mvs-cleanup Phase B — `frameToStepStandalone` is now a module-
   // level function (hoisted above the hook); see top of file.
 
-  const advanceFrame = useCallback(
-    (frame: FFrame, options?: { selectedReportSectionId?: string; focusedCategoryId?: string }) => {
+  // standardized-viewer-control T5 — advance the onboarding JOURNEY STATE for a
+  // frame WITHOUT pushing a viewer step. This is the side-effect half of
+  // `advanceFrame` (lastFrame + completedFrames + the frame-advanced viewer
+  // event + the f7 gate-pop + the f4a section pre-select). The orchestrator's
+  // de-forked `show*`/`editTemplate` handlers push the viewer step THEMSELVES
+  // (the one canvas outcome, both experiences) and then call this to layer the
+  // onboarding journey-progress on top — no redundant step push, no fork.
+  // `advanceFrame` (still used by the 18 unmigrated in-widget sites) composes
+  // this with a step push so its existing callers are unchanged. Onboarding-only.
+  // NOTE: f1 (entity-deactivate, a BACKWARD transition — R2) is NOT handled
+  // here; it stays on `advanceFrame`'s explicit ingest path.
+  const markFrameReached = useCallback(
+    (frame: FFrame, options?: { selectedReportSectionId?: string }) => {
       // Carry (or clear) the builder's pre-selected section. Only the builder
-      // frame (f4a) keeps a selection; advancing anywhere else clears it so a
+      // frame (f4a) keeps a selection; reaching anywhere else clears it so a
       // stale section can't pre-open a later builder visit.
       setSelectedReportSectionId(
         frame === "f4a" ? options?.selectedReportSectionId ?? null : null,
       );
+      if (!activeKeyRef.current) return;
+      if (frame === "f7") {
+        // f7 overlay pop fires on ARRIVAL at Integrate (D12) — a second arrival
+        // with a live gate must still clear it (this runs every reach, not just
+        // a first-reach).
+        setSignupOpen(false);
+        setGate((prev) =>
+          prev.status === "open" || prev.status === "committed" ? { status: "idle" } : prev,
+        );
+        popOverlay("sign-up");
+      }
+      const entityKeyAtAdvance = activeKeyRef.current;
+      updateActive((session) => {
+        if (session.lastFrame === frame) return session;
+        const completedFrames = new Set(session.completedFrames);
+        completedFrames.add(session.lastFrame);
+        return { ...session, lastFrame: frame, completedFrames };
+      });
+      appendViewerEvent({
+        action: "frame-advanced",
+        entityKey: entityKeyAtAdvance,
+        source: "user",
+        detail: { frame },
+      });
+    },
+    [updateActive, appendViewerEvent, popOverlay],
+  );
+
+  const advanceFrame = useCallback(
+    (frame: FFrame, options?: { selectedReportSectionId?: string; focusedCategoryId?: string }) => {
       if (frame === "f1") {
+        // Carry (or clear) the builder's pre-selected section like the non-f1
+        // path does (advancing to f1 always clears it).
+        setSelectedReportSectionId(null);
         // Capture the entity key BEFORE deactivating so the "left"
         // event references the right entity.
         const leavingKey = activeKeyRef.current;
@@ -252,53 +296,40 @@ function useSessionFacade(): OnboardingSessionApi {
       if (!activeKeyRef.current) {
         return;
       }
-      if (frame === "f7") {
-        setSignupOpen(false);
-        setGate((prev) =>
-          prev.status === "open" || prev.status === "committed" ? { status: "idle" } : prev,
-        );
-        popOverlay("sign-up");
-      }
-      const entityKeyAtAdvance = activeKeyRef.current;
-      updateActive((session) => {
-        // Diagnostic — log the actual from→to transition.
-        // eslint-disable-next-line no-console
-        console.log(
-          "[advanceFrame]",
-          session.lastFrame,
-          "→",
-          frame,
-          session.lastFrame === frame ? "(no-op, already there)" : "",
-        );
-        if (session.lastFrame === frame) return session;
-        const completedFrames = new Set(session.completedFrames);
-        completedFrames.add(session.lastFrame);
-        return { ...session, lastFrame: frame, completedFrames };
-      });
-      appendViewerEvent({
-        action: "frame-advanced",
-        entityKey: entityKeyAtAdvance,
-        source: "user",
-        detail: { frame },
-      });
+      // Journey state (lastFrame/completedFrames/frame-advanced event/f7 pop).
+      markFrameReached(frame, options);
       // `master-viewer-session` Phase 3 — accumulate the viewer step.
       // Derive the scenario id from the entity key (`sample:utility` →
       // `utility`); falls back to `unknown` if the key isn't a sample
       // entity. The pushStep action is idempotent on structural
       // equality, so a re-fire of the same frame transition won't
       // pollute history.
+      const entityKeyAtAdvance = activeKeyRef.current;
       const scenarioFromKey = entityKeyAtAdvance?.startsWith("sample:")
         ? (entityKeyAtAdvance.slice("sample:".length) as Scenario)
         : null;
       pushStep(frameToStepStandalone(frame, scenarioFromKey, options?.focusedCategoryId));
-      // OB-02 — understand.completed when leaving F2 (the scan
-      // animation finished and the user advanced).
-      if (frame === "f3" || frame === "f3a") {
-        track("understand.completed", { fromFrame: "f2", toFrame: frame });
-      }
+      // standardized-viewer-control T5 (R1) — the `understand.completed`
+      // analytic NO LONGER fires here. It re-homed onto the Extract first-reach
+      // signal (`notifyExtractReached`, fired by the orchestrator's `showExtract`
+      // handler), because f3/f3a/f5 all map to the single `analyze` stage so a
+      // bare frame edge mis-fired it (R1).
     },
-    [activate, updateActive, appendViewerEvent, pushStep, popOverlay],
+    [activate, updateActive, appendViewerEvent, pushStep, popOverlay, markFrameReached],
   );
+
+  // standardized-viewer-control T5 (R1/R6) — the Extract first-reach signal.
+  // The orchestrator's `showExtract` handler calls this; it fires
+  // `understand.completed` EXACTLY ONCE per session, decided from a SYNCED REF
+  // (`extractReachedRef`) — never a flag mutated inside a setState updater, the
+  // silently-failing pattern that bit `openGate`→sign-up-overlay. The payload is
+  // FRAME-FREE (journey stage + active step, not fromFrame/toFrame).
+  const extractReachedRef = useRef(false);
+  const notifyExtractReached = useCallback(() => {
+    if (extractReachedRef.current) return;
+    extractReachedRef.current = true;
+    track("understand.completed", { stage: "analyze", step: "extract-workbench" });
+  }, []);
 
   const openGate = useCallback(
     (trigger: GateTrigger, options?: { cause?: GateCause }) => {
@@ -405,6 +436,8 @@ function useSessionFacade(): OnboardingSessionApi {
       bootstrapSession,
       pickScenario,
       advanceFrame,
+      markFrameReached,
+      notifyExtractReached,
       openGate,
       dismissGate,
       commitGate,
@@ -414,6 +447,8 @@ function useSessionFacade(): OnboardingSessionApi {
       bootstrapSession,
       pickScenario,
       advanceFrame,
+      markFrameReached,
+      notifyExtractReached,
       openGate,
       dismissGate,
       commitGate,
@@ -449,9 +484,13 @@ export const OnboardingSessionProvider: FC<OnboardingSessionProviderProps> = ({
   initialFrame = "f1",
   initialScenario = null,
 }) => {
-  const { initialEntities, initialActiveKey } = useMemo(() => {
+  const { initialEntities, initialActiveKey, initialViewerStep } = useMemo(() => {
     if (!initialScenario) {
-      return { initialEntities: undefined, initialActiveKey: null as EntityKey | null };
+      return {
+        initialEntities: undefined,
+        initialActiveKey: null as EntityKey | null,
+        initialViewerStep: null as ViewerStep | null,
+      };
     }
     const key = makeEntityKey("sample", initialScenario);
     const now = Date.now();
@@ -465,11 +504,22 @@ export const OnboardingSessionProvider: FC<OnboardingSessionProviderProps> = ({
     };
     const map = new Map<EntityKey, EntitySession>();
     map.set(key, seed);
-    return { initialEntities: map, initialActiveKey: key };
+    // standardized-viewer-control T3 — the viewer step the seeded entity sits
+    // on. `frameToStepStandalone` is the single frame→step projection (also used
+    // by `advanceFrame`/`pickScenario`), so the seed matches what a live advance
+    // would push. EntitySessionStoreProvider primes the ChatStore viewer with
+    // it, making `selectActiveStep` non-null on first render — the frame-free
+    // StepStrip reads the active step kind, with no frame fallback.
+    const initialViewerStep = frameToStepStandalone(initialFrame, initialScenario);
+    return { initialEntities: map, initialActiveKey: key, initialViewerStep };
   }, [initialFrame, initialScenario]);
 
   return (
-    <EntitySessionStoreProvider initialEntities={initialEntities} initialActiveKey={initialActiveKey}>
+    <EntitySessionStoreProvider
+      initialEntities={initialEntities}
+      initialActiveKey={initialActiveKey}
+      initialViewerStep={initialViewerStep}
+    >
       <InnerSessionProvider>{children}</InnerSessionProvider>
     </EntitySessionStoreProvider>
   );

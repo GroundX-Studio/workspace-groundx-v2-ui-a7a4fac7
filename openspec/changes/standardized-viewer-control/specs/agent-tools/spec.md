@@ -52,14 +52,23 @@ navigation tool call without `offerAs`; offering is the same tool call with
 
 A tool SHALL be offer-eligible only if it has an `intentBuilder` and is marked
 LLM-emittable in the shared `intentCatalog`. The UI-only intents (`showSample`,
-`openDocument`, `showCitations`, `editSchema`) SHALL NOT be offerable. A new
-interact navigation tool emitting `showInteract` SHALL be added and marked
-LLM-emittable in the catalog with its coverage prompt.
+`openDocument`, `showCitations`) SHALL NOT be offerable. A new interact navigation tool
+emitting `showInteract` SHALL be added and marked LLM-emittable in the catalog with its
+coverage prompt. The navigation tool **`show_extraction_edit`** (the `_edit` sibling of
+`show_extraction`, mirroring the shipped `show_smart_report_edit`) SHALL be added,
+emitting `editSchema`, `category: "read"`, marked LLM-emittable — so the agent MAY offer a
+clickable "edit this schema" action; `editSchema` is no longer UI-only. There SHALL be no
+novel `show_schema_editor` tool.
 
 #### Scenario: A UI-only intent cannot be offered
 
-- **GIVEN** an attempt to offer an action whose intent kind is UI-only in the catalog
+- **GIVEN** an attempt to offer an action whose intent kind is `showSample`, `openDocument`, or `showCitations`
 - **THEN** no suggested action is produced for it
+
+#### Scenario: The schema editor can be offered
+
+- **GIVEN** the agent calls the schema-editor navigation tool with `offerAs`
+- **THEN** an `editSchema` `suggestedActions` entry is produced (not auto-dispatched)
 
 ## MODIFIED Requirements
 
@@ -72,7 +81,10 @@ editTemplate intent SHALL carry templateId and an optional selectedSectionId. Th
 showIntegrate intent SHALL carry scope. The openDocument intent SHALL carry
 documentId and an optional page. A showInteract intent SHALL be added for the
 Interact destination, carrying scope (the interact-chat step resolves its document
-from that scope). There SHALL be no frame-named navigation intent.
+from that scope). The editSchema intent SHALL reach the schema-design surface by
+moving the active extract-workbench step into its design sub-position (NOT a frame),
+and SHALL work in both the steady and onboarding experiences. There SHALL be no
+frame-named navigation intent.
 
 #### Scenario: showExtract carries category focus
 

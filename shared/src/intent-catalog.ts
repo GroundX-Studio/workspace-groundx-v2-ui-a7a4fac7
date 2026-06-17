@@ -65,10 +65,14 @@ export interface IntentCatalogEntry {
 }
 
 /**
- * All 30 `canvasIntentSchema` kinds. Reconciled against live code (T1):
- *   • 30 kinds == 30 orchestrator cases (no orphan, no uncased kind)
- *   • 26 are LLM-emittable (have a tool `intentBuilder`)
- *   • 4 are NOT: showSample, openDocument, showCitations, editSchema
+ * Every `canvasIntentSchema` kind. Reconciled against live code:
+ *   • kinds == orchestrator cases (no orphan, no uncased kind)
+ *   • LLM-emittable entries each map to a tool `intentBuilder`
+ *   • NOT-emittable (`llm: false`): showSample, openDocument, showCitations,
+ *     editSchema, AND showInteract (standardized-viewer-control T2 — its
+ *     `show_interact` tool lands in T7; emittable then).
+ * The completeness guard derives the kind list from the schema at RUNTIME, so
+ * there is no hardcoded count to keep in sync here.
  */
 export const intentCatalog: IntentCatalogEntry[] = [
   // ── viewer-loading ──────────────────────────────────────────────
@@ -78,6 +82,14 @@ export const intentCatalog: IntentCatalogEntry[] = [
   { kind: "showCitations", class: "viewer-loading", llm: false },
   { kind: "jumpToPage", class: "viewer-loading", llm: { toolName: "jump_to_page", prompt: "Jump the viewer straight to page 2 — just navigate, don't summarize.", liveSingleTurn: false, liveNote: "model inconsistently picks open_document (which also navigates to a page) over the lighter jump_to_page" } },
   { kind: "showExtract", class: "viewer-loading", llm: { toolName: "show_extraction", prompt: "Open the extraction workbench so I can see the extracted fields." } },
+  // standardized-viewer-control T2 — move the canvas to the Interact (chat-with-
+  // sources) surface. NOT-emittable yet (`llm: false`): the dedicated
+  // `show_interact` navigation tool that emits it lands in T7, at which point
+  // this flips to `{ toolName: "show_interact", prompt: "Switch me to the
+  // Interact screen so I can chat with the sources." }`. Keeping it `false` now
+  // keeps the "emittable set == tools with an intentBuilder" guard
+  // (intentLive.test.ts) green — there is no `show_interact` tool until T7.
+  { kind: "showInteract", class: "viewer-loading", llm: false },
   { kind: "showIntegrate", class: "viewer-loading", llm: { toolName: "show_integrate", prompt: "Show me the integration / connector options." } },
   { kind: "showReport", class: "viewer-loading", llm: { toolName: "show_smart_report_render", prompt: "Show me the smart report for this document." } },
   { kind: "editTemplate", class: "viewer-loading", llm: { toolName: "show_smart_report_edit", prompt: "Open the report builder so I can edit the report template." } },

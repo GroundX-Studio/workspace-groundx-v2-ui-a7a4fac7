@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
-import type { NormalizedBbox } from "@groundx/shared";
+import type { ContentScope, NormalizedBbox } from "@groundx/shared";
 import { useApi } from "@/contexts/ApiContext";
 import { useChatStoreOptional } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
@@ -35,6 +35,17 @@ function activeExtractWorkbenchStep(chatStore: NonNullable<ReturnType<typeof use
   const stepIdx = activeSession?.viewer.currentStep.stepIndex ?? -1;
   const top = stepIdx >= 0 ? activeSession?.viewer.history[stepIdx] : null;
   return top?.kind === "extract-workbench" ? top : null;
+}
+
+/**
+ * standardized-viewer-control T5 — the scope's primary document, or null when
+ * the scope carries none (`bucket`/`group`/`none`). `showInteract` resolves it
+ * onto the `interact-chat` step so the shared PdfViewer canvas isn't doc-less in
+ * STEADY (where the shell narrows the canvas scope to a document only for steps
+ * that carry one).
+ */
+function primaryDocumentFromScope(scope: ContentScope): string | null {
+  return scope.type === "documents" ? scope.documentIds[0] ?? null : null;
 }
 
 const CanvasOrchestratorContext = createContext<CanvasOrchestratorApi | null>(null);
@@ -331,74 +342,99 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         case "dismissGate":
           if (onboardingSession) onboardingSession.dismissGate();
           break;
-        // 2026-05-30-onboarding-shell-shared-view Phase 3a — the
-        // `show_extraction` canvas-dispatch tool MOVES the canvas to the
-        // extraction workbench (frame f3). This is the SAME `advanceFrame` the
-        // Extract step-strip sub-pill calls, so the tool drives the identical
-        // canvas move as the on-screen control. Soft-fail in the steady tree
-        // (no OnboardingSessionProvider).
+        // standardized-viewer-control T5 — the `show_extraction` canvas-dispatch
+        // tool MOVES the canvas to the extraction workbench. ONE outcome (both
+        // experiences): push/mutate the `extract-workbench` step honoring the
+        // intent payload (D6 — `schemaId` is the workbench's scenarioId; no more
+        // hardcoded "utility"). Onboarding LAYERS journey-progress (analyze/f3) +
+        // the Extract first-reach analytic on top — it no longer FORKS into
+        // `advanceFrame` for the canvas move.
         case "showExtract": {
-          // standardized-viewer-control T4 — sub-position (focus) change. When
-          // the workbench is ALREADY the active step, re-focus it IN PLACE
-          // (history unchanged; in onboarding this bypasses advanceFrame so its
-          // first-entry side effects don't re-fire). Otherwise enter the
-          // workbench via the normal push (onboarding layers the frame on top).
-          // NOTE (T5): the steady push still hardcodes `scenarioId:"utility"` —
-          // honoring `scope`/`schemaId` is the T5 fix, not this task.
+          // T4/T5 — a re-entry while the workbench is ALREADY the active step
+          // mutates IN PLACE (history unchanged). Two sub-position rules,
+          // distinguished by whether the intent carries a category focus:
+          //   • WITH focusedCategoryId — a re-FOCUS (the category dropdown). It
+          //     PRESERVES the active surface so re-focusing inside the schema
+          //     DESIGN surface stays in design (and inside fields stays in fields).
+          //   • WITHOUT focusedCategoryId — "show the FIELDS workbench" (the
+          //     "← back" from the design surface, T5/R7): return surface to
+          //     "fields", keeping the existing focus.
           const activeExtract = chatStore ? activeExtractWorkbenchStep(chatStore) : null;
           if (chatStore && activeExtract) {
-            if (intent.focusedCategoryId && intent.focusedCategoryId !== activeExtract.focusedCategoryId) {
-              chatStore.mutateActiveStep({ ...activeExtract, focusedCategoryId: intent.focusedCategoryId });
+            if (intent.focusedCategoryId) {
+              if (intent.focusedCategoryId !== activeExtract.focusedCategoryId) {
+                chatStore.mutateActiveStep({ ...activeExtract, focusedCategoryId: intent.focusedCategoryId });
+              }
+            } else if ((activeExtract.surface ?? "fields") !== "fields") {
+              chatStore.mutateActiveStep({ ...activeExtract, surface: "fields" });
             }
-          } else if (routeThroughOnboarding) {
-            onboardingSession?.advanceFrame(
-              "f3",
-              intent.focusedCategoryId ? { focusedCategoryId: intent.focusedCategoryId } : undefined,
-            );
           } else if (chatStore) {
             chatStore.pushStep({
               kind: "extract-workbench",
-              scenarioId: "utility",
+              scenarioId: intent.schemaId,
               ...(intent.focusedCategoryId ? { focusedCategoryId: intent.focusedCategoryId } : {}),
             });
           }
+          // Onboarding-only side effects, layered on top of the one outcome.
+          // (Focus is a sub-position carried on the pushed step above, not a
+          // journey-state input — `markFrameReached` only tracks the stage.)
+          if (routeThroughOnboarding && onboardingSession) {
+            onboardingSession.markFrameReached("f3");
+            // R1 — `understand.completed` on the Extract first-reach (ref-gated).
+            onboardingSession.notifyExtractReached();
+          }
           break;
         }
-        // 2026-05-30-onboarding-shell-shared-view Phase 3b — the
-        // `show_integrate` canvas-dispatch tool MOVES the canvas to the
-        // Integrate connectors surface (frame f7). SAME `advanceFrame` the
-        // Integrate step-strip pill calls. Soft-fail in the steady tree.
-        case "showIntegrate":
-          if (routeThroughOnboarding) onboardingSession?.advanceFrame("f7");
-          else if (chatStore) chatStore.pushStep({ kind: "integrate" });
+        // standardized-viewer-control T5 — `showInteract` MOVES the canvas to the
+        // Interact (chat-with-sources) surface. ONE outcome (both experiences):
+        // push an `interact-chat` step RESOLVING the document from `intent.scope`
+        // so the shared PdfViewer canvas isn't doc-less in steady. Onboarding
+        // layers the Interact journey stage (f5) on top.
+        case "showInteract": {
+          if (chatStore) {
+            const docId = primaryDocumentFromScope(intent.scope);
+            chatStore.pushStep({
+              kind: "interact-chat",
+              scenarioId: onboardingSession?.state.scenario ?? "utility",
+              ...(docId ? { documentId: docId } : {}),
+            });
+          }
+          if (routeThroughOnboarding) onboardingSession?.markFrameReached("f5");
           break;
-        // 2026-05-29-smart-report-screen Phase 5 — the canvas-dispatch `show_*`
-        // report tools MOVE the canvas. `show_smart_report_render` emits
-        // `showReport` (→ render frame f4); `show_smart_report_edit` emits
-        // `editTemplate` (→ builder frame f4a), threading the section to
-        // pre-open via `advanceFrame`'s `selectedReportSectionId` option (read
-        // back by `ReportBuilderView` → the builder's `selectedSectionId`
-        // prop). SAME `advanceFrame` the step-strip pill / render `✎ edit §N`
-        // affordance calls. Soft-fail in the steady tree (report frames are
-        // onboarding-only).
+        }
+        // standardized-viewer-control T5 — `showIntegrate` MOVES the canvas to the
+        // Integrate connectors surface. ONE outcome (both experiences): push the
+        // `integrate` step. Onboarding layers the Integrate journey stage (f7,
+        // which also pops a stale sign-up overlay) on top.
+        case "showIntegrate":
+          if (chatStore) chatStore.pushStep({ kind: "integrate" });
+          if (routeThroughOnboarding) onboardingSession?.markFrameReached("f7");
+          break;
+        // 2026-05-29-smart-report-screen Phase 5 / standardized-viewer-control T5
+        // — the canvas-dispatch `show_*` report tools MOVE the canvas. ONE outcome
+        // (both experiences): `show_smart_report_render` (`showReport`) pushes the
+        // render step; `show_smart_report_edit` (`editTemplate`) pushes the builder
+        // step threading the section to pre-open. Onboarding layers the Report
+        // journey stage (f4 render / f4a builder) on top.
         case "showReport":
-          if (routeThroughOnboarding) onboardingSession?.advanceFrame("f4");
-          else if (chatStore) chatStore.pushStep({ kind: "report", surface: "render" });
+          if (chatStore) chatStore.pushStep({ kind: "report", surface: "render" });
+          if (routeThroughOnboarding) onboardingSession?.markFrameReached("f4");
           break;
         case "editTemplate":
-          if (routeThroughOnboarding) {
-            onboardingSession?.advanceFrame(
-              "f4a",
-              intent.selectedSectionId !== undefined
-                ? { selectedReportSectionId: intent.selectedSectionId }
-                : undefined,
-            );
-          } else if (chatStore) {
+          if (chatStore) {
             chatStore.pushStep({
               kind: "report",
               surface: "builder",
               ...(intent.selectedSectionId !== undefined ? { selectedSectionId: intent.selectedSectionId } : {}),
             });
+          }
+          if (routeThroughOnboarding) {
+            onboardingSession?.markFrameReached(
+              "f4a",
+              intent.selectedSectionId !== undefined
+                ? { selectedReportSectionId: intent.selectedSectionId }
+                : undefined,
+            );
           }
           break;
         // 2026-05-31-shared-canvas-affordance-restoration — route the
@@ -436,18 +472,41 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         case "switchFrame":
           if (onboardingSession) onboardingSession.advanceFrame(intent.frame);
           break;
-        // SAME `pickScenario` the F1 Ingest picker calls (IngestView pairs it
-        // with a URL navigate; here state is canonical — pickScenario is
-        // idempotent on an already-active entity).
+        // standardized-viewer-control T5 (R7) — `showSample` is EXPLICITLY
+        // ONBOARDING-SCOPED: it activates a demo sample via the SAME
+        // `pickScenario` the F1 Ingest picker calls (idempotent on an
+        // already-active entity). In STEADY there is no sample journey, so this
+        // is an HONEST no-op WITH A REASON (not a silent dead intent) — the
+        // authenticated experience navigates documents, not onboarding samples.
         case "showSample":
           if (onboardingSession) onboardingSession.pickScenario(intent.scenario);
+          // else: steady — no sample journey; intentionally nothing to do.
           break;
-        // Schema design surface is the Extract f3a frame. `schemaId` is
-        // currently single-schema-per-scenario, so the frame move alone is the
-        // whole behavior.
-        case "editSchema":
-          if (onboardingSession) onboardingSession.advanceFrame("f3a");
+        // standardized-viewer-control T5 (R7) — the schema DESIGN surface is an
+        // EXPERIENCE-AGNOSTIC sub-position on the `extract-workbench` step
+        // (`surface: "design"`), MIRRORING how `editTemplate` pushes `report`
+        // `surface: "builder"`. This CLOSES a production bug: authenticated
+        // (steady) users could not reach the schema editor at all (the old
+        // `advanceFrame("f3a")` no-ops without an OnboardingSession). ONE outcome
+        // both experiences: if the workbench is already active, flip it to design
+        // in place; otherwise push a workbench step opened on the design surface.
+        // The journey stage stays `analyze` (Extract) — design is a sub-position,
+        // NOT a new frame — so no `markFrameReached`.
+        case "editSchema": {
+          const activeExtract = chatStore ? activeExtractWorkbenchStep(chatStore) : null;
+          if (chatStore && activeExtract) {
+            if (activeExtract.surface !== "design") {
+              chatStore.mutateActiveStep({ ...activeExtract, surface: "design" });
+            }
+          } else if (chatStore) {
+            chatStore.pushStep({
+              kind: "extract-workbench",
+              scenarioId: intent.schemaId,
+              surface: "design",
+            });
+          }
           break;
+        }
         // Mirrors jumpToPage (same push/swap doc-viewer surface, no
         // highlight); the intent's page is optional → default to page 1.
         case "openDocument":

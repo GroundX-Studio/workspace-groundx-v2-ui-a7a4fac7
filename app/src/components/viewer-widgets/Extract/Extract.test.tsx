@@ -182,6 +182,36 @@ describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () =>
   });
 });
 
+// ── standardized-viewer-control T5 (R7) — the schema DESIGN surface is now
+//    driven by the active step's `surface` PROP, not `currentFrame === "f3a"`.
+//    This makes the design surface reachable for AUTHENTICATED users (steady),
+//    not just the onboarding f3a frame (a production bug today).
+describe("Extract — schema design surface reads the step `surface` prop, not the frame (T5/R7)", () => {
+  it("renders the design surface (SchemaView + ← back) when `surface='design'` even with the frame on f3", () => {
+    renderWithOnboardingProviders(
+      <Extract role="member" scope={UTILITY_DOC_SCOPE} surface="design" />,
+      { initialFrame: "f3", initialScenario: "utility" },
+    );
+    // Design-surface markers: the "← back" control + the SchemaView design pane.
+    expect(screen.getByTestId("extract-topbar-back")).toBeInTheDocument();
+    expect(screen.getByTestId("schema-view")).toBeInTheDocument();
+    // The fields workbench body is NOT mounted on the design surface.
+    expect(screen.queryByTestId("extract-fields-panel")).not.toBeInTheDocument();
+  });
+
+  it("renders the fields workbench (NOT the design surface) by default — even if the legacy frame is f3a", () => {
+    renderWithOnboardingProviders(
+      <Extract role="member" scope={UTILITY_DOC_SCOPE} />,
+      { initialFrame: "f3a", initialScenario: "utility" },
+    );
+    // No `surface` prop → fields workbench, regardless of the (legacy) frame:
+    // the design-surface ← back + SchemaView are absent; the fields panel shows.
+    expect(screen.queryByTestId("extract-topbar-back")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("schema-view")).not.toBeInTheDocument();
+    expect(screen.getByTestId("extract-fields-panel")).toBeInTheDocument();
+  });
+});
+
 describe("Extract — render-surface layout (extract-screen-audit fixes)", () => {
   // Field ids are unbreakable snake_case tokens; they must be allowed to wrap so
   // they never overflow into / collide with the value beside them.

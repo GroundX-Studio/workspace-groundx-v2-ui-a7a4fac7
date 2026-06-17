@@ -24,7 +24,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { OnboardingNav } from "@/components/layout/OnboardingNav/OnboardingNav";
 import type { OnboardingNavItemKey } from "@/components/layout/OnboardingNav/OnboardingNav";
 import { StepStrip } from "@/components/layout/StepStrip";
-import type { StepDescriptor, StepId, StepPillState } from "@/components/layout/StepStrip";
+import type { AnalyzeSubstep, StepDescriptor, StepId, StepPillState } from "@/components/layout/StepStrip";
 import { JOURNEY_CATALOG, VIEWER_STEP_TO_JOURNEY } from "@/components/layout/StepStrip/journeyCatalog";
 import type { FFrame, Scenario } from "@/types/onboarding";
 
@@ -74,17 +74,13 @@ const F1_OVERLAY_EASE = [0.32, 0.72, 0, 1] as const;
 const F2_ZOOM_SCALE = 0.985;
 const F2_ZOOM_OPACITY = 0.92;
 
-const FRAME_TO_STEP: Record<FFrame, StepId> = {
-  f1: "ingest",
-  f2: "understand",
-  f3: "analyze",
-  f3a: "analyze",
-  f4: "analyze",
-  f4a: "analyze",
-  f5: "analyze",
-  f6: "analyze",
-  f7: "integrate",
-};
+// standardized-viewer-control T3 — the strip's `FRAME_TO_STEP` map is RETIRED:
+// the current stage now sources off the active ViewerStep kind via
+// `VIEWER_STEP_TO_JOURNEY` (no frame fallback), and the reached-set is an
+// in-memory SET of reached stages, not `completedFrames` mapped through frames.
+// The canvas-side frame projection (`stepKindFallback`) is a separate concern
+// (T6); the frame machine itself (`advanceFrame`/`currentFrame`/…) stays
+// functional this phase.
 
 // Linear journey order. The progress gate (2026-06-12) uses this to forbid
 // JUMPING AHEAD of the step the user has actually reached.
@@ -116,22 +112,24 @@ function pillState(
 }
 
 function analyzeSubsteps(
-  frame: FFrame,
+  activeSubstep: AnalyzeSubstep | undefined,
   gateOpen = false,
   analyzeReached = true,
 ): StepDescriptor["substeps"] {
+  // standardized-viewer-control T3 — the active sub-pill is sourced off the
+  // active ViewerStep kind's substep (via `VIEWER_STEP_TO_JOURNEY`), NOT the
+  // frame. `extract-workbench` → extract, `interact-chat` → interact, `report`
+  // → report. The render-vs-builder split (`report.surface`) doesn't change the
+  // sub-pill — both are the Report sub-step.
+  //
   // P1 (2026-05-29): while the sign-up gate is open the strip sits on
   // Understand, so the Analyze bracket shows no active sub-step (otherwise
   // both Understand and Interact would read as active at once).
-  // 2026-05-29-smart-report-screen Phase 1 — f4/f4a are the Report render +
-  // builder frames; the extract workbench is f3/f3a only (f4 no longer routes
-  // there).
-  const extractActive = !gateOpen && (frame === "f3" || frame === "f3a");
-  const interactActive = !gateOpen && (frame === "f5" || frame === "f6");
+  const extractActive = !gateOpen && activeSubstep === "extract";
+  const interactActive = !gateOpen && activeSubstep === "interact";
   // Report is reachable for ALL scenarios once Analyze is reached (anon
-  // previews the render surface; export/Save locked). Active on the Report
-  // frames.
-  const reportActive = !gateOpen && (frame === "f4" || frame === "f4a");
+  // previews the render surface; export/Save locked).
+  const reportActive = !gateOpen && activeSubstep === "report";
   // Progress gate (2026-06-12): the Analyze sub-pills are DISABLED until the
   // user has reached the Analyze step — no jumping ahead from Understand. Once
   // on/past Analyze they are reachable again (same-bracket navigation between
@@ -192,15 +190,22 @@ export const OnboardingShell: FC = () => {
   const signupSurfaceActiveEarly = routeSignUpActive || signupOverlayEarly != null;
   const activeEntityKeyEarly = activeChatSessionEarly?.activeEntityKey ?? null;
   const latestViewerStepEarly = selectActiveStep(activeChatSessionEarly);
-  // ViewerStep → StepStrip pill mapping comes from the shared journey catalog
-  // (`VIEWER_STEP_TO_JOURNEY`) — single source, also read by the viewer nav.
-  // Clickable citations push a `doc-viewer` step which maps to the Understand
-  // pill, so the nav indicator matches what the canvas surfaces.
+  // standardized-viewer-control T3 — the StepStrip's CURRENT STAGE is sourced
+  // off the active ViewerStep kind via the shared `VIEWER_STEP_TO_JOURNEY` map
+  // (single source, also read by the viewer nav). The frame fallback is GONE:
+  // the active step is always present (seeded on mount via
+  // `OnboardingSessionProvider`/`frameToStepStandalone`, pushed on every
+  // dispatch thereafter). Clickable citations push a `doc-viewer` step → maps to
+  // the Understand pill, so the nav indicator matches what the canvas surfaces.
+  // The only non-step source is the pre-scenario sign-up surface (no active
+  // entity yet); absent both, the journey hasn't started → Ingest.
+  const activeJourney = latestViewerStepEarly
+    ? VIEWER_STEP_TO_JOURNEY[latestViewerStepEarly.kind]
+    : undefined;
   const currentStep: StepId =
     signupSurfaceActiveEarly && session.scenario == null
       ? "ingest"
-      : (latestViewerStepEarly && VIEWER_STEP_TO_JOURNEY[latestViewerStepEarly.kind]?.step) ??
-        FRAME_TO_STEP[session.currentFrame];
+      : activeJourney?.step ?? "ingest";
   const isF1 = session.currentFrame === "f1" && !bookCallActive && !signupSurfaceActiveEarly;
 
   useEffect(() => {
@@ -327,20 +332,47 @@ export const OnboardingShell: FC = () => {
     };
   }, [api.session, bootstrapSession, session.sessionId]);
 
+  // standardized-viewer-control T3 — the reached-set replaces the
+  // `completedFrames`-derived `completedSteps`. It is a SET of reached stages
+  // (NOT a monotonic high-water value — R3): `integrate` is auth-gated and
+  // reachable from anywhere, so the set is genuinely non-contiguous. A stage is
+  // ADDED on its FIRST reach (when it first becomes the current stage) and never
+  // removed, so a later citation jump back to Understand (which moves the
+  // current stage off Analyze) does not re-lock the already-traversed bracket.
+  // Held in memory for this phase; full persistence + the server twin migration
+  // (`completedFramesJson` → reached-set) is T6b. Frame-free: derived purely
+  // from `currentStep` (the active-step-sourced stage), no frame read.
+  const [reachedStages, setReachedStages] = useState<Set<StepId>>(() => new Set([currentStep]));
+  useEffect(() => {
+    setReachedStages((prev) => {
+      if (prev.has(currentStep)) return prev;
+      const next = new Set(prev);
+      next.add(currentStep);
+      return next;
+    });
+  }, [currentStep]);
+  // The reached-set drives the done/traversed checkmarks. A stage is "completed"
+  // (checkmark) only when it has been reached AND is not the one the user is on.
   const completedSteps = useMemo(() => {
-    const set = new Set<StepId>();
-    for (const frame of session.completedFrames) set.add(FRAME_TO_STEP[frame]);
+    const set = new Set(reachedStages);
+    set.delete(currentStep);
     return set;
-  }, [session.completedFrames]);
+  }, [reachedStages, currentStep]);
+
+  // The active Analyze sub-step, sourced off the active ViewerStep kind (T3) —
+  // never the frame. `extract-workbench` → extract, `interact-chat` → interact,
+  // `report` → report.
+  const activeSubstep: AnalyzeSubstep | undefined = activeJourney?.substep;
 
   const steps: StepDescriptor[] = useMemo(() => {
     const signedIn = appMode.authState === "signed-in";
     const scenarioPicked = session.scenario != null;
-    // Analyze is "reached" once the user is on/past it, OR has already
-    // completed it (so a citation-click that resets currentStep to Understand
-    // doesn't re-lock a bracket the user already traversed).
+    // Analyze is "reached" once the user is on/past it, OR has already been
+    // reached (so a citation-click that resets currentStep to Understand
+    // doesn't re-lock a bracket the user already traversed — the reached-SET
+    // retains `analyze`).
     const analyzeReached =
-      stepRank(currentStep) >= stepRank("analyze") || completedSteps.has("analyze");
+      stepRank(currentStep) >= stepRank("analyze") || reachedStages.has("analyze");
     return [
       { id: "ingest", label: JOURNEY_CATALOG.ingest.stepLabel, state: pillState("ingest", currentStep, completedSteps, signedIn, scenarioPicked) },
       { id: "understand", label: JOURNEY_CATALOG.understand.stepLabel, state: pillState("understand", currentStep, completedSteps, signedIn, scenarioPicked) },
@@ -348,11 +380,11 @@ export const OnboardingShell: FC = () => {
         id: "analyze",
         label: JOURNEY_CATALOG.analyze.stepLabel,
         state: pillState("analyze", currentStep, completedSteps, signedIn, scenarioPicked),
-        substeps: analyzeSubsteps(session.currentFrame, session.gate.status === "open", analyzeReached),
+        substeps: analyzeSubsteps(activeSubstep, session.gate.status === "open", analyzeReached),
       },
       { id: "integrate", label: JOURNEY_CATALOG.integrate.stepLabel, state: pillState("integrate", currentStep, completedSteps, signedIn, scenarioPicked) },
     ];
-  }, [currentStep, completedSteps, appMode.authState, session.currentFrame, session.scenario, session.gate.status]);
+  }, [currentStep, completedSteps, reachedStages, activeSubstep, appMode.authState, session.scenario, session.gate.status]);
 
   const handleStepClick = useCallback(
     (stepId: StepId) => {
@@ -615,10 +647,17 @@ export const OnboardingShell: FC = () => {
   // it; otherwise fall back to the scenario's first document.
   const canvasScenarioId = appMode.scenario ?? session.scenario ?? null;
   const canvasScenario = canvasScenarioId ? scenarioById(canvasScenarioId) : undefined;
+  // standardized-viewer-control T5 — both `doc-viewer` and a `showInteract`-
+  // resolved `interact-chat` step carry a resolved document; prefer it over the
+  // scenario's default so the canvas mounts what the intent named.
   const stepDocId =
     latestViewerStep?.kind === "doc-viewer" && isResolvedDocumentId(latestViewerStep.documentId)
       ? latestViewerStep.documentId
-      : null;
+      : latestViewerStep?.kind === "interact-chat" &&
+          latestViewerStep.documentId &&
+          isResolvedDocumentId(latestViewerStep.documentId)
+        ? latestViewerStep.documentId
+        : null;
   const scenarioDocId = canvasScenario?.documents?.[0]?.documentId ?? null;
   const canvasDocId = stepDocId ?? scenarioDocId;
 

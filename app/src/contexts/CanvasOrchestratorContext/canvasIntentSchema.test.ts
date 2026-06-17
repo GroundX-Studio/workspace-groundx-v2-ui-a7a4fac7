@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCanvasIntent, canvasIntentSchema } from "@groundx/shared";
+import { parseCanvasIntent, canvasIntentSchema, offerAsSchema } from "@groundx/shared";
 
 // ────────────────────────────────────────────────────────────────────
 // 2026-05-31-canvas-intent-schema-shared §1 — the ONE shared CanvasIntent
@@ -50,11 +50,40 @@ describe("parseCanvasIntent (shared §1)", () => {
     expect(parseCanvasIntent(showExtract)).toEqual(showExtract);
   });
 
+  it("round-trips showInteract (scope-only, mirroring showIntegrate)", () => {
+    // standardized-viewer-control T2 — the new `showInteract` kind carries only
+    // a `scope` (same shape as `showIntegrate`); the orchestrator resolves the
+    // document for the interact-chat canvas from that scope (T5).
+    const showInteract = { kind: "showInteract", scope: { type: "bucket", bucketId: 28454 } };
+    expect(parseCanvasIntent(showInteract)).toEqual(showInteract);
+    // A `showInteract` missing its required `scope` must coerce to null.
+    expect(parseCanvasIntent({ kind: "showInteract" })).toBeNull();
+  });
+
   it("the schema is the intent discriminator — distinct from the surface-kind enum", () => {
     // `canvasIntentSchema` discriminates on `kind` across intent variants.
     expect(canvasIntentSchema.safeParse({ kind: "wizardNext" }).success).toBe(true);
     // A canvas SURFACE kind value ("doc-viewer") is NOT a valid intent kind —
     // proves the two contracts do not collide.
     expect(canvasIntentSchema.safeParse({ kind: "doc-viewer" }).success).toBe(false);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// standardized-viewer-control T2 — `offerAsSchema` is the ONE shared Zod
+// constant for the navigation tools' optional `offerAs` disposition. Declared
+// ONCE here so the app `*.tools.ts` and the middleware `toolCatalog.ts` import
+// the IDENTICAL shape (the full-shape JSON-Schema parity holds by
+// construction; the per-tool wiring + routing-to-`suggestedActions` is T7).
+// ────────────────────────────────────────────────────────────────────
+describe("offerAsSchema (shared navigation-tool offer disposition)", () => {
+  it("requires `label`, allows an optional `anchor`", () => {
+    expect(offerAsSchema.safeParse({ label: "→ edit this schema" }).success).toBe(true);
+    expect(
+      offerAsSchema.safeParse({ label: "→ open the report", anchor: "the report" }).success,
+    ).toBe(true);
+    // `label` is required.
+    expect(offerAsSchema.safeParse({ anchor: "x" }).success).toBe(false);
+    expect(offerAsSchema.safeParse({}).success).toBe(false);
   });
 });

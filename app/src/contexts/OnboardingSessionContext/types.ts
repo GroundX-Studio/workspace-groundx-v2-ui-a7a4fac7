@@ -50,6 +50,26 @@ export interface OnboardingSessionApi {
     options?: { selectedReportSectionId?: string; focusedCategoryId?: string },
   ) => void;
   /**
+   * standardized-viewer-control T5 — advance the onboarding JOURNEY STATE for a
+   * frame WITHOUT pushing a viewer step (the side-effect half of `advanceFrame`:
+   * lastFrame + completedFrames + the frame-advanced event + the f7 gate-pop +
+   * the f4a section pre-select). The orchestrator's de-forked `show*`/`editTemplate`
+   * handlers push the viewer step themselves (the one canvas outcome, both
+   * experiences) and call this to layer onboarding journey-progress on top. f1
+   * (entity-deactivate) is NOT handled here — it stays on `advanceFrame`.
+   */
+  markFrameReached: (
+    frame: FFrame,
+    options?: { selectedReportSectionId?: string },
+  ) => void;
+  /**
+   * standardized-viewer-control T5 (R1/R6) — the Extract first-reach signal. The
+   * orchestrator's `showExtract` handler calls this; it fires `understand.completed`
+   * EXACTLY ONCE per session, decided from a synced ref (never a setState-flag).
+   * The payload is frame-free (journey stage + active step). Onboarding-only.
+   */
+  notifyExtractReached: () => void;
+  /**
    * Open the F6 gate. Pass `options.cause` to mark the post-commit
    * intent so an effect can fire the dropped action after sign-in
    * succeeds. Today only `"save-schema"` is recognized.

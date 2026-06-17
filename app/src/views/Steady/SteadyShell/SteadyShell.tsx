@@ -155,10 +155,15 @@ export const SteadyShell: FC = () => {
   // doc-viewer narrows to its single document; other built viewer widgets use
   // the scoped session when this steady deep-link belongs to Workspace/Project.
   const sessionScope = scopeFromSessionKey(active?.scopeKey);
+  // standardized-viewer-control T5 — an `interact-chat` step resolved by
+  // `showInteract` carries the target `documentId`; narrow the canvas scope to
+  // it so the shared PdfViewer mounts the real document (not a doc-less view).
   const canvasScope: ContentScope | null = activeStep
     ? activeStep.kind === "doc-viewer"
       ? { type: "documents", documentIds: [activeStep.documentId] }
-      : sessionScope ?? { type: "bucket", bucketId: 28454 }
+      : activeStep.kind === "interact-chat" && activeStep.documentId
+        ? { type: "documents", documentIds: [activeStep.documentId] }
+        : sessionScope ?? { type: "bucket", bucketId: 28454 }
     : null;
   const canvasPane =
     activeStep && canvasScope && resolvedCanvasKind !== null ? (

@@ -81,6 +81,7 @@ import { Extract } from "@/components/viewer-widgets/Extract/Extract";
 import { SignUpWidget } from "@/components/viewer-widgets/SignUpWidget/SignUpWidget";
 import { ChatColumn } from "@/components/chat-widgets/ChatColumn/ChatColumn";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
@@ -146,11 +147,16 @@ async function renderLiveSchemaView(ui: ReactElement) {
  * wrapper provided; the shim below reproduces it verbatim (scenario documents
  * scope + auth role → `Extract`) so the joint-mount tests are unchanged.
  */
-const ExtractView: FC<{ focusedCategoryId?: string }> = ({ focusedCategoryId }) => {
+const ExtractView: FC<{ focusedCategoryId?: string; openDesign?: boolean }> = ({
+  focusedCategoryId,
+  openDesign = false,
+}) => {
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
+  const { state: chatState } = useChatStore();
   const { byId } = useScenarioRegistry();
   const widgetRole = useWidgetRole();
+  const orchestrator = useCanvasOrchestrator();
   const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
   const scenario = byId(scenarioId);
   const docId = scenario?.documents?.[0]?.documentId ?? null;
@@ -158,10 +164,35 @@ const ExtractView: FC<{ focusedCategoryId?: string }> = ({ focusedCategoryId }) 
     () => ({ type: "documents", documentIds: docId ? [docId] : [] }),
     [docId],
   );
-  // standardized-viewer-control — forward the active step's focused category,
-  // exactly as the live canvas (ScopedCanvas) does. When omitted, Extract
-  // defaults focus to the first schema category.
-  return <Extract scope={scope} role={widgetRole} focusedCategoryId={focusedCategoryId} />;
+  // standardized-viewer-control T5 (R7) — the schema DESIGN surface is now a STEP
+  // sub-position (`surface:"design"`), entered via the `editSchema` intent. Tests
+  // that previously mounted at `initialFrame:"f3a"` to land on the design surface
+  // set `openDesign` instead; this dispatches `editSchema` once on mount,
+  // flipping the active step to design — the frame-free, production-correct path.
+  const designOpenedRef = useRef(false);
+  useEffect(() => {
+    if (openDesign && !designOpenedRef.current) {
+      designOpenedRef.current = true;
+      orchestrator.dispatch({ kind: "editSchema", schemaId: scenarioId }, "user");
+    }
+  }, [openDesign, orchestrator, scenarioId]);
+  // standardized-viewer-control — forward the active step's focused category AND
+  // its `surface` sub-position, exactly as the live canvas (ScopedCanvas) does.
+  const activeSession = chatState.activeSessionId
+    ? chatState.sessions.get(chatState.activeSessionId)
+    : null;
+  const stepIdx = activeSession?.viewer.currentStep.stepIndex ?? -1;
+  const top = stepIdx >= 0 ? activeSession?.viewer.history[stepIdx] : null;
+  const stepFocus = top?.kind === "extract-workbench" ? top.focusedCategoryId : undefined;
+  const stepSurface = top?.kind === "extract-workbench" ? top.surface : undefined;
+  return (
+    <Extract
+      scope={scope}
+      role={widgetRole}
+      focusedCategoryId={focusedCategoryId ?? stepFocus}
+      surface={stepSurface}
+    />
+  );
 };
 
 const SignUpSurfaceHost: FC = () => {
@@ -448,7 +479,8 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("clicking Remove on a field dispatches removeSchemaField; field disappears + topbar shows diff", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ExtractView openDesign />, { initialFrame: "f3", initialScenario: "utility" });
+    await screen.findByTestId("schema-field-account_number");
     expect(screen.getByTestId("schema-field-account_number")).toBeInTheDocument();
     await user.click(screen.getByTestId("schema-remove-field-account_number"));
     await waitFor(() => {
@@ -464,8 +496,9 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("topbar Save becomes enabled when there are unsaved changes (Phase 2d)", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ExtractView openDesign />, { initialFrame: "f3", initialScenario: "utility" });
     expect(screen.getByTestId("extract-topbar-save")).toBeDisabled();
+    await screen.findByTestId("schema-remove-field-amount_due");
     await user.click(screen.getByTestId("schema-remove-field-amount_due"));
     await waitFor(() => {
       expect(screen.getByTestId("extract-topbar-save")).not.toBeDisabled();
@@ -474,12 +507,13 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("clicking topbar Save calls the injected template client + flips status to Saved", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<ExtractView />, {
-      initialFrame: "f3a",
+    renderWithOnboardingProviders(<ExtractView openDesign />, {
+      initialFrame: "f3",
       initialScenario: "utility",
       api: { template: { saveTemplate } },
     });
     // Make a change so the button enables.
+    await screen.findByTestId("schema-remove-field-amount_due");
     await user.click(screen.getByTestId("schema-remove-field-amount_due"));
     await waitFor(() => {
       expect(screen.getByTestId("extract-topbar-save")).not.toBeDisabled();
@@ -501,7 +535,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
   it("Fields tab scoped to the focused category renders only that category's fields + a flat header", async () => {
     // Mounting via ExtractView with no explicit focus → Extract defaults the
     // focused category to the first one ("statement"), forwarded to SchemaView.
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ExtractView openDesign />, { initialFrame: "f3", initialScenario: "utility" });
     await waitFor(() => expect(screen.getByTestId("schema-view")).toBeInTheDocument());
     // Statement category fields are present.
     expect(screen.getByTestId("schema-field-account_number")).toBeInTheDocument();
@@ -516,7 +550,7 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("unsaved indicator surfaces when overlay carries diff affecting the focused category", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ExtractView openDesign />, { initialFrame: "f3", initialScenario: "utility" });
     await waitFor(() => expect(screen.getByTestId("schema-fields-header")).toBeInTheDocument());
     await user.click(screen.getByTestId("schema-remove-field-account_number"));
     await waitFor(() =>
@@ -588,7 +622,8 @@ describe("SchemaView (UI-01 Phase 1)", () => {
 
   it("Save commits the edit; the row shows an 'edited' badge + topbar diff counts the edit", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ExtractView openDesign />, { initialFrame: "f3", initialScenario: "utility" });
+    await screen.findByTestId("schema-edit-field-account_number");
     await user.click(screen.getByTestId("schema-edit-field-account_number"));
     // Tweak the prompt textarea so Save lands a real patch.
     const promptInput = screen.getByTestId("schema-field-editor-prompt-account_number").querySelector("textarea");
@@ -652,9 +687,9 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     renderWithOnboardingProviders(
       <>
         <ProposalSeeder name="total_tax" />
-        <ExtractView />
+        <ExtractView openDesign />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      { initialFrame: "f3", initialScenario: "utility" },
     );
     const acceptBtn = await screen.findByTestId(/^schema-proposal-accept-/);
     await user.click(acceptBtn);
@@ -695,13 +730,14 @@ describe("SchemaView (UI-01 Phase 1)", () => {
       <>
         <SchemaAgentRerunSeeder />
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
-        <ExtractView focusedCategoryId="meters" />
+        <ExtractView focusedCategoryId="meters" openDesign />
       </>,
       // `focusedCategoryId="meters"` so the workbench focuses the same category
       // our seeder adds the field to (standardized-viewer-control: focus rides
       // the viewer step / widget prop, not the retired `?focus=` URL param).
+      // `openDesign` opens the schema design surface (the frame-free path).
       {
-        initialFrame: "f3a",
+        initialFrame: "f3",
         initialScenario: "utility",
         api: { extract: { extractField } },
       },
@@ -793,10 +829,11 @@ describe("SchemaView (UI-01 Phase 1)", () => {
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <SignUpSurfaceHost />
-        <ExtractView />
+        <ExtractView openDesign />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility", api: { template: { saveTemplate } } },
+      { initialFrame: "f3", initialScenario: "utility", api: { template: { saveTemplate } } },
     );
+    await screen.findByTestId("schema-remove-field-amount_due");
     await user.click(screen.getByTestId("schema-remove-field-amount_due"));
     await waitFor(() => {
       expect(screen.getByTestId("extract-topbar-save")).not.toBeDisabled();
@@ -835,14 +872,15 @@ describe("SchemaView (UI-01 Phase 1)", () => {
       <>
         <GateCommitter />
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
-        <ExtractView />
+        <ExtractView openDesign />
         {/* IngestView is mounted as a sibling so the banner is
             assertable after the post-commit advance to F1 — the test
             wrapper doesn't simulate OnboardingShell's frame routing. */}
         <IngestView />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility", api: { template: { saveTemplate } } },
+      { initialFrame: "f3", initialScenario: "utility", api: { template: { saveTemplate } } },
     );
+    await screen.findByTestId("schema-remove-field-amount_due");
     await user.click(screen.getByTestId("schema-remove-field-amount_due"));
     await waitFor(() => {
       expect(screen.getByTestId("extract-topbar-save")).not.toBeDisabled();

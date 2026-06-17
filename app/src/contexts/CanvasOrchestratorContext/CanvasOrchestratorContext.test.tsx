@@ -861,9 +861,11 @@ describe("CanvasOrchestratorContext", () => {
       let session = result.current.chatStore.state.sessions.get(
         result.current.chatStore.state.activeSessionId!,
       )!;
+      // standardized-viewer-control T5 (D6) — `showExtract` honors `schemaId`
+      // (no hardcoded "utility"); the workbench step's scenarioId is the dispatched schema.
       expect(session.viewer.history[session.viewer.currentStep.stepIndex]).toEqual({
         kind: "extract-workbench",
-        scenarioId: "utility",
+        scenarioId: "schema-1",
       });
 
       act(() => {
@@ -1004,6 +1006,167 @@ describe("CanvasOrchestratorContext", () => {
     });
   });
 
+  // ── standardized-viewer-control T5 — one outcome, payload honored,
+  //    side effects re-homed ──────────────────────────────────────────
+  //
+  // The `show*` / `editTemplate` / `editSchema` handlers no longer FORK on
+  // experience: each pushes/mutates its viewer step honoring the intent payload,
+  // identically in onboarding and steady (onboarding layers journey-progress +
+  // the first-reach analytic on top). `showInteract` resolves a document from
+  // its scope so the interact canvas isn't a doc-less PdfViewer.
+  describe("T5 — de-forked show* outcome + showInteract document bridge", () => {
+    const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+        <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </OnboardingSessionProvider>
+      </ChatStoreProvider>)
+    );
+    const productWrapper = ({ children }: { children: React.ReactNode }) => (
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+        <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+      </ChatStoreProvider>)
+    );
+    // standardized-viewer-control T3 — the onboarding seed now PRIMES the viewer
+    // with the step for `initialFrame` (so the frame-free StepStrip resolves on
+    // first render). To exercise the FRESH-PUSH branch of `showExtract` (the
+    // "honors schemaId, no hardcoded utility" assertion), seed at f2/Understand
+    // — a `doc-viewer` step — so the dispatch pushes a NEW workbench step rather
+    // than re-entering an already-active one (re-entry mutates focus/surface in
+    // place and intentionally does NOT change scenarioId — see the showExtract
+    // handler's T4/T5 in-place rules).
+    const onboardingWrapperAtUnderstand = ({ children }: { children: React.ReactNode }) => (
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+        <OnboardingSessionProvider initialFrame="f2" initialScenario="utility">
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </OnboardingSessionProvider>
+      </ChatStoreProvider>)
+    );
+
+    function topStep(chatStore: ReturnType<typeof useChatStore>) {
+      const s = chatStore.state.sessions.get(chatStore.state.activeSessionId!);
+      return s ? s.viewer.history[s.viewer.currentStep.stepIndex] : null;
+    }
+
+    it("showExtract PUSHES the workbench step in ONBOARDING too (de-forked — not only steady)", () => {
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() }),
+        { wrapper: onboardingWrapperAtUnderstand },
+      );
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showExtract", scope: { type: "documents", documentIds: ["doc-A"] }, schemaId: "loan" },
+          "user",
+        );
+      });
+      const current = topStep(result.current.chatStore);
+      expect(current?.kind).toBe("extract-workbench");
+      // Honors schemaId in onboarding too (no hardcoded "utility").
+      if (current?.kind === "extract-workbench") expect(current.scenarioId).toBe("loan");
+    });
+
+    it("showExtract advances onboarding journey progress (currentFrame → analyze/f3) while pushing the step", () => {
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore(), session: useOnboardingSession() }),
+        { wrapper: onboardingWrapper },
+      );
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showExtract", scope: { type: "documents", documentIds: ["doc-A"] }, schemaId: "utility" },
+          "user",
+        );
+      });
+      // The workbench journey stage is reached (f3 = analyze/Extract).
+      expect(result.current.session.state.currentFrame).toBe("f3");
+    });
+
+    it("showInteract resolves a document from scope onto the interact-chat step (steady — not doc-less)", () => {
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() }),
+        { wrapper: productWrapper },
+      );
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showInteract", scope: { type: "documents", documentIds: ["doc-INT"] } },
+          "user",
+        );
+      });
+      const current = topStep(result.current.chatStore);
+      expect(current?.kind).toBe("interact-chat");
+      // The handler resolves the scope's primary document onto the step so the
+      // canvas (the shared PdfViewer) mounts a real document, not a doc-less view.
+      if (current?.kind === "interact-chat") expect(current.documentId).toBe("doc-INT");
+    });
+
+    it("showInteract with a non-document scope pushes interact-chat without a documentId (graceful)", () => {
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() }),
+        { wrapper: productWrapper },
+      );
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showInteract", scope: { type: "bucket", bucketId: 28454 } },
+          "user",
+        );
+      });
+      const current = topStep(result.current.chatStore);
+      expect(current?.kind).toBe("interact-chat");
+      if (current?.kind === "interact-chat") expect(current.documentId).toBeUndefined();
+    });
+
+    it("showInteract advances onboarding journey progress to Interact (f5) while pushing the step", () => {
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore(), session: useOnboardingSession() }),
+        { wrapper: onboardingWrapper },
+      );
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showInteract", scope: { type: "documents", documentIds: ["doc-INT"] } },
+          "user",
+        );
+      });
+      expect(result.current.session.state.currentFrame).toBe("f5");
+      const current = topStep(result.current.chatStore);
+      expect(current?.kind).toBe("interact-chat");
+    });
+
+    it("editSchema is reachable in STEADY (no OnboardingSessionProvider) — pushes a design surface step", () => {
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() }),
+        { wrapper: productWrapper },
+      );
+      // Enter the workbench, then open the design surface.
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showExtract", scope: { type: "documents", documentIds: ["doc-A"] }, schemaId: "utility" },
+          "user",
+        );
+      });
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "editSchema", schemaId: "utility" }, "user");
+      });
+      const current = topStep(result.current.chatStore);
+      expect(current?.kind).toBe("extract-workbench");
+      if (current?.kind === "extract-workbench") expect(current.surface).toBe("design");
+    });
+
+    it("editSchema with no active workbench step PUSHES a design-surface workbench step", () => {
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() }),
+        { wrapper: productWrapper },
+      );
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "editSchema", schemaId: "utility" }, "user");
+      });
+      const current = topStep(result.current.chatStore);
+      expect(current?.kind).toBe("extract-workbench");
+      if (current?.kind === "extract-workbench") {
+        expect(current.surface).toBe("design");
+        expect(current.scenarioId).toBe("utility");
+      }
+    });
+  });
+
   // 2026-06-10 — the four previously adapter-registry-only kinds gained
   // built-in handlers after a live-canvas audit found them dispatching
   // (POST /api/intent logged) with NO registered adapter anywhere in the
@@ -1013,7 +1176,9 @@ describe("CanvasOrchestratorContext", () => {
   // on-screen control calls (no parallel path):
   //   switchFrame   → OnboardingSession.advanceFrame(intent.frame)
   //   showSample    → OnboardingSession.pickScenario(intent.scenario)
-  //   editSchema    → OnboardingSession.advanceFrame("f3a") (schema design surface)
+  //   editSchema    → push/mutate extract-workbench step → surface:"design"
+  //                   (T5/R7 — experience-agnostic schema design surface; was
+  //                    `advanceFrame("f3a")`, an onboarding-only no-op-in-steady)
   //   openDocument  → ChatStore.gotoDocViewer (mirrors jumpToPage)
   describe("formerly-silent kinds get built-in handlers (switchFrame / showSample / editSchema / openDocument)", () => {
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
@@ -1044,12 +1209,47 @@ describe("CanvasOrchestratorContext", () => {
       expect(result.current.session.state.scenario).toBe("loan");
     });
 
-    it("editSchema advances the canvas to the schema design surface (f3a)", () => {
-      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
+    // standardized-viewer-control T5 (R7) — `editSchema` is now an
+    // experience-AGNOSTIC outcome: it pushes/mutates the extract-workbench step
+    // into `surface: "design"` (the schema DESIGN surface), mirroring how
+    // `editTemplate` pushes `report` `surface: "builder"`. No `advanceFrame("f3a")`,
+    // no experience fork. The journey stage stays `analyze` (Extract); design is a
+    // sub-position, NOT a new frame — so `currentFrame` stays put (f3), not f3a.
+    it("editSchema mutates the active extract-workbench step into surface='design' (onboarding)", () => {
+      const onboardingWithChat = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+          <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
+            <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+          </OnboardingSessionProvider>
+        </ChatStoreProvider>)
+      );
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore(), session: useOnboardingSession() }),
+        { wrapper: onboardingWithChat },
+      );
+      // Enter the workbench first (so editSchema mutates in place).
       act(() => {
-        result.current.orchestrator.dispatch({ kind: "editSchema", schemaId: "schema-1" }, "user");
+        result.current.orchestrator.dispatch(
+          { kind: "showExtract", scope: { type: "documents", documentIds: ["doc-A"] }, schemaId: "utility" },
+          "user",
+        );
       });
-      expect(result.current.session.state.currentFrame).toBe("f3a");
+      const lenBefore = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!.viewer.history.length;
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "editSchema", schemaId: "utility" }, "user");
+      });
+      const session = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      // Mutated in place — history length unchanged.
+      expect(session.viewer.history.length).toBe(lenBefore);
+      const current = session.viewer.history[session.viewer.currentStep.stepIndex];
+      expect(current.kind).toBe("extract-workbench");
+      if (current.kind === "extract-workbench") expect(current.surface).toBe("design");
+      // The journey stage is unchanged — design is a sub-position of Extract.
+      expect(result.current.session.state.currentFrame).toBe("f3");
     });
 
     it("openDocument pushes a doc-viewer step (defaults to page 1)", () => {

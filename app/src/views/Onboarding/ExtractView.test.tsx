@@ -1,12 +1,13 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useMemo, type FC } from "react";
+import { useEffect, useMemo, useRef, type FC } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope } from "@groundx/shared";
 
 import { Extract } from "@/components/viewer-widgets/Extract/Extract";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
@@ -26,12 +27,16 @@ import type { ScenarioConfig } from "@/types/scenarios";
  * (derive the scenario's documents scope + auth role, mount `Extract`). The
  * tests below are unchanged.
  */
-const ExtractView: FC<{ focusedCategoryId?: string }> = ({ focusedCategoryId }) => {
+const ExtractView: FC<{ focusedCategoryId?: string; openDesign?: boolean }> = ({
+  focusedCategoryId,
+  openDesign = false,
+}) => {
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
   const { state: chatState } = useChatStore();
   const { byId } = useScenarioRegistry();
   const widgetRole = useWidgetRole();
+  const orchestrator = useCanvasOrchestrator();
   const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
   const scenario = byId(scenarioId);
   const docId = scenario?.documents?.[0]?.documentId ?? null;
@@ -39,6 +44,19 @@ const ExtractView: FC<{ focusedCategoryId?: string }> = ({ focusedCategoryId }) 
     () => ({ type: "documents", documentIds: docId ? [docId] : [] }),
     [docId],
   );
+  // standardized-viewer-control T5 (R7) — the schema DESIGN surface is now a
+  // STEP sub-position (`surface:"design"`), entered via the `editSchema` intent
+  // (production path: the fields-panel hamburger → "Edit schema…"). Tests that
+  // previously mounted at `initialFrame:"f3a"` to land on the design surface set
+  // `openDesign` instead; this dispatches `editSchema` once on mount, flipping
+  // the active step to design — the frame-free, experience-agnostic path.
+  const designOpenedRef = useRef(false);
+  useEffect(() => {
+    if (openDesign && !designOpenedRef.current) {
+      designOpenedRef.current = true;
+      orchestrator.dispatch({ kind: "editSchema", schemaId: scenarioId }, "user");
+    }
+  }, [openDesign, orchestrator, scenarioId]);
   // standardized-viewer-control — the live canvas (ScopedCanvas) forwards the
   // ACTIVE extract-workbench step's `focusedCategoryId` to the widget. This shim
   // mirrors that contract so a `showExtract` dispatch that mutates the step's
@@ -50,8 +68,18 @@ const ExtractView: FC<{ focusedCategoryId?: string }> = ({ focusedCategoryId }) 
   const stepIdx = activeSession?.viewer.currentStep.stepIndex ?? -1;
   const top = stepIdx >= 0 ? activeSession?.viewer.history[stepIdx] : null;
   const stepFocus = top?.kind === "extract-workbench" ? top.focusedCategoryId : undefined;
+  // standardized-viewer-control T5 (R7) — the live canvas (ScopedCanvas) also
+  // forwards the active step's `surface` sub-position; mirror it so an
+  // `editSchema` dispatch (which flips the step to `surface:"design"`) opens the
+  // schema design surface — the production-correct, frame-free path.
+  const stepSurface = top?.kind === "extract-workbench" ? top.surface : undefined;
   return (
-    <Extract scope={scope} role={widgetRole} focusedCategoryId={focusedCategoryId ?? stepFocus} />
+    <Extract
+      scope={scope}
+      role={widgetRole}
+      focusedCategoryId={focusedCategoryId ?? stepFocus}
+      surface={stepSurface}
+    />
   );
 };
 
@@ -64,6 +92,28 @@ const FrameProbe = ({ onFrame }: { onFrame: (frame: string) => void }) => {
   onFrame(session.state.currentFrame);
   return null;
 };
+
+// standardized-viewer-control T5 (R7) — the schema DESIGN surface is now a
+// sub-position on the active extract-workbench STEP (`surface: "design"`), not a
+// frame (`currentFrame === "f3a"`). This probe reads the active step's surface so
+// tests assert the real, frame-free contract.
+const SurfaceProbe = ({ onSurface }: { onSurface: (surface: string | undefined) => void }) => {
+  const { state } = useChatStore();
+  const active = state.activeSessionId ? state.sessions.get(state.activeSessionId) : null;
+  const idx = active?.viewer.currentStep.stepIndex ?? -1;
+  const top = idx >= 0 ? active?.viewer.history[idx] : null;
+  onSurface(top?.kind === "extract-workbench" ? top.surface : undefined);
+  return null;
+};
+
+// Open the schema design surface the production way: the fields-panel hamburger →
+// "Edit schema…" dispatches `editSchema`, flipping the active step's surface to
+// "design" (no frame change). Tests that need the design surface call this first.
+async function enterDesignSurface(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("extract-fields-panel-hamburger"));
+  await user.click(await screen.findByTestId("extract-fields-panel-menu-edit-schema"));
+  await waitFor(() => expect(screen.getByTestId("extract-topbar-back")).toBeInTheDocument());
+}
 
 describe("ExtractView (F3/F4)", () => {
   it("pre-selects the first field in the focus category on mount when the step carries a focusedCategoryId", async () => {
@@ -293,8 +343,10 @@ describe("ExtractView (F3/F4)", () => {
 
   // ── add-pinned-samples-row (openspec change) ───────────────────────
 
-  it("F3a auto-pins the active sample and renders the pinned-samples row above the body", async () => {
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+  it("the design surface auto-pins the active sample and renders the pinned-samples row above the body", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    await enterDesignSurface(user);
     // Row exists with PINNED count + a chip for the active scenario's primary doc.
     await waitFor(() => expect(screen.getByTestId("extract-pinned-samples-row")).toBeInTheDocument());
     expect(screen.getByTestId("extract-pinned-count")).toHaveTextContent(/PINNED\s+1\s*\/\s*3/);
@@ -305,25 +357,30 @@ describe("ExtractView (F3/F4)", () => {
     expect(screen.getByTestId("extract-pinned-category-badge")).toHaveTextContent(/category:\s*\w+/);
   });
 
-  // standardized-viewer-control — the F3a category focus dropdown routes
-  // through the orchestrator (`showExtract` → mutate the active step in place),
-  // so picking a category re-scopes the LIVE workbench (no remount): the badge,
-  // the topbar title, and the scoped SchemaView all follow. Enter F3a the
-  // production way (hamburger → Edit schema → advanceFrame("f3a")) so the active
-  // ChatStore step is a real extract-workbench step the dispatch can mutate.
-  it("picking a category in the F3a focus dropdown re-scopes the workbench live (via the dispatch seam)", async () => {
+  // standardized-viewer-control T5 (R7) — the design-surface category focus
+  // dropdown routes through the orchestrator (`showExtract` → mutate the active
+  // step in place), so picking a category re-scopes the LIVE workbench (no
+  // remount): the badge, the topbar title, and the scoped SchemaView all follow.
+  // Enter the design surface the production way (hamburger → Edit schema →
+  // `editSchema` → step `surface:"design"`) so the active ChatStore step is a
+  // real extract-workbench step the dispatch can mutate. The schema design
+  // surface is now a STEP sub-position, not the f3a frame — `currentFrame` stays f3.
+  it("picking a category in the design-surface focus dropdown re-scopes the workbench live (via the dispatch seam)", async () => {
     const user = userEvent.setup();
     let frame = "";
+    let surface: string | undefined;
     renderWithOnboardingProviders(
       <>
         <ExtractView />
         <FrameProbe onFrame={(next) => (frame = next)} />
+        <SurfaceProbe onSurface={(next) => (surface = next)} />
       </>,
       { initialFrame: "f3", initialScenario: "utility" },
     );
-    await user.click(screen.getByTestId("extract-fields-panel-hamburger"));
-    await user.click(await screen.findByTestId("extract-fields-panel-menu-edit-schema"));
-    await waitFor(() => expect(frame).toBe("f3a"));
+    await enterDesignSurface(user);
+    await waitFor(() => expect(surface).toBe("design"));
+    // The journey frame does NOT advance — design is a sub-position of Extract.
+    expect(frame).toBe("f3");
     // Default focus is the first category (statement) — Statement fields show.
     await waitFor(() =>
       expect(screen.getByTestId("extract-pinned-category-badge")).toHaveTextContent(/category:\s*statement/),
@@ -333,12 +390,13 @@ describe("ExtractView (F3/F4)", () => {
     // Open the dropdown and pick Meters.
     await user.click(screen.getByTestId("extract-pinned-category-badge"));
     await user.click(await screen.findByTestId("extract-pinned-category-option-meters"));
-    // The workbench re-scopes live (still F3a — no frame change): badge +
-    // topbar title + the scoped SchemaView all reflect the meters category.
+    // The workbench re-scopes live (still the design surface — no frame change):
+    // badge + topbar title + the scoped SchemaView all reflect the meters category.
     await waitFor(() =>
       expect(screen.getByTestId("extract-pinned-category-badge")).toHaveTextContent(/category:\s*meters/),
     );
-    expect(frame).toBe("f3a");
+    expect(surface).toBe("design");
+    expect(frame).toBe("f3");
     expect(screen.getByTestId("extract-topbar-title")).toHaveTextContent(/·\s*meters/);
     expect(screen.getByTestId("schema-field-meter_kwh")).toBeInTheDocument();
     expect(screen.queryByTestId("schema-field-account_number")).not.toBeInTheDocument();
@@ -346,7 +404,8 @@ describe("ExtractView (F3/F4)", () => {
 
   it("clicking × on a pinned chip removes it and decrements the count", async () => {
     const user = userEvent.setup();
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    await enterDesignSurface(user);
     const chips = await screen.findAllByTestId(/^extract-pinned-chip-(?!remove-)/);
     const remove = chips[0].querySelector('[data-testid^="extract-pinned-chip-remove-"]') as HTMLElement;
     expect(remove).not.toBeNull();
@@ -355,18 +414,24 @@ describe("ExtractView (F3/F4)", () => {
     expect(screen.getByTestId("extract-pinned-count")).toHaveTextContent(/PINNED\s+0\s*\/\s*3/);
   });
 
-  it("clicking ← back on F3a returns the user to F3", async () => {
+  it("clicking ← back on the design surface returns to the fields workbench (step surface → fields)", async () => {
     const user = userEvent.setup();
-    let frame = "";
+    let surface: string | undefined;
     renderWithOnboardingProviders(
       <>
         <ExtractView />
-        <FrameProbe onFrame={(next) => (frame = next)} />
+        <SurfaceProbe onSurface={(next) => (surface = next)} />
       </>,
-      { initialFrame: "f3a", initialScenario: "utility" },
+      { initialFrame: "f3", initialScenario: "utility" },
     );
+    await enterDesignSurface(user);
+    await waitFor(() => expect(surface).toBe("design"));
+    // "← back" dispatches `showExtract` (no focus) → step surface returns to fields.
     await user.click(screen.getByTestId("extract-topbar-back"));
-    await waitFor(() => expect(frame).toBe("f3"));
+    await waitFor(() => expect(surface).toBe("fields"));
+    // The fields workbench body is back; the design ← back control is gone.
+    expect(screen.getByTestId("extract-fields-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("extract-topbar-back")).not.toBeInTheDocument();
   });
 
   it("topbar export and save are 🔒-locked for anonymous users (visual indicator only)", () => {
@@ -387,27 +452,31 @@ describe("ExtractView (F3/F4)", () => {
     expect(screen.getByTestId("extract-topbar-export").getAttribute("data-locked")).toBeNull();
   });
 
-  it("F3a's Design surface mounts inside the shared workbench shell", async () => {
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
+  it("the Design surface mounts inside the shared workbench shell", async () => {
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
+    await enterDesignSurface(user);
     // Design surface (SchemaView body) is rendered.
     await waitFor(() => expect(screen.getByTestId("schema-view")).toBeInTheDocument());
-    // Topbar is still present (shared shell across F3 / F3a / F4).
+    // Topbar is still present (shared shell across the fields + design surfaces).
     expect(screen.getByTestId("extract-topbar")).toBeInTheDocument();
   });
 
   // ── realign-f3a-entry-point (openspec change) ───────────────────────
 
-  it("opens F3a from the fields-panel hamburger menu", async () => {
+  it("opens the schema design surface from the fields-panel hamburger menu (step surface → design)", async () => {
     const user = userEvent.setup();
     let frame = "";
+    let surface: string | undefined;
     renderWithOnboardingProviders(
       <>
         <ExtractView />
         <FrameProbe onFrame={(next) => (frame = next)} />
+        <SurfaceProbe onSurface={(next) => (surface = next)} />
       </>,
       { initialFrame: "f3", initialScenario: "utility" },
     );
-    // On F3 the fields-panel hamburger is visible.
+    // On the fields workbench the fields-panel hamburger is visible.
     const hamburger = screen.getByTestId("extract-fields-panel-hamburger");
     expect(hamburger).toBeInTheDocument();
     // Click → menu opens with Save schema… and Edit schema…
@@ -420,8 +489,11 @@ describe("ExtractView (F3/F4)", () => {
     const saveItem = screen.getByTestId("extract-fields-panel-menu-save-schema");
     expect(saveItem).toBeInTheDocument();
     expect(saveItem).toHaveAttribute("aria-disabled", "true");
-    // Clicking Edit schema advances the frame to F3a.
+    // standardized-viewer-control T5 (R7) — Edit schema dispatches `editSchema`,
+    // flipping the active step's surface to "design" (NOT advancing to an f3a
+    // frame — the journey stage stays on Extract/f3).
     await user.click(screen.getByTestId("extract-fields-panel-menu-edit-schema"));
-    await waitFor(() => expect(frame).toBe("f3a"));
+    await waitFor(() => expect(surface).toBe("design"));
+    expect(frame).toBe("f3");
   });
 });

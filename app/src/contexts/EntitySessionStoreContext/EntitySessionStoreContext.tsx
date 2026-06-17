@@ -1,6 +1,6 @@
 import { useMemo, type FC, type ReactNode } from "react";
 
-import { ChatStoreProvider, EMPTY_PENDING_REPORT_OVERLAY, EMPTY_PENDING_SCHEMA_OVERLAY, EMPTY_VIEWER_SESSION, useChatStore, type ChatSession } from "@/contexts/ChatStoreContext";
+import { ChatStoreProvider, EMPTY_PENDING_REPORT_OVERLAY, EMPTY_PENDING_SCHEMA_OVERLAY, EMPTY_VIEWER_SESSION, useChatStore, type ChatSession, type ViewerSession, type ViewerStep } from "@/contexts/ChatStoreContext";
 import { ChatStoreServerHydrator } from "@/contexts/ChatStoreContext/ChatStoreServerHydrator";
 
 import type { EntityKey, EntitySessionStoreApi, EntitySessionStoreState, EntitySession } from "./types";
@@ -44,12 +44,23 @@ interface EntitySessionStoreProviderProps {
    */
   initialEntities?: ReadonlyMap<EntityKey, EntitySession>;
   initialActiveKey?: EntityKey | null;
+  /**
+   * standardized-viewer-control T3 — the ViewerStep the seeded active entity is
+   * positioned on. When provided, the seeded ChatStore session's `viewer` is
+   * primed with this one step (history length 1, currentStep.stepIndex 0) so
+   * `selectActiveStep` is non-null on first render. The frame-free StepStrip
+   * (which reads the active step kind, no frame fallback) needs this; production
+   * resume (T6b) will seed the same way from the persisted active step.
+   * `OnboardingSessionProvider` computes it via `frameToStepStandalone`.
+   */
+  initialViewerStep?: ViewerStep | null;
 }
 
 export const EntitySessionStoreProvider: FC<EntitySessionStoreProviderProps> = ({
   children,
   initialEntities,
   initialActiveKey = null,
+  initialViewerStep = null,
 }) => {
   /**
    * Two paths:
@@ -69,6 +80,13 @@ export const EntitySessionStoreProvider: FC<EntitySessionStoreProviderProps> = (
     if (!explicitlySeeded) return undefined;
     const now = Date.now();
     const sessionId = `c-onboarding-seed-${now}-${Math.random().toString(36).slice(2, 8)}`;
+    // standardized-viewer-control T3 — when the seed positions the active entity
+    // on a known viewer step, prime the viewer with that single step so the
+    // frame-free StepStrip resolves the current stage off the active step on
+    // first render (no frame fallback). Overlays start empty, as before.
+    const seededViewer: ViewerSession = initialViewerStep
+      ? { ...EMPTY_VIEWER_SESSION, history: [initialViewerStep], currentStep: { stepIndex: 0 } }
+      : EMPTY_VIEWER_SESSION;
     const session: ChatSession = {
       id: sessionId,
       title: "Onboarding",
@@ -82,7 +100,7 @@ export const EntitySessionStoreProvider: FC<EntitySessionStoreProviderProps> = (
       currentIntent: null,
       pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
       reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
-      viewer: EMPTY_VIEWER_SESSION,
+      viewer: seededViewer,
       gate: { status: "idle" },
       signupOpen: false,
       isOnboardingSession: true,
@@ -90,7 +108,7 @@ export const EntitySessionStoreProvider: FC<EntitySessionStoreProviderProps> = (
     const map = new Map<string, ChatSession>();
     map.set(sessionId, session);
     return map;
-  }, [explicitlySeeded, initialEntities, initialActiveKey]);
+  }, [explicitlySeeded, initialEntities, initialActiveKey, initialViewerStep]);
 
   const initialActiveSessionId = useMemo(
     () => (initialSessions ? Array.from(initialSessions.keys())[0] ?? null : undefined),

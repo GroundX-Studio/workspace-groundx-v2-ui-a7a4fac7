@@ -109,6 +109,7 @@ const Pill: FC<{
       role="button"
       aria-current={step.state === "active" ? "step" : undefined}
       aria-disabled={disabled || undefined}
+      data-state={step.state}
       tabIndex={disabled ? -1 : 0}
       title={disabled ? "Available after sign-in" : undefined}
       onClick={interactive ? () => onClick!(step.id) : undefined}
@@ -166,6 +167,7 @@ const SubPill: FC<{
     <Box
       role={interactive || disabled ? "button" : undefined}
       aria-disabled={disabled || undefined}
+      data-state={state}
       tabIndex={interactive ? 0 : disabled ? -1 : undefined}
       title={disabled ? "Available after sign-in" : undefined}
       onClick={interactive ? () => onClick!(id) : undefined}

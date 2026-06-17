@@ -146,6 +146,21 @@ export const intentFixtures: IntentFixture[] = [
     trigger: { via: "dispatch", source: "user", intent: { kind: "editSchema", schemaId: "schema-1" } },
     assert: (s) => assert(s.adapterCapturedKind === "editSchema", `captured ${s.adapterCapturedKind}`),
   },
+  // standardized-viewer-control T2 — `showInteract` (Interact / chat-with-
+  // sources surface). NOT LLM-emittable until its `show_interact` tool lands
+  // in T7, so it is exercised via a direct dispatch (like the other `llm:false`
+  // kinds). The built-in orchestrator case runs `advanceFrame("f5")` in
+  // onboarding; the spy adapter still captures the kind after the built-in
+  // side effect (T5 refines the steady push to resolve a doc from `scope`).
+  {
+    kind: "showInteract",
+    trigger: {
+      via: "dispatch",
+      source: "user",
+      intent: { kind: "showInteract", scope: { type: "documents", documentIds: [DOC] } },
+    },
+    assert: (s) => assert(s.adapterCapturedKind === "showInteract", `captured ${s.adapterCapturedKind}`),
+  },
   // Emittable adapter kinds → via:reply (P4).
   {
     kind: "switchFrame",

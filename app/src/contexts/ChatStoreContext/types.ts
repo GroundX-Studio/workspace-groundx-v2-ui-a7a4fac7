@@ -418,8 +418,36 @@ export type ViewerStep =
        */
       litRegions?: ReadonlyArray<import("@groundx/shared").CitationRegion>;
     }
-  | { kind: "extract-workbench"; scenarioId: string; focusedCategoryId?: string }
-  | { kind: "interact-chat"; scenarioId: string }
+  | {
+      kind: "extract-workbench";
+      scenarioId: string;
+      focusedCategoryId?: string;
+      /**
+       * standardized-viewer-control T2 (R7, steady-first) — the Extract
+       * sub-position, MIRRORING `report.surface` ("render" | "builder"):
+       *   • "fields"  — the extracted-fields workbench (the default; old F3).
+       *   • "design"  — the schema DESIGN surface (old frame f3a / `SchemaView`
+       *                 design pane). Reachable for AUTHENTICATED users via the
+       *                 `editSchema` outcome (T5), NOT a frame.
+       * Absent ⇒ "fields". NOT a new `mode` field — `mode` is the widget-
+       * contract "onboarding | steady" prop, and Extract/Report share this
+       * surface meta-pattern.
+       */
+      surface?: "fields" | "design";
+    }
+  | {
+      kind: "interact-chat";
+      scenarioId: string;
+      /**
+       * standardized-viewer-control T5 — the resolved GroundX document the
+       * Interact (chat-with-sources) canvas mounts. The `showInteract` handler
+       * resolves it from the intent `scope` so the shared PdfViewer canvas isn't
+       * doc-less in STEADY (where the shell narrows the canvas scope to a single
+       * document only for steps that carry one). Absent ⇒ the shell falls back to
+       * the session/scenario scope (onboarding's existing behavior).
+       */
+      documentId?: string;
+    }
   | { kind: "report"; surface?: "render" | "builder"; selectedSectionId?: string }
   | { kind: "integrate" };
 

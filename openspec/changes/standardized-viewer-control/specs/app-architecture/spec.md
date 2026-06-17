@@ -30,11 +30,16 @@ any production module outside the orchestrator references a viewer-step mutator.
 
 The canvas SHALL render purely as a function of the active `ViewerStep`. Viewer
 sub-position SHALL live on the step itself: the `extract-workbench` step SHALL
-carry an optional `focusedCategoryId` and the `report` step SHALL carry an optional
-`selectedSectionId`. `ScopedCanvas` SHALL forward that sub-position to the mounted
-widget. A change that only alters sub-position SHALL mutate the active step in
-place rather than push a new history entry, so navigation history does not grow on
-a focus change.
+carry an optional `focusedCategoryId` AND an optional `surface: "fields" | "design"`
+(the schema-design surface — replacing the `currentFrame === "f3a"` read, and MIRRORING
+the `report` step's existing `surface: "render" | "builder"` field name — not a new
+`mode` field), and the `report` step SHALL carry an optional `selectedSectionId` and its
+existing `surface`. `ScopedCanvas`
+SHALL forward that sub-position to the mounted widget. A change that only alters
+sub-position SHALL mutate the active step in place rather than push a new history entry,
+so navigation history does not grow on a focus change. The schema-design surface SHALL be
+reachable in BOTH the steady and onboarding experiences (it is unreachable for
+authenticated users today — a defect this requirement closes).
 
 #### Scenario: Focusing a category mutates the active step
 
@@ -53,9 +58,10 @@ Analyze sub-steps from the current frame); after this change the current stage S
 come from the active viewer step kind via the existing `VIEWER_STEP_TO_JOURNEY` map
 (which the strip already uses, with the frame only as a fallback — the fallback is
 dropped, the map is reused), and the reached-set (the strip's completion checkmarks)
-SHALL come from a small persisted stage watermark, over the stages
-Ingest, Understand, Analyze, and Integrate. The watermark SHALL increment on dispatch
-only when a stage is reached for the first time. The step strip SHALL keep its
+SHALL come from a small persisted **set of reached stages** (NOT a monotonic
+high-water-mark — `integrate` is reachable out of order, so the reached state is
+genuinely non-contiguous), over the stages Ingest, Understand, Analyze, and Integrate. A
+stage SHALL be added to the set on dispatch only when it is reached for the first time. The step strip SHALL keep its
 existing consumer shape (the journey catalog, the pill-state function, the step
 descriptors). The existing jump-ahead gating behavior, the rule that a citation jump
 does not re-lock a traversed bracket, and the jump-ahead regression test SHALL be
@@ -65,7 +71,7 @@ preserved. Journey progress SHALL exist only in onboarding.
 
 - **GIVEN** an onboarding session whose reached stages are Ingest and Understand
 - **WHEN** a `showExtract` intent is dispatched
-- **THEN** the current stage becomes Analyze and the watermark records Analyze as reached
+- **THEN** the current stage becomes Analyze and the reached-set gains Analyze
 - **AND** the step strip reads no frame value
 
 ### Requirement: Resume and the LLM-context snapshot SHALL be frame-free
@@ -73,7 +79,7 @@ preserved. Journey progress SHALL exist only in onboarding.
 The resume anchor SHALL be a persisted active viewer step (kind plus payload),
 replacing `lastFrame`, and SHALL be restored VERBATIM on hydrate (the last position,
 NOT a highest-reached watermark — the code documents a stale-resume bug from
-conflating the two). The reached-set SHALL be a separate persisted stage watermark,
+conflating the two). The reached-set SHALL be a separate persisted set of reached stages,
 replacing `completedFrames`, used only for the strip checkmarks and never for resume.
 The chat request's current-entity-snapshot axis SHALL convey position as the journey
 stage and the active viewer step kind, NOT as `lastFrame` or `completedFrames`. The

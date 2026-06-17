@@ -112,6 +112,16 @@ export interface ExtractProps {
    * re-focuses the live workbench. Absent leaves the existing default.
    */
   focusedCategoryId?: string;
+  /**
+   * standardized-viewer-control T5 (R7) — the Extract sub-position, forwarded
+   * from the active `extract-workbench` viewer step (mirrors `report.surface`):
+   *   • "fields" (or absent) — the extracted-fields workbench (the default).
+   *   • "design" — the schema DESIGN surface (`SchemaView` design pane).
+   * Reads from this PROP (the dispatched step), NOT `currentFrame === "f3a"`, so
+   * the design surface is reachable for AUTHENTICATED (steady) users — a
+   * production bug today.
+   */
+  surface?: "fields" | "design";
 }
 
 function mintTemplateId(): string {
@@ -207,7 +217,12 @@ const detailLabelSx = {
 // (~360) + a comfortable schema (~380) + the column gap.
 const SIDE_BY_SIDE_MIN_PX = 760;
 
-export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focusedCategoryIdProp }) => {
+export const Extract: FC<ExtractProps> = ({
+  scope,
+  role,
+  focusedCategoryId: focusedCategoryIdProp,
+  surface,
+}) => {
   const api = useApi();
   const { state: appMode } = useAppMode();
   const onboardingSession = useOnboardingSessionOptional();
@@ -377,10 +392,17 @@ export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focu
     : false;
 
   const isAuthed = appMode.authState === "signed-in";
-  const isDesignSurface = session?.currentFrame === "f3a";
+  // standardized-viewer-control T5 (R7) — the design surface is driven by the
+  // active step's `surface` (forwarded as a prop), NOT `currentFrame === "f3a"`.
+  // This is what makes the schema design surface reachable in STEADY.
+  const isDesignSurface = surface === "design";
+  // "← back" returns to the fields workbench by re-dispatching `showExtract`
+  // (surface defaults to "fields") through the orchestrator — the single
+  // viewer-mutation seam. No `advanceFrame`. No-op in a standalone mount with
+  // no orchestrator.
   const handleBack = useCallback(() => {
-    advanceFrame("f3");
-  }, [advanceFrame]);
+    orchestrator?.dispatch({ kind: "showExtract", scope, schemaId: scenarioId }, "user");
+  }, [orchestrator, scope, scenarioId]);
   const handleSave = useCallback(async () => {
     if (!hasUnsavedChanges || saveStatus === "saving") return;
     if (!schema) return;
@@ -1157,7 +1179,7 @@ export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focu
                 ) : (
                   <Box sx={{ flex: 1 }} />
                 )}
-                <FieldsPanelMenu />
+                <FieldsPanelMenu scenarioId={scenarioId} />
               </Box>
               {supportsJsonRender && renderMode === "json" ? (
                 <Box
@@ -1568,9 +1590,13 @@ const PinnedSamplesRow: FC<PinnedSamplesRowProps> = ({
 
 // ── Fields-panel menu (F3a entry point) ─────────────────────────────────
 
-const FieldsPanelMenu: FC = () => {
-  const onboardingSession = useOnboardingSessionOptional();
-  const advanceFrame = onboardingSession?.advanceFrame ?? (() => undefined);
+const FieldsPanelMenu: FC<{ scenarioId: string }> = ({ scenarioId }) => {
+  // standardized-viewer-control T5 (R7) — the "Edit schema" / "Save schema"
+  // menu items dispatch `editSchema` through the orchestrator (the single
+  // viewer-mutation seam) so the schema DESIGN surface opens via the active
+  // step's `surface: "design"` sub-position — in BOTH onboarding and steady. No
+  // `advanceFrame("f3a")` (a no-op in steady). No-op in a standalone mount.
+  const orchestrator = useCanvasOrchestratorOptional();
   const { state: appMode } = useAppMode();
   const isAuthed = appMode.authState === "signed-in";
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
@@ -1579,14 +1605,12 @@ const FieldsPanelMenu: FC = () => {
     setAnchorEl(event.currentTarget);
   }, []);
   const handleClose = useCallback(() => setAnchorEl(null), []);
-  const handleEdit = useCallback(() => {
-    advanceFrame("f3a");
+  const openDesignSurface = useCallback(() => {
+    orchestrator?.dispatch({ kind: "editSchema", schemaId: scenarioId }, "user");
     setAnchorEl(null);
-  }, [advanceFrame]);
-  const handleSave = useCallback(() => {
-    advanceFrame("f3a");
-    setAnchorEl(null);
-  }, [advanceFrame]);
+  }, [orchestrator, scenarioId]);
+  const handleEdit = openDesignSurface;
+  const handleSave = openDesignSurface;
   return (
     <>
       <IconButton

@@ -144,15 +144,18 @@ describe("OnboardingSessionContext", () => {
       expect(findTrack("understand.started")?.[1]).toMatchObject({ scenario: "utility" });
     });
 
-    it("advanceFrame(f3) → fires understand.completed (transition out of F2)", () => {
+    // standardized-viewer-control T5 (R1) — `understand.completed` re-homed
+    // OFF `advanceFrame`'s f3/f3a edge and ONTO the Extract first-reach signal
+    // (`notifyExtractReached`), which the orchestrator's `showExtract` handler
+    // fires. Bare frame advances no longer emit it: f3/f3a/f5 all map to the
+    // single `analyze` stage, so binding the event to a frame edge mis-fired.
+    it("advanceFrame(f3) → does NOT fire understand.completed (re-homed onto notifyExtractReached, T5/R1)", () => {
       vi.mocked(track).mockReset();
       const { result } = renderHook(() => useOnboardingSession(), { wrapper });
       act(() => result.current.pickScenario("utility"));
       vi.mocked(track).mockReset(); // ignore the pick-scenario events
       act(() => result.current.advanceFrame("f3"));
-      const call = findTrack("understand.completed");
-      expect(call).toBeDefined();
-      expect(call?.[1]).toMatchObject({ fromFrame: "f2", toFrame: "f3" });
+      expect(findTrack("understand.completed")).toBeUndefined();
     });
 
     it("advanceFrame(f5) → does NOT fire understand.completed (F5 is past F3)", () => {
@@ -162,6 +165,38 @@ describe("OnboardingSessionContext", () => {
       vi.mocked(track).mockReset();
       act(() => result.current.advanceFrame("f5"));
       expect(findTrack("understand.completed")).toBeUndefined();
+    });
+
+    // standardized-viewer-control T5 (R1/R6) — the Extract first-reach signal.
+    // Fires `understand.completed` EXACTLY ONCE per session (ref-gated, the
+    // openGate synced-ref pattern — never a flag mutated inside a setState
+    // updater), with a frame-free payload (stage/step, NOT fromFrame/toFrame).
+    it("notifyExtractReached → fires understand.completed once, frame-free payload (T5/R1)", () => {
+      vi.mocked(track).mockReset();
+      const { result } = renderHook(() => useOnboardingSession(), { wrapper });
+      act(() => result.current.pickScenario("utility"));
+      vi.mocked(track).mockReset();
+      act(() => result.current.notifyExtractReached());
+      const call = findTrack("understand.completed");
+      expect(call).toBeDefined();
+      // Frame keys are gone — the payload names the journey stage + step.
+      expect(call?.[1]).toMatchObject({ stage: "analyze", step: "extract-workbench" });
+      expect(call?.[1]).not.toHaveProperty("fromFrame");
+      expect(call?.[1]).not.toHaveProperty("toFrame");
+    });
+
+    it("notifyExtractReached fires ONLY on the first reach (idempotent thereafter)", () => {
+      vi.mocked(track).mockReset();
+      const { result } = renderHook(() => useOnboardingSession(), { wrapper });
+      act(() => result.current.pickScenario("utility"));
+      vi.mocked(track).mockReset();
+      act(() => result.current.notifyExtractReached());
+      act(() => result.current.notifyExtractReached());
+      act(() => result.current.notifyExtractReached());
+      const completedCalls = vi
+        .mocked(track)
+        .mock.calls.filter((c) => c[0] === "understand.completed");
+      expect(completedCalls).toHaveLength(1);
     });
 
     it("openGate → fires gate.shown with trigger", () => {
