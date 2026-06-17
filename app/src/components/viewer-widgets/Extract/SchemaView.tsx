@@ -145,9 +145,19 @@ export interface SchemaViewProps {
   schema?: ExtractionSchemaDef | null;
   /** Live extract values from the Extract widget. See {@link schema}. */
   values?: ExtractedFieldValue[];
+  /**
+   * standardized-viewer-control — the schema category to scope the fields list
+   * to, forwarded from the active `extract-workbench` viewer step (via Extract).
+   * `null`/absent renders every category (the standalone-mount fallback).
+   */
+  focusedCategoryId?: string | null;
 }
 
-export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: liveValues }) => {
+export const SchemaView: FC<SchemaViewProps> = ({
+  schema: liveSchema,
+  values: liveValues,
+  focusedCategoryId = null,
+}) => {
   const api = useApi();
   const { state: appMode } = useAppMode();
   const session = useOnboardingSessionOptional()?.state;
@@ -190,7 +200,6 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
     editedFields: new Map<string, SchemaFieldEdit>(),
     pendingFieldProposals: [] as SchemaFieldProposal[],
     pinnedSamples: [] as string[],
-    focusedCategoryId: null as string | null,
   };
   const effectiveSchema = useMemo<ExtractionSchemaDef | null>(
     () => (baseSchema ? applyOverlay(baseSchema, overlay) : null),
@@ -356,14 +365,15 @@ export const SchemaView: FC<SchemaViewProps> = ({ schema: liveSchema, values: li
           </Stack>
         )}
 
-        {/* `category-scoped-fields-view`: when the overlay carries a
-            focusedCategoryId, render ONLY that category's fields as a
-            flat list with a single header (`Existing fields · N accepted`
-            + optional `● M unsaved` coral indicator). When no scope is
-            set (defensive fallback — e.g. SchemaView mounted alone in
-            tests), fall back to the per-category multi-section render. */}
+        {/* `category-scoped-fields-view`: when a `focusedCategoryId` is set (the
+            active extract-workbench step's focus, forwarded as a prop), render
+            ONLY that category's fields as a flat list with a single header
+            (`Existing fields · N accepted` + optional `● M unsaved` coral
+            indicator). When no scope is set (defensive fallback — e.g. SchemaView
+            mounted alone in tests), fall back to the per-category multi-section
+            render. */}
         {(() => {
-          const focusedId = overlay.focusedCategoryId;
+          const focusedId = focusedCategoryId;
           const focused = focusedId
             ? effectiveSchema.categories.find((c) => c.id === focusedId) ?? null
             : null;

@@ -875,6 +875,51 @@ describe("CanvasOrchestratorContext", () => {
       expect(session.viewer.history[session.viewer.currentStep.stepIndex]).toEqual({ kind: "integrate" });
     });
 
+    // standardized-viewer-control T4 — a focus sub-position change is an
+    // IN-PLACE mutation of the active extract-workbench step (not a new push),
+    // so re-focusing the live workbench doesn't grow viewer history (and, in
+    // onboarding, doesn't re-fire the first-entry side effects). The first
+    // showExtract enters the workbench (push); a second showExtract carrying a
+    // different focusedCategoryId re-focuses the SAME step in place.
+    it("a second showExtract re-focuses the active extract-workbench step IN PLACE (history length unchanged)", () => {
+      const productWrapper = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </ChatStoreProvider>)
+      );
+      const { result } = renderHook(
+        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore() }),
+        { wrapper: productWrapper },
+      );
+      const scope = { type: "documents" as const, documentIds: ["doc-A"] };
+      // First showExtract — enters the workbench (push).
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "showExtract", scope, schemaId: "utility" }, "user");
+      });
+      const after1 = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      const lenAfter1 = after1.viewer.history.length;
+      expect(after1.viewer.history[after1.viewer.currentStep.stepIndex].kind).toBe("extract-workbench");
+      // Second showExtract with a focus — re-focuses the SAME step in place.
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "showExtract", scope, schemaId: "utility", focusedCategoryId: "meters" },
+          "user",
+        );
+      });
+      const after2 = result.current.chatStore.state.sessions.get(
+        result.current.chatStore.state.activeSessionId!,
+      )!;
+      // History length unchanged — the step was mutated, not pushed.
+      expect(after2.viewer.history.length).toBe(lenAfter1);
+      const current = after2.viewer.history[after2.viewer.currentStep.stepIndex];
+      expect(current.kind).toBe("extract-workbench");
+      if (current.kind === "extract-workbench") {
+        expect(current.focusedCategoryId).toBe("meters");
+      }
+    });
+
     it("showReport / editTemplate push render and builder report steps without an OnboardingSessionProvider", () => {
       const productWrapper = ({ children }: { children: React.ReactNode }) => (
         withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>

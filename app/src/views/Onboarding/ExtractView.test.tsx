@@ -7,6 +7,7 @@ import type { ContentScope } from "@groundx/shared";
 
 import { Extract } from "@/components/viewer-widgets/Extract/Extract";
 import { useAppMode } from "@/contexts/AppModeContext";
+import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useWidgetRole } from "@/lib/widgetRole";
@@ -25,9 +26,10 @@ import type { ScenarioConfig } from "@/types/scenarios";
  * (derive the scenario's documents scope + auth role, mount `Extract`). The
  * tests below are unchanged.
  */
-const ExtractView: FC = () => {
+const ExtractView: FC<{ focusedCategoryId?: string }> = ({ focusedCategoryId }) => {
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
+  const { state: chatState } = useChatStore();
   const { byId } = useScenarioRegistry();
   const widgetRole = useWidgetRole();
   const scenarioId = appMode.scenario ?? session.scenario ?? "utility";
@@ -37,7 +39,20 @@ const ExtractView: FC = () => {
     () => ({ type: "documents", documentIds: docId ? [docId] : [] }),
     [docId],
   );
-  return <Extract scope={scope} role={widgetRole} />;
+  // standardized-viewer-control — the live canvas (ScopedCanvas) forwards the
+  // ACTIVE extract-workbench step's `focusedCategoryId` to the widget. This shim
+  // mirrors that contract so a `showExtract` dispatch that mutates the step's
+  // focus re-renders the widget (the retired `?focus=` URL carrier is gone). An
+  // explicit prop (the "entered already focused" case) wins over the step.
+  const activeSession = chatState.activeSessionId
+    ? chatState.sessions.get(chatState.activeSessionId)
+    : null;
+  const stepIdx = activeSession?.viewer.currentStep.stepIndex ?? -1;
+  const top = stepIdx >= 0 ? activeSession?.viewer.history[stepIdx] : null;
+  const stepFocus = top?.kind === "extract-workbench" ? top.focusedCategoryId : undefined;
+  return (
+    <Extract scope={scope} role={widgetRole} focusedCategoryId={focusedCategoryId ?? stepFocus} />
+  );
 };
 
 beforeEach(() => {
@@ -51,18 +66,17 @@ const FrameProbe = ({ onFrame }: { onFrame: (frame: string) => void }) => {
 };
 
 describe("ExtractView (F3/F4)", () => {
-  it("pre-selects the first field in the focus category on mount when ?focus= is set", async () => {
-    // F2 Pick-a-view pills navigate to F3 with ?focus=<categoryId>;
+  it("pre-selects the first field in the focus category on mount when the step carries a focusedCategoryId", async () => {
+    // F2 Pick-a-view pills dispatch `showExtract` with `focusedCategoryId`;
     // the user lands already inspecting their picked slice. WF-01 C9
-    // (2026-05-28): when ?focus= picks a category, the first field in
-    // that category becomes the active selection AND the provenance
-    // panel surfaces; the user lands on F4-shape provenance, not the
-    // fields list. (If we want a fields-list-default behavior with
-    // ?focus= just biasing the visible category, that's a follow-up.)
-    renderWithOnboardingProviders(<ExtractView />, {
+    // (2026-05-28): when the step focuses a category, the first field in that
+    // category becomes the active selection AND the provenance panel surfaces;
+    // the user lands on F4-shape provenance, not the fields list.
+    // (standardized-viewer-control: the focus arrives via the step's
+    // `focusedCategoryId` prop, not the retired `?focus=` URL param.)
+    renderWithOnboardingProviders(<ExtractView focusedCategoryId="meters" />, {
       initialFrame: "f3",
       initialScenario: "utility",
-      initialUrl: "/onboarding/28454/utility?focus=meters",
     });
     await waitFor(() => expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument());
     expect(screen.getByTestId("extract-breadcrumb").textContent ?? "").toMatch(/meter_kwh/);
@@ -289,6 +303,45 @@ describe("ExtractView (F3/F4)", () => {
     expect(chips).toHaveLength(1);
     // category badge surfaces the focused category id
     expect(screen.getByTestId("extract-pinned-category-badge")).toHaveTextContent(/category:\s*\w+/);
+  });
+
+  // standardized-viewer-control — the F3a category focus dropdown routes
+  // through the orchestrator (`showExtract` → mutate the active step in place),
+  // so picking a category re-scopes the LIVE workbench (no remount): the badge,
+  // the topbar title, and the scoped SchemaView all follow. Enter F3a the
+  // production way (hamburger → Edit schema → advanceFrame("f3a")) so the active
+  // ChatStore step is a real extract-workbench step the dispatch can mutate.
+  it("picking a category in the F3a focus dropdown re-scopes the workbench live (via the dispatch seam)", async () => {
+    const user = userEvent.setup();
+    let frame = "";
+    renderWithOnboardingProviders(
+      <>
+        <ExtractView />
+        <FrameProbe onFrame={(next) => (frame = next)} />
+      </>,
+      { initialFrame: "f3", initialScenario: "utility" },
+    );
+    await user.click(screen.getByTestId("extract-fields-panel-hamburger"));
+    await user.click(await screen.findByTestId("extract-fields-panel-menu-edit-schema"));
+    await waitFor(() => expect(frame).toBe("f3a"));
+    // Default focus is the first category (statement) — Statement fields show.
+    await waitFor(() =>
+      expect(screen.getByTestId("extract-pinned-category-badge")).toHaveTextContent(/category:\s*statement/),
+    );
+    expect(screen.getByTestId("schema-field-account_number")).toBeInTheDocument();
+    expect(screen.queryByTestId("schema-field-meter_kwh")).not.toBeInTheDocument();
+    // Open the dropdown and pick Meters.
+    await user.click(screen.getByTestId("extract-pinned-category-badge"));
+    await user.click(await screen.findByTestId("extract-pinned-category-option-meters"));
+    // The workbench re-scopes live (still F3a — no frame change): badge +
+    // topbar title + the scoped SchemaView all reflect the meters category.
+    await waitFor(() =>
+      expect(screen.getByTestId("extract-pinned-category-badge")).toHaveTextContent(/category:\s*meters/),
+    );
+    expect(frame).toBe("f3a");
+    expect(screen.getByTestId("extract-topbar-title")).toHaveTextContent(/·\s*meters/);
+    expect(screen.getByTestId("schema-field-meter_kwh")).toBeInTheDocument();
+    expect(screen.queryByTestId("schema-field-account_number")).not.toBeInTheDocument();
   });
 
   it("clicking × on a pinned chip removes it and decrements the count", async () => {

@@ -1221,25 +1221,6 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
   }, []);
 
-  const setFocusedCategory = useCallback((categoryId: string | null) => {
-    setState((prev) => {
-      if (!prev.activeSessionId) return prev;
-      const current = prev.sessions.get(prev.activeSessionId);
-      if (!current) return prev;
-      if (current.pendingSchemaOverlay.focusedCategoryId === categoryId) return prev;
-      const sessions = new Map(prev.sessions);
-      sessions.set(prev.activeSessionId, {
-        ...current,
-        pendingSchemaOverlay: {
-          ...current.pendingSchemaOverlay,
-          focusedCategoryId: categoryId,
-        },
-        updatedAt: Date.now(),
-      });
-      return { ...prev, sessions };
-    });
-  }, []);
-
   // ── Report-builder section actions (smart-report Phase 4) ──────────
   // The `report`-kind siblings of addSchemaField / editSchemaField /
   // removeSchemaField, mutating `reportOverlay` on the active session. The
@@ -1622,6 +1603,34 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
   }, []);
 
+  // standardized-viewer-control T4 — replace the ACTIVE viewer step in place
+  // (history length unchanged, stepIndex unchanged). Used by sub-position
+  // changes (e.g. re-focusing the Extract workbench on a different schema
+  // category) so the canvas re-renders with the new payload WITHOUT pushing a
+  // new history entry — the in-place sibling of pushStep. Idempotent on full
+  // structural equality. No-op when there is no active step to replace.
+  const mutateActiveStep = useCallback((step: import("./types").ViewerStep) => {
+    setState((prev) => {
+      if (!prev.activeSessionId) return prev;
+      const current = prev.sessions.get(prev.activeSessionId);
+      if (!current) return prev;
+      const cur = current.viewer.currentStep.stepIndex;
+      if (cur < 0) return prev;
+      const top = current.viewer.history[cur];
+      if (top == null) return prev;
+      if (JSON.stringify(top) === JSON.stringify(step)) return prev;
+      const nextHistory = current.viewer.history.slice();
+      nextHistory[cur] = step;
+      const sessions = new Map(prev.sessions);
+      sessions.set(prev.activeSessionId, {
+        ...current,
+        viewer: { ...current.viewer, history: nextHistory },
+        updatedAt: Date.now(),
+      });
+      return { ...prev, sessions };
+    });
+  }, []);
+
   // clickable-citations Phase 3 — push-or-mutate a doc-viewer step
   // based on whether the current step already targets the same
   // documentId. The orchestrator calls this on every
@@ -1880,7 +1889,6 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       dismissFieldProposal,
       pinSample,
       unpinSample,
-      setFocusedCategory,
       addReportSection,
       editReportSection,
       removeReportSection,
@@ -1894,6 +1902,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       mutateOverlay,
       popOverlay,
       pushStep,
+      mutateActiveStep,
       gotoDocViewer,
       showCitationRegions,
       clearCitationHighlight,
@@ -1920,7 +1929,6 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       dismissFieldProposal,
       pinSample,
       unpinSample,
-      setFocusedCategory,
       addReportSection,
       editReportSection,
       removeReportSection,
@@ -1934,6 +1942,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       mutateOverlay,
       popOverlay,
       pushStep,
+      mutateActiveStep,
       gotoDocViewer,
       showCitationRegions,
       clearCitationHighlight,

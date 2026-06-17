@@ -22,6 +22,21 @@ function activeDocViewerStep(chatStore: NonNullable<ReturnType<typeof useChatSto
   return top?.kind === "doc-viewer" ? top : null;
 }
 
+/**
+ * The active extract-workbench step off the ChatStore's current viewer
+ * position, or null when no session is active / the top step isn't an
+ * extract-workbench. standardized-viewer-control T4 uses it so a `showExtract`
+ * while ALREADY on the workbench re-focuses in place instead of pushing.
+ */
+function activeExtractWorkbenchStep(chatStore: NonNullable<ReturnType<typeof useChatStoreOptional>>) {
+  const activeSession = chatStore.state.activeSessionId
+    ? chatStore.state.sessions.get(chatStore.state.activeSessionId)
+    : null;
+  const stepIdx = activeSession?.viewer.currentStep.stepIndex ?? -1;
+  const top = stepIdx >= 0 ? activeSession?.viewer.history[stepIdx] : null;
+  return top?.kind === "extract-workbench" ? top : null;
+}
+
 const CanvasOrchestratorContext = createContext<CanvasOrchestratorApi | null>(null);
 
 /**
@@ -322,8 +337,20 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // Extract step-strip sub-pill calls, so the tool drives the identical
         // canvas move as the on-screen control. Soft-fail in the steady tree
         // (no OnboardingSessionProvider).
-        case "showExtract":
-          if (routeThroughOnboarding) {
+        case "showExtract": {
+          // standardized-viewer-control T4 — sub-position (focus) change. When
+          // the workbench is ALREADY the active step, re-focus it IN PLACE
+          // (history unchanged; in onboarding this bypasses advanceFrame so its
+          // first-entry side effects don't re-fire). Otherwise enter the
+          // workbench via the normal push (onboarding layers the frame on top).
+          // NOTE (T5): the steady push still hardcodes `scenarioId:"utility"` —
+          // honoring `scope`/`schemaId` is the T5 fix, not this task.
+          const activeExtract = chatStore ? activeExtractWorkbenchStep(chatStore) : null;
+          if (chatStore && activeExtract) {
+            if (intent.focusedCategoryId && intent.focusedCategoryId !== activeExtract.focusedCategoryId) {
+              chatStore.mutateActiveStep({ ...activeExtract, focusedCategoryId: intent.focusedCategoryId });
+            }
+          } else if (routeThroughOnboarding) {
             onboardingSession?.advanceFrame(
               "f3",
               intent.focusedCategoryId ? { focusedCategoryId: intent.focusedCategoryId } : undefined,
@@ -336,6 +363,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             });
           }
           break;
+        }
         // 2026-05-30-onboarding-shell-shared-view Phase 3b — the
         // `show_integrate` canvas-dispatch tool MOVES the canvas to the
         // Integrate connectors surface (frame f7). SAME `advanceFrame` the

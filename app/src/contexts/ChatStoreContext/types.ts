@@ -176,16 +176,18 @@ export type SchemaFieldEdit = Partial<{
  * (`SmartReportBuilder`, f4a/S3a).
  *
  * The shell is the MECHANISM (added items · removed ids · per-item edits ·
- * proposal queue · pinned samples · focused group); the item shape is the DATA
- * that varies by template kind:
+ * proposal queue · pinned samples); the item shape is the DATA that varies by
+ * template kind:
  *   • Extract → `PendingSchemaOverlay` = shell of `SchemaField*` (fields).
  *   • Report  → `PendingReportOverlay` = shell of `ReportSection*` (sections).
  *
  * The member names are kept generic-but-Extract-compatible (`addedFields`,
- * `editedFields`, `focusedCategoryId`, …) so the Extract arm aliases the shell
- * with ZERO churn — its live code reads the exact same members. For the report
- * arm, read `addedFields` as "added sections", `focusedCategoryId` as "focused
- * sub-tab", etc.
+ * `editedFields`, …) so the Extract arm aliases the shell with ZERO churn — its
+ * live code reads the exact same members. For the report arm, read `addedFields`
+ * as "added sections", etc. (standardized-viewer-control: the focused
+ * sub-position — Extract schema category — moved OFF the overlay and ONTO the
+ * active `ViewerStep` (`extract-workbench.focusedCategoryId`), so the canvas is a
+ * pure function of the step. The overlay no longer carries a `focusedCategoryId`.)
  */
 export interface PendingTemplateOverlay<TItem, TEdit, TProposal> {
   /** Items (fields / sections) added by the user via the editor / LLM propose-card. */
@@ -209,11 +211,6 @@ export interface PendingTemplateOverlay<TItem, TEdit, TProposal> {
    * surfaces. Maximum of 3.
    */
   pinnedSamples: string[];
-  /**
-   * The group the user is currently focusing inside the sub-tabs (Extract:
-   * schema category id; Report: sub-tab id). Null means "no scope set".
-   */
-  focusedCategoryId: string | null;
 }
 
 /**
@@ -256,7 +253,6 @@ export const EMPTY_PENDING_SCHEMA_OVERLAY: PendingSchemaOverlay = {
   editedFields: new Map<string, SchemaFieldEdit>(),
   pendingFieldProposals: [],
   pinnedSamples: [],
-  focusedCategoryId: null,
 };
 
 // ── Report builder overlay (2026-05-29-smart-report-screen Phase 4) ──────
@@ -351,7 +347,6 @@ export const EMPTY_PENDING_REPORT_OVERLAY: PendingReportOverlay = {
   editedFields: new Map<string, ReportSectionEdit>(),
   pendingFieldProposals: [],
   pinnedSamples: [],
-  focusedCategoryId: null,
 };
 
 // ── master-viewer-session Phase 1 ─────────────────────────────────────
@@ -706,13 +701,6 @@ export interface ChatStoreApi {
    */
   unpinSample: (sampleId: string) => void;
 
-  /**
-   * `add-pinned-samples-row` — set the focused category id (the
-   * sub-tab "scope"). Pass null to clear. Read by ExtractView's
-   * topbar title AND the Fields tab's render scope.
-   */
-  setFocusedCategory: (categoryId: string | null) => void;
-
   // ── Report-builder section actions (smart-report Phase 4) ──────────
   // The `report`-kind siblings of `addSchemaField` / `editSchemaField` /
   // `removeSchemaField`, mutating `reportOverlay` on the active session. The
@@ -832,6 +820,16 @@ export interface ChatStoreApi {
    * active session.
    */
   pushStep: (step: ViewerStep) => void;
+
+  /**
+   * standardized-viewer-control T4 — replace the ACTIVE viewer step in place
+   * (history length + `currentStep.stepIndex` unchanged). The in-place sibling
+   * of `pushStep`, used by sub-position changes (e.g. re-focusing the Extract
+   * workbench on a different schema category) so the canvas re-renders with the
+   * new payload without growing history. Idempotent on full structural
+   * equality; no-op when there is no active step.
+   */
+  mutateActiveStep: (step: ViewerStep) => void;
 
   /**
    * clickable-citations Phase 3 — citation-click target. Push-or-mutate

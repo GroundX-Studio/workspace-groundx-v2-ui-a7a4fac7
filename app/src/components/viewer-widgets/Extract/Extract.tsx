@@ -9,7 +9,6 @@ import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type SyntheticEvent } from "react";
-import { useSearchParams } from "react-router-dom";
 
 import { citationRegions, type ContentScope, type ExtractBody, type WidgetRole } from "@groundx/shared";
 
@@ -44,6 +43,7 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useApi } from "@/contexts/ApiContext";
+import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
@@ -218,10 +218,15 @@ export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focu
     state: chatState,
     pinSample,
     unpinSample,
-    setFocusedCategory,
     pushStep,
     appendAgentMessage,
   } = useChatStore();
+  // standardized-viewer-control — category focus is a viewer-step sub-position
+  // now, so the category dropdown DISPATCHES `showExtract` through the
+  // orchestrator (the single viewer-mutation seam) rather than poking a
+  // ChatStore overlay field. Optional: a standalone widget mount (some tests)
+  // has no orchestrator, where the dropdown is a no-op.
+  const orchestrator = useCanvasOrchestratorOptional();
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
   const selectField = useCallback((fieldId: string | null) => {
@@ -283,6 +288,20 @@ export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focu
   const scenarioId = appMode.scenario ?? session?.scenario ?? "utility";
   const { byId } = useScenarioRegistry();
   const scenario = byId(scenarioId);
+
+  // Re-focus the workbench on a schema category through the orchestrator. When
+  // the workbench is already shown the dispatch re-focuses the active step in
+  // place (history unchanged); otherwise it enters the workbench focused there.
+  const handleSelectCategory = useCallback(
+    (categoryId: string | null) => {
+      if (!categoryId || !orchestrator) return;
+      orchestrator.dispatch(
+        { kind: "showExtract", scope, schemaId: scenarioId, focusedCategoryId: categoryId },
+        "user",
+      );
+    },
+    [orchestrator, scope, scenarioId],
+  );
 
   // ScopedViewerWidget contract: the document set comes FROM the scope, not
   // from scenario context. The live schema/values/geometry load re-runs only
@@ -448,18 +467,24 @@ export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focu
     return map;
   }, [scenario, liveSchema, liveValues, liveGeometry, liveDocId]);
 
-  const [searchParams] = useSearchParams();
+  // standardized-viewer-control — when the user ENTERS the workbench already
+  // focused on a category (a pick-a-view pill / `showExtract` intent carrying
+  // `focusedCategoryId` from another view), land them on that category's first
+  // field provenance (the F4-shape landing) — once, when the schema first loads
+  // for that focus, until they navigate. Keyed on `schema` only (not the prop)
+  // so a LIVE re-focus of an already-shown workbench doesn't surprise-open the
+  // provenance panel; it just re-scopes the fields.
   useEffect(() => {
-    const focus = searchParams.get("focus");
-    if (!focus || !schema || selectedFieldId !== null) return;
-    const category = schema.categories.find((c) => c.id === focus);
+    if (!focusedCategoryIdProp || !schema || selectedFieldId !== null) return;
+    const category = schema.categories.find((c) => c.id === focusedCategoryIdProp);
     const firstField = category?.fields[0];
     if (firstField) selectField(firstField.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema]);
 
-  // On F3a entry, auto-pin the scope's primary document AND seed the focused
-  // category from URL or the first manifest category. Idempotent.
+  // On F3a entry, auto-pin the scope's primary document. Idempotent. (The
+  // focused category is no longer seeded here — focus lives on the viewer step
+  // and defaults to the first category via the derivation below.)
   const primaryDocId = liveDocId;
   const primaryDocFileName = scenario?.documents?.[0]?.fileName ?? primaryDocId;
   const primaryDocPages = scenario?.documents?.[0]?.pageCount;
@@ -467,14 +492,6 @@ export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focu
     if (!schema || !overlay) return;
     if (primaryDocId && overlay.pinnedSamples.length === 0) {
       pinSample(primaryDocId);
-    }
-    if (overlay.focusedCategoryId === null) {
-      const focus = searchParams.get("focus");
-      const seed =
-        (focus && schema.categories.find((c) => c.id === focus)?.id) ??
-        schema.categories[0]?.id ??
-        null;
-      if (seed) setFocusedCategory(seed);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema, primaryDocId]);
@@ -506,14 +523,12 @@ export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focu
     );
   }
 
-  const focusParam = searchParams.get("focus");
-  // standardized-viewer-control — the active step's focused category (forwarded
-  // prop) WINS, so a `showExtract` intent re-focuses the live workbench. Falls
-  // back to the (legacy) overlay / `?focus` / first category.
+  // standardized-viewer-control — focus comes SOLELY from the active step
+  // (forwarded prop), so a `showExtract` intent re-focuses the live workbench.
+  // Absent (or naming a category not in this schema) defaults to the first
+  // category. The overlay / `?focus` carriers are gone.
   const focusedCategoryId =
     (focusedCategoryIdProp && schema.categories.find((c) => c.id === focusedCategoryIdProp)?.id) ??
-    overlay?.focusedCategoryId ??
-    (focusParam && schema.categories.find((c) => c.id === focusParam)?.id) ??
     schema.categories[0]?.id ??
     null;
 
@@ -709,13 +724,17 @@ export const Extract: FC<ExtractProps> = ({ scope, role, focusedCategoryId: focu
           onUnpin={unpinSample}
           focusedCategoryId={focusedCategoryId}
           categories={schema.categories}
-          onSelectCategory={setFocusedCategory}
+          onSelectCategory={handleSelectCategory}
         />
       )}
 
       {isDesignSurface ? (
         <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-          <SchemaView schema={schema} values={Array.from(valuesByFieldId.values())} />
+          <SchemaView
+            schema={schema}
+            values={Array.from(valuesByFieldId.values())}
+            focusedCategoryId={focusedCategoryId}
+          />
         </Box>
       ) : (
         <Box

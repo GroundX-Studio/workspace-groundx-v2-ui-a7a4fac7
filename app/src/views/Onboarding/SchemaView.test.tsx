@@ -146,7 +146,7 @@ async function renderLiveSchemaView(ui: ReactElement) {
  * wrapper provided; the shim below reproduces it verbatim (scenario documents
  * scope + auth role → `Extract`) so the joint-mount tests are unchanged.
  */
-const ExtractView: FC = () => {
+const ExtractView: FC<{ focusedCategoryId?: string }> = ({ focusedCategoryId }) => {
   const { state: appMode } = useAppMode();
   const { state: session } = useOnboardingSession();
   const { byId } = useScenarioRegistry();
@@ -158,7 +158,10 @@ const ExtractView: FC = () => {
     () => ({ type: "documents", documentIds: docId ? [docId] : [] }),
     [docId],
   );
-  return <Extract scope={scope} role={widgetRole} />;
+  // standardized-viewer-control — forward the active step's focused category,
+  // exactly as the live canvas (ScopedCanvas) does. When omitted, Extract
+  // defaults focus to the first schema category.
+  return <Extract scope={scope} role={widgetRole} focusedCategoryId={focusedCategoryId} />;
 };
 
 const SignUpSurfaceHost: FC = () => {
@@ -189,7 +192,6 @@ function SchemaAgentRerunSeeder() {
     addSchemaField,
     editSchemaField,
     setSchemaFieldExtraction,
-    setFocusedCategory,
   } = useChatStore();
   const seededRef = useRef(false);
   useEffect(() => {
@@ -208,10 +210,11 @@ function SchemaAgentRerunSeeder() {
       value: 14.5,
       confidence: 0.83,
     });
-    // Pre-focus the meters category so SchemaView's category-scoped
-    // render exposes the seeded field. Default focus is `statement`.
-    setFocusedCategory("meters");
-  }, [addSchemaField, editSchemaField, setSchemaFieldExtraction, setFocusedCategory]);
+    // The meters category is pre-focused via the ExtractView shim's
+    // `focusedCategoryId="meters"` prop (standardized-viewer-control: focus
+    // lives on the viewer step now, not a ChatStore overlay field), so
+    // SchemaView's category-scoped render exposes this seeded field.
+  }, [addSchemaField, editSchemaField, setSchemaFieldExtraction]);
   return null;
 }
 
@@ -496,8 +499,8 @@ describe("SchemaView (UI-01 Phase 1)", () => {
   // ── category-scoped-fields-view (openspec change) ───────────────
 
   it("Fields tab scoped to the focused category renders only that category's fields + a flat header", async () => {
-    // Mounting via ExtractView triggers the auto-pin + seed-focus
-    // effect that lands focusedCategoryId = "statement" (first category).
+    // Mounting via ExtractView with no explicit focus → Extract defaults the
+    // focused category to the first one ("statement"), forwarded to SchemaView.
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3a", initialScenario: "utility" });
     await waitFor(() => expect(screen.getByTestId("schema-view")).toBeInTheDocument());
     // Statement category fields are present.
@@ -692,15 +695,14 @@ describe("SchemaView (UI-01 Phase 1)", () => {
       <>
         <SchemaAgentRerunSeeder />
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
-        <ExtractView />
+        <ExtractView focusedCategoryId="meters" />
       </>,
-      // `?focus=meters` so ExtractView's initial-focus effect lands on
-      // the same category our seeder pre-pins, avoiding the race with
-      // ExtractView's default-to-first-category effect.
+      // `focusedCategoryId="meters"` so the workbench focuses the same category
+      // our seeder adds the field to (standardized-viewer-control: focus rides
+      // the viewer step / widget prop, not the retired `?focus=` URL param).
       {
         initialFrame: "f3a",
         initialScenario: "utility",
-        initialUrl: "/onboarding/28454/utility?focus=meters",
         api: { extract: { extractField } },
       },
     );
