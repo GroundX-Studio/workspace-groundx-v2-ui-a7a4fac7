@@ -174,6 +174,11 @@ export async function runRagPipeline(
   const intents: DispatchedIntent[] = [];
   const toolFailures: ToolFailure[] = [];
   const mutateChips: SuggestedAction[] = [];
+  // standardized-viewer-control T7 — navigation tools that carry the optional
+  // `offerAs` disposition are NOT auto-dispatched: they surface as OFFERED
+  // suggested-action entries (a clickable chip / inline anchor) the USER
+  // triggers. Buffered separately so they slot in after the mutate chips.
+  const offeredChips: SuggestedAction[] = [];
   for (const call of llmResponse.toolCalls) {
     const tool = getServerTool(call.name);
     if (!tool) {
@@ -201,6 +206,27 @@ export async function runRagPipeline(
       continue;
     }
     const intentPayload = tool.intentBuilder(parseResult.data);
+    // standardized-viewer-control T7 — offer disposition. A navigation tool
+    // call carrying `offerAs` is surfaced as an OFFERED suggested action
+    // (validated intent via the tool's intentBuilder + the offer's label +
+    // optional inline anchor) instead of auto-dispatching. `offerAs` is a
+    // PRESENTATION arg — the intentBuilder already ignores it, so the built
+    // intent never carries it. Only navigation tools declare `offerAs` in their
+    // schema, so presence here means the call is offer-eligible by construction.
+    const offerAs = (parseResult.data as { offerAs?: { label: string; anchor?: string } }).offerAs;
+    if (offerAs) {
+      offeredChips.push({
+        key: `tool:${call.name}`,
+        label: offerAs.label,
+        ...(offerAs.anchor !== undefined ? { anchor: offerAs.anchor } : {}),
+        detail: {
+          name: call.name,
+          arguments: parseResult.data as Record<string, unknown>,
+          intent: intentPayload,
+        },
+      });
+      continue;
+    }
     if (tool.category === "mutate") {
       // Surface as a chip the user must click to confirm. The label
       // is the first sentence of the tool description (terminated at
@@ -235,13 +261,15 @@ export async function runRagPipeline(
   // (2026-06-11).
   const suggestedActions: ChatRouterResponse["suggestedActions"] =
     grounded.citations.length > 0 ? [{ key: "show-source", label: "Show all sources" }] : [];
-  // widget-llm-integration follow-up A.5 — the legacy
-  // `suggested-intent` chip emit is gone. `tool:suggest_intent`
-  // chips arrive via the mutateChips buffer below.
-  // Phase 8 — append every mutate-tool chip AFTER the legacy chips so
-  // the existing "show-source" / "suggested-intent" rendering order is
-  // preserved. Frontend `SuggestedActionChips` renders in array order.
+  // widget-llm-integration follow-up A.5 — the legacy `suggested-intent` chip
+  // emit is gone. Phase 8 — append every mutate-tool chip AFTER the
+  // "show-source" chip so the existing rendering order is preserved. Frontend
+  // `SuggestedActionChips` renders in array order.
   for (const chip of mutateChips) suggestedActions.push(chip);
+  // standardized-viewer-control T7 — offered navigation entries last (a
+  // user-triggered "→ go there" chip / inline anchor; standardized-viewer-control
+  // succeeds the retired `suggest_intent` tool's any-frame suggestion).
+  for (const chip of offeredChips) suggestedActions.push(chip);
 
   const answer = grounded.body.trim();
 
@@ -334,8 +362,9 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
   // widget-llm-integration follow-up A.5 (2026-05-28) — the
   // fenced-JSON parser used to handle three concerns: `citations`,
   // `suggestedIntent`, and `proposedSchemaField`. The latter two
-  // have migrated to native LLM function-calling (see toolCatalog's
-  // `suggest_intent` and `propose_schema_field` tools). This
+  // have migrated to native LLM function-calling (`propose_schema_field`; the
+  // navigation tools + their `offerAs` disposition replaced the retired
+  // `suggest_intent` tool — standardized-viewer-control T7). This
   // parser retains ONLY the `citations` branch — citations are
   // metadata on the answer, not a tool surface. The
   // `suggestedIntent` and `proposedSchemaField` fields on the

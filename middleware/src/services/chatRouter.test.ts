@@ -2162,8 +2162,9 @@ describe("Phase 5 — function-calling tool round-trip", () => {
     // `report` step doesn't expose PdfViewer's scoped tools, but it DOES
     // expose the smart-report tool surface (2026-05-29-smart-report-screen
     // Phase 5 — render/edit/pin + section-mutation tools, all scoped to the
-    // `report` step) PLUS the universal/unscoped tools (suggest_intent +
-    // commit_gate / dismiss_gate / book_call).
+    // `report` step) PLUS the universal/unscoped tools (the navigation tools +
+    // commit_gate / dismiss_gate / book_call). standardized-viewer-control T7
+    // retired `suggest_intent` and added show_extraction_edit + show_interact.
     const toolNames = (body.tools as Array<{ function: { name: string } }>)
       .map((t) => t.function.name)
       .sort();
@@ -2188,12 +2189,15 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       "search_documents",
       // onboarding-shell-shared-view Phase 3a — show_extraction lists `report`.
       "show_extraction",
+      // standardized-viewer-control T7 — the schema-edit nav tool is universal.
+      "show_extraction_edit",
       // onboarding-shell-shared-view Phase 3b — show_integrate lists `report`.
       "show_integrate",
+      // standardized-viewer-control T7 — the Interact nav tool is universal.
+      "show_interact",
       "show_smart_report_edit",
       "show_smart_report_render",
       "submit_signup",
-      "suggest_intent",
       "wizard_back",
       "wizard_finish",
       "wizard_next",

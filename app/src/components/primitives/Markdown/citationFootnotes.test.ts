@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Citation } from "@groundx/shared";
 
-import { normalizeForMatch, splitTextRun } from "./citationFootnotes";
+import { anchorWrapOffsets, normalizeForMatch, splitTextRun } from "./citationFootnotes";
 
 /**
  * inline-footnote-citations Phase B — the PURE segmenter that turns a plain-text
@@ -60,5 +60,51 @@ describe("splitTextRun", () => {
 
   it("normalizeForMatch strips markdown emphasis and collapses whitespace", () => {
     expect(normalizeForMatch("the  **$7,613.20**  total")).toBe("the $7,613.20 total");
+  });
+});
+
+/**
+ * standardized-viewer-control T8 — the SAME normalization-tolerant matcher the
+ * citation aligner uses, generalized to return the RAW first-occurrence offsets
+ * of an arbitrary anchor phrase inside a single text run. The remark plugin uses
+ * these offsets to wrap an offered-affordance phrase as inline clickable text.
+ * Returns null when the phrase is not present in this run (→ caller falls back to
+ * a pill so the action is never lost).
+ */
+describe("anchorWrapOffsets", () => {
+  it("returns the raw [start,end) offsets of the first occurrence of the phrase", () => {
+    expect(anchorWrapOffsets("open the report to compare", "the report")).toEqual({
+      start: 5,
+      end: 15,
+    });
+  });
+
+  it("returns only the FIRST occurrence when the phrase repeats", () => {
+    const text = "see the report, then the report again";
+    const off = anchorWrapOffsets(text, "the report");
+    expect(off).toEqual({ start: 4, end: 14 });
+    expect(text.slice(off!.start, off!.end)).toBe("the report");
+  });
+
+  it("returns null when the phrase is absent from the run (→ pill fallback)", () => {
+    expect(anchorWrapOffsets("nothing relevant here", "the report")).toBeNull();
+  });
+
+  it("matches across markdown emphasis + collapsed whitespace, returning the RAW slice that covers the phrase", () => {
+    // The prose bolds the phrase + has doubled spaces; the normalized phrase still
+    // matches and the returned raw offsets cover the literal markdown run.
+    const text = "open  **the report**  now";
+    const off = anchorWrapOffsets(text, "the report");
+    expect(off).not.toBeNull();
+    // The raw slice includes the emphasis markers it spans (so the wrap is contiguous).
+    expect(text.slice(off!.start, off!.end)).toContain("the report");
+  });
+
+  it("is case-insensitive on the normalized comparison", () => {
+    expect(anchorWrapOffsets("Open The Report", "the report")).not.toBeNull();
+  });
+
+  it("returns null for an empty phrase (never wraps the whole run)", () => {
+    expect(anchorWrapOffsets("some text", "")).toBeNull();
   });
 });

@@ -23,7 +23,7 @@
  */
 import { z } from "zod";
 
-import { contentScopeSchema, viewerStepKindSchema, type ViewerStepKind, type WidgetRole } from "@groundx/shared";
+import { contentScopeSchema, offerAsField, viewerStepKindSchema, type ViewerStepKind, type WidgetRole } from "@groundx/shared";
 
 export type { ViewerStepKind, WidgetRole };
 
@@ -342,73 +342,6 @@ const saveToAccount: ServerTool = {
 };
 
 /**
- * widget-llm-integration follow-up A.2 — `suggest_intent` is a
- * server-only catalog entry (no widget owns it). Replaces the
- * legacy fenced-JSON `suggestedIntent` envelope.
- *
- * The LLM emits a tool call with `{ intent, reason, confidence? }`
- * where `intent` is a short canvas-navigation label
- * (`show-extract` / `show-report` / `show-interact`). The chat
- * router surfaces it as a `tool:suggest_intent` chip — the app-
- * side `suggestedActionToIntent` mapper resolves the string label
- * against the active scenario context (which the server doesn't
- * have) into a concrete `CanvasIntent` (e.g. `switchFrame` to f3
- * for `show-extract`).
- *
- * Routing as `mutate` so it surfaces on `suggestedActions[]` for
- * user click confirmation — the chip IS the suggestion. The
- * `intentBuilder` returns the same `switchFrame` mapping the app
- * side uses, as a server-side default. The app's chip handler
- * prefers `detail.arguments.intent` (the string label) over
- * `detail.intent` (the constructed placeholder) for this specific
- * tool, so the mapping stays accurate even if a future scenario
- * needs a different shape.
- */
-const suggestIntent: ServerTool = {
-  name: "suggest_intent",
-  description:
-    "Suggest a canvas navigation the user might want next. Use when " +
-    "you've reasoned that the user's question naturally leads to " +
-    "another surface (\"open the extract to compare line items\", " +
-    "\"check the report for the rollup\"). The chip surfaces the " +
-    "suggestion; the user clicks to navigate.",
-  promptGuidance:
-    "When you've reasoned that the user might want to navigate to another " +
-    "canvas surface, call it with `{intent, reason, confidence}`. Use " +
-    "`show-extract` / `show-report` / `show-interact` for the intent label. " +
-    "Fire only at confidence > 0.8.",
-  category: "mutate",
-  inputSchema: z.object({
-    intent: z
-      .string()
-      .min(1)
-      .describe(
-        "Kebab-case canvas intent label: \"show-extract\" / \"show-report\" / \"show-interact\".",
-      ),
-    reason: z
-      .string()
-      .min(1)
-      .max(200)
-      .describe("Short user-facing reason shown on the chip."),
-    confidence: z
-      .number()
-      .min(0)
-      .max(1)
-      .optional()
-      .describe("Model confidence 0-1; the client may gate chip rendering at a threshold."),
-  }),
-  intentBuilder: (input) => {
-    const frameByLabel: Record<string, "f3" | "f4" | "f5"> = {
-      "show-extract": "f3",
-      "show-report": "f4",
-      "show-interact": "f5",
-    };
-    const frame = frameByLabel[input.intent] ?? "f5";
-    return { kind: "switchFrame", frame };
-  },
-};
-
-/**
  * widget-llm-integration follow-up B.3 — book-call suggested action mirror.
  */
 const bookCall: ServerTool = {
@@ -454,16 +387,76 @@ const showExtraction: ServerTool = {
       .min(1)
       .optional()
       .describe("Optional extraction template id; defaults to the active draft template when omitted."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
   }),
   // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
   // Navigation tools move the user BETWEEN steps; gating them by the step the
   // user is already on defeats their purpose ("go back to extractions" typed
   // on the Integrate step used to get a RAG search because this tool was not
   // offered there). Step-gating remains for step-LOCAL tools only.
+  // The intentBuilder IGNORES `offerAs` (presentation, not a domain arg — it
+  // must never enter the intent).
   intentBuilder: (input) => ({
     kind: "showExtract",
     scope: (input as { scope: unknown }).scope,
     schemaId: (input as { schema_id?: string }).schema_id ?? "draft",
+  }),
+};
+
+// standardized-viewer-control T7 — the `_edit` sibling of `show_extraction`,
+// EXACTLY mirroring `show_smart_report_edit` (the `_edit` sibling of
+// `show_smart_report_render`). Opens the schema DESIGN surface (a sub-position
+// on the extract-workbench step) by emitting `editSchema{schemaId}` — the same
+// CanvasIntent the in-widget "Edit schema" control dispatches. `read`-category
+// navigation, LLM-emittable, so the agent can navigate to OR offer "→ edit this
+// schema" (via `offerAs`). Mirror of the app-side Extract widget tool.
+const showExtractionEdit: ServerTool = {
+  name: "show_extraction_edit",
+  description:
+    "Open the schema editor (the extraction design surface) for a template. Use when the " +
+    "user asks to edit the schema, change which fields are extracted, or you want to surface " +
+    "the field designer for the active extraction.",
+  category: "read",
+  inputSchema: z.object({
+    schema_id: z
+      .string()
+      .min(1)
+      .describe("The extraction template id to open in the schema editor (the active draft when in onboarding)."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (mirrors the other
+  // navigation tools). The intentBuilder IGNORES `offerAs`.
+  intentBuilder: (input) => ({
+    kind: "editSchema",
+    schemaId: (input as { schema_id: string }).schema_id,
+  }),
+};
+
+// standardized-viewer-control T7 — mirror of the app-side Interact navigation
+// tool. Moves the canvas to the Interact (chat-with-sources) surface for a
+// scope; the orchestrator resolves a document from the scope so the
+// interact-chat canvas (the shared PdfViewer) isn't doc-less.
+const showInteractTool: ServerTool = {
+  name: "show_interact",
+  description:
+    "Move the canvas to the Interact surface — the chat-with-sources view over the scope " +
+    "documents. Use when the user asks to chat with or ask questions of the sources, asks to " +
+    "open interact, or you have reasoned a conversational pass over the documents is the natural next surface.",
+  category: "read",
+  inputSchema: z.object({
+    scope: contentScopeSchema.describe(
+      "The ContentScope (documents / bucket+filter / group) the Interact surface chats over — inherited from the surface the user transitioned from.",
+    ),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (mirrors the other
+  // navigation tools). The intentBuilder IGNORES `offerAs`.
+  intentBuilder: (input) => ({
+    kind: "showInteract",
+    scope: (input as { scope: unknown }).scope,
   }),
 };
 
@@ -483,12 +476,15 @@ const showIntegrate: ServerTool = {
     scope: contentScopeSchema.describe(
       "The ContentScope (documents / bucket+filter / group) the user is shipping — inherited from the surface the user transitioned from. The connectors list is scope-independent today, but the scope threads through for context.",
     ),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
   }),
   // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
   // Navigation tools move the user BETWEEN steps; gating them by the step the
   // user is already on defeats their purpose ("go back to extractions" typed
   // on the Integrate step used to get a RAG search because this tool was not
   // offered there). Step-gating remains for step-LOCAL tools only.
+  // The intentBuilder IGNORES `offerAs` (presentation, not a domain arg).
   intentBuilder: (input) => ({
     kind: "showIntegrate",
     scope: (input as { scope: unknown }).scope,
@@ -511,12 +507,15 @@ const showSmartReportRender: ServerTool = {
       .min(1)
       .optional()
       .describe("Optional report template id; defaults to the active draft template when omitted."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
   }),
   // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
   // Navigation tools move the user BETWEEN steps; gating them by the step the
   // user is already on defeats their purpose ("go back to extractions" typed
   // on the Integrate step used to get a RAG search because this tool was not
   // offered there). Step-gating remains for step-LOCAL tools only.
+  // The intentBuilder IGNORES `offerAs` (presentation, not a domain arg).
   intentBuilder: (input) => ({
     kind: "showReport",
     templateId: (input as { template_id?: string }).template_id ?? "draft",
@@ -541,12 +540,15 @@ const showSmartReportEdit: ServerTool = {
       .min(1)
       .optional()
       .describe("Optional section id to pre-select / expand in the builder's row list."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
   }),
   // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
   // Navigation tools move the user BETWEEN steps; gating them by the step the
   // user is already on defeats their purpose ("go back to extractions" typed
   // on the Integrate step used to get a RAG search because this tool was not
   // offered there). Step-gating remains for step-LOCAL tools only.
+  // The intentBuilder IGNORES `offerAs` (presentation, not a domain arg).
   intentBuilder: (input) => ({
     kind: "editTemplate",
     templateId: input.template_id,
@@ -873,7 +875,6 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   proposeSchemaField,
   acceptProposal,
   rejectProposal,
-  suggestIntent,
   commitGate,
   dismissGate,
   // 2026-05-31-shared-canvas-affordance-restoration — gate-open tool (mirror of
@@ -883,6 +884,12 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   // onboarding-shell-shared-view Phase 3a — extract canvas-dispatch tool
   // (mirror of the app-side Extract widget's show_extraction).
   showExtraction,
+  // standardized-viewer-control T7 — the `_edit` sibling opening the schema
+  // design surface (mirror of the app-side Extract widget's show_extraction_edit).
+  showExtractionEdit,
+  // standardized-viewer-control T7 — interact canvas-dispatch tool (mirror of
+  // the app-side Interact navigation tool's show_interact).
+  showInteractTool,
   // onboarding-shell-shared-view Phase 3b — integrate canvas-dispatch tool
   // (mirror of the app-side Integrate widget's show_integrate).
   showIntegrate,

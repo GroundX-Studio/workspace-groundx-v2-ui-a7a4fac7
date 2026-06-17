@@ -24,6 +24,7 @@
     "axios": "^1.6.0",
     "formik": "^2.4.0",
     "framer-motion": "^11.18.2",
+    "mdast-util-from-markdown": "^2.0.3",
     "pdfjs-dist": "^4.10.38",
     "posthog-js": "^1.376.0",
     "react": "^18.2.0",

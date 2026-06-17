@@ -25,7 +25,6 @@ const EXPECTED_NAMES = [
   "propose_schema_field",
   "accept_proposal",
   "reject_proposal",
-  "suggest_intent",
   "commit_gate",
   "dismiss_gate",
   // 2026-05-31-shared-canvas-affordance-restoration — gate-open tool (the chat
@@ -34,6 +33,10 @@ const EXPECTED_NAMES = [
   "book_call",
   // 2026-05-30-onboarding-shell-shared-view Phase 3a — extract canvas-dispatch.
   "show_extraction",
+  // standardized-viewer-control T7 — the `_edit` sibling (schema design surface)
+  // + the Interact navigation tool. `suggest_intent` was retired this phase.
+  "show_extraction_edit",
+  "show_interact",
   // 2026-05-30-onboarding-shell-shared-view Phase 3b — integrate canvas-dispatch.
   "show_integrate",
   // 2026-05-29-smart-report-screen Phase 5 — report tool surface.
@@ -126,9 +129,8 @@ describe("server tool catalog", () => {
   });
 
   it("toolsForStep filters by availableSteps", () => {
-    // doc-viewer step exposes: PdfViewer's 2 tools + ProposeSchemaFieldCard's
-    // 3 + the unscoped (universal) tools suggest_intent + commit_gate /
-    // dismiss_gate / book_call. Names are returned sorted.
+    // doc-viewer step exposes: PdfViewer's 3 tools + ProposeSchemaFieldCard's
+    // 3 + the unscoped (universal) navigation/gate tools. Names returned sorted.
     expect(toolsForStep("doc-viewer").map((t) => t.name).sort()).toEqual(
       [
         "accept_proposal",
@@ -157,16 +159,19 @@ describe("server tool catalog", () => {
         // onboarding-shell-shared-view Phase 3a — show_extraction is reachable
         // from the doc-viewer (the user can ask to see the extraction).
         "show_extraction",
+        // standardized-viewer-control T7 — the schema-edit nav tool is universal.
+        "show_extraction_edit",
         // onboarding-shell-shared-view Phase 3b — show_integrate is reachable
         // from the doc-viewer (the user can ask to ship/integrate).
         "show_integrate",
+        // standardized-viewer-control T7 — the Interact nav tool is universal.
+        "show_interact",
         // 2026-06-11 — canvas-navigation tools are universal; the builder is
         // now reachable from anywhere ("edit the report" from the doc-viewer).
         "show_smart_report_edit",
         "show_smart_report_render",
         // tool-system-completion — sign-up submit is universal (no step filter).
         "submit_signup",
-        "suggest_intent",
         "wizard_back",
         "wizard_finish",
         "wizard_next",
@@ -195,12 +200,15 @@ describe("server tool catalog", () => {
       "search_documents",
       // onboarding-shell-shared-view Phase 3a — show_extraction lists `report`.
       "show_extraction",
+      // standardized-viewer-control T7 — the schema-edit nav tool is universal.
+      "show_extraction_edit",
       // onboarding-shell-shared-view Phase 3b — show_integrate lists `report`.
       "show_integrate",
+      // standardized-viewer-control T7 — the Interact nav tool is universal.
+      "show_interact",
       "show_smart_report_edit",
       "show_smart_report_render",
       "submit_signup",
-      "suggest_intent",
       "wizard_back",
       "wizard_finish",
       "wizard_next",
@@ -216,6 +224,9 @@ describe("server tool catalog", () => {
   it("every canvas-navigation show_* tool is available from EVERY step", () => {
     const NAV_TOOLS = [
       "show_extraction",
+      // standardized-viewer-control T7 — the `_edit` sibling + Interact nav tool.
+      "show_extraction_edit",
+      "show_interact",
       "show_integrate",
       "show_smart_report_render",
       "show_smart_report_edit",

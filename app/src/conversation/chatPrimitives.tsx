@@ -27,6 +27,7 @@ import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaF
 import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
 import { Markdown } from "@/components/primitives/Markdown/Markdown";
+import { consumedAnchorKeys } from "@/components/primitives/Markdown/remarkClickableSpans";
 import type { LiveTurn } from "./useConversation";
 
 import {
@@ -185,13 +186,39 @@ export function LiveTurnList({
             {turn.content}
           </UserBubble>
         ) : (
+          (() => {
+            // standardized-viewer-control T8 — partition the offered actions into
+            // inline anchors vs. pills with the SAME walk the Markdown render uses
+            // (`consumedAnchorKeys`), so the two agree by construction and a
+            // not-found / no-anchor / non-navigation action always falls back to a
+            // pill (never lost). Only `tool:`-keyed navigation offers with an
+            // `anchor` are inline-eligible; mutate + UI-driven actions stay pills.
+            const anchorRules = (turn.suggestedActions ?? [])
+              .filter((a) => a.key.startsWith("tool:") && typeof a.anchor === "string" && a.anchor.length > 0)
+              .map((a) => ({ key: a.key, phrase: a.anchor as string }));
+            const placedKeys = anchorRules.length > 0 ? consumedAnchorKeys(turn.content, anchorRules) : new Set<string>();
+            const inlineActions = (turn.suggestedActions ?? []).filter((a) => placedKeys.has(a.key));
+            const pillActions = (turn.suggestedActions ?? []).filter((a) => !placedKeys.has(a.key));
+            const activateByKey = (key: string): void => {
+              const action = inlineActions.find((a) => a.key === key);
+              if (action) onSuggestedAction(action, turn.citations);
+            };
+            return (
           <Stack key={turn.id} spacing={1}>
             {turn.content.trim().length > 0 && (
               <BotBubble testid="chat-live-assistant">
                 {/* inline-footnote-citations — pass citations so inline `[N]` tokens
                     render as footnote markers. Empty while streaming → inert `[N]`
-                    text; populated on the envelope → clickable markers. */}
-                <Markdown citations={turn.citations}>{turn.content}</Markdown>
+                    text; populated on the envelope → clickable markers.
+                    standardized-viewer-control T8 — `offeredActions` wrap an
+                    offered navigation phrase as inline clickable prose. */}
+                <Markdown
+                  citations={turn.citations}
+                  offeredActions={inlineActions.length > 0 ? inlineActions : undefined}
+                  onAffordanceActivate={activateByKey}
+                >
+                  {turn.content}
+                </Markdown>
               </BotBubble>
             )}
             {/* agentic-tool-loop — muted "what the agent consulted" annotation
@@ -212,14 +239,14 @@ export function LiveTurnList({
                 replaces the flat wall of numbered chips; the inline `[N]` markers
                 in the answer prose (above) are the per-claim affordance. */}
             {(turn.citations?.length ?? 0) > 0 && <SourceList citations={turn.citations!} />}
-            {turn.suggestedActions && turn.suggestedActions.length > 0 && (
+            {pillActions.length > 0 && (
               <Stack
                 direction="row"
                 alignItems="center"
                 sx={{ pl: 0.25, columnGap: 0.75, rowGap: 0.5, flexWrap: "wrap" }}
               >
                 <SuggestedActionChips
-                  actions={turn.suggestedActions}
+                  actions={pillActions}
                   role={role}
                   scope={{ type: "none" }}
                   onAction={(action) => onSuggestedAction(action, turn.citations)}
@@ -255,6 +282,8 @@ export function LiveTurnList({
               />
             )}
           </Stack>
+            );
+          })()
         ),
       )}
       {showThinking && (

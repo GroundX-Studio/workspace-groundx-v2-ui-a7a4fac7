@@ -278,6 +278,14 @@ function checkOneTool(tool) {
     for (const f of fields) {
       const keyMatch = f.match(/^\s*([a-zA-Z_][\w]*)\s*:/);
       if (!keyMatch) continue;
+      // standardized-viewer-control T7 — the optional `offerAs` disposition is
+      // the ONE shared `offerAsField` Zod node (imported identically app+server
+      // for full-shape parity); its top-level `.describe()` lives on that
+      // constant in `@groundx/shared`, not inline here. Accept the bare
+      // constant reference as describe-covered (the textual gate can't follow
+      // the import). Any OTHER value for the field still requires an inline
+      // `.describe(...)`.
+      if (/^\s*offerAs\s*:\s*offerAsField\s*,?\s*$/.test(f)) continue;
       if (!/\.describe\s*\(\s*["'`]/.test(f)) {
         failures.push({
           tool: name,

@@ -282,3 +282,140 @@ describe("callGroundedLlm streaming (chat-response-streaming P1.1)", () => {
     expect(res.answer).toBe("plain");
   });
 });
+
+/**
+ * standardized-viewer-control T7 — `offerAs` disposition routing.
+ *
+ * A navigation tool call carrying the optional `offerAs` disposition is NOT
+ * auto-dispatched: the pipeline builds the intent via the tool's intentBuilder
+ * (which IGNORES `offerAs`) and surfaces it as an OFFERED `suggestedActions`
+ * entry (a clickable chip / inline anchor) the USER triggers. Absence keeps
+ * today's behavior (read navigation auto-dispatches on `intents[]`).
+ */
+describe("offerAs disposition (standardized-viewer-control T7)", () => {
+  function groundxWithHit(): GroundXClient {
+    return {
+      forward: vi.fn(async () =>
+        jsonOk({ search: { results: [{ documentId: "d1", pageNumber: 1, text: "the bill total is $214.07" }] } }),
+      ),
+    };
+  }
+  function llmEmittingToolCall(name: string, args: Record<string, unknown>): LlmClient {
+    return {
+      forward: vi.fn(async () =>
+        jsonOk({
+          choices: [
+            {
+              message: {
+                content: "Here is the answer.",
+                tool_calls: [
+                  { id: "call_1", type: "function", function: { name, arguments: JSON.stringify(args) } },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+    };
+  }
+  const deps = (llmClient: LlmClient, groundxClient: GroundXClient) => ({
+    llmClient,
+    groundxClient,
+    groundxApiKey: "k",
+    samplesBucketId: 42,
+    llmModelId: "test-model",
+    wordMapFetch: async () => null,
+  });
+
+  it("a navigation tool WITHOUT offerAs auto-dispatches on intents[] (today's behavior)", async () => {
+    const reply = await runRagPipeline(
+      makeRequest(),
+      deps(
+        llmEmittingToolCall("show_extraction", { scope: { type: "documents", documentIds: ["d1"] } }),
+        groundxWithHit(),
+      ),
+    );
+    const kinds = reply.intents.map((i) => (i.intent as { kind?: string }).kind);
+    expect(kinds).toContain("showExtract");
+    // No offered chip surfaced.
+    expect(reply.suggestedActions.some((a) => a.key === "tool:show_extraction")).toBe(false);
+  });
+
+  it("a navigation tool WITH offerAs surfaces an offered suggestedActions entry instead of auto-dispatching", async () => {
+    const reply = await runRagPipeline(
+      makeRequest(),
+      deps(
+        llmEmittingToolCall("show_extraction", {
+          scope: { type: "documents", documentIds: ["d1"] },
+          offerAs: { label: "→ open the extract" },
+        }),
+        groundxWithHit(),
+      ),
+    );
+    // NOT auto-dispatched.
+    const kinds = reply.intents.map((i) => (i.intent as { kind?: string }).kind);
+    expect(kinds).not.toContain("showExtract");
+    // Offered as a chip with the offer's label + the built intent on detail.
+    const chip = reply.suggestedActions.find((a) => a.key === "tool:show_extraction");
+    expect(chip).toBeDefined();
+    expect(chip!.label).toBe("→ open the extract");
+    expect((chip!.detail?.intent as { kind?: string } | undefined)?.kind).toBe("showExtract");
+  });
+
+  it("the built intent NEVER carries offerAs (presentation, not a domain arg)", async () => {
+    const reply = await runRagPipeline(
+      makeRequest(),
+      deps(
+        llmEmittingToolCall("show_integrate", {
+          scope: { type: "documents", documentIds: ["d1"] },
+          offerAs: { label: "→ integrate this" },
+        }),
+        groundxWithHit(),
+      ),
+    );
+    const chip = reply.suggestedActions.find((a) => a.key === "tool:show_integrate");
+    expect(chip).toBeDefined();
+    expect(chip!.detail?.intent).not.toHaveProperty("offerAs");
+  });
+
+  it("offerAs carries an optional inline anchor onto the offered entry", async () => {
+    const reply = await runRagPipeline(
+      makeRequest(),
+      deps(
+        llmEmittingToolCall("show_smart_report_render", {
+          scope: { type: "documents", documentIds: ["d1"] },
+          offerAs: { label: "→ see the report", anchor: "the report" },
+        }),
+        groundxWithHit(),
+      ),
+    );
+    const chip = reply.suggestedActions.find((a) => a.key === "tool:show_smart_report_render");
+    expect(chip).toBeDefined();
+    expect(chip!.anchor).toBe("the report");
+  });
+
+  it("a UI-only navigation tool (open_document) drops an unexpected offerAs key and still auto-dispatches", async () => {
+    // open_document's schema does NOT declare offerAs — Zod strips the unknown
+    // key, so there is no offered chip; the read navigation auto-dispatches.
+    const reply = await runRagPipeline(
+      makeRequest(),
+      deps(
+        llmEmittingToolCall("open_document", { documentId: "d1", offerAs: { label: "→ nope" } }),
+        groundxWithHit(),
+      ),
+    );
+    expect(reply.suggestedActions.some((a) => a.key === "tool:open_document")).toBe(false);
+    const kinds = reply.intents.map((i) => (i.intent as { kind?: string }).kind);
+    expect(kinds).toContain("highlightCitation");
+  });
+
+  it("show_extraction_edit emits an editSchema intent (the schema design surface)", async () => {
+    const reply = await runRagPipeline(
+      makeRequest(),
+      deps(llmEmittingToolCall("show_extraction_edit", { schema_id: "tmpl-1" }), groundxWithHit()),
+    );
+    const intent = reply.intents.map((i) => i.intent as { kind?: string; schemaId?: string }).find((i) => i.kind === "editSchema");
+    expect(intent).toBeDefined();
+    expect(intent!.schemaId).toBe("tmpl-1");
+  });
+});

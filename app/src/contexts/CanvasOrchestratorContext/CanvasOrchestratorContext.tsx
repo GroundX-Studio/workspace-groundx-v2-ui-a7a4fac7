@@ -463,15 +463,13 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
           }
           break;
         // 2026-06-10 formerly-silent kinds — a live-canvas audit found these
-        // four dispatching (intent_log row written) with NO registered adapter
-        // in the production tree, i.e. silent no-ops. switchFrame was the
-        // critical gap: the middleware `suggest_intent` tool emits it, so the
-        // LLM could dispatch it and the canvas never moved. Each now routes to
-        // the SAME mutator the on-screen control calls (no parallel path),
+        // kinds dispatching (intent_log row written) with NO registered adapter
+        // in the production tree, i.e. silent no-ops. Each now routes to the
+        // SAME mutator the on-screen control calls (no parallel path),
         // soft-failing in the steady tree like the other onboarding cases.
-        case "switchFrame":
-          if (onboardingSession) onboardingSession.advanceFrame(intent.frame);
-          break;
+        // (standardized-viewer-control T7 retired the `switchFrame` kind + its
+        // `suggest_intent` source — per-destination navigation intents
+        // (`showExtract`/`showReport`/`showInteract`/`showIntegrate`) replace it.)
         // standardized-viewer-control T5 (R7) — `showSample` is EXPLICITLY
         // ONBOARDING-SCOPED: it activates a demo sample via the SAME
         // `pickScenario` the F1 Ingest picker calls (idempotent on an

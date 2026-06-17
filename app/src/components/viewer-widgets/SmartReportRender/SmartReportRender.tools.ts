@@ -17,7 +17,7 @@
  */
 import { z } from "zod";
 
-import { contentScopeSchema } from "@groundx/shared";
+import { contentScopeSchema, offerAsField } from "@groundx/shared";
 
 import type { WidgetTool } from "@/tools/types";
 import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
@@ -38,6 +38,8 @@ const showSmartReportRender: WidgetTool = {
       .min(1)
       .optional()
       .describe("Optional report template id; defaults to the active draft template when omitted."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
   }),
   // Canvas-NAVIGATION tool — universal, NO availableSteps (Task 7 mirrors the
   // 2026-06-11 server-side decision: navigation tools move the user BETWEEN

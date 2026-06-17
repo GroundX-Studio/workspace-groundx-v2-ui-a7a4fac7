@@ -24,10 +24,10 @@ import { type FC, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { Citation } from "@groundx/shared";
+import type { Citation, SuggestedAction } from "@groundx/shared";
 
 import { CiteChip, citationColor } from "@/components/brand/CiteChip/CiteChip";
-import { remarkCitationMarkers } from "./remarkCitationMarkers";
+import { remarkClickableSpans, type AnchorRule } from "./remarkClickableSpans";
 
 import {
   BODY_TEXT,
@@ -45,9 +45,23 @@ export interface MarkdownProps {
   /**
    * inline-footnote-citations — when present, inline `[N]` tokens in the prose
    * render as footnote `CiteChip`s bound to `citations[N-1]` (see
-   * `remarkCitationMarkers`). Absent → the render is byte-identical to before.
+   * `remarkClickableSpans`). Absent → the render is byte-identical to before.
    */
   citations?: Citation[];
+  /**
+   * standardized-viewer-control T8 — offered navigation affordances that MAY
+   * bind inline. Only entries with an `anchor` whose phrase is FOUND in the prose
+   * render here (first occurrence, as inline clickable text); everything else —
+   * no anchor, phrase-not-found, mutate/UI-driven — renders as a pill by the host
+   * (`LiveTurnList`), so an action is never lost. Absent → no anchor wrapping.
+   */
+  offeredActions?: SuggestedAction[];
+  /**
+   * Called with the activated action's `key` when an inline anchor is clicked.
+   * The host translates it into an orchestrator dispatch (navigation, source
+   * `"user"`) via the SAME `suggestedActionToIntent` path the pills use.
+   */
+  onAffordanceActivate?: (key: string) => void;
 }
 
 /** Anchor override — every link opens safely in a new tab. */
@@ -58,13 +72,20 @@ const SafeLink: FC<{ href?: string; children?: ReactNode }> = ({ href, children 
 );
 
 /**
- * The `sup` `components` override used only when `citations` are passed: the
- * remark plugin emits each `[N]` marker as a `sup` carrying `data-cite-pos` /
- * `data-cite-index`, which we render as the footnote `CiteChip`. Markdown never
- * emits a `sup` on its own (raw HTML is disabled), so overriding it is safe; a
- * marker whose data is missing/out-of-range falls back to a plain `<sup>`.
+ * The `components` overrides used when `citations` and/or offered anchors are
+ * passed. The remark plugin emits:
+ *   • each `[N]` marker as a `sup` carrying `data-cite-pos` / `data-cite-index`,
+ *     rendered as the footnote `CiteChip`;
+ *   • each wrapped anchor as a `span` carrying `data-affordance-key`, rendered as
+ *     an inline clickable that calls `onAffordanceActivate(key)`.
+ * Markdown never emits a `sup` (raw HTML is disabled) and never emits a `span`
+ * with `data-affordance-key`, so overriding them is safe; a node whose data is
+ * missing/out-of-range falls back to a plain element.
  */
-function makeCitationComponents(citations: Citation[]): Components {
+function makeClickableComponents(
+  citations: Citation[],
+  onAffordanceActivate?: (key: string) => void,
+): Components {
   return {
     a: SafeLink,
     sup: ({ node, children }) => {
@@ -76,13 +97,58 @@ function makeCitationComponents(citations: Citation[]): Components {
       // Same index/confidence-keyed color as the SourceList pill (one shared rule).
       return <CiteChip citation={citation} index={idx} variant="footnote" color={citationColor(idx, citation)} />;
     },
+    span: ({ node, children }) => {
+      const props = (node?.properties ?? {}) as Record<string, unknown>;
+      const key = props["dataAffordanceKey"] ?? props["data-affordance-key"];
+      if (typeof key !== "string") return <span>{children}</span>;
+      // An inline clickable affordance: a button so it stays keyboard-accessible;
+      // dispatch is the host's job (it owns navigation + `source: "user"`).
+      return (
+        <Box
+          component="button"
+          type="button"
+          data-testid={`affordance-anchor-${key}`}
+          data-affordance-key={key}
+          onClick={() => onAffordanceActivate?.(key)}
+          sx={{
+            appearance: "none",
+            font: "inherit",
+            p: 0,
+            border: "none",
+            background: "none",
+            color: NAVY,
+            fontWeight: FONT_WEIGHT_HEADLINE,
+            textDecoration: "underline",
+            textUnderlineOffset: "2px",
+            cursor: "pointer",
+            "&:hover": { textDecorationThickness: "2px" },
+            "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
+          }}
+        >
+          {children}
+        </Box>
+      );
+    },
   };
 }
 
-export const Markdown: FC<MarkdownProps> = ({ children, citations }) => {
-  const hasCitations = Array.isArray(citations) && citations.length > 0;
-  const remarkPlugins = hasCitations ? [remarkGfm, remarkCitationMarkers(citations)] : [remarkGfm];
-  const components: Components = hasCitations ? makeCitationComponents(citations) : { a: SafeLink };
+/** Offered actions with a non-empty `anchor` → the remark plugin's anchor rules. */
+function anchorRulesFrom(offeredActions: SuggestedAction[] | undefined): AnchorRule[] {
+  return (offeredActions ?? [])
+    .filter((a): a is SuggestedAction & { anchor: string } => typeof a.anchor === "string" && a.anchor.length > 0)
+    .map((a) => ({ key: a.key, phrase: a.anchor }));
+}
+
+export const Markdown: FC<MarkdownProps> = ({ children, citations, offeredActions, onAffordanceActivate }) => {
+  const cites = Array.isArray(citations) ? citations : [];
+  const anchors = anchorRulesFrom(offeredActions);
+  const hasClickable = cites.length > 0 || anchors.length > 0;
+  const remarkPlugins = hasClickable
+    ? [remarkGfm, remarkClickableSpans({ citations: cites, anchors })]
+    : [remarkGfm];
+  const components: Components = hasClickable
+    ? makeClickableComponents(cites, onAffordanceActivate)
+    : { a: SafeLink };
   return (
   <Box
     data-testid="markdown"

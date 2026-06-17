@@ -16,7 +16,7 @@
  */
 import { z } from "zod";
 
-import { contentScopeSchema } from "@groundx/shared";
+import { contentScopeSchema, offerAsField } from "@groundx/shared";
 
 import type { WidgetTool } from "@/tools/types";
 import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
@@ -33,6 +33,8 @@ const showIntegrate: WidgetTool = {
     scope: contentScopeSchema.describe(
       "The ContentScope (documents / bucket+filter / group) the user is shipping — inherited from the surface the user transitioned from. The connectors list is scope-independent today, but the scope threads through for context.",
     ),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
   }),
   // Canvas-NAVIGATION tool — universal, NO availableSteps (Task 7 mirrors the
   // 2026-06-11 server-side decision: navigation tools move the user BETWEEN

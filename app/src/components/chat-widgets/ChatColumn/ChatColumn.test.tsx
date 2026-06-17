@@ -1240,7 +1240,11 @@ describe("ChatColumn", () => {
               detail: {
                 name: "accept_proposal",
                 arguments: { fieldId: "f-1" },
-                intent: { kind: "switchFrame", frame: "f3" },
+                // standardized-viewer-control T7 — the chip carries the
+                // server-validated CanvasIntent on detail.intent; this test
+                // exercises the generic tool:<name> dispatch mechanism with a
+                // surviving navigation kind (switchFrame was retired this phase).
+                intent: { kind: "showInteract", scope: { type: "documents", documentIds: ["d1"] } },
               },
             },
           ],
@@ -1256,7 +1260,7 @@ describe("ChatColumn", () => {
         const { registerAdapter } = useCanvasOrchestrator();
         useEffect(() => {
           return registerAdapter({
-            kind: "switchFrame",
+            kind: "showInteract",
             apply: (intent) => {
               dispatched.push(intent);
             },
@@ -1283,10 +1287,15 @@ describe("ChatColumn", () => {
       await waitFor(() => {
         expect(dispatched.length).toBeGreaterThan(0);
       });
-      expect(dispatched[0]).toMatchObject({ kind: "switchFrame", frame: "f3" });
+      expect(dispatched[0]).toMatchObject({ kind: "showInteract" });
     });
 
-    it("clicking the high-confidence suggested-intent chip dispatches a CanvasIntent via the orchestrator", async () => {
+    // standardized-viewer-control T7 — an OFFERED navigation chip (a navigation
+    // tool call carrying `offerAs`) arrives as a `tool:<name>` entry with its
+    // built CanvasIntent on detail.intent, and clicking it dispatches that
+    // intent through the orchestrator. This is the successor to the retired
+    // legacy `suggested-intent` string-label chip.
+    it("clicking an offered tool: navigation chip dispatches its detail.intent via the orchestrator", async () => {
       sendChatMessage.mockResolvedValueOnce({
         userMessageId: "u-si",
         assistantMessageId: "a-si",
@@ -1297,9 +1306,17 @@ describe("ChatColumn", () => {
           suggestedActions: [
             { key: "show-source", label: "Show source" },
             {
-              key: "suggested-intent",
+              key: "tool:show_extraction",
               label: "Open the extract to compare line items",
-              detail: { intent: "show-extract", confidence: 0.91 },
+              detail: {
+                name: "show_extraction",
+                arguments: { scope: { type: "documents", documentIds: ["d1"] }, schema_id: "draft" },
+                intent: {
+                  kind: "showExtract",
+                  scope: { type: "documents", documentIds: ["d1"] },
+                  schemaId: "draft",
+                },
+              },
             },
           ],
           intents: [],
@@ -1314,7 +1331,7 @@ describe("ChatColumn", () => {
         const { registerAdapter } = useCanvasOrchestrator();
         useEffect(() => {
           return registerAdapter({
-            kind: "switchFrame",
+            kind: "showExtract",
             apply: (intent) => {
               dispatched.push(intent);
             },
@@ -1333,15 +1350,15 @@ describe("ChatColumn", () => {
       await user.click(screen.getByTestId("chat-live-send"));
 
       await waitFor(() => {
-        expect(screen.getByTestId("suggested-action-chip-suggested-intent")).toBeInTheDocument();
+        expect(screen.getByTestId("suggested-action-chip-tool:show_extraction")).toBeInTheDocument();
       });
 
-      await user.click(screen.getByTestId("suggested-action-chip-suggested-intent"));
+      await user.click(screen.getByTestId("suggested-action-chip-tool:show_extraction"));
 
       await waitFor(() => {
         expect(dispatched.length).toBeGreaterThan(0);
       });
-      expect(dispatched[0]).toMatchObject({ kind: "switchFrame", frame: "f3" });
+      expect(dispatched[0]).toMatchObject({ kind: "showExtract", schemaId: "draft" });
     });
 
     // Empty-bubble guard (2026-05-28). An empty answer with chips must

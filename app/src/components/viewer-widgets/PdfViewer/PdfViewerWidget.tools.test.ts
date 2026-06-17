@@ -5,6 +5,9 @@
  *
  *   • `open_document` (read) — opens/highlights a cited document
  *   • `jump_to_page` (read) — jumps the active viewer to a page
+ *   • `show_interact` (read) — moves the canvas to the Interact surface
+ *     (standardized-viewer-control T7; the interact-chat canvas mounts this
+ *     widget's doc-viewer canvas, so the navigation tool lives here).
  *
  * The tests exercise the app-side metadata and Zod schemas. Executable
  * CanvasIntent construction lives in the middleware `SERVER_TOOL_CATALOG`.
@@ -16,9 +19,33 @@ import { tools } from "./PdfViewerWidget.tools";
 const byName = (name: string) => tools.find((t) => t.name === name)!;
 
 describe("PdfViewer tools", () => {
-  it("declares the two expected tools", () => {
+  it("declares the expected tools", () => {
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["jump_to_page", "open_document"]);
+    expect(names).toEqual(["jump_to_page", "open_document", "show_interact"]);
+  });
+
+  describe("show_interact", () => {
+    const tool = byName("show_interact");
+
+    it("is a read-category, universal (no availableSteps) navigation tool", () => {
+      expect(tool.category).toBe("read");
+      // Navigation tools move BETWEEN steps — universal, no step gating.
+      expect(tool.availableSteps).toBeUndefined();
+    });
+
+    it("Zod schema accepts a documents scope + optional offerAs", () => {
+      expect(tool.input.safeParse({ scope: { type: "documents", documentIds: ["d1"] } }).success).toBe(true);
+      expect(
+        tool.input.safeParse({
+          scope: { type: "documents", documentIds: ["d1"] },
+          offerAs: { label: "→ open interact" },
+        }).success,
+      ).toBe(true);
+    });
+
+    it("Zod schema requires a scope", () => {
+      expect(tool.input.safeParse({}).success).toBe(false);
+    });
   });
 
   describe("open_document", () => {

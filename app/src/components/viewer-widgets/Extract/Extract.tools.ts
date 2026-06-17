@@ -17,7 +17,7 @@
  */
 import { z } from "zod";
 
-import { contentScopeSchema } from "@groundx/shared";
+import { contentScopeSchema, offerAsField } from "@groundx/shared";
 
 import type { WidgetTool } from "@/tools/types";
 import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
@@ -38,13 +38,40 @@ const showExtraction: WidgetTool = {
       .min(1)
       .optional()
       .describe("Optional extraction template id; defaults to the active draft template when omitted."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
   }),
   // Canvas-NAVIGATION tool — universal, NO availableSteps (Task 7 mirrors the
   // 2026-06-11 server-side decision: navigation tools move the user BETWEEN
   // steps; gating them by the current step defeats their purpose).
 };
 
-export const tools: WidgetTool[] = [showExtraction];
+// standardized-viewer-control T7 — the `_edit` sibling of `show_extraction`,
+// mirroring `show_smart_report_edit` (the `_edit` sibling of
+// `show_smart_report_render`). Opens the schema DESIGN surface (the
+// `surface: "design"` sub-position on the extract-workbench step) by emitting
+// `editSchema{schemaId}` — the same intent the in-widget "Edit schema" control
+// dispatches. `read`-category navigation; offer-eligible via `offerAs`.
+const showExtractionEdit: WidgetTool = {
+  name: "show_extraction_edit",
+  description:
+    "Open the schema editor (the extraction design surface) for a template. Use when the " +
+    "user asks to edit the schema, change which fields are extracted, or you want to surface " +
+    "the field designer for the active extraction.",
+  category: "read",
+  input: z.object({
+    schema_id: z
+      .string()
+      .min(1)
+      .describe("The extraction template id to open in the schema editor (the active draft when in onboarding)."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (mirrors the other
+  // navigation tools).
+};
+
+export const tools: WidgetTool[] = [showExtraction, showExtractionEdit];
 
 /**
  * ScopedViewerWidget descriptor for the extraction workbench — the

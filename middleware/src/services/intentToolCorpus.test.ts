@@ -77,9 +77,11 @@ const TOOL_ARGS: Record<string, Record<string, unknown>> = {
   commit_gate: { method: "register" },
   dismiss_gate: {},
   save_to_account: {},
-  suggest_intent: { intent: "show-extract", reason: "Move to the extraction workbench." },
   book_call: {},
   show_extraction: { scope: { type: "documents", documentIds: ["doc-1"] }, schema_id: "schema-1" },
+  // standardized-viewer-control T7 — the new navigation tools.
+  show_extraction_edit: { schema_id: "schema-1" },
+  show_interact: { scope: { type: "documents", documentIds: ["doc-1"] } },
   show_integrate: { scope: { type: "documents", documentIds: ["doc-1"] } },
   show_smart_report_render: { scope: { type: "documents", documentIds: ["doc-1"] }, template_id: "tmpl-1" },
   show_smart_report_edit: { template_id: "tmpl-1" },

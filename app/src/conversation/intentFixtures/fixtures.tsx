@@ -170,11 +170,6 @@ export const intentFixtures: IntentFixture[] = [
   },
   // Emittable adapter kinds → via:reply (P4).
   {
-    kind: "switchFrame",
-    trigger: { via: "reply", reply: replyWithIntent("suggest_intent", { kind: "switchFrame", frame: "f3" }) },
-    assert: (s) => assert(s.adapterCapturedKind === "switchFrame", `captured ${s.adapterCapturedKind}`),
-  },
-  {
     kind: "submitSignup",
     trigger: {
       via: "reply",

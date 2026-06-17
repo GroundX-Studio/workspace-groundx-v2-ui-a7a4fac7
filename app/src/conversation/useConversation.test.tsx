@@ -270,6 +270,59 @@ describe("useConversation (durable engine)", () => {
     await waitFor(() => expect(screen.getByTestId("lit-count")).toHaveTextContent("2"));
   });
 
+  // standardized-viewer-control T8 — a clicked offered navigation action (pill OR
+  // inline anchor, same path) dispatches through the orchestrator with
+  // `source: "user"` (the user triggered it; the agent only OFFERED it). The
+  // durable intent_log row carries the source, so we assert it there.
+  it("dispatches a clicked offered navigation action with source:\"user\"", async () => {
+    const recordIntent = vi.fn().mockResolvedValue(undefined);
+    function OfferProbe() {
+      const { state } = useChatStore();
+      const sid = state.activeSessionId;
+      const conv = useConversation(sid);
+      return (
+        <div>
+          <div data-testid="probe-session-id">{sid ?? "none"}</div>
+          <button
+            data-testid="click-offer"
+            onClick={() =>
+              conv.handleSuggestedAction({
+                key: "tool:show_smart_report_render",
+                label: "Open the report",
+                detail: { name: "show_smart_report_render", intent: { kind: "showReport" } },
+              })
+            }
+          >
+            offer
+          </button>
+        </div>
+      );
+    }
+
+    renderWithOnboardingProviders(<OfferProbe />, {
+      initialFrame: "f5",
+      initialScenario: "utility",
+      api: {
+        chat: { sendChatMessage, listChatMessages },
+        intent: { recordIntent },
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("probe-session-id")).not.toHaveTextContent("none");
+    });
+
+    await act(async () => {
+      screen.getByTestId("click-offer").click();
+    });
+
+    await waitFor(() => {
+      expect(recordIntent).toHaveBeenCalled();
+    });
+    expect(recordIntent.mock.calls.some(([arg]) => arg?.source === "user" && arg?.intent?.kind === "showReport")).toBe(
+      true,
+    );
+  });
+
   it("projects agent-prefixed ChatStore messages into liveTurns", async () => {
     function AgentEmitter() {
       const { appendAgentMessage } = useChatStore();

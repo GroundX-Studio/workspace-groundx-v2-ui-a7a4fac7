@@ -22,6 +22,8 @@
  */
 import { z } from "zod";
 
+import { contentScopeSchema, offerAsField } from "@groundx/shared";
+
 import type { WidgetTool } from "@/tools/types";
 import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 
@@ -71,7 +73,30 @@ const jumpToPage: WidgetTool = {
   availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
 };
 
-export const tools: WidgetTool[] = [openDocument, jumpToPage];
+// standardized-viewer-control T7 — the Interact (chat-with-sources) navigation
+// tool. Moves the canvas to the `interact-chat` surface (which mounts THIS
+// widget's `doc-viewer` canvas — see ScopedCanvas's `interact-chat → doc-viewer`
+// mapping). Mirror of the middleware `show_interact`. `read`-category, universal
+// (navigation tools move BETWEEN steps), offer-eligible via `offerAs`.
+const showInteract: WidgetTool = {
+  name: "show_interact",
+  description:
+    "Move the canvas to the Interact surface — the chat-with-sources view over the scope " +
+    "documents. Use when the user asks to chat with or ask questions of the sources, asks to " +
+    "open interact, or you have reasoned a conversational pass over the documents is the natural next surface.",
+  category: "read",
+  input: z.object({
+    scope: contentScopeSchema.describe(
+      "The ContentScope (documents / bucket+filter / group) the Interact surface chats over — inherited from the surface the user transitioned from.",
+    ),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (mirrors the other
+  // navigation tools).
+};
+
+export const tools: WidgetTool[] = [openDocument, jumpToPage, showInteract];
 
 /**
  * ScopedViewerWidget descriptor for the PDF viewer — the `doc-viewer`

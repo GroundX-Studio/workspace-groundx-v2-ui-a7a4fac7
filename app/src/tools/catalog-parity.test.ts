@@ -35,14 +35,14 @@ import { SERVER_TOOL_CATALOG } from "../../../middleware/src/services/toolCatalo
 import type { WidgetRole } from "@groundx/shared";
 
 // Tools that live ONLY on the server (no widget owns them). They have no app
-// mirror by design — `suggest_intent` is the server-side canvas-navigation
-// suggestion (the app resolves the kebab label against scenario context);
-// `lookup_groundx_docs` (agentic-tool-loop) is server-EXECUTED — the middleware
-// runs it inside the grounded tool-result loop and it never reaches the app.
-// `search_documents` (loop-tool-refined-research) is the second such server-only tool.
-// `fetch_document_fields` (loop-tool-secondary-extraction) is the third.
+// mirror by design — all three are server-EXECUTED (the middleware runs them
+// inside the grounded tool-result loop and they never reach the app):
+// `lookup_groundx_docs` (agentic-tool-loop), `search_documents`
+// (loop-tool-refined-research), `fetch_document_fields`
+// (loop-tool-secondary-extraction). (standardized-viewer-control T7 retired the
+// only intent-routed server-only tool, `suggest_intent`; every navigation tool
+// now has an app mirror.)
 const SERVER_ONLY = new Set([
-  "suggest_intent",
   "lookup_groundx_docs",
   "search_documents",
   "fetch_document_fields",
@@ -227,9 +227,10 @@ describe("app↔server tool-catalog parity (NAME + role)", () => {
       expect(declared).toEqual(enumerated);
     });
 
-    // Direction-2, SERVER side: a SERVER-ONLY tool (no app mirror — e.g.
-    // `suggest_intent`) that declares a rendersWidget binding would slip past
-    // the app-only walk above, leaving an unenumerated/unmirrored chat card.
+    // Direction-2, SERVER side: a SERVER-ONLY tool (no app mirror — e.g. the
+    // server-executed `lookup_groundx_docs`) that declares a rendersWidget
+    // binding would slip past the app-only walk above, leaving an
+    // unenumerated/unmirrored chat card.
     // Require every server tool with a binding to also be enumerated in
     // CARD_TOOL_BINDINGS. The mirrored app+server cards already pass via the
     // app walk; this closes the server-only gap. Today this filtered set is

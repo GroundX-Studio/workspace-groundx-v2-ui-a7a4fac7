@@ -197,7 +197,10 @@ export function citationToHighlightIntent(c: Citation): CanvasIntent {
  */
 export function suggestedActionToIntent(action: ChatSuggestedAction): CanvasIntent | null {
   // widget-llm-integration Phase 8 — `tool:<name>` chips carry the
-  // server-validated, server-constructed CanvasIntent on `detail.intent`.
+  // server-validated, server-constructed CanvasIntent on `detail.intent`. This
+  // is the ONE chip path: mutate chips, and (standardized-viewer-control T7)
+  // OFFERED navigation chips (a navigation tool call carrying `offerAs`) both
+  // arrive as `tool:<name>` entries with their built intent on `detail.intent`.
   if (action.key.startsWith("tool:")) {
     const intent = action.detail?.intent;
     if (intent && typeof intent === "object" && typeof (intent as { kind?: unknown }).kind === "string") {
@@ -205,13 +208,10 @@ export function suggestedActionToIntent(action: ChatSuggestedAction): CanvasInte
     }
     return null;
   }
-  // Phase 1 — legacy `suggested-intent` chip with a string intent label.
-  if (action.key === "suggested-intent") {
-    const intent = action.detail?.intent;
-    if (intent === "show-extract") return { kind: "switchFrame", frame: "f3" };
-    if (intent === "show-report") return { kind: "switchFrame", frame: "f4" };
-    if (intent === "show-interact") return { kind: "switchFrame", frame: "f5" };
-  }
+  // standardized-viewer-control T7 — the legacy `suggested-intent` string-label
+  // chip (mapped to the retired `switchFrame` kind) is gone; the middleware no
+  // longer emits it (the `suggest_intent` tool was removed). Navigation is now
+  // per-destination intents carried on `tool:<name>` chips (handled above).
   return null;
 }
 
@@ -323,8 +323,13 @@ export function useConversation(
         }
         return;
       }
+      // standardized-viewer-control T8 — a suggested action is dispatched
+      // because the USER clicked it (a pill OR an inline anchor), so the source
+      // is `"user"`, never `"agent"` (the agent only OFFERED it; design §1.4/§1.5
+      // — anything the user triggers is `source:"user"`). This is the single
+      // dispatch path both the pill and the inline-anchor surface route through.
       const intent = suggestedActionToIntent(action);
-      if (intent) dispatchIntent(intent, "agent");
+      if (intent) dispatchIntent(intent, "user");
     },
     [dispatchIntent],
   );

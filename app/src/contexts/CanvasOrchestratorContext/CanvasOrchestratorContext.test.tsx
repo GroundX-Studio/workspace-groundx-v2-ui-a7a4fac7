@@ -1167,20 +1167,19 @@ describe("CanvasOrchestratorContext", () => {
     });
   });
 
-  // 2026-06-10 — the four previously adapter-registry-only kinds gained
-  // built-in handlers after a live-canvas audit found them dispatching
-  // (POST /api/intent logged) with NO registered adapter anywhere in the
-  // production tree — silent no-ops. switchFrame is the critical one: the
-  // middleware `suggest_intent` tool emits it, so the LLM could dispatch it
-  // and the canvas never moved. Each routes to the SAME mutator the
-  // on-screen control calls (no parallel path):
-  //   switchFrame   → OnboardingSession.advanceFrame(intent.frame)
+  // 2026-06-10 — the previously adapter-registry-only kinds gained built-in
+  // handlers after a live-canvas audit found them dispatching (POST /api/intent
+  // logged) with NO registered adapter anywhere in the production tree — silent
+  // no-ops. Each routes to the SAME mutator the on-screen control calls (no
+  // parallel path):
   //   showSample    → OnboardingSession.pickScenario(intent.scenario)
   //   editSchema    → push/mutate extract-workbench step → surface:"design"
   //                   (T5/R7 — experience-agnostic schema design surface; was
   //                    `advanceFrame("f3a")`, an onboarding-only no-op-in-steady)
   //   openDocument  → ChatStore.gotoDocViewer (mirrors jumpToPage)
-  describe("formerly-silent kinds get built-in handlers (switchFrame / showSample / editSchema / openDocument)", () => {
+  // (standardized-viewer-control T7 retired the `switchFrame` kind + its
+  // `suggest_intent` source — per-destination navigation intents replace it.)
+  describe("formerly-silent kinds get built-in handlers (showSample / editSchema / openDocument)", () => {
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
       withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
         <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
@@ -1191,15 +1190,6 @@ describe("CanvasOrchestratorContext", () => {
     function useBoth() {
       return { orchestrator: useCanvasOrchestrator(), session: useOnboardingSession() };
     }
-
-    it("switchFrame advances the canvas to the dispatched frame (suggest_intent path)", () => {
-      const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
-      expect(result.current.session.state.currentFrame).toBe("f3");
-      act(() => {
-        result.current.orchestrator.dispatch({ kind: "switchFrame", frame: "f5" }, "agent");
-      });
-      expect(result.current.session.state.currentFrame).toBe("f5");
-    });
 
     it("showSample activates the dispatched scenario", () => {
       const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
@@ -1298,14 +1288,13 @@ describe("CanvasOrchestratorContext", () => {
       }
     });
 
-    it("switchFrame / showSample / editSchema are no-ops (no throw) without an OnboardingSessionProvider", () => {
+    it("showSample / editSchema are no-ops (no throw) without an OnboardingSessionProvider", () => {
       const plainWrapper = ({ children }: { children: React.ReactNode }) => (
         withCanvasApi(<CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>)
       );
       const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: plainWrapper });
       expect(() => {
         act(() => {
-          result.current.dispatch({ kind: "switchFrame", frame: "f5" });
           result.current.dispatch({ kind: "showSample", scenario: "utility" });
           result.current.dispatch({ kind: "editSchema", schemaId: "s1" });
         });

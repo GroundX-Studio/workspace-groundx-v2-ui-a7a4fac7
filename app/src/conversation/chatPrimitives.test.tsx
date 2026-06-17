@@ -1,5 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -89,6 +89,128 @@ describe("LiveTurnList — inline footnote citations (Phase E)", () => {
     expect(chips.some((c) => c.getAttribute("data-variant") === "pill")).toBe(true); // source list
     // the single-citation SourceList names the document (no UUID)
     expect(screen.getByTestId("source-list")).toHaveTextContent("utility-bill.pdf");
+  });
+});
+
+// standardized-viewer-control T8 — an OFFERED navigation action that carries an
+// `anchor` renders as inline clickable prose (when its phrase is found) instead
+// of a pill; a not-found anchor falls back to a pill; a no-anchor action is a
+// pill. One `suggestedActions` list; clicking either surface goes through the
+// host's `onSuggestedAction` (→ orchestrator dispatch, `source: "user"`).
+describe("LiveTurnList — offered affordances (inline anchor vs. pill)", () => {
+  const navOffer = (anchor?: string): NonNullable<LiveTurn["suggestedActions"]>[number] => ({
+    key: "tool:show_smart_report_render",
+    label: "Open the report",
+    detail: { name: "show_smart_report_render", intent: { kind: "showReport" } },
+    ...(anchor ? { anchor } : {}),
+  });
+
+  it("renders an inline anchor (NOT a pill) when the anchor phrase is found in the prose", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[
+          assistantTurn({
+            content: "Take a look at the report to compare line items.",
+            suggestedActions: [navOffer("the report")],
+          }),
+        ]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    // inline anchor present in the prose
+    expect(screen.getByTestId("affordance-anchor-tool:show_smart_report_render")).toBeInTheDocument();
+    // and NOT also rendered as a follow-up pill (one list, one surface)
+    expect(
+      screen.queryByTestId("suggested-action-chip-tool:show_smart_report_render"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clicking the inline anchor calls onSuggestedAction with the action (→ orchestrator dispatch)", () => {
+    const onAction = vi.fn();
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[
+          assistantTurn({
+            content: "Open the report to compare.",
+            citations: [{ documentId: "doc-A", page: 2 }],
+            suggestedActions: [navOffer("the report")],
+          }),
+        ]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={onAction}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("affordance-anchor-tool:show_smart_report_render"));
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(onAction.mock.calls[0][0]).toMatchObject({ key: "tool:show_smart_report_render" });
+  });
+
+  it("falls back to a PILL when the anchor phrase is NOT found in the prose (never lost)", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[
+          assistantTurn({
+            content: "This answer has no matching phrase.",
+            suggestedActions: [navOffer("the report")],
+          }),
+        ]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByTestId("affordance-anchor-tool:show_smart_report_render"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("suggested-action-chip-tool:show_smart_report_render"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a no-anchor offered action as a pill", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[
+          assistantTurn({
+            content: "Open the report whenever you like.",
+            suggestedActions: [navOffer()],
+          }),
+        ]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId("suggested-action-chip-tool:show_smart_report_render"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("affordance-anchor-tool:show_smart_report_render"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps a UI-driven action (show-source) as a pill even if it coincidentally matches prose", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[
+          assistantTurn({
+            content: "Open the report and show source if needed.",
+            citations: [{ documentId: "doc-A", page: 2 }],
+            // `show-source` is UI-driven, has no `tool:` key + no anchor → always a pill.
+            suggestedActions: [{ key: "show-source", label: "Show source" }, navOffer("the report")],
+          }),
+        ]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("suggested-action-chip-show-source")).toBeInTheDocument();
+    // the navigation offer with a found anchor still inlines
+    expect(screen.getByTestId("affordance-anchor-tool:show_smart_report_render")).toBeInTheDocument();
   });
 });
 

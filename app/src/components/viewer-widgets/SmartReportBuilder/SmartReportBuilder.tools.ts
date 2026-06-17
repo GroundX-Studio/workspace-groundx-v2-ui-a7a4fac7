@@ -24,6 +24,8 @@
  */
 import { z } from "zod";
 
+import { offerAsField } from "@groundx/shared";
+
 import type { WidgetTool } from "@/tools/types";
 import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 
@@ -44,6 +46,8 @@ const showSmartReportEdit: WidgetTool = {
       .min(1)
       .optional()
       .describe("Optional section id to pre-select / expand in the builder's row list."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
   }),
   // Canvas-NAVIGATION tool — universal, NO availableSteps (Task 7 mirrors the
   // 2026-06-11 server-side decision: navigation tools move the user BETWEEN

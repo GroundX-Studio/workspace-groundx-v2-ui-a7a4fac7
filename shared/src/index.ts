@@ -678,6 +678,20 @@ export const offerAsSchema = z.object({
 });
 export type OfferAs = z.infer<typeof offerAsSchema>;
 
+/**
+ * The ready-made OPTIONAL `offerAs` field node every navigation tool's input
+ * schema spreads in — imported IDENTICALLY by the app `*.tools.ts` and the
+ * middleware `toolCatalog.ts`, so the full-shape JSON-Schema parity holds by
+ * construction (one Zod node, both sides). Carries a top-level `.describe()`
+ * (the `check-tool-quality` Rule 4 textual gate inspects per-field describes;
+ * the nested `label`/`anchor` describes live on `offerAsSchema`).
+ */
+export const offerAsField = offerAsSchema
+  .optional()
+  .describe(
+    "Optional. Set this to OFFER the navigation as a user-clickable suggestion (a chip / inline anchor) instead of auto-moving the canvas — the user, not you, triggers the move. Omit to navigate immediately.",
+  );
+
 // ──────────────────────────────────────────────────────────────────────
 // ProposedSchemaField — 2026-05-31-core-data-followups §4 #18. The
 // `proposal-envelope` wire shape the grounded LLM emits ("add a field for total
@@ -981,8 +995,6 @@ export type CanvasKind = z.infer<typeof canvasKindSchema>;
 // a missing required field or a non-discriminant `kind` IS rejected.
 // ──────────────────────────────────────────────────────────────────────
 
-/** The frame the canvas/shell can switch to (== app `FFrame`). */
-const canvasFrameSchema = z.enum(["f1", "f2", "f3", "f3a", "f4", "f4a", "f5", "f6", "f7"]);
 /** The demo scenario (== app `Scenario`). */
 const canvasScenarioSchema = z.enum(["utility", "loan", "solar"]);
 /** Report-section render mode (shared by propose/edit report-section intents). */
@@ -1046,7 +1058,6 @@ export const canvasIntentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("showReport"), templateId: z.string(), scope: contentScopeSchema }),
   z.object({ kind: z.literal("editTemplate"), templateId: z.string(), selectedSectionId: z.string().optional() }),
   z.object({ kind: z.literal("openGate"), trigger: z.enum(["save", "export", "byo", "threshold"]) }),
-  z.object({ kind: z.literal("switchFrame"), frame: canvasFrameSchema }),
   z.object({
     kind: z.literal("proposeSchemaField"),
     categoryId: z.string(),

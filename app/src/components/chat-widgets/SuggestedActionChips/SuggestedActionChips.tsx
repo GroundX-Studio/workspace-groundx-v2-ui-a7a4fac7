@@ -6,14 +6,12 @@
  * widget-llm-integration Phase 1 (2026-05-27): closes the dark loop
  * where the chat router emitted suggestions and the frontend silently
  * dropped them. Click invokes the host-supplied `onAction(action)`
- * callback; the host translates the action into an orchestrator
- * dispatch (e.g., `suggested-intent` → `switchFrame` for "show-extract").
+ * callback; the host translates the action into an orchestrator dispatch.
  *
- * Phase 3 will retire host-side translation in favor of the declarative
- * tool registry — each action will carry its full `CanvasIntent`
- * payload in `detail.intent` and dispatch via the registry directly.
- * For now the host owns the mapping so we can ship this floor without
- * the full registry.
+ * Each action carries its full server-validated `CanvasIntent` payload on
+ * `detail.intent` (mutate chips + standardized-viewer-control T7's OFFERED
+ * navigation chips); the host's `suggestedActionToIntent` reads it and
+ * dispatches through the orchestrator.
  *
  * Role + scope (2026-05-30-widget-role-access):
  *   • `role: WidgetRole` — authorization, not a chat phase. Per the
