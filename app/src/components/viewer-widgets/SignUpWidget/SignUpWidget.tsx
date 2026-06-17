@@ -61,6 +61,7 @@ import {
 } from "@/constants";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useIsPreIntegrateStage } from "@/components/layout/StepStrip/useJourneyStage";
 import type { GateCause } from "@/contexts/OnboardingSessionContext/types";
 import type { GateTrigger } from "@/types/onboarding";
 
@@ -95,8 +96,6 @@ const SIGNUP_COPY_BY_CAUSE: Record<GateCause, { eyebrow: string; title: string; 
   },
 };
 
-const PRE_INTEGRATE_FRAMES = new Set(["f1", "f2", "f3", "f3a", "f4", "f4a", "f5", "f6"]);
-
 export interface SignUpWidgetProps {
   /**
    * Widget access role (widget contract). Forward-looking — does NOT
@@ -126,7 +125,12 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({
 }) => {
   const api = useApi();
   const { promoteToSignedIn } = useAppMode();
-  const { state: session, commitGate, advanceFrame } = useOnboardingSession();
+  const { state: session, commitGate } = useOnboardingSession();
+  // 2026-05-31-tool-system-completion (wf04 §1) — the orchestrator is the seam
+  // for BOTH the `submit_signup` adapter (registered in an effect below) AND the
+  // standardized-viewer-control T6 "Continue to Integrate" dispatch. Soft-optional
+  // so a standalone mount (no provider) degrades to a no-op.
+  const orchestrator = useCanvasOrchestratorOptional();
   // RE-SOURCED gate behavior: a gate is "awaiting commit" when it is open
   // or was dismissed (re-openable). We commit it on a successful register
   // so the viewer flips to its committed state. When idle, registering
@@ -153,7 +157,11 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({
       ? session.gate.cause
       : undefined;
   const copy = gateCause ? SIGNUP_COPY_BY_CAUSE[gateCause] : SIGNUP_COPY[trigger];
-  const canContinueToIntegrate = PRE_INTEGRATE_FRAMES.has(session.currentFrame);
+  // standardized-viewer-control T6 — the committed "Continue" CTA is gated on the
+  // active viewer step's journey stage (the step-based successor to the legacy
+  // `PRE_INTEGRATE_FRAMES.has(currentFrame)` read): it shows only while the
+  // journey has NOT already reached Integrate.
+  const canContinueToIntegrate = useIsPreIntegrateStage();
 
   const handleBookCall = useCallback(() => {
     onBookCall?.();
@@ -176,13 +184,21 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({
     }
   }, [gateAwaitingCommit, commitGate]);
 
+  // standardized-viewer-control T6 — Continue prefers the host-supplied
+  // `onContinueIntegrate` (the mount site may own the transition); absent it,
+  // DISPATCH `showIntegrate` through the orchestrator (the single viewer-mutation
+  // seam) instead of `advanceFrame("f7")`. The orchestrator pushes the
+  // `integrate` step and (in onboarding) layers the f7 journey-progress + the
+  // stale sign-up overlay pop — the exact side effects `advanceFrame("f7")` had.
+  // Sign-up is session-scoped, so the intent carries the empty document scope
+  // (`showIntegrate`'s handler ignores scope — connectors are scope-independent).
   const handleContinueIntegrate = useCallback(() => {
     if (onContinueIntegrate) {
       onContinueIntegrate();
       return;
     }
-    advanceFrame("f7");
-  }, [advanceFrame, onContinueIntegrate]);
+    orchestrator?.dispatch({ kind: "showIntegrate", scope: { type: "documents", documentIds: [] } }, "user");
+  }, [orchestrator, onContinueIntegrate]);
 
   // The REAL submit sequence, parameterized by explicit field values. Both the
   // on-screen form submit and the `submit_signup` LLM tool (via the registered
@@ -260,7 +276,7 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({
   // tool routes to the SAME submit sequence as the form's submit Button. The
   // tool carries the field values as arguments (the 5 inputs are `noTool`).
   // No-op when no CanvasOrchestratorProvider is mounted (standalone tests).
-  const orchestrator = useCanvasOrchestratorOptional();
+  // (`orchestrator` is read once at the top of the component.)
   useEffect(() => {
     if (!orchestrator) return;
     return orchestrator.registerAdapter({

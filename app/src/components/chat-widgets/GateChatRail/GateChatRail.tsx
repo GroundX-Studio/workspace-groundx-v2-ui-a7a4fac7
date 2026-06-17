@@ -144,6 +144,8 @@ function useGateSequencePlayed(): [boolean, () => void] {
   return [played, mark];
 }
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
+import { useIsPreIntegrateStage } from "@/components/layout/StepStrip/useJourneyStage";
 import type { GateTrigger } from "@/types/onboarding";
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 
@@ -163,15 +165,6 @@ const PREAMBLE_BY_CAUSE: Record<"save-schema", string> = {
   "save-schema": "Sign in to save this schema",
 };
 
-/**
- * Frames before the user has already reached Integrate. When the gate commits
- * from any of these onboarding frames, the committed-state card offers the
- * "Continue to Integrate" nav CTA that advances the flow to F7. This is FLOW
- * chrome, re-sourced from session/gate-state (`currentFrame`) — NOT a widget
- * `role`/`mode` prop (2026-05-30-widget-role-access).
- */
-const PRE_INTEGRATE_FRAMES = new Set(["f1", "f2", "f3", "f3a", "f4", "f4a", "f5", "f6"]);
-
 export interface GateChatRailProps {
   /**
    * Widget access role per the role+scope contract
@@ -190,13 +183,16 @@ export interface GateChatRailProps {
 }
 
 export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope }) => {
-  const { state, dismissGate, advanceFrame, commitGate } = useOnboardingSession();
-  // FLOW chrome, re-sourced from gate-state — not from a widget prop. The
-  // committed "Continue to Integrate" nav CTA shows while the onboarding flow
-  // has not already reached the Integrate frame. Live Extract unlocks can open
-  // and commit the gate from F3 without first moving through the historical F6
-  // wrapper, so key this to pre-F7 flow state rather than only `f6`.
-  const canContinueToIntegrate = PRE_INTEGRATE_FRAMES.has(state.currentFrame);
+  const { state, dismissGate, commitGate } = useOnboardingSession();
+  const orchestrator = useCanvasOrchestratorOptional();
+  // FLOW chrome, re-sourced from the active viewer step (the journey stage), not
+  // from a frame read or a widget prop. The committed "Continue to Integrate"
+  // nav CTA shows while the journey has NOT already reached the Integrate stage
+  // (standardized-viewer-control T6 — was `PRE_INTEGRATE_FRAMES.has(currentFrame)`).
+  // Live Extract unlocks can open and commit the gate from the Analyze stage
+  // without first passing through the historical gate frame, so keying this to
+  // "not yet on Integrate" still covers them.
+  const canContinueToIntegrate = useIsPreIntegrateStage();
   const navigate = useNavigate();
   const location = useLocation();
   const [email, setEmail] = useState("");
@@ -260,9 +256,17 @@ export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope
     );
   }, [location.pathname, location.search, navigate]);
 
+  // standardized-viewer-control T6 — "Continue to Integrate" DISPATCHES
+  // `showIntegrate` through the orchestrator (the single viewer-mutation seam)
+  // instead of `advanceFrame("f7")`. The orchestrator pushes the `integrate`
+  // step and (in onboarding) layers the f7 journey-progress + the stale sign-up
+  // overlay pop — the exact side effects the old `advanceFrame("f7")` produced.
+  // The gate rail is session-scoped, so the intent carries the empty document
+  // scope (`showIntegrate`'s handler ignores scope — the connectors surface is
+  // scope-independent; the field exists only for context/telemetry).
   const handleContinue = useCallback(() => {
-    advanceFrame("f7");
-  }, [advanceFrame]);
+    orchestrator?.dispatch({ kind: "showIntegrate", scope: { type: "documents", documentIds: [] } }, "user");
+  }, [orchestrator]);
 
   if (state.gate.status === "committed") {
     const method = state.gate.method;

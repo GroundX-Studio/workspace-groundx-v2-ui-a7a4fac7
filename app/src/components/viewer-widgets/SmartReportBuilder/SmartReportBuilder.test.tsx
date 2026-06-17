@@ -14,6 +14,7 @@ import type {
 } from "@/api/smartReport";
 
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
+import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
 import { MessageBarProvider } from "@/contexts/MessageBarContext/MessageBarContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
@@ -92,7 +93,13 @@ const renderProductBuilder = (ui: ReactElement) =>
       <GxThemeProvider>
         <LoadingProvider>
           <MessageBarProvider>
-            <ChatStoreProvider autoSeedDefaultSession>{ui}</ChatStoreProvider>
+            <ChatStoreProvider autoSeedDefaultSession>
+              {/* standardized-viewer-control T6 — the STEADY tree (no
+                  OnboardingSessionProvider) still mounts the orchestrator so the
+                  migrated `↻ render` dispatch (showReport) is reachable for
+                  authenticated users — not a silent no-op (D15). */}
+              <CanvasOrchestratorProvider>{ui}</CanvasOrchestratorProvider>
+            </ChatStoreProvider>
           </MessageBarProvider>
         </LoadingProvider>
       </GxThemeProvider>,
@@ -373,6 +380,66 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     // the surface's scope.
     expect(call.scope).toEqual(UTILITY_SCOPE);
     expect(call.templateId).toMatch(/^rt-/);
+  });
+
+  // ── standardized-viewer-control T6 — the ↻ render control DISPATCHES
+  //    `showReport` through the orchestrator (the single viewer-mutation seam)
+  //    instead of calling `advanceFrame("f4")`. The orchestrator pushes a
+  //    `report` step on the RENDER surface. This widget is genuinely shared, so
+  //    the dispatch must be reachable + tested in BOTH onboarding and steady
+  //    (D15) — no silent no-op for authenticated users.
+  it("T6: ↻ render pushes a report (render surface) viewer step through the orchestrator (onboarding)", async () => {
+    const user = userEvent.setup();
+    const storeRef: { current: ReturnType<typeof useChatStore> | null } = { current: null };
+    const StoreProbe: FC = () => {
+      storeRef.current = useChatStore();
+      return null;
+    };
+    renderWithReportApi(
+      <>
+        <SmartReportBuilder role="member" scope={UTILITY_SCOPE} />
+        <StoreProbe />
+      </>,
+      { initialScenario: "utility", initialFrame: "f4a", initialAuthState: "signed-in" },
+    );
+    await user.click(screen.getByTestId("report-builder-render"));
+    await waitFor(() => {
+      const store = storeRef.current;
+      if (!store?.state.activeSessionId) throw new Error("ChatStore probe did not mount");
+      const session = store.state.sessions.get(store.state.activeSessionId);
+      // The seeded f4a step is a `report` builder step; the migrated ↻ render must
+      // push a NEW `report` step on the RENDER surface (not the builder).
+      const renderStep = session?.viewer.history.find(
+        (step) => step.kind === "report" && "surface" in step && step.surface === "render",
+      );
+      expect(renderStep).toBeTruthy();
+    });
+  });
+
+  it("T6 (D15 steady): ↻ render pushes a report render step in the STEADY tree (no OnboardingSession, not a no-op)", async () => {
+    const user = userEvent.setup();
+    const storeRef: { current: ReturnType<typeof useChatStore> | null } = { current: null };
+    const StoreProbe: FC = () => {
+      storeRef.current = useChatStore();
+      return null;
+    };
+    renderProductBuilder(
+      <>
+        <SmartReportBuilder role="member" scope={UTILITY_SCOPE} />
+        <StoreProbe />
+      </>,
+    );
+    await screen.findByTestId("smart-report-builder");
+    await user.click(screen.getByTestId("report-builder-render"));
+    await waitFor(() => {
+      const store = storeRef.current;
+      if (!store?.state.activeSessionId) throw new Error("ChatStore probe did not mount");
+      const session = store.state.sessions.get(store.state.activeSessionId);
+      const renderStep = session?.viewer.history.find(
+        (step) => step.kind === "report" && "surface" in step && step.surface === "render",
+      );
+      expect(renderStep).toBeTruthy();
+    });
   });
 
   // ── report-empty-state T1(a) — RED until baseRowsForScope → [] ──────

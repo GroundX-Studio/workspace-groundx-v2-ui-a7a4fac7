@@ -49,7 +49,6 @@ import type { WidgetRole, WidgetScope } from "@groundx/shared";
 const promoteToSignedIn = vi.fn();
 const commitGate = vi.fn();
 const dismissGate = vi.fn();
-const advanceFrame = vi.fn();
 
 vi.mock("@/contexts/AppModeContext", () => ({
   useAppMode: () => ({
@@ -68,11 +67,29 @@ let mockGate: { status: "open" | "committed" | "dismissed" | "idle"; trigger?: s
 
 vi.mock("@/contexts/OnboardingSessionContext", () => ({
   useOnboardingSession: () => ({
-    state: { gate: mockGate, currentFrame: "f6" },
+    state: { gate: mockGate },
     commitGate,
     dismissGate,
-    advanceFrame,
   }),
+}));
+
+// standardized-viewer-control T6 — the committed "Continue" CTA now DISPATCHES
+// `showIntegrate` through the orchestrator (the single viewer-mutation seam)
+// instead of calling `advanceFrame("f7")`. The mock captures the dispatched
+// intent + still supports the `submit_signup` adapter registration the widget
+// performs on mount (returns a cleanup fn).
+const dispatch = vi.fn();
+const registerAdapter = vi.fn(() => () => undefined);
+vi.mock("@/contexts/CanvasOrchestratorContext", () => ({
+  useCanvasOrchestratorOptional: () => ({ dispatch, registerAdapter }),
+}));
+
+// standardized-viewer-control T6 — the pre-Integrate gate (was
+// `PRE_INTEGRATE_FRAMES.has(currentFrame)`) is now the step/stage-based
+// `useIsPreIntegrateStage()`. Controlled per-test by `mockPreIntegrate`.
+let mockPreIntegrate = true;
+vi.mock("@/components/layout/StepStrip/useJourneyStage", () => ({
+  useIsPreIntegrateStage: () => mockPreIntegrate,
 }));
 
 import { withApiProvider } from "@/test/withApiProvider";
@@ -115,11 +132,13 @@ describe("SignUpWidget", () => {
     promoteToSignedIn.mockReset();
     commitGate.mockReset();
     dismissGate.mockReset();
-    advanceFrame.mockReset();
+    dispatch.mockReset();
+    registerAdapter.mockClear();
     mockedRegister.mockReset();
     mockedClaim.mockReset();
     mockedCaptureException.mockReset();
     mockGate = { status: "open", trigger: "byo" };
+    mockPreIntegrate = true;
   });
 
   it("renders the four required form fields", () => {
@@ -240,11 +259,38 @@ describe("SignUpWidget", () => {
     expect(screen.getByTestId("sign-up-viewer-surface")).toBeInTheDocument();
     expect(screen.getByTestId("signup-celebration")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("sign-up-viewer-continue-integrate"));
-    expect(advanceFrame).toHaveBeenCalledWith("f7");
+    // standardized-viewer-control T6 — Continue DISPATCHES showIntegrate through
+    // the orchestrator (the single viewer-mutation seam), not advanceFrame("f7").
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const [intent, source] = dispatch.mock.calls[0]!;
+    expect(intent).toMatchObject({ kind: "showIntegrate" });
+    expect(source).toBe("user");
     // Form fields must be gone — the user already submitted; showing
     // the filled form behind a "Welcome!" card in chat would be odd.
     expect(screen.queryByTestId("signup-first-input")).not.toBeInTheDocument();
     expect(screen.queryByTestId("signup-submit")).not.toBeInTheDocument();
+  });
+
+  // The explicit `onContinueIntegrate` prop (host-supplied) still takes
+  // precedence over the orchestrator dispatch — the mount site can own the
+  // transition. standardized-viewer-control T6 keeps that escape hatch.
+  it("prefers an explicit onContinueIntegrate prop over the orchestrator dispatch", () => {
+    mockGate = { status: "committed", method: "register" };
+    const onContinueIntegrate = vi.fn();
+    renderWidget("anonymous", NONE_SCOPE, { onContinueIntegrate });
+    fireEvent.click(screen.getByTestId("sign-up-viewer-continue-integrate"));
+    expect(onContinueIntegrate).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  // The committed-state Continue CTA is step/stage-gated (was a frame read): once
+  // the journey is already on Integrate the CTA is redundant and hides.
+  it("hides the Continue CTA once the journey is already on the Integrate stage", () => {
+    mockGate = { status: "committed", method: "register" };
+    mockPreIntegrate = false;
+    renderWidget();
+    expect(screen.getByTestId("signup-celebration")).toBeInTheDocument();
+    expect(screen.queryByTestId("sign-up-viewer-continue-integrate")).not.toBeInTheDocument();
   });
 
   it("does NOT commitGate when there is no active gate (idle) — gate-state, not role", async () => {

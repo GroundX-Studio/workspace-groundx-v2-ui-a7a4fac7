@@ -24,14 +24,17 @@ dispatches to one of:
   viewer stack, not a replacement chat mode.
 - **Steady chat** (active session is non-onboarding) → `<ConversationFlow>`
   with **no experience** (the bare chat: live-turns + input bar).
-- **Onboarding journey** (F2–F5 with a scenario) → `<ConversationFlow>`
-  with the onboarding `ChatExperience` looked up from
-  `chatExperienceRegistry.byId("onboarding").create({ scenarioId, thinkingScript })`
+- **Onboarding journey** (the Understand / Analyze journey stages with a
+  scenario) → `<ConversationFlow>` with the onboarding `ChatExperience` looked up
+  from `chatExperienceRegistry.byId("onboarding").create({ scenarioId, thinkingScript })`
   (scripted ThinkingStream + Done bubble + Pick-a-view pills above the
-  thread; the f3/f5 auto-advances live in the experience's `Choreography`
-  + the ThinkingStream `onDone`).
-- **F1** → idle placeholder ("Ask anything about the sample…").
-- **F2 BYO without scenario** → `ByoChatPlaceholder` ("sign in to upload").
+  thread; the auto-advances live in the experience's `Choreography` + the
+  ThinkingStream `onDone`). standardized-viewer-control T6 — this whitelist is
+  STEP-SOURCED: the journey stage is derived from the ACTIVE VIEWER STEP (via the
+  single-source `VIEWER_STEP_TO_JOURNEY`), NOT a `session.currentFrame` read. The
+  Report builder (Analyze) keeps the chat exactly like the render.
+- **Ingest / pre-scenario** → idle placeholder ("Ask anything about the sample…").
+- **BYO without scenario** → `ByoChatPlaceholder` ("sign in to upload").
 
 The live-turn rendering, persisted-thread hydration (RT-01), send path
 (CF-18), and orchestrator integration for chip-driven LLM intents all
@@ -45,7 +48,7 @@ live in `useConversation` / `ConversationFlow` / `chatPrimitives` (under
 | `role` | `WidgetRole` (`"anonymous" \| "member"`) | — (required) | Widget AUTHORIZATION role. ChatColumn is all-roles and locks no affordance by role today; the prop satisfies the widget contract and is forwarded to children (via `ConversationFlow`) as roles get teeth. NEVER selects the flow. |
 | `scope` | `WidgetScope` | — (required) | Always `{ type: "none" }` — chat is session-scoped, not document-scoped. ChatColumn is not a ScopedViewerWidget. |
 | `overrideScenarioId` | `string \| null` | undefined | Onboarding only — used by the F2→F1 slide-out so the leaving pane shows the conversation that's sliding away. |
-| `overrideFrame` | `FFrame` | undefined | Onboarding only — same use case as `overrideScenarioId`. |
+| `overrideFrame` | frame literal | undefined | Onboarding only — same slide-out use case as `overrideScenarioId`. standardized-viewer-control T6 — the journey stage is sourced from the active viewer step; this frame-typed override is mapped to a stage so the prop's contract is preserved without reading session frame state. (No production caller passes it today.) |
 | `bookingActive` | `boolean` | `false` | Keeps the same chat mounted while Calendly is shown in the viewer. |
 | `signInActive` | `boolean` | `false` | Keeps the same chat mounted while sign-in is shown in the viewer. |
 

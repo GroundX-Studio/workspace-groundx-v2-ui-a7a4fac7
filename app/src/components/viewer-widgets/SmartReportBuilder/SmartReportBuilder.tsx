@@ -65,6 +65,7 @@ import {
 } from "@/constants";
 import type { ReportTemplateDefinition, SaveReportTemplateInput } from "@/api/smartReport";
 import { useApi } from "@/contexts/ApiContext";
+import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import type { ReportSectionEdit, ReportSectionItem, ReportSectionRenderAs } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
@@ -81,8 +82,9 @@ export interface SmartReportBuilderProps {
    * mount contract can't supply it); the builder then falls back to
    * `session.selectedReportSectionId`, which the orchestrator sets from the
    * render→builder `✎ edit §N` control and the `show_smart_report_edit` LLM tool
-   * (both emit the `editTemplate` intent → `advanceFrame("f4a", {
-   * selectedReportSectionId })`). Omitted with no session value → no editor open.
+   * (both emit the `editTemplate` intent; the orchestrator pushes the `report`
+   * builder step and, in onboarding, threads the section via the journey-progress
+   * advance). Omitted with no session value → no editor open.
    */
   selectedSectionId?: string;
 }
@@ -149,7 +151,14 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
   const { addReportSection, editReportSection, removeReportSection, state: chatState } = useChatStore();
   const onboardingSession = useOnboardingSessionOptional();
   const openGate = onboardingSession?.openGate ?? (() => undefined);
-  const advanceFrame = onboardingSession?.advanceFrame ?? (() => undefined);
+  // standardized-viewer-control T6 — the canvas move to the render surface
+  // DISPATCHES `showReport` through the orchestrator (the single viewer-mutation
+  // seam) instead of `advanceFrame("f4")`. This widget is genuinely shared, so it
+  // must work in BOTH experiences (D15): the orchestrator pushes the `report`
+  // render step in onboarding AND steady, and onboarding LAYERS the Report
+  // journey stage (f4) on top. Optional: a standalone mount with no orchestrator
+  // makes the render-surface move a no-op (the render endpoint still fires).
+  const orchestrator = useCanvasOrchestratorOptional();
 
   // The active session's report overlay (the draft diff) + the template id it
   // renders/edits. The template is scope-INDEPENDENT, so base rows are driven by
@@ -205,8 +214,8 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
   // is the explicit caller value; on the live `<ScopedCanvas>` path that prop
   // is absent (the `{ scope, role }` mount contract can't supply it), so fall
   // back to `session.selectedReportSectionId` — set by the orchestrator's
-  // editTemplate routing (advanceFrame("f4a", { selectedReportSectionId })),
-  // which is the render→builder + `show_smart_report_edit` hand-off.
+  // editTemplate routing (the journey-progress advance carries the section), which
+  // is the render→builder + `show_smart_report_edit` hand-off.
   const effectiveSelectedSectionId =
     selectedSectionId ?? onboardingSession?.state.selectedReportSectionId ?? undefined;
   // Only one row's inline editor is open at a time (the F3a invariant). Seeded
@@ -297,22 +306,27 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
   }, [canEdit, openGate, saveStatus, templateIdentity, rows, saveReportTemplate]);
 
   // ↻ render — re-run the template over the current scope through the render
-  // endpoint (`renderReport`), then advance to the render surface (f4) to show
+  // endpoint (`renderReport`), then move the canvas to the render surface to show
   // the result. The endpoint is the production caller (round-trip closed); the
-  // render surface re-fetches its own first paint, so advancing is sufficient.
+  // render surface re-fetches its own first paint, so dispatching is sufficient.
+  // standardized-viewer-control T6 — the canvas move is now a `showReport`
+  // dispatch (render surface) through the orchestrator, not `advanceFrame("f4")`.
+  const showRenderSurface = useCallback(() => {
+    orchestrator?.dispatch({ kind: "showReport", templateId: templateIdentity.id, scope }, "user");
+  }, [orchestrator, templateIdentity.id, scope]);
   const handleRerender = useCallback(async () => {
     const chatSessionId = chatState.activeSessionId;
     if (!chatSessionId) {
-      advanceFrame("f4");
+      showRenderSurface();
       return;
     }
     try {
       await renderReport({ templateId: templateIdentity.id, scope, chatSessionId });
     } catch {
-      /* the render surface owns the visible error state; advance regardless */
+      /* the render surface owns the visible error state; move regardless */
     }
-    advanceFrame("f4");
-  }, [chatState.activeSessionId, templateIdentity.id, scope, advanceFrame, renderReport]);
+    showRenderSurface();
+  }, [chatState.activeSessionId, templateIdentity.id, scope, showRenderSurface, renderReport]);
 
   const handleAddSection = useCallback(() => {
     const id = `sec-${Date.now()}`;

@@ -25,6 +25,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  // Some tests set the thinking-stream-done flag to suppress the intro re-snap;
+  // clear it so it doesn't leak into the next test.
+  if (typeof window !== "undefined") window.sessionStorage.clear();
 });
 
 const SessionProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { sessionId: string | null; frame: string }) => void }) => {
@@ -185,6 +188,10 @@ describe("OnboardingShell", () => {
 
   it("keeps the current chat mounted while sign-in opens in the viewer", async () => {
     const user = userEvent.setup();
+    // The user has already passed the Understand intro (they're on Interact),
+    // so the thinking-stream replay is "done" — set the flag so the experience
+    // does NOT re-snap the canvas to Understand on mount (production state).
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     // The InteractView "💾 Save 🔒" button that used to open the gate was
     // retired with the per-frame canvas views (the F5 canvas is now the
     // shared PdfViewer via <ScopedCanvas>). Drive the gate open through the
@@ -211,12 +218,21 @@ describe("OnboardingShell", () => {
 
     await user.click(screen.getByTestId("viewer-frame-close"));
 
+    // standardized-viewer-control T6 — after closing the gate the user is back
+    // on the Interact step (the active viewer step), so ChatColumn resumes the
+    // onboarding CONVERSATION (step-sourced journey predicate), not the legacy
+    // f6 idle placeholder the old frame whitelist produced. The chat is never
+    // disabled by a closed gate.
     await waitFor(() => expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument());
-    expect(screen.getByText("Ask anything about the sample. Citations appear next to every answer.")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
   });
 
   it("renders sign-in as a viewer overlay while preserving the chat relationship", async () => {
     const user = userEvent.setup();
+    // Intro already played (the user is on Interact) — suppress the
+    // experience's re-snap-to-Understand so the frame stays on f6 across the
+    // gate flow (production state; the snap only fires on a fresh resume).
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
 
     let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
     renderWithOnboardingProviders(

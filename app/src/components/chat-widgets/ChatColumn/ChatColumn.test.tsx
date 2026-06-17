@@ -232,6 +232,43 @@ describe("ChatColumn", () => {
     expect(screen.getByTestId("chat-live-input")).toBeInTheDocument();
   });
 
+  // standardized-viewer-control T6 — the conversation-journey predicate reads
+  // the ACTIVE VIEWER STEP (its journey stage), NOT `session.currentFrame`.
+  // This discriminates the migration: a raw `pushStep` moves the active step
+  // WITHOUT touching `lastFrame`/`currentFrame` (only `advanceFrame`/
+  // `markFrameReached` do that). Pushing an `ingest-picker` step over a seeded
+  // journey frame must drop the conversation chrome to the idle placeholder
+  // (ingest is NOT in the journey whitelist) — a frame-based read would still
+  // see the seeded f2 and wrongly keep the chrome.
+  it("follows the active viewer step (not the seeded frame) for the conversation-journey predicate", async () => {
+    function StepPusher() {
+      const { pushStep } = useChatStore();
+      return (
+        <button data-testid="push-ingest-step" onClick={() => pushStep({ kind: "ingest-picker" })}>
+          push
+        </button>
+      );
+    }
+    renderWithChatColumnApi(
+      <>
+        <ChatColumn role="anonymous" scope={{ type: "none" }} />
+        <StepPusher />
+      </>,
+      { initialFrame: "f2", initialScenario: "utility" },
+    );
+    // Seeded on the Understand step → onboarding conversation chrome shows.
+    expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
+    // Move the ACTIVE STEP to ingest-picker (frame/lastFrame unchanged).
+    act(() => {
+      screen.getByTestId("push-ingest-step").click();
+    });
+    // The predicate follows the step (ingest, not in the journey) → idle.
+    await waitFor(() => {
+      expect(screen.queryByTestId("onboarding-chat-conversation")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/Ask anything about the sample/i)).toBeInTheDocument();
+  });
+
   it("on F2 with a scenario, renders the wireframe conversation chrome", () => {
     renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, { initialFrame: "f2", initialScenario: "utility" });
     // Wireframe markers: a header that shows the FILE NAME, the scenario
@@ -401,16 +438,46 @@ describe("ChatColumn", () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
-  // schema-agent-chat-affordances: F3a-only chrome — Schema-Agent header
-  // and earlier-turns summary above the conversation.
+  // schema-agent-chat-affordances: schema-DESIGN-surface chrome — the
+  // Schema-Agent header + earlier-turns summary above the conversation.
+  //
+  // standardized-viewer-control T6 — the header is now driven by the ACTIVE
+  // VIEWER STEP `surface === "design"` (the dispatched `editSchema` step), NOT
+  // the retired `currentFrame === "f3a"`. So it tracks the design surface in
+  // BOTH onboarding and steady. The design surface is reached by DISPATCHING
+  // `editSchema` (the production path), mirroring SchemaView's `openDesign` — a
+  // bare `initialFrame:"f3a"` seeds the FIELDS workbench (no design surface).
   // ────────────────────────────────────────────────────────────────────
   describe("schema-agent-chat-affordances", () => {
-    it("renders the Schema Agent header + sample switcher chip on F3a", () => {
-      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f3a",
-        initialScenario: "utility",
-      });
-      const header = screen.getByTestId("chat-schema-agent-header");
+    const DesignOpener = ({ schemaId }: { schemaId: string }) => {
+      const orchestrator = useCanvasOrchestrator();
+      return (
+        <button
+          data-testid="open-design"
+          onClick={() => orchestrator.dispatch({ kind: "editSchema", schemaId }, "user")}
+        >
+          open design
+        </button>
+      );
+    };
+
+    it("renders the Schema Agent header + sample switcher chip on the design surface", async () => {
+      const user = userEvent.setup();
+      renderWithChatColumnApi(
+        <>
+          <ChatColumn role="anonymous" scope={{ type: "none" }} />
+          <DesignOpener schemaId="utility" />
+        </>,
+        { initialFrame: "f3", initialScenario: "utility" },
+      );
+      // Fields surface (default) → no schema-agent header yet.
+      expect(screen.queryByTestId("chat-schema-agent-header")).not.toBeInTheDocument();
+
+      // Dispatch editSchema → the active extract-workbench step flips to
+      // surface:"design"; the header appears.
+      await user.click(screen.getByTestId("open-design"));
+
+      const header = await screen.findByTestId("chat-schema-agent-header");
       expect(header).toHaveTextContent(/Schema Agent/);
       const chip = screen.getByTestId("chat-schema-agent-sample-switcher");
       expect(chip).toHaveTextContent(/sample:/);
@@ -418,7 +485,17 @@ describe("ChatColumn", () => {
       expect(chip).toHaveTextContent(/switch ▾/);
     });
 
-    it("omits the Schema-Agent header on F2 (frame-conditional)", () => {
+    it("omits the Schema-Agent header on the FIELDS workbench (surface-conditional)", () => {
+      // Seeded on f3 = extract-workbench FIELDS surface (no design flip).
+      renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
+        initialFrame: "f3",
+        initialScenario: "utility",
+      });
+      expect(screen.queryByTestId("chat-schema-agent-header")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chat-schema-agent-sample-switcher")).not.toBeInTheDocument();
+    });
+
+    it("omits the Schema-Agent header on Understand (surface-conditional)", () => {
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
         initialFrame: "f2",
         initialScenario: "utility",

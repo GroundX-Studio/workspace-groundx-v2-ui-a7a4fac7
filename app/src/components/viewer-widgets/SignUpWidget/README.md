@@ -43,7 +43,7 @@ of switching to a separate gate chat.
 | `role`  | `WidgetRole`               |    ✅    | `"anonymous"` \| `"member"`. Widget-contract prop, forward-looking. Locks NO affordance here (see below).    |
 | `scope` | `WidgetScope`              |    ✅    | Always `{ type: "none" }` — sign-up is not document-scoped. Declared for the contract; never read.           |
 | `onBookCall` | `() => void`          |          | Host callback for opening the Calendly viewer overlay.                                                      |
-| `onContinueIntegrate` | `() => void` |          | Host callback for post-commit Continue. Defaults to `advanceFrame("f7")`.                                   |
+| `onContinueIntegrate` | `() => void` |          | Host callback for post-commit Continue. Absent → dispatches `showIntegrate` through the canvas orchestrator (the single viewer-mutation seam; was `advanceFrame("f7")`). The committed-state CTA is gated on `useIsPreIntegrateStage()` (the active viewer step's journey stage), shown only while the journey is pre-Integrate. |
 
 `WidgetRole` / `WidgetScope` come from `@groundx/shared`.
 

@@ -29,9 +29,14 @@ form INSTEAD of leaving the sample in place.
 | `scope` | `WidgetScope` |   yes    | Always `{ type: "none" }` — this widget is session/gate-scoped, not document-scoped.               |
 
 The committed-state **Continue-to-Integrate** nav CTA is NOT a prop — it is
-onboarding-FLOW chrome re-sourced from gate-state (`state.currentFrame === "f6"`,
-the gate frame). A steady re-encounter of the gate is off that frame, so the
-nav CTA is absent (2026-05-30-widget-role-access).
+onboarding-FLOW chrome re-sourced from the active viewer step's journey stage
+(`useIsPreIntegrateStage()`): it shows only while the journey has NOT already
+reached Integrate. Once the user is on the Integrate stage (or in a steady
+re-encounter) the CTA is absent. Clicking it DISPATCHES `showIntegrate` through
+the canvas orchestrator (the single viewer-mutation seam) — the orchestrator
+pushes the `integrate` step and, in onboarding, layers the journey-progress +
+the stale sign-up overlay pop (standardized-viewer-control T6; was a direct
+`advanceFrame("f7")` + a `PRE_INTEGRATE_FRAMES.has(currentFrame)` frame read).
 
 ## What this widget owns
 
@@ -97,9 +102,11 @@ one of the four ScopedViewerWidgets that take a real `ContentScope`).
 - "← Keep exploring" link → calls `dismissGate()` from
   `OnboardingSessionContext`. ESC at the shell level fires the same
   action.
-- Continue-to-Integrate CTA (committed state, only while the
-  onboarding flow is on the gate frame `f6`) → advances the frame via
-  `advanceFrame("f7")`.
+- Continue-to-Integrate CTA (committed state, only while the journey
+  has not yet reached the Integrate stage — `useIsPreIntegrateStage()`) →
+  dispatches `showIntegrate` through the canvas orchestrator, which moves
+  the canvas to the Integrate step and (in onboarding) advances the
+  journey + pops the stale sign-up overlay.
 
 ## How to mount
 

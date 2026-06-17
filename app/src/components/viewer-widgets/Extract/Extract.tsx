@@ -318,6 +318,17 @@ export const Extract: FC<ExtractProps> = ({
     [orchestrator, scope, scenarioId],
   );
 
+  // standardized-viewer-control T6 — the "Try asking a question →" interact entry
+  // DISPATCHES `showInteract` through the orchestrator (the single
+  // viewer-mutation seam) carrying the Extract scope, so the orchestrator pushes
+  // an `interact-chat` step resolving the document from the scope. Replaces the
+  // old `advanceFrame("f5")` (which forked the canvas move into the onboarding
+  // journey); the journey stage (f5) is now layered by the `showInteract`
+  // handler. No-op in a standalone mount with no orchestrator.
+  const handleAskQuestion = useCallback(() => {
+    orchestrator?.dispatch({ kind: "showInteract", scope }, "user");
+  }, [orchestrator, scope]);
+
   // ScopedViewerWidget contract: the document set comes FROM the scope, not
   // from scenario context. The live schema/values/geometry load re-runs only
   // when the scope IDENTITY changes (via `useScopeAdapter`).
@@ -465,6 +476,15 @@ export const Extract: FC<ExtractProps> = ({
         });
         setSaveStatus("saved");
         const schemaName = `${schema!.name} (custom)`;
+        // standardized-viewer-control T6 — this onboarding-only "save-and-return
+        // to the Ingest picker" choreography is the f1 entity-DEACTIVATE +
+        // gate-reset + "left" viewer-event side effects (a BACKWARD transition,
+        // R2). No `show*` intent models a return-to-ingest-picker today
+        // (`showSample` ACTIVATES a sample; there is no deactivate/picker intent),
+        // so per design.md §0 R2/R7 this stays on `advanceFrame("f1")` until the
+        // dedicated ingest/picker intent + the symbol-deletion phase land. The
+        // explicit `pushStep` below carries the freshly-attached schema onto the
+        // picker step (which `advanceFrame("f1")`'s generic picker step does not).
         advanceFrame("f1");
         pushStep({
           kind: "ingest-picker",
@@ -1346,11 +1366,11 @@ export const Extract: FC<ExtractProps> = ({
                   role="button"
                   tabIndex={0}
                   data-testid="advance-to-f5"
-                  onClick={() => advanceFrame("f5")}
+                  onClick={handleAskQuestion}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      advanceFrame("f5");
+                      handleAskQuestion();
                     }
                   }}
                   sx={{

@@ -27,6 +27,9 @@ import { useMemo, type FC } from "react";
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
 import { chatExperienceRegistry } from "@/conversation/chatExperienceRegistry";
 import { ConversationFlow } from "@/conversation/ConversationFlow";
+import { selectActiveStep } from "@/contexts/ChatStoreContext";
+import { VIEWER_STEP_TO_JOURNEY } from "@/components/layout/StepStrip/journeyCatalog";
+import type { StepId } from "@/components/layout/StepStrip/types";
 
 import {
   BODY_TEXT,
@@ -40,6 +43,28 @@ import { useAppMode } from "@/contexts/AppModeContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistryOptional } from "@/contexts/ScenarioRegistryContext";
+
+/**
+ * standardized-viewer-control T6 — map the frame-typed `overrideFrame` PROP to a
+ * journey stage. This exists ONLY to honor that (caller-less) prop's contract
+ * without reading `session.currentFrame`; the live journey stage is sourced from
+ * the active viewer step. The keys are the prop's own frame vocabulary (NOT a
+ * `ViewerStep.kind → stage` mapping — that single source is `VIEWER_STEP_TO_JOURNEY`
+ * and must not be re-declared). Mirrors `frameToStepStandalone`'s frame grouping:
+ * f1→ingest, f2→understand, f3/f3a/f4/f5/f6→analyze (Extract/Report/Interact),
+ * f7→integrate. (The prop union has no `f4a`; the builder is reached via a step,
+ * not this prop.)
+ */
+const FRAME_TO_STAGE: Record<NonNullable<ChatColumnProps["overrideFrame"]>, StepId> = {
+  f1: "ingest",
+  f2: "understand",
+  f3: "analyze",
+  f3a: "analyze",
+  f4: "analyze",
+  f5: "analyze",
+  f6: "analyze",
+  f7: "integrate",
+};
 
 export interface ChatColumnProps {
   /**
@@ -66,7 +91,12 @@ export interface ChatColumnProps {
    */
   overrideScenarioId?: string | null;
   /**
-   * Override the current frame. Same use case as overrideScenarioId.
+   * Override the journey stage the chat derives, by frame. Same slide-out use
+   * case as `overrideScenarioId`. standardized-viewer-control T6 — the chat's
+   * conversation-journey predicate is now sourced from the ACTIVE VIEWER STEP's
+   * journey stage, not `session.currentFrame`; this frame-typed override is
+   * mapped to a stage (`FRAME_TO_STAGE`) so the prop's contract is preserved
+   * without reading session frame state. (No production caller passes it today.)
    */
   overrideFrame?: "f1" | "f2" | "f3" | "f3a" | "f4" | "f5" | "f6" | "f7";
   /**
@@ -105,7 +135,16 @@ export const ChatColumn: FC<ChatColumnProps> = ({
   // not-yet-hydrated session renders the onboarding chrome, not the bare chat.
   const isOnboardingSession = activeChatSession?.isOnboardingSession ?? true;
 
-  const currentFrame = overrideFrame ?? session?.currentFrame;
+  // standardized-viewer-control T6 — the chat's conversation-journey predicate
+  // is sourced from the ACTIVE VIEWER STEP's journey stage (via the single-source
+  // `VIEWER_STEP_TO_JOURNEY`), NOT a `session.currentFrame` read. The frame-typed
+  // `overrideFrame` prop (slide-out use case; no production caller today) is
+  // mapped to a stage so its contract is preserved without reading session frame
+  // state. `null` stage = the journey hasn't started (picker / pre-scenario).
+  const activeStep = selectActiveStep(activeChatSession);
+  const journeyStage: StepId | null =
+    (overrideFrame ? FRAME_TO_STAGE[overrideFrame] : undefined) ??
+    (activeStep ? VIEWER_STEP_TO_JOURNEY[activeStep.kind]?.step ?? null : null);
   const scenarioId =
     overrideScenarioId !== undefined
       ? overrideScenarioId
@@ -153,25 +192,29 @@ export const ChatColumn: FC<ChatColumnProps> = ({
     return <ConversationFlow chatSessionId={activeSessionId} />;
   }
 
-  const isF1 = currentFrame === "f1";
+  // The picker: the active step is the ingest-picker (journey stage `ingest`),
+  // OR there's no journey at all (no step, no scenario) — the pre-scenario idle
+  // state. (Was `currentFrame === "f1"`.)
+  const isF1 = journeyStage === "ingest" || (journeyStage == null && !scenario);
 
-  // The onboarding journey (F2–F5 with a scenario) gets the onboarding
-  // experience. The conversation stays mounted across the whole journey so
-  // auto-advance doesn't wipe liveTurns — persistence is structural now.
+  // The onboarding journey gets the onboarding experience. The conversation
+  // stays mounted across the whole journey so auto-advance doesn't wipe
+  // liveTurns — persistence is structural now. standardized-viewer-control T6 —
+  // this whitelist is now STEP-SOURCED: the Understand + Analyze journey stages
+  // (Analyze covers Extract / Interact / Report — the `report` step is Analyze,
+  // so the BUILDER keeps the working chat exactly like the render; omitting it
+  // dropped the chat to a static placeholder — Regression: ChatColumn.test.tsx
+  // "on F4a (report builder) …"). Under the book-call overlay (booking, not
+  // sign-in) the onboarding experience also stays mounted for the journey-
+  // adjacent stages (Integrate / Ingest / pre-step) so the conversation sliding
+  // behind the calendar shows the journey, not the bare flow (was the f6/f7/f1
+  // booking special case).
   const isInScenarioJourney =
-    currentFrame === "f2" ||
-    currentFrame === "f3" ||
-    currentFrame === "f3a" ||
-    currentFrame === "f4" ||
-    // f4a = the report BUILDER. It is part of the Analyze journey exactly like
-    // f4 (the render) — omitting it dropped the production chat to a static
-    // placeholder on the builder (a viewer surface must NOT disable the chat).
-    // Regression: ChatColumn.test.tsx "on F4a (report builder) …".
-    currentFrame === "f4a" ||
-    currentFrame === "f5" ||
+    journeyStage === "understand" ||
+    journeyStage === "analyze" ||
     (bookingActive &&
       !signInActive &&
-      (currentFrame === "f6" || currentFrame === "f7" || currentFrame === "f1"));
+      (journeyStage === "integrate" || journeyStage === "ingest" || journeyStage == null));
 
   if (isInScenarioJourney && scenario) {
     return <ConversationFlow chatSessionId={activeSessionId} experience={onboardingExperience} />;

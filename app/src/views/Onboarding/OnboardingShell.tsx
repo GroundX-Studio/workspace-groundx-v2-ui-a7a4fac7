@@ -17,6 +17,7 @@ import {
 import { useApi } from "@/contexts/ApiContext";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useWidgetRole } from "@/lib/widgetRole";
+import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
@@ -168,6 +169,13 @@ export const OnboardingShell: FC = () => {
   const { state: appMode } = useAppMode();
   const widgetRole = useWidgetRole();
   const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate, dismissGate, commitGate } = useOnboardingSession();
+  // standardized-viewer-control T6 — the step-strip pills, Analyze sub-pills,
+  // the post-gate "Continue to Integrate", and the Understand pill MOVE the
+  // canvas ONLY by dispatching the corresponding intent (the single
+  // viewer-mutation seam) instead of `advanceFrame(frame)`. OnboardingShell is
+  // always mounted inside `CanvasOrchestratorProvider` (App.tsx +
+  // renderWithOnboardingProviders), so the required hook is safe here.
+  const { dispatch } = useCanvasOrchestrator();
   const { state: scenarioRegistry, byId: scenarioById } = useScenarioRegistry();
   // ChatStore is read up here so the StepStrip pill state below can
   // derive from the active ViewerStep (citation clicks push a
@@ -206,7 +214,18 @@ export const OnboardingShell: FC = () => {
     signupSurfaceActiveEarly && session.scenario == null
       ? "ingest"
       : activeJourney?.step ?? "ingest";
-  const isF1 = session.currentFrame === "f1" && !bookCallActive && !signupSurfaceActiveEarly;
+  // standardized-viewer-control T6 — `isF1` (the F1 ingest-picker overlay gate)
+  // reads the ACTIVE STEP KIND, not `currentFrame`. The picker is up when the
+  // active viewer step is `ingest-picker` (the step the return-to-picker path
+  // pushes), OR when no step has landed yet AND no scenario is active (the
+  // first-mount / deactivated state, which the frame-free strip resolves to
+  // Ingest). Book-call / sign-up surfaces suppress it (they overlay the canvas).
+  const isF1 =
+    (latestViewerStepEarly
+      ? latestViewerStepEarly.kind === "ingest-picker"
+      : session.scenario == null) &&
+    !bookCallActive &&
+    !signupSurfaceActiveEarly;
 
   useEffect(() => {
     if (bookCallActive) setBookCallEmbedState("initializing");
@@ -386,6 +405,29 @@ export const OnboardingShell: FC = () => {
     ];
   }, [currentStep, completedSteps, reachedStages, activeSubstep, appMode.authState, session.scenario, session.gate.status]);
 
+  // standardized-viewer-control T6 — the navigation scope the step-strip /
+  // sub-pill dispatches carry. `showExtract`/`showInteract` are document-scoped
+  // (the active scenario's primary document); the orchestrator resolves the doc
+  // from this scope so the shared widgets aren't doc-less. `showIntegrate` is
+  // session-scoped (connectors are scope-independent — the handler ignores it;
+  // mirrors GateChatRail's empty-documents scope). `showReport` uses the
+  // bucket+projectId report scope (the GroundX data-org key for the demo).
+  const navScenarioId = session.scenario ?? appMode.scenario ?? null;
+  const navScenario = navScenarioId ? scenarioById(navScenarioId) : undefined;
+  const navDocId = navScenario?.documents?.[0]?.documentId ?? null;
+  const navDocScope: ContentScope = useMemo(
+    () => (navDocId ? { type: "documents", documentIds: [navDocId] } : { type: "documents", documentIds: [] }),
+    [navDocId],
+  );
+  const navReportScope: ContentScope = useMemo(
+    () => ({
+      type: "bucket",
+      bucketId: scenarioRegistry.bucketId ?? 28454,
+      filter: { projectId: navScenario?.projectId ?? "proj_utility" },
+    }),
+    [scenarioRegistry.bucketId, navScenario?.projectId],
+  );
+
   const handleStepClick = useCallback(
     (stepId: StepId) => {
       if (stepId === "integrate" && appMode.authState !== "signed-in") return;
@@ -401,42 +443,68 @@ export const OnboardingShell: FC = () => {
         navigate("/onboarding");
         return;
       }
-      const frameByStep: Record<StepId, FFrame> = {
-        ingest: "f1",
-        understand: "f2",
-        analyze: "f3",
-        integrate: "f7",
-      };
-      advanceFrame(frameByStep[stepId]);
+      // T6 — each pill MOVES the canvas by dispatching its destination intent
+      // (the single seam). The orchestrator's handler layers the onboarding
+      // journey-progress (markFrameReached) + first-reach analytics on top, so
+      // the side effects `advanceFrame(frame)` produced are preserved.
+      // (`analyze` has no clickable header — the strip renders it as a bracket
+      // GROUP whose sub-pills route through `handleSubstepClick`; only the
+      // Pill-rendered steps reach here.)
+      switch (stepId) {
+        case "understand":
+          // Understand = surfacing the active document (the doc-viewer step).
+          if (navDocId) dispatch({ kind: "openDocument", documentId: navDocId, page: 1 }, "user");
+          break;
+        case "integrate":
+          dispatch({ kind: "showIntegrate", scope: { type: "documents", documentIds: [] } }, "user");
+          break;
+      }
     },
-    [advanceFrame, appMode.authState, isF1, navigate, session.scenario],
+    [appMode.authState, dispatch, navDocId, navigate, session.scenario],
   );
 
-  // WF-01 C3 (2026-05-28). Sub-pill clicks (Extract / Interact / Report)
-  // route directly to the corresponding F-frame.
-  // 2026-05-29-smart-report-screen Phase 1 — Report is now reachable for all
+  // WF-01 C3 (2026-05-28). Sub-pill clicks (Extract / Interact / Report).
+  // standardized-viewer-control T6 — each dispatches its destination intent
+  // (showExtract / showInteract / showReport / editTemplate) through the
+  // orchestrator, never `advanceFrame`.
+  // 2026-05-29-smart-report-screen Phase 1 — Report is reachable for all
   // scenarios. report-empty-state: Report routing is TEMPLATE-AWARE — a present
-  // report template id → the render surface (f4); absent → the empty builder
-  // (f4a), the new-customer norm (existing-or-new UX). Extract/Interact are
-  // unconditional.
+  // report template id → the render surface (`showReport`); absent → the empty
+  // builder (`editTemplate`), the new-customer norm (existing-or-new UX).
+  // Extract/Interact are unconditional.
   const handleSubstepClick = useCallback(
     (subId: "extract" | "interact" | "report") => {
       if (session.scenario == null) return;
-      if (subId === "report") {
-        const activeReportSession =
-          chatStoreState.activeSessionId != null
-            ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
-            : undefined;
-        advanceFrame(activeReportSession?.reportOverlay.templateId ? "f4" : "f4a");
+      if (subId === "extract") {
+        dispatch(
+          { kind: "showExtract", scope: navDocScope, schemaId: navScenarioId ?? "utility" },
+          "user",
+        );
         return;
       }
-      const frameBySub: Record<"extract" | "interact", FFrame> = {
-        extract: "f3",
-        interact: "f5",
-      };
-      advanceFrame(frameBySub[subId]);
+      if (subId === "interact") {
+        dispatch({ kind: "showInteract", scope: navDocScope }, "user");
+        return;
+      }
+      // Report — template-aware. The render-vs-builder split lives on the pushed
+      // `report` step's `surface` field (R4): `showReport` → render, `editTemplate`
+      // → builder. The templateId is required by the intent shape; the
+      // `editTemplate` handler routes to the builder (which reads the in-memory
+      // `reportOverlay` draft) and ignores the id, so the no-template case uses
+      // the same `"report-draft"` sentinel SmartReportRender's "open draft
+      // builder" button uses.
+      const activeReportSession =
+        chatStoreState.activeSessionId != null
+          ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
+          : undefined;
+      const loadedTemplateId = activeReportSession?.reportOverlay.templateId;
+      if (loadedTemplateId) {
+        dispatch({ kind: "showReport", templateId: loadedTemplateId, scope: navReportScope }, "user");
+      } else {
+        dispatch({ kind: "editTemplate", templateId: "report-draft" }, "user");
+      }
     },
-    [advanceFrame, session.scenario, chatStoreState],
+    [dispatch, session.scenario, navDocScope, navReportScope, navScenarioId, chatStoreState],
   );
 
   // F6a — Book a Call · Calendly embed.
@@ -589,42 +657,17 @@ export const OnboardingShell: FC = () => {
     signupSurfaceActive,
   ]);
 
-  // post-mvs-cleanup Phase B — canvas switches on `viewer.currentStep.kind`
-  // (driven by the viewer session) instead of the legacy `currentFrame`
-  // slot. Frame-only navigations (StepStrip pill clicks) still call
-  // `advanceFrame(...)` which pushes the corresponding ViewerStep onto
-  // viewer.history; the projection here picks up the latest step.
-  //
-  // currentFrame remains a derived getter for backwards compat with
-  // StepStrip / pill state computation, but isn't on the render hot path.
+  // post-mvs-cleanup Phase B / standardized-viewer-control T6 — the canvas
+  // switches on the ACTIVE ViewerStep kind, never the legacy `currentFrame`.
+  // Every navigation (StepStrip pill, sub-pill, citation, auto-advance) now
+  // pushes its ViewerStep through `dispatch`, and the active step is seeded on
+  // mount (`OnboardingSessionProvider`/`frameToStepStandalone`), so the step is
+  // always present — the old `currentFrame`→kind projection fallback (T3/R3) is
+  // GONE. The only stepless edge (no active session yet) defaults to the
+  // `ingest-picker` overlay, matching the frame-free strip's "no step → Ingest".
   const latestViewerStep = selectActiveStep(activeChatSession);
-  // Fallback to currentFrame projection if no step is in history yet
-  // (initial mount before any advanceFrame / pickScenario fires).
-  const stepKindFallback: import("@/contexts/ChatStoreContext").ViewerStep["kind"] | null = (() => {
-    switch (session.currentFrame) {
-      case "f1":
-        return "ingest-picker";
-      case "f2":
-        return "doc-viewer";
-      case "f3":
-      case "f3a":
-        return "extract-workbench";
-      // 2026-05-29-smart-report-screen Phase 1 — f4 = Report render,
-      // f4a = Report builder. Both project to the `report` step kind (was
-      // mis-routed to extract-workbench).
-      case "f4":
-      case "f4a":
-        return "report";
-      case "f5":
-      case "f6":
-        return "interact-chat";
-      case "f7":
-        return "integrate";
-      default:
-        return null;
-    }
-  })();
-  const effectiveStepKind = latestViewerStep?.kind ?? stepKindFallback;
+  const effectiveStepKind: import("@/contexts/ChatStoreContext").ViewerStep["kind"] =
+    latestViewerStep?.kind ?? "ingest-picker";
 
   // 2026-05-30-onboarding-shell-shared-view Phase 2 — the per-frame
   // `canvasContent` switch is GONE. The canvas is now driven entirely by
@@ -704,9 +747,16 @@ export const OnboardingShell: FC = () => {
     }
   }, [latestViewerStep, effectiveStepKind, canvasDocId, canvasScenarioId]);
 
-  // f4 = render, f4a = builder. The `report` step kind alone can't tell the
-  // two apart; the frame disambiguates which report CanvasKind to mount.
-  const reportSurface: "render" | "builder" = session.currentFrame === "f4a" ? "builder" : "render";
+  // standardized-viewer-control T6 (R4) — render vs builder is a sub-position on
+  // the active `report` ViewerStep's `surface` field (pushed by `showReport` →
+  // "render" / `editTemplate` → "builder"), NOT the retired `currentFrame ===
+  // "f4a"` read. `ScopedCanvas.stepToCanvasKind` already prefers `step.surface`
+  // over this prop, so this is only the fallback for the synthesized stepless
+  // `canvasStep` (which carries no surface); default to render.
+  const reportSurface: "render" | "builder" =
+    latestViewerStep?.kind === "report" && latestViewerStep.surface === "builder"
+      ? "builder"
+      : "render";
 
   const handleSignInClose = useCallback(() => {
     dismissGate();
@@ -726,8 +776,13 @@ export const OnboardingShell: FC = () => {
   }, [location.pathname, location.search, navigate]);
 
   const handleSignInContinue = useCallback(() => {
-    advanceFrame("f7");
-  }, [advanceFrame]);
+    // standardized-viewer-control T6 — "Continue to Integrate" MOVES the canvas
+    // via `showIntegrate` (the single seam). The orchestrator pushes the
+    // `integrate` step and layers the onboarding f7 journey advance (which also
+    // pops a stale sign-up overlay) — the exact side effects `advanceFrame("f7")`
+    // produced. Session-scoped (the connectors surface is scope-independent).
+    dispatch({ kind: "showIntegrate", scope: { type: "documents", documentIds: [] } }, "user");
+  }, [dispatch]);
 
   const signInCloseLabel = session.scenario == null ? "Back to samples" : "Close sign-in";
 

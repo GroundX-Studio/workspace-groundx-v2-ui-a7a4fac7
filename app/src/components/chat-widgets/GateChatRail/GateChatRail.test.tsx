@@ -27,21 +27,31 @@ let mockGate: { status: "open" | "committed" | "dismissed" | "idle"; trigger?: s
   status: "open",
   trigger: "byo",
 };
-// The onboarding-flow signal that drives the committed "Continue to
-// Integrate" CTA — re-sourced from session/gate-state (`currentFrame`),
-// NOT from a widget `mode`/`role` prop.
-let mockCurrentFrame = "f6";
 
 vi.mock("@/contexts/OnboardingSessionContext", () => ({
   useOnboardingSession: () => ({
-    state: { gate: mockGate, currentFrame: mockCurrentFrame },
+    state: { gate: mockGate },
     commitGate,
     dismissGate,
-    advanceFrame,
   }),
 }));
 
-const advanceFrame = vi.fn();
+// standardized-viewer-control T6 — the committed "Continue to Integrate" CTA
+// now DISPATCHES `showIntegrate` through the orchestrator (the single
+// viewer-mutation seam) instead of calling `advanceFrame("f7")`. The test
+// captures the dispatched intent via a spy orchestrator.
+const dispatch = vi.fn();
+vi.mock("@/contexts/CanvasOrchestratorContext", () => ({
+  useCanvasOrchestratorOptional: () => ({ dispatch }),
+}));
+
+// standardized-viewer-control T6 — the pre-Integrate gate (was
+// `PRE_INTEGRATE_FRAMES.has(currentFrame)`) is now the step/stage-based
+// `useIsPreIntegrateStage()`. Controlled per-test by `mockPreIntegrate`.
+let mockPreIntegrate = true;
+vi.mock("@/components/layout/StepStrip/useJourneyStage", () => ({
+  useIsPreIntegrateStage: () => mockPreIntegrate,
+}));
 
 import { GateChatRail } from "./GateChatRail";
 
@@ -64,10 +74,10 @@ const renderWidget = (ui: ReactNode = <GateChatRail role="anonymous" scope={NONE
 describe("GateChatRail", () => {
   beforeEach(() => {
     dismissGate.mockReset();
-    advanceFrame.mockReset();
+    dispatch.mockReset();
     commitGate.mockReset();
     mockGate = { status: "open", trigger: "byo" };
-    mockCurrentFrame = "f6";
+    mockPreIntegrate = true;
   });
 
   // P1 — the gate's three doors live in the chat rail (wireframe Flow_Gate):
@@ -148,16 +158,19 @@ describe("GateChatRail", () => {
     expect(screen.getByTestId("gate-rail-continue-integrate")).toBeInTheDocument();
   });
 
-  it("Continue-to-Integrate calls advanceFrame('f7')", () => {
+  it("Continue-to-Integrate dispatches showIntegrate through the orchestrator", () => {
     mockGate = { status: "committed", method: "register" };
     renderWidget();
     fireEvent.click(screen.getByTestId("gate-rail-continue-integrate"));
-    expect(advanceFrame).toHaveBeenCalledWith("f7");
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const [intent, source] = dispatch.mock.calls[0]!;
+    expect(intent).toMatchObject({ kind: "showIntegrate" });
+    expect(source).toBe("user");
   });
 
-  it("still offers Continue-to-Integrate when the gate committed from Extract", () => {
+  it("still offers Continue-to-Integrate while the journey is pre-Integrate (gate committed from Extract)", () => {
     mockGate = { status: "committed", method: "register" };
-    mockCurrentFrame = "f3";
+    mockPreIntegrate = true;
     renderWidget();
     expect(screen.getByTestId("gate-rail-continue-integrate")).toBeInTheDocument();
   });
@@ -180,13 +193,14 @@ describe("GateChatRail", () => {
     expect(container.querySelector('[data-widget="gate-chat-rail"]')).toBeNull();
   });
 
-  // RE-SOURCE (2026-05-30-widget-role-access): the committed-state
+  // RE-SOURCE (standardized-viewer-control T6): the committed-state
   // "Continue to Integrate" nav CTA is onboarding-FLOW chrome, not a
-  // role affordance. It is driven by the onboarding-flow signal
-  // (`currentFrame === "f6"`, the gate frame), NOT by a widget prop.
-  it("does not render the Continue-to-Integrate CTA when off the onboarding gate frame, even when committed", () => {
+  // role affordance. It is driven by the step/stage-based journey signal
+  // (`useIsPreIntegrateStage()`), NOT a frame read or a widget prop. Once the
+  // user is already ON the Integrate stage the CTA is redundant and hides.
+  it("does not render the Continue-to-Integrate CTA once the journey is already on Integrate, even when committed", () => {
     mockGate = { status: "committed", method: "register" };
-    mockCurrentFrame = "f7"; // already advanced past the gate / steady re-encounter
+    mockPreIntegrate = false; // already on the Integrate stage / steady re-encounter
     renderWidget();
     expect(screen.queryByTestId("gate-rail-continue-integrate")).not.toBeInTheDocument();
   });
