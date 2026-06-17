@@ -150,6 +150,48 @@ describe("ViewerWidgetFrame", () => {
     expect(within(header).queryByTestId("viewer-frame-close")).not.toBeInTheDocument();
   });
 
+  it("places a close (X) action at the trailing edge of the header (upper-right), after the title", () => {
+    render(
+      <ViewerWidgetFrame
+        widgetId="book-call"
+        active
+        chromePolicy="framed"
+        contentMode="embed"
+        eyebrow="Connect"
+        title="Book a call"
+        closeAction={{ id: "close-book", label: "Close booking", icon: "close", onClick: vi.fn() }}
+      >
+        <div>content</div>
+      </ViewerWidgetFrame>,
+    );
+    const header = screen.getByTestId("viewer-frame-header");
+    const title = within(header).getByText("Book a call");
+    const close = within(header).getByTestId("viewer-frame-close");
+    // The X renders AFTER the title in DOM order → it sits on the right.
+    expect(title.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps a back arrow at the leading edge (upper-left), before the title", () => {
+    render(
+      <ViewerWidgetFrame
+        widgetId="sign-up"
+        active
+        chromePolicy="framed"
+        contentMode="centered-panel"
+        eyebrow="Unlock the full workspace"
+        title="Create your account"
+        closeAction={{ id: "back", label: "Back to samples", icon: "back", onClick: vi.fn() }}
+      >
+        <div>content</div>
+      </ViewerWidgetFrame>,
+    );
+    const header = screen.getByTestId("viewer-frame-header");
+    const title = within(header).getByText("Create your account");
+    const back = within(header).getByTestId("viewer-frame-close");
+    // The back arrow renders BEFORE the title in DOM order → it stays on the left.
+    expect(back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("renders secondary frame actions supplied by the host with their declared icons", () => {
     const onSecondary = vi.fn();
 

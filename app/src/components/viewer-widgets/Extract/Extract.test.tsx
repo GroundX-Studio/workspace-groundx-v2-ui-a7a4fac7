@@ -10,6 +10,7 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import type { ScenarioConfig } from "@/types/scenarios";
 
 import { Extract } from "./Extract";
+import { descriptor as extractDescriptor } from "./Extract.tools";
 
 const UTILITY_DOC_SCOPE: ContentScope = {
   type: "documents",
@@ -26,6 +27,14 @@ beforeEach(() => {
 });
 
 describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () => {
+  // The widget renders its OWN full-width topbar + internal scroll container, so
+  // the frame must NOT add its own padding/scroll on top — that double-chrome
+  // was the visible gap between the nav and the topbar buttons. Edge-to-edge
+  // lets the topbar hug the nav.
+  it("declares an edge-to-edge frame (no redundant padding above its own topbar)", () => {
+    expect(extractDescriptor.viewerFrame.contentMode).toBe("edge-to-edge");
+  });
+
   // ── role + scope contract (widget-contract sibling test) ──────────
   it.each<WidgetRole>(["anonymous", "member"])(
     "mounts for role %s and reflects it on data-role",

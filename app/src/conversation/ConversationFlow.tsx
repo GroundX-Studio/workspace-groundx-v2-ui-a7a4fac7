@@ -47,7 +47,7 @@ export const ConversationFlow: FC<ConversationFlowProps> = ({ chatSessionId, exp
     ...(experience?.scopeHint ? { scopeHint: experience.scopeHint } : {}),
     ...(experience?.title ? { title: experience.title } : {}),
   });
-  const { liveTurns, sending, send, handleSuggestedAction, seedTurns } = conversation;
+  const { liveTurns, sending, thinking, send, handleSuggestedAction, seedTurns } = conversation;
 
   // Seed the experience's one-shot turns exactly once on mount.
   const seededRef = useRef(false);
@@ -69,7 +69,7 @@ export const ConversationFlow: FC<ConversationFlowProps> = ({ chatSessionId, exp
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [liveTurns, sending]);
+  }, [liveTurns, sending, thinking]);
 
   const Intro = experience?.Intro;
   const Choreography = experience?.Choreography;
@@ -102,6 +102,7 @@ export const ConversationFlow: FC<ConversationFlowProps> = ({ chatSessionId, exp
         <LiveTurnList
           liveTurns={liveTurns}
           sending={sending}
+          thinking={thinking}
           role={role}
           onSuggestedAction={handleSuggestedAction}
         />

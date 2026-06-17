@@ -160,15 +160,23 @@ export const PickViewPill: FC<PickViewPillProps> = (props) => {
 export function LiveTurnList({
   liveTurns,
   sending,
+  thinking,
   role,
   onSuggestedAction,
 }: {
   liveTurns: LiveTurn[];
   sending: boolean;
+  /**
+   * simulated-agent-narration — drives the bottom "thinking" indicator. A real
+   * in-flight turn OR scripted agent narration being revealed. Defaults to
+   * `sending` (back-compat). `sending` still gates pin-streaming below.
+   */
+  thinking?: boolean;
   role: WidgetRole;
   onSuggestedAction: (action: ChatSuggestedAction, citations?: Citation[]) => void;
 }) {
-  if (liveTurns.length === 0 && !sending) return null;
+  const showThinking = thinking ?? sending;
+  if (liveTurns.length === 0 && !showThinking) return null;
   return (
     <Stack spacing={1} sx={{ mt: 0.5 }}>
       {liveTurns.map((turn, idx) =>
@@ -249,7 +257,7 @@ export function LiveTurnList({
           </Stack>
         ),
       )}
-      {sending && (
+      {showThinking && (
         <BotBubble testid="chat-thinking">
           <LoadingDots aria-label="Assistant is thinking" />
         </BotBubble>

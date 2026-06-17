@@ -583,8 +583,8 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                       right: 0,
                       top: 0,
                       padding: "2px 8px",
-                      backgroundColor: `${CYAN}14`,
-                      borderBottom: `1px dashed ${CYAN}`,
+                      backgroundColor: `${CORAL}14`,
+                      borderBottom: `1px dashed ${CORAL}`,
                       color: NAVY,
                       fontSize: FONT_SIZE_LABEL,
                       pointerEvents: "none",
@@ -603,10 +603,21 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
                   aria-hidden
                   style={{
                     ...overlayStyleFor(region.bbox),
+                    // Saturated CORAL (the brand "highlight accent") — visible on
+                    // light, medium, AND dark pages where the old pale-cyan wash
+                    // disappeared. Tier drives the fill opacity + border weight.
                     backgroundColor:
-                      tier === "ambient" ? `${CYAN}1f` : tier === "paraphrase" ? `${CYAN}33` : `${CYAN}55`,
-                    border: tier === "exact" || tier == null ? `2px solid ${CYAN}` : `1px dashed ${CYAN}`,
+                      tier === "ambient"
+                        ? `${CORAL}1f`
+                        : tier === "paraphrase"
+                          ? `${CORAL}29`
+                          : `${CORAL}3d`,
+                    border: tier === "exact" || tier == null ? `2px solid ${CORAL}` : `1px dashed ${CORAL}`,
                     borderRadius: BORDER_RADIUS_SM,
+                    // Background-agnostic halo: a crisp light ring lifts the coral
+                    // edge off dark pages; a soft dark outer glow lifts it off
+                    // light pages. One of the two always contrasts.
+                    boxShadow: `0 0 0 1px ${alpha(WHITE, 0.85)}, 0 0 6px 1px ${alpha(NAVY, 0.45)}`,
                     pointerEvents: "none",
                   }}
                 />

@@ -60,7 +60,11 @@ export const descriptor = defineScopedViewerWidget({
     // No `eyebrow`: the viewer nav sources it from the journey catalog in
     // onboarding and leaves it empty in steady (viewer-nav-redesign).
     chromePolicy: "framed",
-    contentMode: "padded-scroll",
+    // Edge-to-edge: Extract owns its full-width topbar + its own internal
+    // scroll container, so the frame must NOT add padding/scroll on top. The
+    // redundant `padded-scroll` top-padding was the visible gap between the nav
+    // and the topbar buttons.
+    contentMode: "edge-to-edge",
     title: "Extract",
     subtitle: "Review structured fields and citations for the active scope.",
   },

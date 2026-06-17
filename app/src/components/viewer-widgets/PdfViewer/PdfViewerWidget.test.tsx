@@ -361,6 +361,32 @@ describe("PdfViewerWidget", () => {
       expect(style).toMatch(/border:\s*2px solid/);
     });
 
+    // The highlight must be obvious on ANY document background (dark / light /
+    // medium). It uses the brand's saturated CORAL highlight accent (NOT the
+    // pale CYAN wash that vanished on light docs) PLUS a contrasting halo
+    // (box-shadow) so the box separates from whatever is behind it.
+    it("renders the highlight in an obvious, background-agnostic treatment (coral + halo)", async () => {
+      getXrayMock.mockResolvedValue(fakeXray);
+
+      render(
+        <PdfViewerWidget
+          scope={docScope("doc-1")}
+          role="member"
+          targetPage={1}
+          highlightBbox={{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 }}
+          highlightTier="exact"
+        />,
+        { wrapper },
+      );
+      const overlay = await screen.findByTestId("pdf-viewer-highlight");
+      const style = overlay.getAttribute("style") ?? "";
+      // Coral (#f3663f / rgb(243,102,63)) — not the old pale cyan (#c1e8ee).
+      expect(style).toMatch(/#f3663f|rgb\(243,\s*102,\s*63\)/i);
+      expect(style).not.toMatch(/#c1e8ee|rgb\(193,\s*232,\s*238\)/i);
+      // Contrasting halo so the box is visible against dark AND light pages.
+      expect(style).toMatch(/box-shadow:/i);
+    });
+
     it("renders a TRANSLUCENT (chunk-region) highlight for a paraphrase-tier citation", async () => {
       getXrayMock.mockResolvedValue(fakeXray);
 

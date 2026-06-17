@@ -19,7 +19,6 @@ import {
   BORDER_RADIUS_CARD,
   EYEBROW_ON_LIGHT,
   FONT_WEIGHT_LABEL,
-  GREEN,
   MUTED_ON_LIGHT,
   NAVY,
   WARM_OFFWHITE,
@@ -137,8 +136,10 @@ export const ViewerWidgetFrame: FC<ViewerWidgetFrameProps> = ({
           }}
         >
           <Stack direction="row" spacing={1.5} alignItems="center">
-            {active && closeAction ? (
-              // Icon-only back/close — a sleek ghost affordance, labelled for a11y.
+            {/* A "back" affordance leads (upper-left, conventional for going
+                back); a "close" X trails (upper-right, conventional for
+                dismissing) so it never crowds the eyebrow › title. */}
+            {active && closeAction && (closeAction.icon ?? "close") === "back" ? (
               <IconButton
                 noTool="viewer frame close/back navigation"
                 icon={actionIcon(closeAction, "close")}
@@ -226,6 +227,18 @@ export const ViewerWidgetFrame: FC<ViewerWidgetFrameProps> = ({
                 ))}
               </Stack>
             ) : null}
+            {/* Trailing close (X) — upper-right, the conventional dismiss spot.
+                Rendered last so it never competes with the eyebrow › title. */}
+            {active && closeAction && (closeAction.icon ?? "close") !== "back" ? (
+              <IconButton
+                noTool="viewer frame close/back navigation"
+                icon={actionIcon(closeAction, "close")}
+                aria-label={closeAction.label}
+                onClick={closeAction.onClick}
+                data-testid="viewer-frame-close"
+                sx={{ flexShrink: 0 }}
+              />
+            ) : null}
           </Stack>
         </Box>
       ) : null}
@@ -237,16 +250,20 @@ export const ViewerWidgetFrame: FC<ViewerWidgetFrameProps> = ({
           sx={{
             flexShrink: 0,
             borderBottom: `1px solid ${BORDER}`,
-            backgroundColor: WARM_OFFWHITE,
-            color: NAVY,
-            px: { xs: 2, md: 3 },
-            py: 1.25,
+            // Seamless with the white header/body — NOT the cream/green
+            // treatment that read as a foreign "alert" strip. The indicator is
+            // the same coral LoadingDots as the chat "thinking" bubble, so the
+            // viewer and the conversation share one loading affordance.
+            backgroundColor: WHITE,
+            color: MUTED_ON_LIGHT,
+            px: { xs: 1.5, md: 2 },
+            py: 1,
           }}
         >
           {loading ? (
             <Stack direction="row" spacing={1.25} alignItems="center">
-              <LoadingDots size={6} color={GREEN} aria-label={loading.label} />
-              <BodyText size="sm" component="span">
+              <LoadingDots size={6} aria-label={loading.label} />
+              <BodyText size="sm" component="span" sx={{ color: MUTED_ON_LIGHT }}>
                 {loading.label}
               </BodyText>
             </Stack>

@@ -7,12 +7,16 @@
 
 Policy: `framed`
 
-Content mode: `padded-scroll`
+Content mode: `edge-to-edge`
 
-`ScopedCanvas` wraps Extract in `ViewerWidgetFrame`. The widget owns
-workbench-local controls, including field selection, pane tabs, Save/export,
-and the `extract-topbar-back` content action that moves Design back to
-Results. That back action is not viewer-frame close/back chrome.
+`ScopedCanvas` wraps Extract in `ViewerWidgetFrame`. Extract owns its full
+layout — a full-width `extract-topbar` plus its own internal scroll container —
+so the frame is `edge-to-edge` (no frame padding/scroll). `padded-scroll` would
+add a redundant top inset above the topbar, leaving a visible gap between the
+nav and the topbar controls. The widget owns workbench-local controls, including
+field selection, pane tabs, Save/export, and the `extract-topbar-back` content
+action that moves Design back to Results. That back action is not viewer-frame
+close/back chrome.
 
 ## What it does
 

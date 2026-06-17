@@ -103,6 +103,16 @@ function useSessionFacade(): OnboardingSessionApi {
   // surface they're on. Once committed → signed in everywhere; once
   // dismissed → dismissed until something explicitly re-triggers it.
   const [gate, setGate] = useState<GateStatus>({ status: "idle" });
+  // Live ref to the latest committed gate. `openGate` must decide its
+  // one-time side effects (push the sign-up overlay, log analytics)
+  // SYNCHRONOUSLY — it cannot read that decision out of the `setGate`
+  // updater, because React only runs the updater eagerly when the fiber
+  // has no other pending work. Under render pressure (e.g. a streaming
+  // reply or scripted-narration reveal in flight) the updater runs
+  // lazily, the side-effect flag stays false, and the overlay silently
+  // never opens. Reading `gateRef.current` removes that dependence.
+  const gateRef = useRef(gate);
+  gateRef.current = gate;
   // Signup surface flag. When true, the user clicked BYO (a sign-up
   // trigger from the F1 picker) and we render the shell with the
   // gate in chat + BYO placeholder in canvas. BYO is intentionally
@@ -291,19 +301,20 @@ function useSessionFacade(): OnboardingSessionApi {
         setSignupOpen(true);
       }
       const cause = options?.cause;
-      let shouldRecord = false;
+      // Decide the one-time side effects SYNCHRONOUSLY from the live gate
+      // ref — NOT as a flag mutated inside the `setGate` updater (which
+      // React may run lazily under render pressure, dropping the overlay).
+      // Same predicate as the updater below, kept in lockstep:
+      //   • `committed` → no-op (already signed in everywhere).
+      //   • `open(sameTrigger, sameCause)` while open → no-op (already showing it).
+      //   • everything else (incl. `dismissed → open(sameTrigger)`) → record + re-open.
+      const prevGate = gateRef.current;
+      const shouldRecord =
+        prevGate.status !== "committed" &&
+        !(prevGate.status === "open" && prevGate.trigger === trigger && prevGate.cause === cause);
       setGate((prev) => {
         if (prev.status === "committed") return prev;
-        // `open(sameTrigger, sameCause)` while already open is a no-op
-        // — the gate is already showing the right thing, no point
-        // re-recording. Different cause IS a meaningful re-open.
         if (prev.status === "open" && prev.trigger === trigger && prev.cause === cause) return prev;
-        // `dismissed → open(sameTrigger)` MUST re-enter the gate.
-        // The user clicked Sign Up, dismissed it, then clicked Sign Up
-        // again — that's an explicit re-trigger and the gate should
-        // re-open. (We previously short-circuited this and left the gate
-        // stuck in `dismissed`, which broke the BYO re-click flow.)
-        shouldRecord = true;
         return { status: "open", trigger, openedAt: Date.now(), cause };
       });
       if (shouldRecord) {

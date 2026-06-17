@@ -44,6 +44,15 @@ import {
 import { litRegionsFromCitations } from "@/views/Onboarding/litRegions";
 
 /**
+ * simulated-agent-narration — per-message thinking beat for SCRIPTED agent
+ * narration reveal. Shorter than the Understand-page ThinkingStream window
+ * (1500-2800ms) — chat turn-taking should feel snappy, not sluggish — and
+ * randomized so a multi-message burst doesn't read as a metronome.
+ */
+const AGENT_REVEAL_MIN_MS = 320;
+const AGENT_REVEAL_MAX_MS = 560;
+
+/**
  * One live ad-hoc conversation turn. ONE definition shared by the engine,
  * `LiveTurnList`, and both flow components.
  */
@@ -107,6 +116,15 @@ export interface ConversationOptions {
 export interface ConversationApi {
   liveTurns: LiveTurn[];
   sending: boolean;
+  /**
+   * simulated-agent-narration — `true` while the chat is in a "thinking" beat:
+   * either a real user turn is in flight (`sending`) OR scripted agent
+   * narration (book-call / sign-up / schema-agent) is being revealed one
+   * message at a time. Drives the single `chat-thinking` indicator so scripted
+   * bubbles read as live turn-taking instead of popping in fully-formed.
+   * Distinct from `sending`, which alone gates the input bar + pin streaming.
+   */
+  thinking: boolean;
   /**
    * Canvas↔chat coherence (2026-06-11) — `true` once the RT-01 history
    * hydration has SETTLED (the listChatMessages fetch resolved, success or
@@ -241,6 +259,16 @@ export function useConversation(
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [sending, setSending] = useState(false);
   const [firstUserMessageSent, setFirstUserMessageSent] = useState(false);
+  // simulated-agent-narration — scripted agent bubbles (book-call / sign-up /
+  // schema-agent) are revealed ONE AT A TIME with a short thinking beat between
+  // them instead of all popping in fully-formed. `pendingAgentReveals` is the
+  // reveal queue; `narrating` shows the thinking indicator while it drains.
+  const [pendingAgentReveals, setPendingAgentReveals] = useState<LiveTurn[]>([]);
+  const [narrating, setNarrating] = useState(false);
+  // Every agent-message id ever enqueued — so the projection never re-queues a
+  // message already revealed or in flight (the effect re-runs on every messages
+  // change).
+  const revealedAgentIdsRef = useRef<Set<string>>(new Set());
 
   // chat-response-streaming — the in-flight stream's AbortController, so the
   // SSE connection is CANCELLED on unmount (instead of running to completion as
@@ -348,21 +376,45 @@ export function useConversation(
   }, [api.chat, api.telemetry, chatSessionId]);
 
   // `schema-agent-chat-affordances` — project ChatStore-emitted agent
-  // messages (id prefix `agent-`) into the rendered live-turns list. The
-  // Schema-Agent's confidence-delta narration is appended via
-  // `appendAgentMessage`; without this projection it would land in
-  // `ChatSession.messages` but never reach the rendered conversation.
+  // messages (id prefix `agent-`) into the rendered conversation. The
+  // Schema-Agent's confidence-delta narration AND the onboarding book-call /
+  // sign-up narration are appended via `appendAgentMessage`; without this
+  // projection they would land in `ChatSession.messages` but never render.
+  //
+  // simulated-agent-narration — rather than dumping every new agent message in
+  // at once (they "just appeared"), enqueue the fresh ones onto a reveal queue.
+  // The processor effect below drains it one message at a time behind a
+  // thinking beat, so scripted bubbles read as live turn-taking.
   useEffect(() => {
     if (!activeChatSession) return;
-    setLiveTurns((cur) => {
-      const seen = new Set(cur.map((t) => t.id));
-      const projected: LiveTurn[] = activeChatSession.messages
-        .filter((m) => m.id.startsWith("agent-") && !seen.has(m.id))
-        .map((m) => ({ id: m.id, role: "assistant", content: m.content }));
-      if (projected.length === 0) return cur;
-      return [...cur, ...projected];
-    });
+    const seen = revealedAgentIdsRef.current;
+    const fresh: LiveTurn[] = activeChatSession.messages
+      .filter((m) => m.id.startsWith("agent-") && !seen.has(m.id))
+      .map((m) => ({ id: m.id, role: "assistant" as const, content: m.content }));
+    if (fresh.length === 0) return;
+    for (const t of fresh) seen.add(t.id);
+    setPendingAgentReveals((cur) => [...cur, ...fresh]);
   }, [activeChatSession?.messages, activeChatSession]);
+
+  // simulated-agent-narration — drain the reveal queue one message at a time.
+  // While the queue is non-empty `narrating` is true (the thinking indicator
+  // shows); after a short, slightly-randomized beat the head message lands in
+  // the thread and the effect re-runs for the next. Mirrors the Understand-page
+  // ThinkingStream cadence (a beat, then content), just faster for chat.
+  useEffect(() => {
+    if (pendingAgentReveals.length === 0) {
+      setNarrating(false);
+      return undefined;
+    }
+    setNarrating(true);
+    const next = pendingAgentReveals[0];
+    const beat = AGENT_REVEAL_MIN_MS + Math.random() * (AGENT_REVEAL_MAX_MS - AGENT_REVEAL_MIN_MS);
+    const timer = window.setTimeout(() => {
+      setLiveTurns((cur) => (cur.some((t) => t.id === next.id) ? cur : [...cur, next]));
+      setPendingAgentReveals((cur) => cur.filter((t) => t.id !== next.id));
+    }, beat);
+    return () => window.clearTimeout(timer);
+  }, [pendingAgentReveals]);
 
   const send = useCallback(
     async (text: string) => {
@@ -533,5 +585,16 @@ export function useConversation(
     [api.chat, sending, chatSessionId, activeChatSession, enqueueFieldProposal, appendMessage, dispatchIntent],
   );
 
-  return { liveTurns, sending, hydrated, firstUserMessageSent, send, handleSuggestedAction, seedTurns };
+  return {
+    liveTurns,
+    sending,
+    // The single thinking indicator fires for a real in-flight turn OR while
+    // scripted agent narration is being revealed.
+    thinking: sending || narrating,
+    hydrated,
+    firstUserMessageSent,
+    send,
+    handleSuggestedAction,
+    seedTurns,
+  };
 }

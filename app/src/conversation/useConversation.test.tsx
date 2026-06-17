@@ -49,6 +49,7 @@ function Probe({ onFirstUserSend }: { onFirstUserSend?: () => void }) {
     <div>
       <div data-testid="probe-session-id">{chatSessionId ?? "none"}</div>
       <div data-testid="probe-sending">{String(conv.sending)}</div>
+      <div data-testid="probe-thinking">{String(conv.thinking)}</div>
       <button data-testid="probe-send" onClick={() => void conv.send("What is the bill total?")}>
         send
       </button>
@@ -291,6 +292,28 @@ describe("useConversation (durable engine)", () => {
     // report-pin-affordance — agent narration is NOT pinnable (opt-in: only
     // genuine answers set `pinnable`).
     expect(screen.getByTestId("probe-turn-assistant")).toHaveAttribute("data-pinnable", "false");
+  });
+
+  it("reveals a projected agent message after a thinking beat, then clears thinking (simulated chat)", async () => {
+    function AgentEmitter() {
+      const { appendAgentMessage } = useChatStore();
+      useEffect(() => {
+        appendAgentMessage("Opening the booking calendar now.");
+      }, [appendAgentMessage]);
+      return <Probe />;
+    }
+
+    renderWithConversationApi(<AgentEmitter />, {
+      initialFrame: "f3a",
+      initialScenario: "utility",
+    });
+
+    // A "thinking" beat plays BEFORE the message lands — the bubble does not
+    // just pop in fully-formed.
+    await waitFor(() => expect(screen.getByTestId("probe-thinking")).toHaveTextContent("true"));
+    // …then the message reveals and the thinking indicator clears.
+    await screen.findByText("Opening the booking calendar now.");
+    await waitFor(() => expect(screen.getByTestId("probe-thinking")).toHaveTextContent("false"));
   });
 
   // report-pin-affordance — `pinnable` round-trip: it's set ONLY at the genuine
