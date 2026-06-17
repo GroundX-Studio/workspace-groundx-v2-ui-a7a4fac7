@@ -90,7 +90,11 @@ function HarnessProbe({ stateRef, actionsRef, spyKind }: ProbeRefs) {
             litRegionCount: top.litRegions?.length ?? 0,
           }
         : null,
-    frame: onboarding?.state.currentFrame ?? null,
+    // Frame-free position (standardized-viewer-control T6b/D13): read the
+    // active ViewerStep kind + report surface off the ChatStore viewer
+    // history, NOT a frame getter.
+    activeStepKind: top?.kind ?? null,
+    reportSurface: top && top.kind === "report" ? top.surface ?? "render" : null,
     gateStatus: onboarding?.state.gate?.status ?? null,
     schemaOverlay: sessionUnknown ? overlayView(sessionUnknown.pendingSchemaOverlay) : EMPTY_OVERLAY,
     reportOverlay: sessionUnknown ? overlayView(sessionUnknown.reportOverlay) : EMPTY_OVERLAY,
@@ -115,7 +119,8 @@ export async function replayIntentFixture(fixture: IntentFixture): Promise<void>
   const stateRef: ProbeRefs["stateRef"] = {
     current: {
       docViewerStep: null,
-      frame: null,
+      activeStepKind: null,
+      reportSurface: null,
       gateStatus: null,
       schemaOverlay: EMPTY_OVERLAY,
       reportOverlay: EMPTY_OVERLAY,

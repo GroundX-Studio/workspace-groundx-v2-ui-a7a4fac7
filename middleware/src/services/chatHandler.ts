@@ -44,7 +44,7 @@ import {
   type ChatRouterRequest,
   type ChatRouterResponse,
 } from "./chatRouter.js";
-import { ApiError, type ContentScope } from "@groundx/shared";
+import { ApiError, journeyStageForStepKind, type ContentScope } from "@groundx/shared";
 import { runCompression, runMetaCompaction, selectActiveSummaries } from "./conversationCompressor.js";
 import { UpstreamTimeoutError } from "./http.js";
 import { turnStreamContext } from "./streamSink.js";
@@ -299,8 +299,11 @@ export async function handleChatMessage(
     },
     currentEntity: {
       entityKey: activeEntity?.entityKey ?? null,
-      lastFrame: activeEntity?.lastFrame ?? null,
-      completedFrames: activeEntity ? safeParseStringArray(activeEntity.completedFramesJson) : [],
+      // Frame-free position (standardized-viewer-control D13): the active
+      // ViewerStep kind comes off the wire request (the client's current
+      // surface) and the journey stage is its pure projection — no frame word.
+      activeStepKind: request.activeStepKind ?? null,
+      journeyStage: journeyStageForStepKind(request.activeStepKind),
       extractedValues: activeEntity?.extractedValuesJson
         ? safeParseObject(activeEntity.extractedValuesJson)
         : null,

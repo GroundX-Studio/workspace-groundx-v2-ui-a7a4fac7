@@ -7,10 +7,13 @@
  *
  *   1. conversation — the latest summary (if any) plus the live tail
  *      of messages that haven't been compressed into a summary yet.
- *   2. currentEntity — the per-session entity state (last frame,
- *      completed frames, extracted values…). Reads from
+ *   2. currentEntity — the per-session entity state (journey stage,
+ *      active viewer-step kind, extracted values…). Reads from
  *      ChatStore.activeSession.entities or from the DB chat_session_entities
- *      table depending on auth state (server picks the right read).
+ *      table depending on auth state (server picks the right read). The
+ *      position is described FRAME-FREE (standardized-viewer-control D13):
+ *      the journey STAGE (ingest | understand | analyze | integrate) plus the
+ *      active ViewerStep KIND — never a frame word (f1…f7).
  *   3. viewerTrail — the recent slice of viewer_events for the
  *      session. Always server-side (telemetry).
  *
@@ -29,6 +32,8 @@
  * middleware wiring track (#70); this file provides the trigger +
  * the data shape the summary writer needs.
  */
+
+import type { JourneyStage } from "@groundx/shared";
 
 export interface BundleConversationInput {
   /**
@@ -57,8 +62,18 @@ export interface BundleConversationInput {
 
 export interface BundleEntityInput {
   entityKey: string | null;
-  lastFrame: string | null;
-  completedFrames: string[];
+  /**
+   * Frame-free journey position (standardized-viewer-control D13). The
+   * top-level stage the user is on, derived from the active ViewerStep kind
+   * via `journeyStageForStepKind`. `null` when no recognized step is active.
+   */
+  journeyStage: JourneyStage | null;
+  /**
+   * The active ViewerStep kind the user is currently on (e.g. "doc-viewer",
+   * "extract-workbench"). The frame-free replacement for the old `lastFrame`
+   * resume anchor in the LLM context.
+   */
+  activeStepKind: string | null;
   extractedValues: Record<string, unknown> | null;
 }
 
@@ -213,7 +228,8 @@ function estimateConversationTokens(c: BundleConversationInput): number {
 
 function estimateEntityTokens(e: BundleEntityInput): number {
   if (!e.entityKey) return 0;
-  let total = estimateText(e.entityKey) + estimateText(e.lastFrame ?? "") + e.completedFrames.length * 2;
+  let total =
+    estimateText(e.entityKey) + estimateText(e.journeyStage ?? "") + estimateText(e.activeStepKind ?? "");
   if (e.extractedValues) total += estimateText(JSON.stringify(e.extractedValues));
   return total;
 }

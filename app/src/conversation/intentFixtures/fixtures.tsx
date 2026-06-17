@@ -69,26 +69,33 @@ export const intentFixtures: IntentFixture[] = [
     },
   },
 
-  // ── Batch A: frame-advance (P4 → OnboardingSession.advanceFrame) ─
+  // ── Batch A: viewer navigation (P4 → active ViewerStep). Asserted on the
+  //    FRAME-FREE active step kind + report surface (T6b/D13), not a frame. ─
   {
     kind: "showExtract",
     trigger: { via: "reply", reply: replyWithIntent("show_extraction", { kind: "showExtract", scope: DOC_SCOPE, schemaId: "schema-1" }) },
-    assert: (s) => assert(s.frame === "f3", `frame was ${s.frame}`),
+    assert: (s) => assert(s.activeStepKind === "extract-workbench", `activeStepKind was ${s.activeStepKind}`),
   },
   {
     kind: "showIntegrate",
     trigger: { via: "reply", reply: replyWithIntent("show_integrate", { kind: "showIntegrate", scope: DOC_SCOPE }) },
-    assert: (s) => assert(s.frame === "f7", `frame was ${s.frame}`),
+    assert: (s) => assert(s.activeStepKind === "integrate", `activeStepKind was ${s.activeStepKind}`),
   },
   {
     kind: "showReport",
     trigger: { via: "reply", reply: replyWithIntent("show_smart_report_render", { kind: "showReport", templateId: "tmpl-1", scope: DOC_SCOPE }) },
-    assert: (s) => assert(s.frame === "f4", `frame was ${s.frame}`),
+    assert: (s) => {
+      assert(s.activeStepKind === "report", `activeStepKind was ${s.activeStepKind}`);
+      assert(s.reportSurface === "render", `reportSurface was ${s.reportSurface}`);
+    },
   },
   {
     kind: "editTemplate",
     trigger: { via: "reply", reply: replyWithIntent("show_smart_report_edit", { kind: "editTemplate", templateId: "tmpl-1" }) },
-    assert: (s) => assert(s.frame === "f4a", `frame was ${s.frame}`),
+    assert: (s) => {
+      assert(s.activeStepKind === "report", `activeStepKind was ${s.activeStepKind}`);
+      assert(s.reportSurface === "builder", `reportSurface was ${s.reportSurface}`);
+    },
   },
 
   // ── Batch C: viewer built-in (jumpToPage / showCitations) ───────

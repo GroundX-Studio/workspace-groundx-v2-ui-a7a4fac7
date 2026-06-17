@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
+import { journeyStageForStepKind } from "@groundx/shared";
+
 import { useChatStore, type ViewerStep } from "@/contexts/ChatStoreContext";
 import { track } from "@/lib/analytics";
 import { gaSetDefaults } from "@/lib/ga";
@@ -216,7 +218,7 @@ function useSessionFacade(): OnboardingSessionApi {
 
   // standardized-viewer-control T5 — advance the onboarding JOURNEY STATE for a
   // frame WITHOUT pushing a viewer step. This is the side-effect half of
-  // `advanceFrame` (lastFrame + completedFrames + the frame-advanced viewer
+  // `advanceFrame` (lastFrame + completedFrames + the journey-advanced viewer
   // event + the f7 gate-pop + the f4a section pre-select). The orchestrator's
   // de-forked `show*`/`editTemplate` handlers push the viewer step THEMSELVES
   // (the one canvas outcome, both experiences) and then call this to layer the
@@ -251,11 +253,16 @@ function useSessionFacade(): OnboardingSessionApi {
         completedFrames.add(session.lastFrame);
         return { ...session, lastFrame: frame, completedFrames };
       });
+      // standardized-viewer-control T6b (D14) — the viewer-event action
+      // vocabulary is FRAME-FREE. Record the journey-progress advance as
+      // `journey-advanced` carrying the destination's journey stage + step
+      // kind (derived from the step projection), never a frame name.
+      const stepKind = frameToStepStandalone(frame, null).kind;
       appendViewerEvent({
-        action: "frame-advanced",
+        action: "journey-advanced",
         entityKey: entityKeyAtAdvance,
         source: "user",
-        detail: { frame },
+        detail: { stage: journeyStageForStepKind(stepKind), step: stepKind },
       });
     },
     [updateActive, appendViewerEvent, popOverlay],
@@ -296,7 +303,7 @@ function useSessionFacade(): OnboardingSessionApi {
       if (!activeKeyRef.current) {
         return;
       }
-      // Journey state (lastFrame/completedFrames/frame-advanced event/f7 pop).
+      // Journey state (lastFrame/completedFrames/journey-advanced event/f7 pop).
       markFrameReached(frame, options);
       // `master-viewer-session` Phase 3 — accumulate the viewer step.
       // Derive the scenario id from the entity key (`sample:utility` →

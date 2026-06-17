@@ -17,8 +17,8 @@ function baseInput(overrides: Partial<BundleChatContextInput> = {}): BundleChatC
     },
     currentEntity: {
       entityKey: null,
-      lastFrame: null,
-      completedFrames: [],
+      journeyStage: null,
+      activeStepKind: null,
       extractedValues: null,
       ...overrides.currentEntity,
     },
@@ -50,13 +50,13 @@ describe("bundleChatContext", () => {
         },
         currentEntity: {
           entityKey: "sample:utility",
-          lastFrame: "f2",
-          completedFrames: ["f1", "f2"],
+          journeyStage: "understand",
+          activeStepKind: "doc-viewer",
           extractedValues: { amount: 123 },
         },
         recentViewerEvents: [
           { action: "opened", entityKey: "sample:utility", source: "user", timestamp: 1 },
-          { action: "frame-advanced", entityKey: "sample:utility", source: "user", timestamp: 2 },
+          { action: "intent-dispatched", entityKey: "sample:utility", source: "user", timestamp: 2 },
         ],
         newUserMessage: "what is the total amount due?",
       }),
@@ -67,6 +67,25 @@ describe("bundleChatContext", () => {
     expect(bundle.viewerTrail).toHaveLength(2);
     expect(bundle.newUserMessage).toBe("what is the total amount due?");
     expect(bundle.estimatedTokens).toBeGreaterThan(0);
+  });
+
+  it("carries the FRAME-FREE journey stage + active step kind on currentEntity (no frame word)", () => {
+    const bundle = bundleChatContext(
+      baseInput({
+        currentEntity: {
+          entityKey: "sample:utility",
+          journeyStage: "analyze",
+          activeStepKind: "extract-workbench",
+          extractedValues: null,
+        },
+      }),
+    );
+    expect(bundle.currentEntity.journeyStage).toBe("analyze");
+    expect(bundle.currentEntity.activeStepKind).toBe("extract-workbench");
+    // No frame word leaks into the assembled bundle.
+    expect(JSON.stringify(bundle.currentEntity)).not.toMatch(/\bf[1-7]a?\b/);
+    expect(bundle.currentEntity).not.toHaveProperty("lastFrame");
+    expect(bundle.currentEntity).not.toHaveProperty("completedFrames");
   });
 
   it("counts EVERY active summary against the token budget (multi-summary case)", () => {

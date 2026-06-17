@@ -803,6 +803,37 @@ describe("middleware API route contract", () => {
         .expect(400);
     });
 
+    // standardized-viewer-control T6b (D14) — the viewer-event action
+    // vocabulary is FRAME-FREE. The journey-progress advance is recorded
+    // as `journey-advanced` (stage/step detail), and the retired
+    // `frame-advanced` name is no longer a valid action.
+    it("accepts the frame-free `journey-advanced` action", async () => {
+      const { repository, agent } = await setupAnonSession();
+      await agent
+        .post("/api/viewer-events")
+        .send(
+          viewerEventBody({
+            action: "journey-advanced",
+            detail: { stage: "analyze", step: "extract-workbench" },
+          }),
+        )
+        .expect(201);
+      const rows = await repository.listViewerEvents("rt02-anon");
+      expect(rows[0]).toMatchObject({ action: "journey-advanced" });
+      expect(JSON.parse(rows[0].detailJson ?? "{}")).toEqual({
+        stage: "analyze",
+        step: "extract-workbench",
+      });
+    });
+
+    it("rejects the retired frame-coupled `frame-advanced` action (400)", async () => {
+      const { agent } = await setupAnonSession();
+      await agent
+        .post("/api/viewer-events")
+        .send(viewerEventBody({ action: "frame-advanced" }))
+        .expect(400);
+    });
+
     it("returns 404 when the chat session row does not exist", async () => {
       const { app } = setup();
       const agent = request.agent(app);

@@ -74,7 +74,7 @@ describe("recordViewerEvent (RT-02 client)", () => {
         chatSessionId: "chat-1",
         timestamp: 0,
         entityKey: null,
-        action: "frame-advanced",
+        action: "journey-advanced",
         source: "agent",
       }),
     ).resolves.toBeUndefined();
@@ -84,7 +84,7 @@ describe("recordViewerEvent (RT-02 client)", () => {
     expect(extras).toMatchObject({
       route: "/api/viewer-events",
       status: 500,
-      action: "frame-advanced",
+      action: "journey-advanced",
     });
   });
 

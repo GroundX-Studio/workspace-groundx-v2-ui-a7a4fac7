@@ -878,6 +878,47 @@ export const viewerStepKindSchema = z.enum([
 export type ViewerStepKind = z.infer<typeof viewerStepKindSchema>;
 
 // ──────────────────────────────────────────────────────────────────────
+// JourneyStage — the four-stop onboarding journey vocabulary, FRAME-FREE.
+// standardized-viewer-control T6b (D3/D13): the LLM context + the step strip
+// describe "where the user is" by JOURNEY STAGE + ACTIVE STEP KIND, never by a
+// frame word (f1…f7). The stage is a pure function of the active ViewerStep
+// kind — `extract-workbench` / `interact-chat` / `report` all collapse to the
+// single `analyze` stage (the strip nests them as Analyze sub-steps; the LLM
+// context only needs the top-level stage). The app's richer
+// `VIEWER_STEP_TO_JOURNEY` map (kind → {step, substep}) is the strip view over
+// this same vocabulary; `viewerStepKindToJourneyStage` is the canonical
+// kind → top-level-stage projection both sides derive from.
+// ──────────────────────────────────────────────────────────────────────
+export const journeyStageSchema = z.enum(["ingest", "understand", "analyze", "integrate"]);
+export type JourneyStage = z.infer<typeof journeyStageSchema>;
+
+/**
+ * Canonical projection from a `ViewerStepKind` to its top-level
+ * `JourneyStage`. Total over `viewerStepKindSchema` (a compile-time
+ * `Record<ViewerStepKind, …>` keeps it exhaustive; a guard test asserts
+ * every kind resolves). Frame-free: nothing here references f1…f7.
+ */
+export const viewerStepKindToJourneyStage: Record<ViewerStepKind, JourneyStage> = {
+  "ingest-picker": "ingest",
+  "doc-viewer": "understand",
+  "extract-workbench": "analyze",
+  "interact-chat": "analyze",
+  report: "analyze",
+  integrate: "integrate",
+};
+
+/**
+ * Resolve the journey stage for an active step kind. Returns `null` for an
+ * absent/unknown kind (the user hasn't landed on a recognized surface yet) so
+ * the LLM context can say "no active step" rather than guess a stage.
+ */
+export function journeyStageForStepKind(kind: string | null | undefined): JourneyStage | null {
+  if (!kind) return null;
+  const parsed = viewerStepKindSchema.safeParse(kind);
+  return parsed.success ? viewerStepKindToJourneyStage[parsed.data] : null;
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // CanvasKind — the CLOSED set of canvas surfaces that have a built
 // `ScopedViewerWidget` today. This is deliberately NARROWER than
 // `ViewerStepKind`: a ViewerStep can carry a kind (`extract-workbench`,

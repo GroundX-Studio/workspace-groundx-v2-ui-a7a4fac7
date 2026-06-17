@@ -27,7 +27,20 @@ import type {
 } from "../types.js";
 import type { ChatRouterRequest, ChatRouterResponse } from "./chatRouter.js";
 import { groundedAnswerOverScope } from "./groundedAnswer.js";
-import type { ContentScope } from "@groundx/shared";
+import { journeyStageForStepKind, type ContentScope } from "@groundx/shared";
+
+/**
+ * One frame-free sentence describing the user's current position
+ * (standardized-viewer-control D13): the journey STAGE plus the active
+ * ViewerStep KIND, both sourced from the wire request's `activeStepKind`.
+ * Never a frame word. Returns null when no recognized step is active.
+ */
+function describePosition(activeStepKind: string | null | undefined): string | null {
+  if (!activeStepKind) return null;
+  const stage = journeyStageForStepKind(activeStepKind);
+  if (!stage) return null;
+  return `${stage} stage, on the ${activeStepKind} step`;
+}
 
 export type StructuredQueryKind =
   | "pages_remaining"
@@ -103,9 +116,9 @@ export async function runStructuredQuery(
     case "pages_remaining":
       return await answerPagesRemaining(deps);
     case "onboarding_state":
-      return await answerOnboardingState(deps);
+      return await answerOnboardingState(deps, request.activeStepKind);
     case "current_entity":
-      return await answerCurrentEntity(deps);
+      return await answerCurrentEntity(deps, request.activeStepKind);
     case "saved_schemas":
       return await answerSavedSchemas(deps);
     case "my_projects":
@@ -139,7 +152,10 @@ async function answerPagesRemaining(deps: StructuredHandlerDeps): Promise<ChatRo
   };
 }
 
-async function answerOnboardingState(deps: StructuredHandlerDeps): Promise<ChatRouterResponse> {
+async function answerOnboardingState(
+  deps: StructuredHandlerDeps,
+  activeStepKind: string | null | undefined,
+): Promise<ChatRouterResponse> {
   const session = await deps.repository.getChatSession(deps.chatSessionId);
   if (!session) {
     return frank("structured: chat session row not found.");
@@ -149,7 +165,7 @@ async function answerOnboardingState(deps: StructuredHandlerDeps): Promise<ChatR
   const active = entities.find((e) => e.entityKey === activeKey);
   return {
     mode: "structured",
-    answer: formatOnboardingStateAnswer(session, active, entities),
+    answer: formatOnboardingStateAnswer(session, active, entities, activeStepKind),
     citations: [],
     suggestedActions: [
       { key: "show-extract", label: "Show me the extract" },
@@ -161,7 +177,10 @@ async function answerOnboardingState(deps: StructuredHandlerDeps): Promise<ChatR
   };
 }
 
-async function answerCurrentEntity(deps: StructuredHandlerDeps): Promise<ChatRouterResponse> {
+async function answerCurrentEntity(
+  deps: StructuredHandlerDeps,
+  activeStepKind: string | null | undefined,
+): Promise<ChatRouterResponse> {
   const session = await deps.repository.getChatSession(deps.chatSessionId);
   if (!session) return frank("structured: chat session row not found.");
   const entities = await deps.repository.listChatSessionEntities(deps.chatSessionId);
@@ -177,12 +196,14 @@ async function answerCurrentEntity(deps: StructuredHandlerDeps): Promise<ChatRou
     proposedSchemaField: null,
     };
   }
+  const position = describePosition(activeStepKind);
   return {
     mode: "structured",
     answer:
       `You're currently viewing \`${active.entityKey}\`. ` +
-      `Last frame: \`${active.lastFrame ?? "f1"}\`. ` +
-      `${safeCount(active.completedFramesJson)} frames completed so far.`,
+      (position
+        ? `You're on the ${position}.`
+        : `You haven't opened a view on it yet.`),
     citations: [],
     // No citations on this structured status reply → no "Show all sources"
     // chip (a sources chip with zero sources is a dead button, 2026-06-11).
@@ -453,8 +474,15 @@ export async function runHybridQuery(
   const contextLines: string[] = [];
   if (active) {
     contextLines.push(`Active entity: ${active.entityKey}`);
-    contextLines.push(`Last frame: ${active.lastFrame ?? "f1"}`);
-    contextLines.push(`Frames completed: ${safeCount(active.completedFramesJson)}`);
+    // Frame-free position (standardized-viewer-control D13): journey STAGE +
+    // active ViewerStep KIND off the wire request, never a frame word.
+    const stage = journeyStageForStepKind(request.activeStepKind);
+    if (stage) {
+      contextLines.push(`Journey stage: ${stage}`);
+      contextLines.push(`Active step: ${request.activeStepKind}`);
+    } else {
+      contextLines.push("No active view yet.");
+    }
   } else {
     contextLines.push("No active entity yet.");
   }
@@ -547,13 +575,15 @@ function formatOnboardingStateAnswer(
   session: ChatSessionRecord,
   active: ChatSessionEntityRecord | undefined,
   entities: ChatSessionEntityRecord[],
+  activeStepKind: string | null | undefined,
 ): string {
   const lines: string[] = [];
   lines.push(`Session: ${session.title}${session.isOnboarding ? " (onboarding)" : ""}`);
   if (active) {
-    lines.push(`Active entity: ${active.entityKey} (frame ${active.lastFrame ?? "f1"})`);
-    const completed = safeCount(active.completedFramesJson);
-    lines.push(`Frames completed: ${completed}`);
+    // Frame-free position (standardized-viewer-control D13): journey STAGE +
+    // active ViewerStep KIND, never a frame word or a frames-completed count.
+    const position = describePosition(activeStepKind);
+    lines.push(`Active entity: ${active.entityKey}${position ? ` (${position})` : ""}`);
   } else {
     lines.push("No active entity.");
   }
@@ -561,16 +591,6 @@ function formatOnboardingStateAnswer(
     lines.push(`Other entities you've visited: ${entities.length - 1}`);
   }
   return lines.join("\n");
-}
-
-function safeCount(json: string | null): number {
-  if (!json) return 0;
-  try {
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed.length : 0;
-  } catch {
-    return 0;
-  }
 }
 
 function truncate(s: string, max: number): string {

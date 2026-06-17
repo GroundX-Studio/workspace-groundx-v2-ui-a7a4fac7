@@ -41,6 +41,20 @@ only after its adversarial review gate passes against the plan AND the real code
   (`save-schema` re-trigger round-trip test), the 3 hand-maintained tool-test fixtures
   (`EXPECTED_NAMES`/`toolsForStep`/`TOOL_ARGS`), and the `offerAs` shared-constant parity
   discipline. (Prior pass's "nearly clean" was under-rigorous — this pass was not.)
+- **EXECUTION (workflows):** Phase 1 foundation (T2/T3/T5) committed `77fb3848`; T6 + T9
+  auto-advance committed `be782df3` — both independently verified green (tsc + full app
+  1866 / middleware 1005 suites + guards + validate). All production triggers now change
+  the canvas via `dispatch`.
+- **GAP found in execution (resolve in the deletion phase):** R7's "reuse ingest-picker,
+  no new intent kind" was incomplete. Three BACKWARD-transition sites have NO destination
+  intent and remain on `advanceFrame` until deletion: `Extract.tsx:488` (f1 save-return),
+  `OnboardingShell.tsx:324` (f1 URL-return), `experience.tsx:208` (f2 intro-snap).
+  `showSample` ACTIVATES a scenario; there is no deactivate/return-to-picker intent, and
+  the intro-snap needs BOTH a scanning doc-viewer beat AND the journey edge. **Before
+  deleting `advanceFrame`/`currentFrame`/`completedFrames`/`frameToStepStandalone`, the
+  deletion phase MUST add: (a) a return-to-ingest-picker (entity-deactivate) intent, and
+  (b) an Understand intro-snap capability** (or fold the snap into an existing intent),
+  then migrate these 3 sites. This is the frame-symbol-deletion gate.
 
 > **Review corrections to stale facts:** "36 `advanceFrame` sites" is actually **18**
 > production trigger call sites (verified). The intent-catalog completeness test

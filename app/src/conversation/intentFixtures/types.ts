@@ -25,8 +25,20 @@ export interface OverlayView {
 export interface HarnessState {
   /** The active `doc-viewer` step (highlightCitation / jumpToPage / showCitations). */
   docViewerStep: DocViewerStepView | null;
-  /** OnboardingSession current frame (showExtract/Integrate/Report/editTemplate/switchFrame). */
-  frame: string | null;
+  /**
+   * The active ViewerStep KIND — the frame-free position read
+   * (standardized-viewer-control T6b/D13). Replaces the old `frame` probe:
+   * `showExtract`→"extract-workbench", `showReport`/`editTemplate`→"report",
+   * `showIntegrate`→"integrate", etc. Sourced from the ChatStore viewer
+   * history, NOT from any frame getter.
+   */
+  activeStepKind: string | null;
+  /**
+   * The active `report` step's surface ("render" | "builder"), or null when
+   * the active step is not a report. This is the frame-free replacement for
+   * the old f4 (render) vs f4a (builder) distinction.
+   */
+  reportSurface: "render" | "builder" | null;
   /** OnboardingSession gate status (openGate/commitGate/dismissGate). */
   gateStatus: string | null;
   /** Schema proposal overlay (proposeSchemaField / accept / reject). */

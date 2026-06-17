@@ -116,26 +116,37 @@ describe("runStructuredQuery", () => {
     expect(reply.citations).toHaveLength(0);
   });
 
-  it("onboarding_state → returns real data from the session + active entity", async () => {
+  it("onboarding_state → describes position by FRAME-FREE journey stage + active step (no frame word)", async () => {
     const reply = await runStructuredQuery(
-      makeRequest({ newUserMessage: "where am I in onboarding progress?" }),
+      makeRequest({
+        newUserMessage: "where am I in onboarding progress?",
+        activeStepKind: "extract-workbench",
+      }),
       { repository: repo, chatSessionId: "chat-1", groundxUsername: null, byoPagesLimit: 100 },
     );
     expect(reply.mode).toBe("structured");
     expect(reply.answer).toMatch(/sample:utility/);
-    expect(reply.answer).toMatch(/f3/);
-    expect(reply.answer).toMatch(/frames completed: 3/i);
+    // Stage + active step kind, NOT a frame word or a frames-completed count.
+    expect(reply.answer).toMatch(/analyze/i);
+    expect(reply.answer).toMatch(/extract-workbench/);
+    expect(reply.answer).not.toMatch(/\bf[1-7]a?\b/);
+    expect(reply.answer).not.toMatch(/frames? completed/i);
   });
 
-  it("current_entity → returns the active entity key and last frame", async () => {
-    const reply = await runStructuredQuery(makeRequest({ newUserMessage: "what's the current view?" }), {
-      repository: repo,
-      chatSessionId: "chat-1",
-      groundxUsername: null,
-      byoPagesLimit: 100,
-    });
+  it("current_entity → returns the active entity key + FRAME-FREE stage/step (no frame word)", async () => {
+    const reply = await runStructuredQuery(
+      makeRequest({ newUserMessage: "what's the current view?", activeStepKind: "extract-workbench" }),
+      {
+        repository: repo,
+        chatSessionId: "chat-1",
+        groundxUsername: null,
+        byoPagesLimit: 100,
+      },
+    );
     expect(reply.answer).toMatch(/sample:utility/);
-    expect(reply.answer).toMatch(/f3/);
+    expect(reply.answer).toMatch(/analyze/i);
+    expect(reply.answer).toMatch(/extract-workbench/);
+    expect(reply.answer).not.toMatch(/\bf[1-7]a?\b/);
   });
 
   it("current_entity with no active entity → 'pick a sample' nudge", async () => {
@@ -447,6 +458,28 @@ describe("hybrid full-merge (grounded seam)", () => {
     expect(
       gx.forward.mock.calls.filter(([p]) => String(p).includes("/ingest/document/extract/")),
     ).toHaveLength(1);
+  });
+
+  it("the WORKSPACE STATE block describes position FRAME-FREE (journey stage + active step, no frame word)", async () => {
+    const llm = fakeLlm("ok");
+    const gx = fakeGroundx([{ documentId: "d-1", text: "total is $123.45" }]);
+    await runHybridQuery(makeRequest({ newUserMessage: "where am I?", activeStepKind: "extract-workbench" }), {
+      repository: repo,
+      chatSessionId: "chat-h",
+      groundxUsername: null,
+      byoPagesLimit: 100,
+      llmClient: llm.client,
+      llmModelId: "m",
+      groundxClient: gx.client,
+      groundxApiKey: "k",
+    });
+    const body = JSON.parse((llm.forward.mock.calls[0][1] as { body: string }).body);
+    const system = body.messages[0].content as string;
+    expect(system).toContain("WORKSPACE STATE");
+    expect(system).toMatch(/stage:\s*analyze/i);
+    expect(system).toMatch(/extract-workbench/);
+    // The grounded system prompt must carry NO frame word from the workspace block.
+    expect(system).not.toMatch(/(Last frame|Frames completed|frame f[1-7])/i);
   });
 
   it("uncited hybrid answer carries ZERO citations and no show-source chip", async () => {

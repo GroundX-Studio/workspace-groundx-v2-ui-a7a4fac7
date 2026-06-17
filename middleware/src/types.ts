@@ -140,11 +140,17 @@ export interface ChatSessionEntityRecord {
 
 export const viewerEventActionSchema = z.enum([
   "opened",
-  "frame-advanced",
+  // standardized-viewer-control T6b (D14) — frame-free journey-progress
+  // advance (carries `{ stage, step }` detail), replacing the retired
+  // frame-coupled `frame-advanced`. The action vocabulary names no frame.
+  "journey-advanced",
   "extracted-value-viewed",
   "citation-clicked",
   "scan-completed",
   "intent-dispatched",
+  // `left` is INTENTIONALLY KEPT (T6b assessment): it records leaving the
+  // active entity/journey (the return-to-ingest entity-deactivate), not
+  // "left frame f1" — the name carries no frame, so it stays as-is.
   "left",
 ]);
 export type ViewerEventAction = z.infer<typeof viewerEventActionSchema>;
@@ -177,7 +183,7 @@ export interface ViewerEventRecord {
  * UI-10b — `intent_log` table. The canvas-orchestrator dispatch trail
  * lives here, separate from `viewer_events`:
  *
- *   - viewer_events records every UI-visible action (frame-advanced,
+ *   - viewer_events records every UI-visible action (journey-advanced,
  *     citation-clicked, scan-completed). Reads light, writes many.
  *   - intent_log records every dispatched CanvasIntent regardless of
  *     whether it produced a UI-visible action. Smaller volume but

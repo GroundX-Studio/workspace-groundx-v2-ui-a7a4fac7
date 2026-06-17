@@ -75,11 +75,15 @@ export interface ViewerEvent {
   entityKey: EntityKey | null;
   action:
     | "opened"
-    | "frame-advanced"
+    // standardized-viewer-control T6b (D14) — frame-free journey-progress
+    // advance, replacing the retired frame-coupled `frame-advanced`.
+    | "journey-advanced"
     | "extracted-value-viewed"
     | "citation-clicked"
     | "scan-completed"
     | "intent-dispatched"
+    // `left` is intentionally kept — it records leaving the active
+    // entity/journey, not "left frame f1" (carries no frame name).
     | "left";
   // 2026-05-31-chat-wire-types-shared — single-sourced off the shared `Source`.
   source: Source;

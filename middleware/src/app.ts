@@ -977,7 +977,7 @@ export function createApp({
       // when extending the enum on the types side.
       const allowedActions = new Set<string>([
         "opened",
-        "frame-advanced",
+        "journey-advanced",
         "extracted-value-viewed",
         "citation-clicked",
         "scan-completed",
@@ -1031,7 +1031,7 @@ export function createApp({
         entityKey: entityKey ?? null,
         action: action as
           | "opened"
-          | "frame-advanced"
+          | "journey-advanced"
           | "extracted-value-viewed"
           | "citation-clicked"
           | "scan-completed"

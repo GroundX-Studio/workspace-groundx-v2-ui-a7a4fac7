@@ -243,7 +243,7 @@ describe("MemoryAppRepository — chat-session methods", () => {
       detailJson: null,
     });
     await repo.appendViewerEvent(make("e1", 1000, "opened"));
-    await repo.appendViewerEvent(make("e2", 2000, "frame-advanced"));
+    await repo.appendViewerEvent(make("e2", 2000, "journey-advanced"));
     await repo.appendViewerEvent(make("e3", 3000, "citation-clicked"));
     const all = await repo.listViewerEvents("chat-1");
     expect(all.map((e) => e.id)).toEqual(["e3", "e2", "e1"]);

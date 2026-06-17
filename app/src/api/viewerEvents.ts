@@ -27,7 +27,9 @@ export interface RecordViewerEventInput {
   entityKey: string | null;
   action:
     | "opened"
-    | "frame-advanced"
+    // standardized-viewer-control T6b (D14) — frame-free journey-progress
+    // advance, replacing the retired frame-coupled `frame-advanced`.
+    | "journey-advanced"
     | "extracted-value-viewed"
     | "citation-clicked"
     | "scan-completed"

@@ -52,7 +52,7 @@ export interface OnboardingSessionApi {
   /**
    * standardized-viewer-control T5 — advance the onboarding JOURNEY STATE for a
    * frame WITHOUT pushing a viewer step (the side-effect half of `advanceFrame`:
-   * lastFrame + completedFrames + the frame-advanced event + the f7 gate-pop +
+   * lastFrame + completedFrames + the journey-advanced event + the f7 gate-pop +
    * the f4a section pre-select). The orchestrator's de-forked `show*`/`editTemplate`
    * handlers push the viewer step themselves (the one canvas outcome, both
    * experiences) and call this to layer onboarding journey-progress on top. f1

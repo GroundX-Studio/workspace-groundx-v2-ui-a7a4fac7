@@ -15,9 +15,9 @@ import { OnboardingShell } from "./OnboardingShell";
  * / openDocument), never by calling `advanceFrame` directly.
  *
  * Discriminator: a dispatched intent records an `intent-dispatched` ViewerEvent
- * carrying `detail.kind`; a frame advance records a `frame-advanced` event.
- * Asserting the former (and that no `frame-advanced` rides along for the strip
- * navigation) proves the click routed through `dispatch`.
+ * carrying `detail.kind`; a journey-progress advance records a `journey-advanced`
+ * event (frame-free, D14). Asserting the former (and that no `journey-advanced`
+ * rides along for the strip navigation) proves the click routed through `dispatch`.
  */
 
 const IntentEventsProbe = ({

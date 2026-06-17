@@ -1028,12 +1028,16 @@ describe("OnboardingShell", () => {
       expect(opens[opens.length - 1].source).toBe("user");
     });
 
-    // Advance to F3 → ViewerEvent action="frame-advanced", detail.frame="f3"
+    // Advance to F3 → ViewerEvent action="journey-advanced" (frame-free,
+    // D14): detail carries the journey stage + step kind, never a frame.
     act(() => actions!.advanceFrame("f3"));
     await waitFor(() => {
-      const advances = snapshot.events.filter((e) => e.action === "frame-advanced");
+      const advances = snapshot.events.filter((e) => e.action === "journey-advanced");
       expect(advances.length).toBeGreaterThanOrEqual(1);
-      expect(advances[advances.length - 1].detail).toMatchObject({ frame: "f3" });
+      expect(advances[advances.length - 1].detail).toMatchObject({
+        stage: "analyze",
+        step: "extract-workbench",
+      });
     });
 
     // Return to picker via Ingest pill → ViewerEvent action="left"

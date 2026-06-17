@@ -22,7 +22,7 @@ import { makeOnboardingExperience } from "./experience";
  *
  * Discriminator: a dispatched intent records an `intent-dispatched` ViewerEvent
  * carrying `detail.kind`. Asserting it proves the path routed through `dispatch`
- * (a bare `advanceFrame` would record `frame-advanced` instead).
+ * (a bare `advanceFrame` would record `journey-advanced` instead).
  */
 
 const IntentEventsProbe = ({

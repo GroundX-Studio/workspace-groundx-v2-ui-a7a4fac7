@@ -233,13 +233,13 @@ describe("ChatStoreContext", () => {
         idA = result.current.newSession();
         result.current.appendViewerEvent({ action: "opened", entityKey: null, source: "user" });
         idB = result.current.newSession();
-        result.current.appendViewerEvent({ action: "frame-advanced", entityKey: null, source: "user" });
+        result.current.appendViewerEvent({ action: "journey-advanced", entityKey: null, source: "user" });
         result.current.appendViewerEvent({ action: "left", entityKey: null, source: "user" });
       });
       const sessA = result.current.state.sessions.get(idA)!;
       const sessB = result.current.state.sessions.get(idB)!;
       expect(sessA.viewerHistory.map((e) => e.action)).toEqual(["opened"]);
-      expect(sessB.viewerHistory.map((e) => e.action)).toEqual(["frame-advanced", "left"]);
+      expect(sessB.viewerHistory.map((e) => e.action)).toEqual(["journey-advanced", "left"]);
     });
   });
 
@@ -451,7 +451,7 @@ describe("ChatStoreContext", () => {
         for (let i = 0; i < 75; i++) {
           result.current.appendViewerEvent({
             entityKey: null,
-            action: "frame-advanced",
+            action: "journey-advanced",
             source: "user",
             detail: { i },
           });
