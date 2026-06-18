@@ -444,7 +444,6 @@ export type ViewerStep =
     }
   | {
       kind: "interact-chat";
-      scenarioId: string;
       /**
        * standardized-viewer-control T5 — the resolved GroundX document the
        * Interact (chat-with-sources) canvas mounts. The `showInteract` handler
@@ -490,7 +489,6 @@ export function toPersistedViewerStep(step: ViewerStep): PersistedViewerStep {
     case "interact-chat":
       return {
         kind: "interact-chat",
-        scenarioId: step.scenarioId,
         ...(step.documentId !== undefined ? { documentId: step.documentId } : {}),
       };
     case "report":

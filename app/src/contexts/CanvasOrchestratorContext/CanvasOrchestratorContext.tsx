@@ -396,15 +396,11 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             const docId = primaryDocumentFromScope(intent.scope);
             chatStore.pushStep({
               kind: "interact-chat",
-              scenarioId: onboardingSession?.state.scenario ?? "utility",
               ...(docId ? { documentId: docId } : {}),
             });
           }
           if (routeThroughOnboarding) {
-            onboardingSession?.markStageReached({
-              kind: "interact-chat",
-              scenarioId: onboardingSession.state.scenario ?? "utility",
-            });
+            onboardingSession?.markStageReached({ kind: "interact-chat" });
           }
           break;
         }

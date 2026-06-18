@@ -570,14 +570,19 @@ those durable requirements survive untouched and the spec set self-contradicts.
   capability.
 - Persisted-intent data migration is NOT required (pre-launch; `parseCanvasIntent`
   degrades unknown kinds to null).
-- **NOTE-level closeout follow-ups (from the T12 hostile review; not load-bearing):**
-  (a) make `interact-chat.scenarioId` OPTIONAL so the steady `showInteract` handler
-  drops the vestigial `?? "utility"` placeholder (the canvas resolves its document from
-  `scope`, so `scenarioId` is a label/telemetry artifact on interact-chat — a small
-  ViewerStep + PersistedViewerStep schema change, deferred to avoid a sign-off schema
-  ripple); (b) move `app/src/conversation/intentFixtures/replayIntent.tsx` under
-  `app/src/test/` so the single test-only frame-literal exception lives on one named
-  path. Both are test-/label-only; neither affects shipped behavior.
+- **NOTE-level closeout follow-ups (from the T12 hostile review):**
+  (a) ~~make `interact-chat.scenarioId` optional~~ **DONE 2026-06-18 — REMOVED entirely.**
+  A read-audit showed `interact-chat.scenarioId` was never consumed for behavior (the
+  canvas resolves its document from `scope`/`documentId`; the chat derives its scenario
+  from the session) — it was set, persisted, restored, and never read. So the right fix
+  was deletion, not "optional": dropped from the `ViewerStep` union, `PersistedViewerStep`
+  schema, the serializer, the two production set-sites (`showInteract` handler +
+  `OnboardingShell` canvas-step fallback, which had hardcoded `?? "utility"`), the test
+  fixtures, and `data-model.md`. (`extract-workbench.scenarioId` stays — it is the real
+  schemaId.) tsc/app 1909/mw 1016/guards/validate all green. (b) STILL OPEN: move
+  `app/src/conversation/intentFixtures/replayIntent.tsx` under `app/src/test/` so the
+  single test-only frame-literal exception lives on one named path (test-only; never
+  shipped).
 
 > **discipline §8:** the first two items are deferred future work and MUST each be filed
 > as a GitHub Issue before this change is archived (don't leave them as orphaned bullets).

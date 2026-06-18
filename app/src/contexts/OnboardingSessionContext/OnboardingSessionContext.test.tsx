@@ -178,7 +178,7 @@ describe("OnboardingSessionContext", () => {
       const { result } = renderHook(() => useOnboardingSession(), { wrapper });
       act(() => result.current.pickScenario("utility"));
       vi.mocked(track).mockReset();
-      act(() => result.current.markStageReached({ kind: "interact-chat", scenarioId: "utility" }));
+      act(() => result.current.markStageReached({ kind: "interact-chat" }));
       expect(findTrack("understand.completed")).toBeUndefined();
     });
 

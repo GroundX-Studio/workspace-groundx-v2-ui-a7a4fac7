@@ -55,7 +55,7 @@ export function testFrameToStep(
       return { kind: "report", surface: "builder" };
     case "f5":
     case "f6":
-      return { kind: "interact-chat", scenarioId: scenario ?? "unknown" };
+      return { kind: "interact-chat" };
     case "f7":
       return { kind: "integrate" };
     default:

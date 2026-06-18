@@ -131,7 +131,7 @@ describe("ScopedCanvas — declared CanvasKinds mount real widgets", () => {
   });
 
   it("interact-chat step → the doc viewer (the canvas shows the cited source)", () => {
-    const step: ViewerStep = { kind: "interact-chat", scenarioId: "utility" };
+    const step: ViewerStep = { kind: "interact-chat" };
     renderWithOnboardingProviders(
       <ScopedCanvas scope={DOC_SCOPE} step={step} role="member" experience="onboarding" />,
     );

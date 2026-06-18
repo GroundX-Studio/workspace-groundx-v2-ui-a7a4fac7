@@ -971,7 +971,6 @@ export const persistedViewerStepSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("interact-chat"),
-    scenarioId: z.string(),
     documentId: z.string().optional(),
   }),
   z.object({

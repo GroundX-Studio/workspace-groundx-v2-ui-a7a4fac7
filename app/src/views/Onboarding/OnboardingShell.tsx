@@ -738,7 +738,7 @@ export const OnboardingShell: FC = () => {
       case "extract-workbench":
         return { kind: "extract-workbench", scenarioId: canvasScenarioId ?? "utility" };
       case "interact-chat":
-        return { kind: "interact-chat", scenarioId: canvasScenarioId ?? "utility" };
+        return { kind: "interact-chat" };
       case "report":
         return { kind: "report" };
       case "integrate":

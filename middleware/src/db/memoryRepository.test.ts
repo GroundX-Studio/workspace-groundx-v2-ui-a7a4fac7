@@ -152,7 +152,7 @@ describe("MemoryAppRepository — chat-session methods", () => {
     await repo.upsertChatSessionEntity({
       chatSessionId: "chat-1",
       entityKey: "project:abc",
-      lastStepJson: JSON.stringify({ kind: "interact-chat", scenarioId: "x" }),
+      lastStepJson: JSON.stringify({ kind: "interact-chat" }),
       reachedStagesJson: "[]",
       scanProgressJson: null,
       extractedValuesJson: null,

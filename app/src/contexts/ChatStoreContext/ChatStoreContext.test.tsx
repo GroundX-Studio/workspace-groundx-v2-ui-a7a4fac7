@@ -184,11 +184,11 @@ describe("ChatStoreContext", () => {
       result.current.upsertEntityAndActivate("sample", "utility", { lastStep: { kind: "doc-viewer", documentId: "scenario:utility" } });
     });
     act(() => {
-      result.current.updateActiveEntity((entity) => ({ ...entity, lastStep: { kind: "interact-chat", scenarioId: "utility" } }));
+      result.current.updateActiveEntity((entity) => ({ ...entity, lastStep: { kind: "interact-chat" } }));
     });
     const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
     const entity = session.entities.get("sample:utility" as never)!;
-    expect(entity.lastStep).toEqual({ kind: "interact-chat", scenarioId: "utility" });
+    expect(entity.lastStep).toEqual({ kind: "interact-chat" });
   });
 
   // -----------------------------------------------------------------
@@ -337,7 +337,7 @@ describe("ChatStoreContext", () => {
                 {
                   kind: "sample",
                   id: "utility",
-                  lastStep: { kind: "interact-chat", scenarioId: "utility" },
+                  lastStep: { kind: "interact-chat" },
                   reachedStages: ["ingest", "understand", "analyze", "integrate"],
                   createdAt: 1000,
                   lastVisitedAt: 1500,
@@ -359,7 +359,7 @@ describe("ChatStoreContext", () => {
 
       const entity = result.current.state.sessions.get(persistedSessionId)!.entities.get("sample:utility" as never)!;
       // Resume anchor = the step the user was last on (Interact), NOT Integrate.
-      expect(entity.lastStep).toEqual({ kind: "interact-chat", scenarioId: "utility" });
+      expect(entity.lastStep).toEqual({ kind: "interact-chat" });
       // The reached-set is restored independently (drives checkmarks only) and
       // is genuinely non-contiguous — it still carries `integrate`.
       expect([...entity.reachedStages].sort()).toEqual(["analyze", "ingest", "integrate", "understand"]);
