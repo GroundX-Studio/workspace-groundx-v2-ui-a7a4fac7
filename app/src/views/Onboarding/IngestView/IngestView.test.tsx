@@ -4,6 +4,14 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { track } from "@/lib/analytics";
+
+vi.mock("@/lib/analytics", () => ({
+  track: vi.fn(),
+  identify: vi.fn(),
+  initAnalytics: vi.fn(),
+}));
+
 import { ApiProvider } from "@/contexts/ApiContext";
 import { AppModeProvider, useAppMode } from "@/contexts/AppModeContext";
 import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext";
@@ -19,6 +27,7 @@ beforeEach(() => {
   // MUI ripple deferred state updates — silence the global "throw on
   // console.error" spy for this spec only.
   vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.mocked(track).mockClear();
 });
 
 const fixtureScenarios: ScenarioConfig[] = [
@@ -203,6 +212,19 @@ describe("IngestView (F1)", () => {
     await user.click(screen.getByTestId("sample-utility"));
     expect(snapshot.scenario).toBe("utility");
     expect(snapshot.step).toBe("doc-viewer");
+  });
+
+  it("picks the scenario through the dispatch seam EXACTLY once (no direct + dispatched double-call)", async () => {
+    // `handlePickScenario` must NOT call `pickScenario` directly AND dispatch
+    // `showSample` (whose orchestrator handler ALSO calls `pickScenario`) — that
+    // ran the scenario-pick seam twice. `pickScenario` fires `track("sample.picked")`
+    // once per invocation, so a double-call shows up as two telemetry events.
+    const user = userEvent.setup();
+    render(wrap(<IngestView />));
+    await user.click(screen.getByTestId("sample-utility"));
+    const picks = vi.mocked(track).mock.calls.filter(([event]) => event === "sample.picked");
+    expect(picks).toHaveLength(1);
+    expect(picks[0]?.[1]).toMatchObject({ scenario: "utility" });
   });
 
   it("clicking BYO opens the gate (the signup surface is route-driven, not a viewer step)", async () => {

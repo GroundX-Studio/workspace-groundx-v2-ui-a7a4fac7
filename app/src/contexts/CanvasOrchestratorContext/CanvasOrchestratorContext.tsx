@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 import type { ContentScope, NormalizedBbox } from "@groundx/shared";
 import { useApi } from "@/contexts/ApiContext";
 import { useChatStoreOptional } from "@/contexts/ChatStoreContext";
-import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
+import { scanningDocViewerStep, useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 
 import type { CanvasAdapter, CanvasIntent, CanvasOrchestratorApi, IntentSource, StampedIntent } from "./types";
 import { togglesOffOnRepeat } from "./togglesOffOnRepeat";
@@ -510,13 +510,10 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
                 // beat AND set the Understand journey edge. Push the scanning
                 // doc-viewer step (the canvas outcome) then layer the journey
                 // advance (the Understand stage edge) via markStageReached —
-                // one seam, no fork.
-                const scenario = onboardingSession.state.scenario;
-                const scanStep = {
-                  kind: "doc-viewer" as const,
-                  documentId: scenario ? `scenario:${scenario}` : "scenario:unknown",
-                  scanning: true,
-                };
+                // one seam, no fork. The step is built by the SHARED
+                // `scanningDocViewerStep` helper (same source `pickScenario`
+                // uses) so the `scenario:<id>` documentId convention can't drift.
+                const scanStep = scanningDocViewerStep(onboardingSession.state.scenario);
                 if (chatStore) chatStore.pushStep(scanStep);
                 onboardingSession.markStageReached(scanStep);
                 break;

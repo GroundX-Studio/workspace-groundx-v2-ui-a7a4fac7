@@ -1,3 +1,5 @@
+import type { JourneyStage } from "@groundx/shared";
+
 import type { ViewerStep } from "@/contexts/ChatStoreContext";
 import type { GateTrigger, Scenario } from "@/types/onboarding";
 
@@ -24,6 +26,16 @@ export interface OnboardingSessionState {
   scenario: Scenario | null;
   /** Gate lifecycle (LC3) — single source of truth for the sign-up gate. */
   gate: GateStatus;
+  /**
+   * standardized-viewer-control T6b — the journey stages the user has REACHED
+   * inside the active entity, projected from the DURABLE, persisted +
+   * server-twinned `EntitySession.reachedStages` (the single source of truth for
+   * the step-strip checkmarks). A SET, not a monotonic watermark (R3:
+   * `integrate` is auth-gated and reachable from anywhere, so the set is
+   * genuinely non-contiguous). Empty (a stable empty-set identity) when no entity
+   * is active — the pre-scenario picker state.
+   */
+  reachedStages: ReadonlySet<JourneyStage>;
   /**
    * The report section the builder surface should pre-open its inline editor
    * on. Set by the render→builder `✎ edit §N` hand-off (and the

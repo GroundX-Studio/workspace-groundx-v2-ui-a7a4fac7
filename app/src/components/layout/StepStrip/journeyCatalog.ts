@@ -12,8 +12,8 @@
  * Eyebrow values are stored MIXED-CASE; the `Label` eyebrow variant renders them
  * uppercase via CSS `text-transform`, so the DOM text stays mixed-case.
  */
+import { viewerStepKindToJourneyStage, type PersistedViewerStep, type ViewerStepKind } from "@groundx/shared";
 import type { ViewerStep } from "@/contexts/ChatStoreContext";
-import type { PersistedViewerStep } from "@groundx/shared";
 
 import type { AnalyzeSubstep, StepId } from "./types";
 
@@ -51,20 +51,44 @@ export const INGEST_LIVE_LABEL =
   "Reading the document — mapping each table, paragraph, and figure on the page.";
 
 /**
+ * The Analyze sub-step a viewer step kind nests under, for the three kinds that
+ * collapse to the single `analyze` journey stage. This is the ONLY locally-owned
+ * half of the kind → journey mapping — the top-level `step` is DERIVED from the
+ * shared `viewerStepKindToJourneyStage` (see `VIEWER_STEP_TO_JOURNEY` below), so
+ * there is one kind → top-stage source of truth in `@groundx/shared`. A kind
+ * absent here (ingest-picker / doc-viewer / integrate) has no sub-step.
+ */
+const VIEWER_STEP_SUBSTEP: Partial<Record<ViewerStepKind, AnalyzeSubstep>> = {
+  "extract-workbench": "extract",
+  "interact-chat": "interact",
+  report: "report",
+};
+
+/**
  * SINGLE SOURCE for "which journey step/sub-step does this viewer step kind
  * belong to". Moved here from `OnboardingShell`'s local
  * `VIEWER_STEP_KIND_TO_STEP_ID`. Keyed by `ViewerStep["kind"]`.
+ *
+ * The top-level `step` is DERIVED from the shared
+ * `viewerStepKindToJourneyStage[kind]` (the canonical kind → top-stage
+ * projection both the strip and the LLM context read), so it cannot drift from
+ * the shared source; only the strip-specific `substep` field is owned here
+ * (`VIEWER_STEP_SUBSTEP`). A cross-check test
+ * (`journeyCatalog.test.ts`) asserts the derived `step` equals the shared map
+ * for every kind; the drift guard forbids a rival hand-written copy in either
+ * tree.
  */
 export const VIEWER_STEP_TO_JOURNEY: Readonly<
-  Record<string, { readonly step: StepId; readonly substep?: AnalyzeSubstep }>
-> = {
-  "ingest-picker": { step: "ingest" },
-  "doc-viewer": { step: "understand" },
-  "extract-workbench": { step: "analyze", substep: "extract" },
-  "interact-chat": { step: "analyze", substep: "interact" },
-  report: { step: "analyze", substep: "report" },
-  integrate: { step: "integrate" },
-};
+  Record<ViewerStepKind, { readonly step: StepId; readonly substep?: AnalyzeSubstep }>
+> = Object.fromEntries(
+  (Object.keys(viewerStepKindToJourneyStage) as ViewerStepKind[]).map((kind) => [
+    kind,
+    {
+      step: viewerStepKindToJourneyStage[kind],
+      ...(VIEWER_STEP_SUBSTEP[kind] ? { substep: VIEWER_STEP_SUBSTEP[kind] } : {}),
+    },
+  ]),
+) as Record<ViewerStepKind, { readonly step: StepId; readonly substep?: AnalyzeSubstep }>;
 
 /**
  * standardized-viewer-control (D2) — the FRAME-FREE diagnostic identifier for an

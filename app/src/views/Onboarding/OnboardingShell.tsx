@@ -354,27 +354,30 @@ export const OnboardingShell: FC = () => {
     };
   }, [api.session, bootstrapSession, session.sessionId]);
 
-  // standardized-viewer-control T3 — the reached-set drives the strip
+  // standardized-viewer-control T6b — the reached-set drives the strip
   // checkmarks. It is a SET of reached stages (NOT a monotonic high-water value
   // — R3): `integrate` is auth-gated and reachable from anywhere, so the set is
-  // genuinely non-contiguous. A stage is ADDED on its FIRST reach (when it first
-  // becomes the current stage) and never removed, so a later citation jump back
-  // to Understand (which moves the current stage off Analyze) does not re-lock
-  // the already-traversed bracket. Derived purely from `currentStep` (the
-  // active-step-sourced stage). The DURABLE reached-set now lives on the EntitySession
-  // (`reachedStages`, persisted + server-twinned in T6b); this strip-local set is
-  // the live UI accumulation seeded from the resumed stage. Seeding it from the
-  // persisted entity set (so cross-reload checkmarks survive verbatim) is the
-  // remaining strip-wiring item folded into the D2 onboarding-frame churn.
-  const [reachedStages, setReachedStages] = useState<Set<StepId>>(() => new Set([currentStep]));
-  useEffect(() => {
-    setReachedStages((prev) => {
-      if (prev.has(currentStep)) return prev;
-      const next = new Set(prev);
-      next.add(currentStep);
-      return next;
-    });
-  }, [currentStep]);
+  // genuinely non-contiguous. A stage is ADDED on its FIRST reach and never
+  // removed, so a later citation jump back to Understand (which moves the current
+  // stage off Analyze) does not re-lock the already-traversed bracket.
+  //
+  // SINGLE SOURCE OF TRUTH: the durable, persisted + server-twinned
+  // `EntitySession.reachedStages` (written by `markStageReached`/`pickScenario`,
+  // projected onto `session.reachedStages`). The strip reads THAT set unioned
+  // with the current step. The union covers two windows the durable set hasn't
+  // caught up on yet: (a) the brief render BEFORE `markStageReached` commits the
+  // new stage, and (b) the no-entity case (pre-scenario / signup surface), where
+  // the durable set is empty but the current stage always shows. Because the
+  // durable set survives reload (ChatStore serialize/parse + the DB twin),
+  // cross-reload checkmarks are now restored verbatim — no strip-local
+  // re-accumulation that resets to the resumed step on hydrate.
+  // `StepId` is an alias of the shared `JourneyStage`, so `session.reachedStages`
+  // (a `ReadonlySet<JourneyStage>`) is directly a `ReadonlySet<StepId>` — no cast.
+  const reachedStages = useMemo<Set<StepId>>(() => {
+    const set = new Set<StepId>(session.reachedStages);
+    set.add(currentStep);
+    return set;
+  }, [session.reachedStages, currentStep]);
   // The reached-set drives the done/traversed checkmarks. A stage is "completed"
   // (checkmark) only when it has been reached AND is not the one the user is on.
   const completedSteps = useMemo(() => {

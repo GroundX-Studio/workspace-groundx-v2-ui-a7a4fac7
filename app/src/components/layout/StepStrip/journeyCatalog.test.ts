@@ -1,3 +1,4 @@
+import { viewerStepKindSchema, viewerStepKindToJourneyStage, type ViewerStepKind } from "@groundx/shared";
 import { describe, expect, it } from "vitest";
 
 import { INGEST_LIVE_LABEL, JOURNEY_CATALOG, VIEWER_STEP_TO_JOURNEY } from "./journeyCatalog";
@@ -34,6 +35,22 @@ describe("journeyCatalog — single source of journey vocabulary", () => {
     expect(VIEWER_STEP_TO_JOURNEY.report).toEqual({ step: "analyze", substep: "report" });
     expect(VIEWER_STEP_TO_JOURNEY.integrate).toEqual({ step: "integrate" });
     expect(VIEWER_STEP_TO_JOURNEY["ingest-picker"]).toEqual({ step: "ingest" });
+  });
+
+  it("derives every kind's top-level step from the shared viewerStepKindToJourneyStage (one source)", () => {
+    // The app map's `step` field is the SAME kind → top-stage projection the
+    // shared map exposes (the LLM context + strip both read it). This guards
+    // against the two maps drifting if a future kind's stage is changed in only
+    // one place.
+    for (const kind of viewerStepKindSchema.options as ViewerStepKind[]) {
+      expect(VIEWER_STEP_TO_JOURNEY[kind].step).toBe(viewerStepKindToJourneyStage[kind]);
+    }
+  });
+
+  it("covers every viewer step kind (total over the shared schema)", () => {
+    for (const kind of viewerStepKindSchema.options as ViewerStepKind[]) {
+      expect(VIEWER_STEP_TO_JOURNEY[kind]).toBeDefined();
+    }
   });
 
   it("provides the live ingest line (mechanism over magic — no hype words)", () => {

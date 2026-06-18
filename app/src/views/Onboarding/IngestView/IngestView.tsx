@@ -71,7 +71,7 @@ const CAPABILITIES: ReadonlyArray<{ letter: "E" | "I" | "R"; name: string; key: 
  */
 export const IngestView: FC = () => {
   const { setScenario } = useAppMode();
-  const { pickScenario, openGate } = useOnboardingSession();
+  const { openGate } = useOnboardingSession();
   // `master-viewer-session` Phase 5 — the pre-attached schema is now
   // an annotation on the F1 ingest-picker step (pushed by ExtractView
   // after a successful Save → sign-in → persist loop). The legacy
@@ -93,19 +93,20 @@ export const IngestView: FC = () => {
     (id: string) => {
       const scenario = asKnownScenario(id);
       if (!scenario) return;
-      // Update state directly (preserves resume on existing entities)
-      // AND navigate to the canonical URL so deep links + back/forward
-      // work. OnboardingShell's URL-sync useEffect will also call
-      // pickScenario when it observes the URL change — that call is
-      // idempotent on an already-active entity.
-      pickScenario(scenario);
+      // Activate the sample through the ONE dispatch seam — `showSample`'s
+      // orchestrator handler calls `pickScenario` (resume-preserving, idempotent
+      // on an already-active entity). Going through the seam (not a direct
+      // `pickScenario` call ALSO followed by the dispatch) avoids running the
+      // pick twice. AppMode + the canonical URL are updated alongside so deep
+      // links + back/forward work; OnboardingShell's URL-sync useEffect calling
+      // `pickScenario` on the URL change is idempotent.
       setScenario(scenario);
       dispatch({ kind: "showSample", scenario }, "user");
       if (registry.bucketId != null) {
         navigate(`/onboarding/${registry.bucketId}/${scenario}`);
       }
     },
-    [navigate, registry.bucketId, pickScenario, setScenario, dispatch]
+    [navigate, registry.bucketId, setScenario, dispatch]
   );
 
   const handleByoClick = useCallback(() => {

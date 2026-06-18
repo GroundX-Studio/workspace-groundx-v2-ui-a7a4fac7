@@ -3,9 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import type { CanvasIntent } from "@groundx/shared";
+import { STORAGE_VERSION } from "@/contexts/ChatStoreContext/parseChatStoreSnapshot";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
 import { OnboardingShell } from "./OnboardingShell";
+
+// The localStorage key ChatStore persists / rehydrates from. Kept in lockstep
+// with `STORAGE_KEY` in `ChatStoreContext.tsx` (module-private there).
+const CHAT_STORE_KEY = "groundx-onboarding.chat-store.v1";
 
 /**
  * T3 (standardized-viewer-control) — the onboarding StepStrip's CURRENT STAGE
@@ -150,6 +155,103 @@ describe("OnboardingShell — frame-free journey-progress source (T3)", () => {
       expect(
         strip().getByText(label).closest('[role="button"]'),
         `${label} sub-pill must stay reachable after a citation jump`,
+      ).not.toHaveAttribute("aria-disabled");
+    }
+  });
+
+  // T6b SEAM — cross-reload checkmarks. Before this fix the strip seeded its
+  // checkmark set from `currentStep` ONLY on hydrate, so a persisted
+  // NON-CONTIGUOUS reached-set ([ingest, understand, analyze, integrate] resumed
+  // at interact) lost every checkmark behind the resumed step (notably
+  // `integrate`, which is non-contiguous — reachable from anywhere, then left).
+  // The durable `EntitySession.reachedStages` (persisted via ChatStore
+  // serialize/parse + the DB twin) is now the SINGLE source the strip reads, so
+  // the persisted checkmarks must survive a reload VERBATIM.
+  it("restores persisted NON-CONTIGUOUS reachedStages checkmarks across a reload/hydrate (T6b)", () => {
+    // Persist a hydrated ChatStore snapshot: the user reached Integrate (so the
+    // reached-set is the full non-contiguous [ingest, understand, analyze,
+    // integrate]) and then moved BACK to Interact before reloading — the resume
+    // anchor (`lastStep`) is the interact-chat step, NOT integrate. A reload that
+    // re-seeded checkmarks from the resumed step alone would drop integrate's
+    // checkmark; reading the durable set must keep it.
+    const now = Date.now();
+    const snapshot = {
+      version: STORAGE_VERSION,
+      ownerKey: "anon-reload-1",
+      activeSessionId: "c-reload-1",
+      sessions: [
+        {
+          id: "c-reload-1",
+          title: "Onboarding",
+          createdAt: now,
+          updatedAt: now,
+          messages: [],
+          entities: [
+            [
+              "sample:utility",
+              {
+                kind: "sample",
+                id: "utility",
+                // Resume anchor: the user was last on Interact (analyze stage).
+                lastStep: { kind: "interact-chat" },
+                // Durable reached-set: NON-CONTIGUOUS — integrate was reached and
+                // then left, so it is behind the resumed interact step.
+                reachedStages: ["ingest", "understand", "analyze", "integrate"],
+                createdAt: now,
+                lastVisitedAt: now,
+              },
+            ],
+          ],
+          activeEntityKey: "sample:utility",
+          isOnboardingSession: true,
+          signupOpen: false,
+        },
+      ],
+    };
+    window.localStorage.setItem(CHAT_STORE_KEY, JSON.stringify(snapshot));
+
+    let dispatch: (intent: CanvasIntent) => void = () => undefined;
+    // `initialScenario: null` → the harness seeds NO entity explicitly, so
+    // ChatStore rehydrates from the localStorage snapshot above (the real
+    // cross-reload path). Deep-link URL so the URL→state sync sees the hydrated
+    // sample already active and does NOT deactivate it. Signed-in so Integrate is
+    // a real (non-disabled) pill.
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <DispatchProbe onReady={(d) => (dispatch = d)} />
+      </>,
+      {
+        initialScenario: null,
+        initialUrl: "/onboarding/28454/utility",
+        initialAuthState: "signed-in",
+      },
+    );
+
+    // The viewer history is not auto-restored from the resume anchor on hydrate
+    // (a separate resume-push concern); re-push the resumed step so the active
+    // stage is Interact — exactly what landing back on the resume anchor does.
+    act(() => {
+      dispatch({ kind: "showInteract", scope: { type: "documents", documentIds: ["doc-1"] } });
+    });
+    expect(activeSubstepLabel()).toBe("Interact");
+
+    // The persisted checkmarks survive the reload VERBATIM. Understand + Integrate
+    // are both done-traversed (reached, not current); Integrate is the
+    // load-bearing assertion — a `currentStep`-seeded strip would have lost it.
+    expect(
+      strip().getByText("Understand").closest('[role="button"]'),
+      "Understand must stay checked after reload",
+    ).toHaveAttribute("data-state", "done-traversed");
+    expect(
+      strip().getByText("Integrate").closest('[role="button"]'),
+      "Integrate's persisted checkmark must survive a non-contiguous reload",
+    ).toHaveAttribute("data-state", "done-traversed");
+    // The Analyze bracket stays reachable (reached-set retains `analyze`).
+    for (const label of ["Extract", "Interact", "Report"]) {
+      expect(
+        strip().getByText(label).closest('[role="button"]'),
+        `${label} sub-pill must be reachable after reload`,
       ).not.toHaveAttribute("aria-disabled");
     }
   });

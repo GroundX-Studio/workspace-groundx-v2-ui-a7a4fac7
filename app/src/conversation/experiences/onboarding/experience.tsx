@@ -482,9 +482,12 @@ const PRE_INTERACT_STEP_KINDS: ReadonlySet<string> = new Set([
 
 /**
  * The first-send → Interact advance is scenario-agnostic: it carries an empty
- * documents scope (the orchestrator's `showInteract` handler falls back to the
- * onboarding session's active scenario for the step's scenarioId). Module-level
- * so the effect's identity is stable.
+ * documents scope. The orchestrator's `showInteract` handler resolves the
+ * step's `documentId` ONLY from this scope (via `primaryDocumentFromScope`), so
+ * an empty scope leaves the pushed `interact-chat` step doc-less — which is
+ * correct for onboarding: `ScopedCanvas` feeds the PdfViewer from the shell's
+ * `canvasScope` prop (derived from the active scenario), not from the step.
+ * Module-level so the effect's identity is stable.
  */
 const FIRST_SEND_INTERACT_SCOPE: ContentScope = { type: "documents", documentIds: [] };
 

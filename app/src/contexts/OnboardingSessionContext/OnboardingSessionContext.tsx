@@ -14,27 +14,18 @@ import {
 } from "@/contexts/EntitySessionStoreContext";
 import type { GateTrigger, Scenario } from "@/types/onboarding";
 
+import { scanningDocViewerStep } from "./scanningDocViewerStep";
 import type { GateCause, GateStatus, OnboardingSessionApi, OnboardingSessionState } from "./types";
 
 const OnboardingSessionContext = createContext<OnboardingSessionApi | null>(null);
 
 /**
- * The "GroundX is reading the doc" beat for a freshly-opened sample — the
- * doc-viewer step that is active exactly while the chat ThinkingStream plays
- * (its onDone auto-advances to Extract). `scanning: true` makes <ScopedCanvas>
- * mount the PdfViewer with the reading scan-line. Citation-jump doc-viewer
- * steps are pushed by the cite-click sink, NOT this seed, so they never scan.
- *
- * standardized-viewer-control (D2) — `pickScenario` is the sole live caller; the
- * Understand reading beat is the journey origin for a freshly-opened sample.
+ * Stable empty reached-set identity for the no-entity (pre-scenario picker)
+ * case. Reusing one frozen Set keeps the `state` memo's identity stable across
+ * renders when no entity is active — a fresh `new Set()` each render would
+ * defeat the memo and re-fire every `state`-dependent effect.
  */
-function scanningDocViewerStep(scenario: Scenario | null): ViewerStep {
-  return {
-    kind: "doc-viewer",
-    documentId: scenario ? `scenario:${scenario}` : "scenario:unknown",
-    scanning: true,
-  };
-}
+const EMPTY_REACHED_STAGES: ReadonlySet<JourneyStage> = new Set<JourneyStage>();
 
 interface OnboardingSessionProviderProps {
   children: ReactNode;
@@ -130,6 +121,11 @@ function useSessionFacade(): OnboardingSessionApi {
       sessionId,
       scenario: active?.kind === "sample" ? (active.id as Scenario) : null,
       gate,
+      // standardized-viewer-control T6b — project the DURABLE reached-set off the
+      // active entity (the persisted + server-twinned source of truth) so the
+      // StepStrip reads ONE set, not a strip-local re-accumulation. The stable
+      // empty-set const keeps the memo identity stable in the no-entity case.
+      reachedStages: active?.reachedStages ?? EMPTY_REACHED_STAGES,
       selectedReportSectionId,
     };
   }, [sessionId, active, gate, selectedReportSectionId]);
@@ -463,13 +459,23 @@ export const OnboardingSessionProvider: FC<OnboardingSessionProviderProps> = ({
     // StepStrip reads the active step kind.
     const initialViewerStep: ViewerStep = initialStep ?? { kind: "ingest-picker" };
     // Frame-free entity seed: the resume anchor is the persisted projection of
-    // the seeded step; the reached-set seeds with that step's journey stage.
+    // the seeded step. The durable reached-set is seeded to MATCH what the live
+    // path (`pickScenario` then resuming at the seeded step) would have produced:
+    // the journey-ORIGIN stages (`ingest` + `understand`, seeded by
+    // `pickScenario` for every active sample) UNIONED with the seeded step's own
+    // journey stage. An active sample entity always implies the user reached the
+    // origin, so seeding only the seeded step's stage (the old behavior) under-
+    // reported the checkmarks on a deep-resume (e.g. resuming at Extract used to
+    // show only Analyze checked, never Understand). This is the same shape T6b
+    // hydrates the persisted set into, so initial render === post-reload render.
     const seedStage = journeyStageForStepKind(initialViewerStep.kind);
+    const reachedStages = new Set<JourneyStage>(["ingest", "understand"]);
+    if (seedStage) reachedStages.add(seedStage);
     const seed: EntitySession = {
       kind: "sample",
       id: initialScenario,
       lastStep: toPersistedViewerStep(initialViewerStep),
-      reachedStages: seedStage ? new Set<JourneyStage>([seedStage]) : new Set<JourneyStage>(),
+      reachedStages,
       createdAt: now,
       lastVisitedAt: now,
     };

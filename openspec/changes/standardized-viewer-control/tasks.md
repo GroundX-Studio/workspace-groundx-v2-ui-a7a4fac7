@@ -559,6 +559,78 @@ those durable requirements survive untouched and the spec set self-contradicts.
 - **Gate:** no removed symbol is documented as current/canonical in any `docs/agents/`
       reference doc (grep the full `docs/agents/` tree for the removed symbols → clean).
 
+## T15 — Final-review fixes (2026-06-18 fresh whole-diff adversarial review)
+
+The final fresh review (reviewing the net diff as an outside PR) found a real blocker that
+every prior pass — including the "green" T12 review — missed, because the two halves were
+each tested but the SEAM between them was not.
+
+- [x] **BLOCKER — wire the durable reached-set to the strip (kill the dormant plumbing).**
+      The persisted + server-twinned `EntitySession.reachedStages` (the R3/D13 deliverable,
+      written by `markStageReached`) is NEVER read: `OnboardingShell.tsx:369` keeps its OWN
+      `useState<Set<StepId>>` re-accumulated from `currentStep`, and the inline comment
+      (:366-368) admits it's "the remaining strip-wiring item." Consequence: dormant
+      persistence, two sets that can drift, and **cross-reload checkmarks are broken** (on
+      hydrate the strip re-seeds from `currentStep` only, losing the persisted non-contiguous
+      history). FIX: expose `reachedStages` on `OnboardingSessionState` (project the active
+      entity's set); the strip reads `session.reachedStages ∪ {currentStep}` (single source);
+      delete the local `useState`/`useEffect`; seed `reachedStages` in the test harness; ADD a
+      cross-reload checkmark test (the missing seam); keep jump-ahead/non-contiguous/no-relock
+      green; remove the stale comment.
+      DONE 2026-06-18: `OnboardingSessionState.reachedStages` projects `active?.reachedStages`
+      (stable empty-set const); `OnboardingShell` reads `session.reachedStages ∪ {currentStep}`
+      via `useMemo` (local `useState`/`useEffect` deleted); the harness/provider seed now mirrors
+      the live path (`pickScenario` origin `[ingest,understand]` ∪ seeded-step stage); added the
+      cross-reload non-contiguous-checkmark seam test (verified RED against the old code, GREEN
+      with the fix). `session.reachedStages` now has a real reader. tsc + full app suite (1911)
+      green.
+- [x] **SHOULD-FIX — one kind→stage mapping.** `shared/src/index.ts:916`
+      `viewerStepKindToJourneyStage` and app `journeyCatalog.ts:58` `VIEWER_STEP_TO_JOURNEY`
+      are two hand-written copies (the comment claims derivation; there's none, no cross-check
+      test) — and the new shared map matches the exact `doc-viewer:understand` signature the
+      project's own `recurrence-drift-guards` guard (f) forbids, escaping it only because the
+      guard scans `app/src` not `shared/src`. FIX: derive `VIEWER_STEP_TO_JOURNEY[k].step` from
+      the shared map (+cross-check) AND extend the drift guard to also scan `shared/src`.
+      DONE 2026-06-18 — `VIEWER_STEP_TO_JOURNEY[k].step` now built via
+      `Object.fromEntries` over the shared `viewerStepKindToJourneyStage` (only the
+      strip-specific `substep` is owned app-side via `VIEWER_STEP_SUBSTEP`); added a
+      `journeyCatalog.test.ts` cross-check asserting derived `step === shared[k]` for every
+      kind + total-coverage. Drift guard (f) refactored: the kind→STAGE check now scans BOTH
+      `app/src` AND `shared/src`, allowing the ONE canonical site `shared/src/index.ts` and
+      forbidding a rival literal in either tree (proven non-vacuous by a planted
+      `shared/src/__driftplant__.ts` → fired, then removed). app suite 1914 / guards green.
+- [x] **SHOULD-FIX — un-guarded second mutation path.** `pickScenario` calls `pushStep` and is
+      invoked directly from views (`IngestView.tsx:101`, `OnboardingShell.tsx:306`); `IngestView`
+      ALSO dispatches `showSample` right after (:103), double-calling `pickScenario`. Fix the
+      redundant double-call; assess widening the seam guard to cover `pickScenario`/
+      `returnToIngestPicker` (currently only the named mutators are unrepresentable).
+      DONE 2026-06-18 (double-call) — `IngestView.handlePickScenario` now activates the sample
+      ONLY through `dispatch({kind:"showSample"})` (whose orchestrator handler calls
+      `pickScenario`); the direct `pickScenario(scenario)` call + its dep were removed. Failing
+      seam test first: counts `track("sample.picked")` = 1 (was 2), proven non-vacuous by
+      re-introducing the call → RED, then restored. The seam-guard WIDENING assessment for
+      `pickScenario`/`returnToIngestPicker` is NOT taken here (left as a deliberate follow-up;
+      out of scope for the double-call fix).
+- [x] **NOTE fixes:** `StepId = JourneyStage` alias (third vocab copy); de-dup the
+      `scanningDocViewerStep`/"scenario:unknown" literal (orchestrator reuses one source);
+      correct the `showInteract` comment that claims a scenario-fallback that doesn't exist;
+      consider re-stating the residual "frame f4/f4a" LABELS in agent-tools/smart-report durable
+      specs onto `report.surface:"builder"`; rename `isF1` (frame-free semantics).
+      DONE 2026-06-18 (3 of 5) — (a) `StepId` now `= JourneyStage` (imported from
+      `@groundx/shared`); the redundant `as ReadonlySet<StepId>` cast + stale "value-identical"
+      comment in `OnboardingShell` removed; tsc clean (the unions were structurally identical).
+      (b) `scanningDocViewerStep` extracted to its own module
+      (`contexts/OnboardingSessionContext/scanningDocViewerStep.ts`), exported via the barrel;
+      both `pickScenario` and the orchestrator `understand-scanning` beat now build the step
+      from this ONE source (no inline `scenario:unknown` literal rebuild). (c) `showInteract`
+      comment in `onboarding/experience.tsx` corrected to state the handler resolves the step's
+      doc ONLY from `scope` (no scenario-fallback) and the onboarding canvas is fed from the
+      shell's `canvasScope` prop. The two remaining sub-items (re-state f4/f4a durable-spec
+      LABELS; rename `isF1`) are NOT done — left as separate follow-ups (out of scope here).
+- **Gate:** `session.reachedStages` has a real reader; cross-reload checkmarks tested; one
+      kind→stage map (cross-checked + guard scans shared/src); no double-pickScenario; full
+      suites + guards + validate + archive dry-run green.
+
 ## Deferred (tracked, not in this change)
 
 - Per-category pills as a general/steady pattern at arbitrary schema cardinality;
