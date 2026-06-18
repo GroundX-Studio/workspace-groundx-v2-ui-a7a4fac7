@@ -1073,7 +1073,7 @@ describe("middleware API route contract", () => {
       const { repository, agent } = await setupAnonSession();
       await agent
         .put("/api/chat-sessions/rt03-anon/entities/sample%3Autility")
-        .send(entityBody({ lastStepJson: JSON.stringify({ kind: "interact-chat", scenarioId: "utility" }), reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]) }))
+        .send(entityBody({ lastStepJson: JSON.stringify({ kind: "interact-chat" }), reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]) }))
         .expect(200);
       // Same call signature chatHandler.ts:249 + structuredHandler.ts:141/159/397
       // invoke during context bundling. Returning the row here proves
@@ -1082,7 +1082,7 @@ describe("middleware API route contract", () => {
       expect(bundled).toHaveLength(1);
       expect(bundled[0]).toMatchObject({
         entityKey: "sample:utility",
-        lastStepJson: JSON.stringify({ kind: "interact-chat", scenarioId: "utility" }),
+        lastStepJson: JSON.stringify({ kind: "interact-chat" }),
         reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]),
       });
     });

@@ -4,11 +4,11 @@
  *
  * standardized-viewer-control T6. Several chrome surfaces (the gate's
  * "Continue to Integrate" CTA in `GateChatRail` + `SignUpWidget`, ChatColumn's
- * conversation-journey predicate) used to read `session.currentFrame` and test
- * it against a hand-maintained `PRE_INTEGRATE_FRAMES` set / a frame whitelist.
- * Those are LEGACY frame reads. The journey stage is now derived the SAME way
- * the StepStrip + viewer nav derive it: the active `ViewerStep.kind` mapped
- * through the single-source `VIEWER_STEP_TO_JOURNEY` map (`journeyCatalog.ts`).
+ * conversation-journey predicate) used to derive the journey position from a
+ * legacy onboarding-session surface field against a hand-maintained set. The
+ * journey stage is now derived the SAME way the StepStrip + viewer nav derive
+ * it: the active `ViewerStep.kind` mapped through the single-source
+ * `VIEWER_STEP_TO_JOURNEY` map (`journeyCatalog.ts`).
  *
  * This is the shared read for ≥2 callers (GateChatRail, SignUpWidget, and
  * ChatColumn's journey predicate), so it lives next to the catalog it consumes
@@ -38,12 +38,11 @@ export function useJourneyStage(): StepId | null {
 }
 
 /**
- * True while the journey has NOT yet reached the Integrate stage — the
- * step-based successor to the legacy `PRE_INTEGRATE_FRAMES.has(currentFrame)`
- * read. The gate's committed-state "Continue to Integrate" CTA shows only here:
- * once the user is already ON Integrate the CTA is redundant. A `null` stage
- * (journey not started / no ChatStore) is treated as pre-Integrate, matching the
- * old set (which included every frame except f7).
+ * True while the journey has NOT yet reached the Integrate stage. The gate's
+ * committed-state "Continue to Integrate" CTA shows only here: once the user is
+ * already ON Integrate the CTA is redundant. A `null` stage (journey not
+ * started / no ChatStore) is treated as pre-Integrate, matching the legacy
+ * behavior (every stage except Integrate was pre-Integrate).
  */
 export function useIsPreIntegrateStage(): boolean {
   return useJourneyStage() !== "integrate";

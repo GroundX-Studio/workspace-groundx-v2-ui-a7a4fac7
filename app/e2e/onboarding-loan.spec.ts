@@ -20,6 +20,14 @@ import { expect, test } from "@playwright/test";
  * into bucket 28454 with their own `filter.projectId` +
  * `SAMPLE_PROJECT_ID_BY_SCENARIO` entries — tracked by the "Seed Loan + Solar
  * live sample docs" ticket (spawn_task, 2026-06-02).
+ *
+ * The retired frame test-ids (`onboarding-frame-f*` / `advance-to-f*`) have been
+ * migrated to the step-kind selectors (`onboarding-step-*`) + the chat
+ * pick-view affordance, so this skipped spec carries no dead frame vocabulary.
+ * The remaining work for the un-skip is DATA, not selectors: the body still
+ * asserts old MOCK_MODE fixture values (doc titles, `loan-doc-N · page 1`, DTI
+ * copy, `loan-schema-v1`) that must be re-grounded to the live Loan doc — same
+ * de-mock treatment onboarding-utility.spec.ts already had.
  */
 
 test.describe.skip("F1–F7 · Loan Eligibility scenario · golden journey @desktop-only", () => {
@@ -40,14 +48,14 @@ test.describe.skip("F1–F7 · Loan Eligibility scenario · golden journey @desk
 
   test("picking Loan transitions F1 → F2 with the first doc title", async ({ page }) => {
     await page.getByTestId("sample-loan").click();
-    await expect(page.getByTestId("onboarding-frame-f2")).toBeVisible();
+    await expect(page.getByTestId("onboarding-step-doc-viewer")).toBeVisible();
     await expect(page.getByText(/Paystub Mar 14/)).toBeVisible();
   });
 
   test("F3 renders Income / Debt / Anomalies categories", async ({ page }) => {
     await page.getByTestId("sample-loan").click();
-    await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible();
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible();
     // Category cards expose their name via aria-label; using the label query
     // sidesteps the ARIA role question (a flat Card is not a "region").
     await expect(page.getByLabel("Income", { exact: true })).toBeVisible();
@@ -57,7 +65,7 @@ test.describe.skip("F1–F7 · Loan Eligibility scenario · golden journey @desk
 
   test("gross_monthly_income field carries 4 cross-doc citation chips", async ({ page }) => {
     await page.getByTestId("sample-loan").click();
-    await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     const row = page.getByTestId("field-row-gross_monthly_income");
     await expect(row.getByTestId("cite-chip-1")).toBeVisible();
     await expect(row.getByTestId("cite-chip-4")).toBeVisible();
@@ -65,7 +73,7 @@ test.describe.skip("F1–F7 · Loan Eligibility scenario · golden journey @desk
 
   test("citation peek shows all 4 source paystubs", async ({ page }) => {
     await page.getByTestId("sample-loan").click();
-    await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     await page.getByTestId("field-row-gross_monthly_income").click();
     const preview = page.getByTestId("extract-preview");
     await expect(preview.getByRole("heading", { name: "Gross monthly income" })).toBeVisible();
@@ -75,7 +83,7 @@ test.describe.skip("F1–F7 · Loan Eligibility scenario · golden journey @desk
 
   test("render-mode toggle switches Table ↔ JSON (workflow handoff demo)", async ({ page }) => {
     await page.getByTestId("sample-loan").click();
-    await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     await expect(page.getByTestId("render-mode-tabs")).toBeVisible();
     // Default is Table — JSON block not shown.
     await expect(page.getByTestId("extract-json")).toBeHidden();
@@ -89,15 +97,18 @@ test.describe.skip("F1–F7 · Loan Eligibility scenario · golden journey @desk
 
   test("F5 InteractView replays Loan DTI question", async ({ page }) => {
     await page.getByTestId("sample-loan").click();
-    await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
-    await page.getByTestId("advance-to-f5").click();
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
+    await page
+      .getByTestId("step-strip-wrapper")
+      .getByRole("button", { name: "Interact", exact: true })
+      .click();
     await expect(page.getByText(/35% DTI threshold/)).toBeVisible();
     await expect(page.getByText(/Estimated DTI is 22%/)).toBeVisible();
   });
 
   test("Loan render-mode toggle does NOT appear on Utility (utility has no JSON mode)", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    await page.getByTestId("advance-to-f3").click({ timeout: 8_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     await expect(page.getByTestId("render-mode-tabs")).toBeHidden();
   });
 });

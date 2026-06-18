@@ -20,11 +20,11 @@ import type { EntityKey, EntityKind } from "@/contexts/EntitySessionStoreContext
  * rejects any other version (rehydration then falls back to legacy migration /
  * a fresh store), it does NOT migrate older shapes.
  *
- * v2 (standardized-viewer-control D13/R5) — the per-entity resume anchor moved
- * off frames: `lastFrame`/`completedFrames` are replaced by a persisted ACTIVE
- * VIEWER STEP (`lastStep`, restored verbatim — the resume anchor) and a SET of
- * reached journey stages (`reachedStages`, checkmarks only; NOT a watermark —
- * R3). The active step persists only its navigational payload (the shared
+ * v2 (standardized-viewer-control D13/R5) — the per-entity resume anchor is a
+ * persisted ACTIVE VIEWER STEP (`lastStep`, restored verbatim — the resume
+ * anchor) and a SET of reached journey stages (`reachedStages`, checkmarks
+ * only; NOT a watermark — R3). The active step persists only its navigational
+ * payload (the shared
  * `persistedViewerStepSchema`); ephemeral citation highlights / the scan beat
  * are rebuilt on demand, never stored. Overlays are not persisted.
  */

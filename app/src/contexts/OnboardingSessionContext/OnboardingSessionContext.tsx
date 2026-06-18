@@ -14,27 +14,18 @@ import {
 } from "@/contexts/EntitySessionStoreContext";
 import type { GateTrigger, Scenario } from "@/types/onboarding";
 
+import { scanningDocViewerStep } from "./scanningDocViewerStep";
 import type { GateCause, GateStatus, OnboardingSessionApi, OnboardingSessionState } from "./types";
 
 const OnboardingSessionContext = createContext<OnboardingSessionApi | null>(null);
 
 /**
- * The "GroundX is reading the doc" beat for a freshly-opened sample — the
- * doc-viewer step that is active exactly while the chat ThinkingStream plays
- * (its onDone auto-advances to Extract). `scanning: true` makes <ScopedCanvas>
- * mount the PdfViewer with the reading scan-line. Citation-jump doc-viewer
- * steps are pushed by the cite-click sink, NOT this seed, so they never scan.
- *
- * standardized-viewer-control (D2) — `pickScenario` is the sole live caller; the
- * Understand reading beat is the journey origin for a freshly-opened sample.
+ * Stable empty reached-set identity for the no-entity (pre-scenario picker)
+ * case. Reusing one frozen Set keeps the `state` memo's identity stable across
+ * renders when no entity is active — a fresh `new Set()` each render would
+ * defeat the memo and re-fire every `state`-dependent effect.
  */
-function scanningDocViewerStep(scenario: Scenario | null): ViewerStep {
-  return {
-    kind: "doc-viewer",
-    documentId: scenario ? `scenario:${scenario}` : "scenario:unknown",
-    scanning: true,
-  };
-}
+const EMPTY_REACHED_STAGES: ReadonlySet<JourneyStage> = new Set<JourneyStage>();
 
 interface OnboardingSessionProviderProps {
   children: ReactNode;
@@ -49,9 +40,9 @@ interface OnboardingSessionProviderProps {
 }
 
 /**
- * Internal facade hook — derives the legacy `OnboardingSessionState`
+ * Internal facade hook — derives the `OnboardingSessionState`
  * shape from the active entity in the EntityRegistry, and routes the
- * legacy mutation API (pickScenario / advanceFrame / openGate / …)
+ * mutation API (pickScenario / markStageReached / openGate / …)
  * into registry operations.
  *
  * The legacy hook (`useOnboardingSession`) and the legacy state
@@ -99,12 +90,12 @@ function useSessionFacade(): OnboardingSessionApi {
   // boolean + the session-level gate.
   // standardized-viewer-control (D2) — the shell now detects the signup surface
   // from the sign-up overlay / route (`signupSurfaceActive`), not this flag; the
-  // value binding fed only the retired `currentFrame` projection, so only the
+  // value binding fed only the retired session surface projection, so only the
   // setter (which other paths still toggle as part of the gate lifecycle) remains.
   const [, setSignupOpen] = useState<boolean>(false);
-  // The report section the builder (f4a) should pre-open. Set by the
-  // render→builder `✎ edit §N` hand-off via `advanceFrame`; cleared when the
-  // user leaves the builder frame.
+  // The report section the builder surface should pre-open. Set by the
+  // render→builder `✎ edit §N` hand-off (the `editTemplate` dispatch); cleared
+  // when the user leaves the builder surface.
   const [selectedReportSectionId, setSelectedReportSectionId] = useState<string | null>(null);
 
   // Live ref to the registry's current activeKey. Action callbacks
@@ -119,17 +110,22 @@ function useSessionFacade(): OnboardingSessionApi {
     ? registry.state.entities.get(registry.state.activeKey)
     : undefined;
 
-  // standardized-viewer-control (D2) — the legacy `currentFrame` reverse
-  // projection is GONE. The user's journey position lives entirely on the active
-  // viewer step (rendered via the `onboarding-step-*` testid + read by the
-  // frame-free StepStrip off `VIEWER_STEP_TO_JOURNEY`); the resume anchor is the
-  // entity's `lastStep`. This state record carries only the session-level fields
-  // that are not derivable from the active step.
+  // standardized-viewer-control (D2) — there is no session surface field. The
+  // user's journey position lives entirely on the active viewer step (rendered
+  // via the `onboarding-step-*` testid + read by the StepStrip off
+  // `VIEWER_STEP_TO_JOURNEY`); the resume anchor is the entity's `lastStep`.
+  // This state record carries only the session-level fields that are not
+  // derivable from the active step.
   const state: OnboardingSessionState = useMemo(() => {
     return {
       sessionId,
       scenario: active?.kind === "sample" ? (active.id as Scenario) : null,
       gate,
+      // standardized-viewer-control T6b — project the DURABLE reached-set off the
+      // active entity (the persisted + server-twinned source of truth) so the
+      // StepStrip reads ONE set, not a strip-local re-accumulation. The stable
+      // empty-set const keeps the memo identity stable in the no-entity case.
+      reachedStages: active?.reachedStages ?? EMPTY_REACHED_STAGES,
       selectedReportSectionId,
     };
   }, [sessionId, active, gate, selectedReportSectionId]);
@@ -246,11 +242,12 @@ function useSessionFacade(): OnboardingSessionApi {
   );
 
   // standardized-viewer-control deletion-phase — return to the Ingest picker AND
-  // deactivate the active entity (the f1 BACKWARD-transition side effects: gate
+  // deactivate the active entity (the backward-to-ingest side effects: gate
   // reset, the "left" viewer event, the ingest-picker step push). The
   // `presentExperienceBeat` `ingest-picker` beat handler calls this; the optional
-  // `attachedSchema` rides onto the picker step so the F3a Save → sign-in →
-  // persist → picker hand-off lands the freshly-saved schema. Onboarding-only.
+  // `attachedSchema` rides onto the picker step so the schema-design Save →
+  // sign-in → persist → picker hand-off lands the freshly-saved schema.
+  // Onboarding-only.
   const returnToIngestPicker = useCallback(
     (attachedSchema?: { schemaId: string; name: string }) => {
       setSelectedReportSectionId(null);
@@ -273,11 +270,11 @@ function useSessionFacade(): OnboardingSessionApi {
     [activate, appendViewerEvent, pushStep],
   );
 
-  // standardized-viewer-control deletion-phase — `advanceFrame` is GONE. All
-  // canvas navigation now dispatches a CanvasIntent through the orchestrator
+  // standardized-viewer-control deletion-phase — there is no frame-advance API.
+  // All canvas navigation now dispatches a CanvasIntent through the orchestrator
   // (the de-forked `show*`/`editTemplate` handlers push the step + call
-  // `markStageReached`); the f1 backward return is `returnToIngestPicker`; the
-  // three residual onboarding-overlay beats route through `presentExperienceBeat`.
+  // `markStageReached`); the backward return to ingest is `returnToIngestPicker`;
+  // the residual onboarding-overlay beats route through `presentExperienceBeat`.
 
   // standardized-viewer-control T5 (R1/R6) — the Extract first-reach signal.
   // The orchestrator's `showExtract` handler calls this; it fires
@@ -462,13 +459,23 @@ export const OnboardingSessionProvider: FC<OnboardingSessionProviderProps> = ({
     // StepStrip reads the active step kind.
     const initialViewerStep: ViewerStep = initialStep ?? { kind: "ingest-picker" };
     // Frame-free entity seed: the resume anchor is the persisted projection of
-    // the seeded step; the reached-set seeds with that step's journey stage.
+    // the seeded step. The durable reached-set is seeded to MATCH what the live
+    // path (`pickScenario` then resuming at the seeded step) would have produced:
+    // the journey-ORIGIN stages (`ingest` + `understand`, seeded by
+    // `pickScenario` for every active sample) UNIONED with the seeded step's own
+    // journey stage. An active sample entity always implies the user reached the
+    // origin, so seeding only the seeded step's stage (the old behavior) under-
+    // reported the checkmarks on a deep-resume (e.g. resuming at Extract used to
+    // show only Analyze checked, never Understand). This is the same shape T6b
+    // hydrates the persisted set into, so initial render === post-reload render.
     const seedStage = journeyStageForStepKind(initialViewerStep.kind);
+    const reachedStages = new Set<JourneyStage>(["ingest", "understand"]);
+    if (seedStage) reachedStages.add(seedStage);
     const seed: EntitySession = {
       kind: "sample",
       id: initialScenario,
       lastStep: toPersistedViewerStep(initialViewerStep),
-      reachedStages: seedStage ? new Set<JourneyStage>([seedStage]) : new Set<JourneyStage>(),
+      reachedStages,
       createdAt: now,
       lastVisitedAt: now,
     };

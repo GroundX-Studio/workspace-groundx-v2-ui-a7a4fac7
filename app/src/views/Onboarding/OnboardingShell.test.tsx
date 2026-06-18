@@ -467,7 +467,7 @@ describe("OnboardingShell", () => {
   // otherwise screen-reader / keyboard-Tab users hit phantom sidebar +
   // chat elements that have no visible affordance. The fix: wrap the
   // underneath shell in a div carrying `aria-hidden="true"` and `inert`
-  // while `isF1` is true; clear both on F2.
+  // while the ingest picker is shown; clear both once a sample is active.
   it("WF-01 C1: F1 marks the underneath shell aria-hidden + inert", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
     const wrap = screen.getByTestId("onboarding-shell-underneath");
@@ -1428,6 +1428,7 @@ describe("OnboardingShell", () => {
     // drives the f4↔f4a transition via the session `advanceFrame` API and
     // asserts <ScopedCanvas> mounts the right report surface for each frame
     // (`report` step kind + frame f4 → render widget; f4a → builder widget).
+    const user = userEvent.setup();
     let snapshot = { sessionId: null as string | null, step: null as string | null };
     let actions: { advanceFrame: (f: TestFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
     renderWithOnboardingProviders(
@@ -1439,7 +1440,14 @@ describe("OnboardingShell", () => {
       { initialFrame: "f4", initialScenario: "utility" },
     );
 
-    // f4 render surface is up.
+    // Reach the Report render surface via the step-strip pill rather than relying
+    // on the seed sticking. The utility journey re-enters Understand on a fresh
+    // mount (the intro snap pushes the Understand doc-viewer step); on Node 22's
+    // async timing that snap overrides the seeded `report` step before this
+    // assertion, so an explicit navigate (the proven pattern in the sibling
+    // Loan-Report / "clicking ✎ edit" tests) is the deterministic way in.
+    // Scope to the step strip — "Report" also appears in the left nav.
+    await user.click(within(screen.getByTestId("step-strip-wrapper")).getByText("Report"));
     expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
 
     // f4 → f4a: ScopedCanvas mounts the builder (report-builder CanvasKind).
@@ -1475,11 +1483,16 @@ describe("OnboardingShell", () => {
       api: { report: { renderReport } },
     });
 
-    // Start on the Extract workbench (the scenario's source context).
+    // Start on the Extract workbench (the scenario's source context). Reach it
+    // via the step-strip pill, not the seed: the utility intro snap re-enters
+    // Understand on a fresh mount and (on Node 22's async timing) overrides the
+    // seeded `extract-workbench` step before this assertion.
+    const strip = within(screen.getByTestId("step-strip-wrapper")); // "Extract"/"Report" also appear in the left nav
+    await user.click(strip.getByText("Extract"));
     expect(await screen.findByTestId("extract-workbench")).toBeInTheDocument();
 
     // Navigate Extract → Report.
-    await user.click(screen.getByText("Report"));
+    await user.click(strip.getByText("Report"));
 
     // The render surface mounts and shows the seeded template's three sections.
     expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
@@ -1529,10 +1542,16 @@ describe("OnboardingShell", () => {
   // ChatExperience in the chat slot). Neither hits the "not yet available"
   // placeholder.
   it("Phase 3a: F3 renders the packaged Extract workbench through <ScopedCanvas> (no placeholder)", async () => {
+    const user = userEvent.setup();
     renderWithOnboardingProviders(<OnboardingShell />, {
       initialFrame: "f3",
       initialScenario: "utility",
     });
+    // Reach Extract via the step-strip pill, not the seed: the utility intro
+    // snap re-enters Understand on a fresh mount and (on Node 22's async timing)
+    // overrides the seeded `extract-workbench` step before this assertion.
+    // Scope to the step strip — "Extract" also appears in the left nav.
+    await user.click(within(screen.getByTestId("step-strip-wrapper")).getByText("Extract"));
     expect(await screen.findByTestId("extract-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("scoped-canvas")).toHaveAttribute(
       "data-canvas-kind",

@@ -894,8 +894,8 @@ export type ViewerStepKind = z.infer<typeof viewerStepKindSchema>;
 // ──────────────────────────────────────────────────────────────────────
 // JourneyStage — the four-stop onboarding journey vocabulary, FRAME-FREE.
 // standardized-viewer-control T6b (D3/D13): the LLM context + the step strip
-// describe "where the user is" by JOURNEY STAGE + ACTIVE STEP KIND, never by a
-// frame word (f1…f7). The stage is a pure function of the active ViewerStep
+// describe "where the user is" by JOURNEY STAGE + ACTIVE STEP KIND, with no
+// frame vocabulary. The stage is a pure function of the active ViewerStep
 // kind — `extract-workbench` / `interact-chat` / `report` all collapse to the
 // single `analyze` stage (the strip nests them as Analyze sub-steps; the LLM
 // context only needs the top-level stage). The app's richer
@@ -910,7 +910,7 @@ export type JourneyStage = z.infer<typeof journeyStageSchema>;
  * Canonical projection from a `ViewerStepKind` to its top-level
  * `JourneyStage`. Total over `viewerStepKindSchema` (a compile-time
  * `Record<ViewerStepKind, …>` keeps it exhaustive; a guard test asserts
- * every kind resolves). Frame-free: nothing here references f1…f7.
+ * every kind resolves). Frame-free: no frame vocabulary here.
  */
 export const viewerStepKindToJourneyStage: Record<ViewerStepKind, JourneyStage> = {
   "ingest-picker": "ingest",
@@ -971,7 +971,6 @@ export const persistedViewerStepSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("interact-chat"),
-    scenarioId: z.string(),
     documentId: z.string().optional(),
   }),
   z.object({
@@ -1108,18 +1107,19 @@ export const canvasIntentSchema = z.discriminatedUnion("kind", [
   // standardized-viewer-control deletion-phase — the ONE generic, NOT-LLM-
   // emittable intent for experience/overlay-internal SCRIPTED viewer beats (the
   // onboarding choreography the LLM/affordance seam must never offer). The three
-  // residual `advanceFrame` sites (Extract save-and-return, OnboardingShell
-  // URL-return, the experience intro-snap) are onboarding-OVERLAY beats with no
-  // shared destination meaning — they route through the standard dispatch seam
-  // via this one intent instead of adding onboarding-specific destination kinds.
-  // The MECHANISM is this kind; the VALUES are the typed, extensible `beat`
-  // discriminator, so a future overlay scenario adds a `beat` variant rather than
-  // a new intent kind. Marked `llm: false` in the intent catalog (not offerable).
+  // residual backward/lateral onboarding transitions (Extract save-and-return,
+  // OnboardingShell URL-return, the experience intro-snap) are onboarding-OVERLAY
+  // beats with no shared destination meaning — they route through the standard
+  // dispatch seam via this one intent instead of adding onboarding-specific
+  // destination kinds. The MECHANISM is this kind; the VALUES are the typed,
+  // extensible `beat` discriminator, so a future overlay scenario adds a `beat`
+  // variant rather than a new intent kind. Marked `llm: false` in the intent
+  // catalog (not offerable).
   //   • ingest-picker — return to the Ingest picker AND deactivate the active
   //                      entity (a BACKWARD transition); the optional
   //                      `attachedSchema` carries a freshly-saved schema onto the
-  //                      picker step (the F3a Save → sign-in → persist → picker
-  //                      hand-off).
+  //                      picker step (the schema-design Save → sign-in → persist
+  //                      → picker hand-off).
   //   • understand-scanning — snap to the Understand "GroundX is reading the doc"
   //                      scanning beat AND set the Understand journey edge.
   z.object({

@@ -63,7 +63,7 @@ This change ships as a **hardened production implementation**. Non-negotiable:
   FEATURES (not half-finished pieces of this one), each filed as a GitHub Issue per
   discipline §8.
 
-## What
+## What Changes
 
 Make **changing the viewer one mechanism**, and give an LLM a first-class way to
 **offer clickable viewer behavior**. Three threads:

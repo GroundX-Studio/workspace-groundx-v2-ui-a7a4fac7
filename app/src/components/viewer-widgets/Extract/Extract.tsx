@@ -78,9 +78,11 @@ import { SchemaView } from "./SchemaView";
  *
  * The scenario manifest is still the fallback schema/values source (BYO,
  * placeholder ids, pre-resolve, errors) and drives the loan-only JSON render
- * mode + the skips-extract copy — read off the onboarding session/appMode
- * (the workbench is an onboarding-only surface today; SteadyShell mounts only
- * the doc-viewer kind through `<ScopedCanvas>`).
+ * mode + the skips-extract copy — read off the onboarding session/appMode.
+ * (standardized-viewer-control R7 — the extract-workbench step, incl. its
+ * `surface:"design"` schema editor, is reachable in BOTH experiences: SteadyShell
+ * mounts it through `<ScopedCanvas>` via `showExtract`/`editSchema`. It is no
+ * longer onboarding-only.)
  *
  * Per `widget-role-access`: `role: WidgetRole` is the authorization axis
  * (export / Save locked-for-anonymous via the padlock affordances + the
@@ -117,9 +119,9 @@ export interface ExtractProps {
    * from the active `extract-workbench` viewer step (mirrors `report.surface`):
    *   • "fields" (or absent) — the extracted-fields workbench (the default).
    *   • "design" — the schema DESIGN surface (`SchemaView` design pane).
-   * Reads from this PROP (the dispatched step), NOT `currentFrame === "f3a"`, so
-   * the design surface is reachable for AUTHENTICATED (steady) users — a
-   * production bug today.
+   * Reads from this PROP (the dispatched step's `surface`), so the design
+   * surface is reachable for AUTHENTICATED (steady) users — a production bug
+   * before this change.
    */
   surface?: "fields" | "design";
 }
@@ -232,7 +234,6 @@ export const Extract: FC<ExtractProps> = ({
     state: chatState,
     pinSample,
     unpinSample,
-    pushStep,
     appendAgentMessage,
   } = useChatStore();
   // standardized-viewer-control — category focus is a viewer-step sub-position
@@ -320,10 +321,9 @@ export const Extract: FC<ExtractProps> = ({
   // standardized-viewer-control T6 — the "Try asking a question →" interact entry
   // DISPATCHES `showInteract` through the orchestrator (the single
   // viewer-mutation seam) carrying the Extract scope, so the orchestrator pushes
-  // an `interact-chat` step resolving the document from the scope. Replaces the
-  // old `advanceFrame("f5")` (which forked the canvas move into the onboarding
-  // journey); the journey stage (f5) is now layered by the `showInteract`
-  // handler. No-op in a standalone mount with no orchestrator.
+  // an `interact-chat` step resolving the document from the scope. The Interact
+  // journey stage is layered by the `showInteract` handler (one canvas outcome,
+  // no experience fork). No-op in a standalone mount with no orchestrator.
   const handleAskQuestion = useCallback(() => {
     orchestrator?.dispatch({ kind: "showInteract", scope }, "user");
   }, [orchestrator, scope]);
@@ -403,13 +403,12 @@ export const Extract: FC<ExtractProps> = ({
 
   const isAuthed = appMode.authState === "signed-in";
   // standardized-viewer-control T5 (R7) — the design surface is driven by the
-  // active step's `surface` (forwarded as a prop), NOT `currentFrame === "f3a"`.
-  // This is what makes the schema design surface reachable in STEADY.
+  // active step's `surface` (forwarded as a prop). This is what makes the schema
+  // design surface reachable in STEADY.
   const isDesignSurface = surface === "design";
   // "← back" returns to the fields workbench by re-dispatching `showExtract`
   // (surface defaults to "fields") through the orchestrator — the single
-  // viewer-mutation seam. No `advanceFrame`. No-op in a standalone mount with
-  // no orchestrator.
+  // viewer-mutation seam. No-op in a standalone mount with no orchestrator.
   const handleBack = useCallback(() => {
     orchestrator?.dispatch({ kind: "showExtract", scope, schemaId: scenarioId }, "user");
   }, [orchestrator, scope, scenarioId]);
@@ -431,10 +430,24 @@ export const Extract: FC<ExtractProps> = ({
       setSaveStatus("saved");
       if (templateIdRef.current) {
         const schemaName = `${schema.name} (custom)`;
-        pushStep({
-          kind: "ingest-picker",
-          attachedSchema: { schemaId: templateIdRef.current, name: schemaName },
-        });
+        // standardized-viewer-control T10 — the "save-and-return to the Ingest
+        // picker" choreography dispatches the generic `presentExperienceBeat`
+        // `ingest-picker` beat through the STANDARD dispatch seam (NOT a direct
+        // `pushStep` — viewer-step mutators are reachable only from the
+        // orchestrator). The beat handler deactivates the entity, resets the
+        // gate, records the "left" viewer-event, and pushes the picker step
+        // carrying the freshly-attached schema — one seam, no double-push. This
+        // mirrors the post-commit (gate-resolved) path below.
+        orchestrator?.dispatch(
+          {
+            kind: "presentExperienceBeat",
+            beat: {
+              kind: "ingest-picker",
+              attachedSchema: { schemaId: templateIdRef.current, name: schemaName },
+            },
+          },
+          "user",
+        );
         appendAgentMessage(`Schema attached: ${schemaName}`);
       }
     } catch (err) {
@@ -446,7 +459,7 @@ export const Extract: FC<ExtractProps> = ({
         setSaveStatus("error");
       }
     }
-  }, [api.template, hasUnsavedChanges, saveStatus, schema, overlay, openGate, pushStep, appendAgentMessage]);
+  }, [api.template, hasUnsavedChanges, saveStatus, schema, overlay, openGate, orchestrator, appendAgentMessage]);
 
   const postCommitConsumedRef = useRef(false);
   useEffect(() => {
@@ -476,12 +489,12 @@ export const Extract: FC<ExtractProps> = ({
         setSaveStatus("saved");
         const schemaName = `${schema!.name} (custom)`;
         // standardized-viewer-control deletion-phase — the onboarding-only
-        // "save-and-return to the Ingest picker" choreography now dispatches the
+        // "save-and-return to the Ingest picker" choreography dispatches the
         // generic `presentExperienceBeat` `ingest-picker` beat through the STANDARD
-        // dispatch seam (was `advanceFrame("f1") + pushStep`). The beat handler
-        // does the f1 entity-DEACTIVATE + gate-reset + "left" viewer-event side
-        // effects (a BACKWARD transition, R2) AND pushes the picker step carrying
-        // the freshly-attached schema — one seam, no frame, no double-push.
+        // dispatch seam. The beat handler does the entity-DEACTIVATE + gate-reset
+        // + "left" viewer-event side effects (a BACKWARD transition to ingest, R2)
+        // AND pushes the picker step carrying the freshly-attached schema — one
+        // seam, no double-push.
         orchestrator?.dispatch(
           {
             kind: "presentExperienceBeat",
@@ -1616,8 +1629,8 @@ const FieldsPanelMenu: FC<{ scenarioId: string }> = ({ scenarioId }) => {
   // standardized-viewer-control T5 (R7) — the "Edit schema" / "Save schema"
   // menu items dispatch `editSchema` through the orchestrator (the single
   // viewer-mutation seam) so the schema DESIGN surface opens via the active
-  // step's `surface: "design"` sub-position — in BOTH onboarding and steady. No
-  // `advanceFrame("f3a")` (a no-op in steady). No-op in a standalone mount.
+  // step's `surface: "design"` sub-position — in BOTH onboarding and steady.
+  // No-op in a standalone mount.
   const orchestrator = useCanvasOrchestratorOptional();
   const { state: appMode } = useAppMode();
   const isAuthed = appMode.authState === "signed-in";

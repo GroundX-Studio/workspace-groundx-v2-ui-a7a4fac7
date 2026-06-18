@@ -806,11 +806,14 @@ their content; they're not "widgets" themselves.
 ### `OnboardingNav` (`components/layout/OnboardingNav/`)
 
 Not a widget — a **layout shell component**. It sits in `AppShell`'s
-nav slot and renders the F1-F7 progress strip plus a per-frame
-title. It's the chrome AROUND widgets, not a widget itself; the
-LLM doesn't navigate via the nav (it dispatches `switchFrame`
-intents). Rule of thumb: anything in `layout/` is host chrome —
-widgets fill the slots layout components expose.
+nav slot and renders the journey progress strip (the stage stops)
+plus a per-stage title. It's the chrome AROUND widgets, not a widget
+itself; the LLM doesn't navigate via the nav — it dispatches the
+per-destination navigation intents (`showExtract` / `showInteract` /
+`showReport` / `editSchema` / `showIntegrate`) through the
+orchestrator, optionally as an offered affordance (`offerAs`). Rule of
+thumb: anything in `layout/` is host chrome — widgets fill the slots
+layout components expose.
 
 ### `AppShell` (`components/layout/AppShell/`)
 

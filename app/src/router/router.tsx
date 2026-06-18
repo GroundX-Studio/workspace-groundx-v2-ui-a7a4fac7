@@ -110,11 +110,12 @@ export const router = createBrowserRouter([
       // WF-01 C4 (2026-05-28). Catch unknown sub-paths under an onboarding
       // scenario so they don't trip the error boundary. Currently the only
       // canonical sub-paths recognized at the shell level are the scenario
-      // root + signup; per-frame routing happens via state (advanceFrame),
-      // not URL. A splat here mounts the same OnboardingShell, which then
-      // ignores the extra segment and renders the canonical scenario URL's
-      // surface. (If we add real per-frame deep-links later, this splat
-      // becomes the dispatch table.)
+      // root + signup; surface navigation happens by dispatching a navigation
+      // intent through the orchestrator (the active viewer step is the source
+      // of truth), not the URL. A splat here mounts the same OnboardingShell,
+      // which then ignores the extra segment and renders the canonical
+      // scenario URL's surface. (If we add real per-surface deep-links later,
+      // this splat becomes the dispatch table.)
       { path: `${ROUTER_PATHS.ONBOARDING}/:bucketId/:scenarioId/*`, element: <OnboardingShell /> },
     ],
   },

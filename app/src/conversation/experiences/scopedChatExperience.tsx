@@ -9,8 +9,9 @@
  *   • Intro — a short summary of the scope's docs + pick-view pills (mirrors
  *     onboarding's Intro, but with NO scripted `ThinkingStream`: a steady
  *     surface is not a first-read reading beat).
- *   • Choreography — NONE. Steady surfaces never auto-advance onboarding
- *     frames (no f3/f5 side-effects); the conversation is the whole surface.
+ *   • Choreography — NONE. Steady surfaces never auto-advance the onboarding
+ *     journey (no Extract/Interact auto-advance side-effects); the conversation
+ *     is the whole surface.
  *
  * Composable-over-forked: workspace and project differ ONLY in the
  * closed-over `ContentScope` (bucket vs bucket+filter) and the labels derived

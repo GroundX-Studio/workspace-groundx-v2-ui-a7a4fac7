@@ -13,7 +13,17 @@
  *   • reachable-todo   — clickable; not yet visited (navy outline)
  */
 
-export type StepId = "ingest" | "understand" | "analyze" | "integrate";
+import type { JourneyStage } from "@groundx/shared";
+
+/**
+ * The four-stop journey vocabulary. ALIASED to the shared `JourneyStage` (the
+ * frame-free canonical journey-stage union in `@groundx/shared`) so the strip's
+ * step ids and the shared stage vocabulary are ONE type, not two hand-typed
+ * copies that can drift. `StepId` is kept as the strip-local NAME for the same
+ * concept ("which pill"); `JourneyStage` is the shared NAME ("where in the
+ * journey").
+ */
+export type StepId = JourneyStage;
 
 export type StepPillState = "active" | "done-traversed" | "disabled" | "reachable-todo";
 

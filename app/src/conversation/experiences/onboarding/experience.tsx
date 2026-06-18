@@ -8,13 +8,13 @@
  *     switcher + F3a schema-agent chrome + earlier-turns summary), the seed
  *     bubbles (scenario name + "Reading <file> now."), the scripted
  *     `ThinkingStream`, and the Pick-a-view pills (`derivePickViews`).
- *     Exactly the old `F2ConversationFlow` header content, lifted out.
+ *     Exactly the old Understand conversation-flow header content, lifted out.
  *   - `Choreography` — a render-null director that DISPATCHES the destination
  *     intent through the CanvasOrchestrator (standardized-viewer-control T6/T9):
  *     `showExtract` when the ThinkingStream completes (in `Intro`'s `onDone`),
  *     `showInteract` on the first user send. The canvas moves only via the
  *     orchestrator seam; the onboarding journey + analytics layer on top inside
- *     the orchestrator's handlers (no direct `advanceFrame` for the canvas).
+ *     the orchestrator's handlers (no direct viewer mutation for the canvas).
  *
  * NB: the SCRIPTED intro turns (user bubble + bot lead) are rendered inline by
  * `Intro` (not via the engine's `seedTurns`) so the existing wireframe testids
@@ -106,10 +106,10 @@ export function derivePickViews(
 function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperienceComponentProps> {
   const OnboardingIntro: FC<ChatExperienceComponentProps> = ({ conversation }) => {
     const { scenarioId, thinkingScript } = config;
-    // standardized-viewer-control deletion-phase — the intro-snap below now
+    // standardized-viewer-control deletion-phase — the intro-snap below
     // dispatches the `presentExperienceBeat` `understand-scanning` beat through
-    // the STANDARD seam (was `advanceFrame("f2")`). ALL canvas navigation —
-    // forward and the scripted intro-snap — goes through `dispatchIntent`.
+    // the STANDARD seam. ALL canvas navigation — forward and the scripted
+    // intro-snap — goes through `dispatchIntent`.
     const { byId, state: registryState } = useScenarioRegistry();
     const { state: chatState } = useChatStore();
     const { dispatch: dispatchIntent } = useCanvasOrchestrator();
@@ -137,12 +137,11 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
     // standardized-viewer-control T6 — the active viewer step is the frame-free
     // source for "where the canvas is". Two reads draw off it:
     //   • the schema-agent chat header shows when the active step is the schema
-    //     DESIGN surface (`extract-workbench` + `surface === "design"`), NOT the
-    //     retired `currentFrame === "f3a"` — so it tracks the dispatched
-    //     `editSchema` step in BOTH onboarding and steady (mirrors Extract's
-    //     `isDesignSurface = surface === "design"`).
+    //     DESIGN surface (`extract-workbench` + `surface === "design"`) — so it
+    //     tracks the dispatched `editSchema` step in BOTH onboarding and steady
+    //     (mirrors Extract's `isDesignSurface = surface === "design"`).
     //   • the intro-snap guard reads "is the canvas already on Understand"
-    //     (active step kind `doc-viewer`) instead of `currentFrame === "f2"`.
+    //     (active step kind `doc-viewer`).
     const activeStep = selectActiveStep(activeChatSession);
     const isDesignSurface =
       activeStep?.kind === "extract-workbench" && activeStep.surface === "design";
@@ -150,9 +149,9 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
 
     // Synced ref of "is the canvas already on Understand" — both once-only canvas
     // side effects below read it at FIRE time (the intro-snap guard + the
-    // ThinkingStream-done auto-advance guard, each formerly `currentFrame ===
-    // "f2"`). R6: compute one-time side-effect decisions from a synced ref, never
-    // a value mutated inside a setState/reducer updater.
+    // ThinkingStream-done auto-advance guard). R6: compute one-time side-effect
+    // decisions from a synced ref, never a value mutated inside a
+    // setState/reducer updater.
     const isOnUnderstandStepRef = useRef(isOnUnderstandStep);
     isOnUnderstandStepRef.current = isOnUnderstandStep;
 
@@ -188,13 +187,12 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
       }
       snapFiredRef.current = true;
       // Guard re-expressed as a STEP predicate (T6): snap only if the canvas is
-      // not ALREADY on the Understand doc-viewer step (was `currentFrame !==
-      // "f2"`). Read off the synced ref so the once-only decision can't observe
-      // a stale render value (R6).
+      // not ALREADY on the Understand doc-viewer step. Read off the synced ref so
+      // the once-only decision can't observe a stale render value (R6).
       //
       // standardized-viewer-control deletion-phase — the snap dispatches the
       // generic `presentExperienceBeat` `understand-scanning` beat through the
-      // STANDARD seam (was `advanceFrame("f2")`). This BACKWARD/lateral onboarding
+      // STANDARD seam. This BACKWARD/lateral onboarding
       // beat must BOTH (a) push the Understand *scanning* doc-viewer step and (b)
       // set the Understand journey edge — the orchestrator's beat handler does
       // exactly that pair (pushStep(scanning doc-viewer) + markStageReached), so
@@ -398,16 +396,15 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
                 setShowDone(true);
                 // standardized-viewer-control T9 — auto-advance Understand →
                 // Extract when the scripted stream finishes, by DISPATCHING
-                // `showExtract` through the orchestrator (the one seam), NOT
-                // `advanceFrame("f3")`. The handler pushes the extract-workbench
-                // step (canvas → Extract) and layers the onboarding journey
-                // (`markFrameReached("f3")` + the Extract first-reach analytic).
-                // No `focusedCategoryId` → the default first category, exactly as
-                // the bare `advanceFrame("f3")` landed.
-                // Guard re-expressed as a STEP predicate (was `currentFrame ===
-                // "f2"`): only auto-advance if the canvas is still on the
-                // Understand doc-viewer step. Read off the synced ref so the
-                // onDone callback can't observe a stale render value (R6).
+                // `showExtract` through the orchestrator (the one seam). The
+                // handler pushes the extract-workbench step (canvas → Extract)
+                // and layers the onboarding journey (the Analyze-stage
+                // markStageReached + the Extract first-reach analytic). No
+                // `focusedCategoryId` → the default first category.
+                // Guard expressed as a STEP predicate: only auto-advance if the
+                // canvas is still on the Understand doc-viewer step. Read off the
+                // synced ref so the onDone callback can't observe a stale render
+                // value (R6).
                 if (isOnUnderstandStepRef.current) {
                   dispatchIntent({ kind: "showExtract", scope: docScope, schemaId: scenarioId }, "user");
                 }
@@ -432,10 +429,10 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
                         if (view.key === "interact") {
                           // standardized-viewer-control T6 — the "Show me chat"
                           // pill MOVES the canvas to Interact by DISPATCHING
-                          // `showInteract` (was `advanceFrame("f5")`). The handler
-                          // pushes the interact-chat step resolving the scenario
-                          // document from the scope, and layers the onboarding
-                          // Interact journey stage (`markFrameReached("f5")`).
+                          // `showInteract`. The handler pushes the interact-chat
+                          // step resolving the scenario document from the scope,
+                          // and layers the onboarding Interact journey stage (the
+                          // Interact-stage markStageReached).
                           dispatchIntent({ kind: "showInteract", scope: docScope }, "user");
                           return;
                         }
@@ -471,11 +468,11 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
  * standardized-viewer-control T6 (M1) — the set of active viewer-step kinds that
  * count as "pre-Interact": the user is browsing the canvas (Understand, Extract,
  * or Report) and has NOT yet moved into the Interact chat. A genuine first send
- * from any of these jumps the canvas to Interact. The kinds map 1:1 to the
- * legacy guard `frame === "f2"|"f3"|"f3a"|"f4"` (understand/extract/report); it
- * EXCLUDES `interact-chat` (already AT Interact — don't bounce), `integrate`,
- * and `ingest-picker`. This is the BEHAVIORAL read M1 calls out — re-expressed
- * as an explicit step predicate, not a frame literal.
+ * from any of these jumps the canvas to Interact. The set is the
+ * understand/extract/report step kinds; it EXCLUDES `interact-chat` (already AT
+ * Interact — don't bounce), `integrate`, and `ingest-picker`. This is the
+ * BEHAVIORAL "don't bounce a user already at Interact" read M1 calls out —
+ * expressed as an explicit step-kind predicate.
  */
 const PRE_INTERACT_STEP_KINDS: ReadonlySet<string> = new Set([
   "doc-viewer",
@@ -485,20 +482,23 @@ const PRE_INTERACT_STEP_KINDS: ReadonlySet<string> = new Set([
 
 /**
  * The first-send → Interact advance is scenario-agnostic: it carries an empty
- * documents scope (the orchestrator's `showInteract` handler falls back to the
- * onboarding session's active scenario for the step's scenarioId). Module-level
- * so the effect's identity is stable.
+ * documents scope. The orchestrator's `showInteract` handler resolves the
+ * step's `documentId` ONLY from this scope (via `primaryDocumentFromScope`), so
+ * an empty scope leaves the pushed `interact-chat` step doc-less — which is
+ * correct for onboarding: `ScopedCanvas` feeds the PdfViewer from the shell's
+ * `canvasScope` prop (derived from the active scenario), not from the step.
+ * Module-level so the effect's identity is stable.
  */
 const FIRST_SEND_INTERACT_SCOPE: ContentScope = { type: "documents", documentIds: [] };
 
 /**
  * The onboarding `Choreography` — a render-null director. It owns the
  * first-send → Interact advance: a real user-typed turn means they're moving
- * past browsing the canvas, so it DISPATCHES `showInteract` (was
- * `advanceFrame("f5")`). It observes the engine's `firstUserMessageSent`
- * lifecycle STATE (set ONLY by a genuine `send()`, never by RT-01 hydration of a
- * persisted user turn) and fires once. (The intro-done → Extract auto-advance
- * lives in `Intro`'s ThinkingStream `onDone`, which owns the per-note timing.)
+ * past browsing the canvas, so it DISPATCHES `showInteract`. It observes the
+ * engine's `firstUserMessageSent` lifecycle STATE (set ONLY by a genuine
+ * `send()`, never by RT-01 hydration of a persisted user turn) and fires once.
+ * (The intro-done → Extract auto-advance lives in `Intro`'s ThinkingStream
+ * `onDone`, which owns the per-note timing.)
  *
  * Guard: only advance if the active canvas step is PRE-INTERACT (Understand /
  * Extract / Report). A user already AT Interact (e.g. clicked "Show me chat") is
@@ -512,7 +512,7 @@ function makeOnboardingChoreography(reportTemplateId?: string): FC<ChatExperienc
     const firstSendFiredRef = useRef(false);
 
     // The active viewer step's kind — the frame-free source for the pre-Interact
-    // guard (was `currentFrame`). Synced to a ref for the once-only effect (R6).
+    // guard. Synced to a ref for the once-only effect (R6).
     const activeStep = selectActiveStep(
       chatState.activeSessionId ? chatState.sessions.get(chatState.activeSessionId) : null,
     );

@@ -23,7 +23,7 @@ import {
  * standardized-viewer-control D13/R5 — the resume anchor for a freshly-created
  * entity (before any navigation lands a real step). The ingest-picker step is
  * the journey origin; `pickScenario`/the orchestrator overwrite `lastStep` with
- * the real destination on first advance. Replaced the old `lastFrame: "f1"`.
+ * the real destination on the first navigation dispatch.
  */
 const DEFAULT_PERSISTED_STEP: PersistedViewerStep = { kind: "ingest-picker" };
 import type {
@@ -35,7 +35,35 @@ import type {
   NewMessageInput,
   NewViewerEventInput,
   ViewerEvent,
+  ViewerSession,
 } from "./types";
+
+/**
+ * standardized-viewer-control #30 — rebuild the in-memory viewer from the
+ * active entity's persisted `lastStep` on hydrate. The resume anchor lives on
+ * the `EntitySession` (`lastStep`, a `PersistedViewerStep`); the rendered
+ * canvas reads `viewer.history[currentStep.stepIndex]` (`selectActiveStep`),
+ * NOT the entity field. Without this rebuild the entities + lastStep restore
+ * but the viewer stays EMPTY, so a returning user on a bare reload lands on the
+ * ingest-picker instead of their last surface (LC4: "returning users land in
+ * their last sample"). A `PersistedViewerStep` is structurally a `ViewerStep`
+ * with the ephemeral fields (the scan beat / citation highlights) absent —
+ * those are rebuilt on demand, never persisted, so the single-step history is
+ * the correct resume seed.
+ */
+function viewerFromActiveEntity(
+  entities: ReadonlyMap<EntityKey, EntitySession>,
+  activeEntityKey: EntityKey | null,
+): ViewerSession {
+  const active = activeEntityKey ? entities.get(activeEntityKey) : undefined;
+  if (!active) return EMPTY_VIEWER_SESSION;
+  return {
+    history: [active.lastStep],
+    currentStep: { stepIndex: 0 },
+    overlays: [],
+    workspace: { schemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY },
+  };
+}
 
 const ChatStoreContext = createContext<ChatStoreApi | null>(null);
 
@@ -297,7 +325,9 @@ function deserialize(raw: string): ChatStoreState | null {
         currentIntent: null,
         pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
         reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
-        viewer: EMPTY_VIEWER_SESSION,
+        // #30 — resume the canvas from the active entity's `lastStep` (the
+        // viewer is not itself persisted; it is rebuilt from the resume anchor).
+        viewer: viewerFromActiveEntity(entities, s.activeEntityKey),
         gate: { status: "idle" },
         signupOpen: s.signupOpen,
         isOnboardingSession: s.isOnboardingSession,
@@ -875,7 +905,11 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       // hydrate; a server-only session starts with the empty viewer
       // session + empty schema overlay, exactly as the always-null
       // hydrate did before the drop. A session already present locally
-      // keeps its own client-only state via the spread below.
+      // keeps its own client-only state via the spread below — INCLUDING its
+      // viewer, which deserialize already resumed from the entity `lastStep`
+      // (#30): the server merge must not reset it back to empty, or an
+      // authenticated reload / sign-in would drop the user off their last
+      // surface onto the ingest-picker.
       setState((prev) => {
         const nextSessions = new Map(prev.sessions);
         for (const remote of serverSessions) {
@@ -887,7 +921,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
                 title: remote.title,
                 activeEntityKey: (remote.activeEntityKey as EntityKey | null) ?? null,
                 currentIntent: coerceHydratedIntent(remote.currentIntent),
-                viewer: EMPTY_VIEWER_SESSION,
+                // #30 — `viewer` is intentionally NOT overridden here: `...local`
+                // preserves the deserialize-resumed canvas (client-only state).
                 pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
                 createdAt: new Date(remote.createdAt).getTime(),
                 updatedAt: new Date(remote.updatedAt).getTime(),

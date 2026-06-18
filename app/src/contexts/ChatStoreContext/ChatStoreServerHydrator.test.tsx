@@ -6,7 +6,8 @@ import { AuthContext } from "@/contexts/AuthContext/AuthContext";
 import { makeApiWrapper } from "@/test/withApiProvider";
 
 import { ChatStoreProvider, useChatStore } from "./ChatStoreContext";
-import { EMPTY_PENDING_REPORT_OVERLAY } from "./types";
+import { EMPTY_PENDING_REPORT_OVERLAY, EMPTY_PENDING_SCHEMA_OVERLAY } from "./types";
+import { selectActiveStep } from "./selectors";
 import { ChatStoreServerHydrator } from "./ChatStoreServerHydrator";
 
 import type { FC, ReactNode } from "react";
@@ -317,6 +318,83 @@ describe("ChatStoreServerHydrator (RT-05)", () => {
       expect(observedViewer!.history).toEqual([]);
       expect(observedViewer!.overlays).toEqual([]);
     });
+  });
+
+  // #30 — the LOCAL-merge branch must PRESERVE the already-resumed viewer.
+  // `deserialize` rebuilds the viewer from the active entity's `lastStep`; when
+  // an authed user then hydrates (sign-in / authed reload), `hydrateFromServer`
+  // merges the server row into the locally-present session. The merge must NOT
+  // reset that resumed viewer to empty (the old `viewer: EMPTY_VIEWER_SESSION`
+  // override did, dropping the returning user back on the ingest-picker — the
+  // server carries no viewer to hydrate, so the client viewer is authoritative).
+  it("local-merge branch preserves the resumed viewer (does not reset the canvas) — #30", async () => {
+    listChatSessions.mockResolvedValue([
+      makeRemoteSession({ id: "resume-merge", title: "Server-authoritative title" }),
+    ]);
+    const initialSessions = new Map([
+      [
+        "resume-merge",
+        {
+          id: "resume-merge",
+          title: "Stale local title",
+          createdAt: 0,
+          updatedAt: 0,
+          messages: [],
+          summaries: [],
+          entities: new Map([
+            [
+              "sample:utility",
+              {
+                kind: "sample" as const,
+                id: "utility",
+                lastStep: { kind: "interact-chat" as const },
+                reachedStages: new Set<"ingest" | "understand" | "analyze" | "integrate">(["ingest"]),
+                createdAt: 0,
+                lastVisitedAt: 0,
+              },
+            ],
+          ]),
+          activeEntityKey: "sample:utility",
+          viewerHistory: [],
+          currentIntent: null,
+          pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
+          reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
+          // The viewer deserialize already resumed from `lastStep`.
+          viewer: {
+            history: [{ kind: "interact-chat" as const }],
+            currentStep: { stepIndex: 0 },
+            overlays: [],
+            workspace: { schemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY },
+          },
+          gate: { status: "idle" as const },
+          signupOpen: false,
+          isOnboardingSession: true,
+        },
+      ],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ]) as any;
+    let observedStep: unknown = "unset";
+    let observedTitle = "";
+    const Inspector: FC = () => {
+      const s = useChatStore().state.sessions.get("resume-merge");
+      observedStep = s ? selectActiveStep(s) : "missing";
+      observedTitle = s?.title ?? "";
+      return null;
+    };
+    renderWithHydratorApi(
+      <StubAuthProvider auth={{ isLoggedIn: true }}>
+        <ChatStoreProvider initialSessions={initialSessions} initialActiveSessionId="resume-merge">
+          <ChatStoreServerHydrator />
+          <Inspector />
+        </ChatStoreProvider>
+      </StubAuthProvider>,
+    );
+    // Server wins on title (proves the merge actually ran)...
+    await waitFor(() => {
+      expect(observedTitle).toBe("Server-authoritative title");
+    });
+    // ...and the resumed canvas survives the merge (the regression #30 guards).
+    expect(observedStep).toEqual({ kind: "interact-chat" });
   });
 
   it("only hydrates once per false→true transition (StrictMode-safe)", async () => {

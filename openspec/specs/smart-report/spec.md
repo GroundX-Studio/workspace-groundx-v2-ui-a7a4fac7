@@ -43,16 +43,16 @@ multi-workspace reports differ only by their `ContentScope`.
 - **AND** **GIVEN** the scope is instead `documents[]`, `group`, or any shape with or without a `filter`
 - **THEN** the same render surface renders the matching document set with no surface change.
 
-### Requirement: The report render surface (frame f4 / S3) SHALL stream ordered, cited sections
+### Requirement: The report render surface (S3) SHALL stream ordered, cited sections
 
 The render surface SHALL obtain its rendered report from the render endpoint
 (`POST /api/widgets/smart-report/reports/render`) on its **initial** paint — not from a synchronous
-client-side fixture read — so the surface the user first sees on frame `f4` is the endpoint response
+client-side fixture read — so the surface the user first sees on the render surface is the endpoint response
 (the same path the `↻ re-render` control and the builder Save already use). It SHALL display the
 rendered report as its template's sections in order, each with a heading, a body formatted per
 `renderAs`, and inline citations using the shared `CiteChip` (honoring the WF-06b tiers); sections
 SHALL stream in render order; and each section heading SHALL carry an **✎ edit §N** affordance that
-navigates to the builder (frame `f4a`) with that section pre-selected. While the initial render is in
+navigates to the builder (the `builder` surface) with that section pre-selected. While the initial render is in
 flight the surface SHALL show a visible loading state; if the endpoint returns no renderable report
 for the scope it SHALL show the empty state; if the initial render call fails it SHALL show a
 retryable error affordance rather than a blank surface or a thrown render. (MOCK_MODE backs the
@@ -60,11 +60,11 @@ endpoint response; the live multi-document fan-out remains deferred to WF-10.)
 
 #### Scenario: Initial paint renders the endpoint response
 
-- **GIVEN** the user reaches the Report render surface on frame `f4`
+- **GIVEN** the user reaches the Report render surface
 - **WHEN** the surface mounts
 - **THEN** it calls `POST /api/widgets/smart-report/reports/render` for its initial report (not a synchronous fixture read)
 - **AND** on the response the sections render in order with headings, `renderAs`-formatted bodies, and `CiteChip`s
-- **AND** each heading exposes an edit affordance that opens frame `f4a` with that section selected.
+- **AND** each heading exposes an edit affordance that opens the builder surface with that section selected.
 
 #### Scenario: Initial render degrades through loading, empty, and error
 
@@ -97,7 +97,7 @@ attribution tiers. The report SHALL NOT introduce a separate citation-peek surfa
 - **THEN** the viewer opens the cited document at the cited page
 - **AND** the cited region is highlighted at the citation's tier precision.
 
-### Requirement: The report builder surface (frame f4a / S3a) SHALL mirror the schema-editor chrome
+### Requirement: The report builder surface (S3a) SHALL mirror the schema-editor chrome
 
 The builder SHALL reuse the F3a schema-editor chrome: a pinned-samples row, `Sections` / `Render`
 sub-tabs, a row-based section list (name + `renderAs` chip + question) with one row expandable into
@@ -109,7 +109,7 @@ surface's edit affordance and from the `show_smart_report_edit` tool.
 #### Scenario: Builder presents the editable section list
 
 - **GIVEN** a draft or saved template
-- **WHEN** the builder mounts on frame `f4a`
+- **WHEN** the builder mounts
 - **THEN** it shows the pinned-samples row, `Sections`/`Render` sub-tabs, and one row per section
 - **AND** a row expands into an inline editor exposing name, renderAs, question, instructions, and scope
 - **AND** the topbar offers export (locked), render, and Save (locked).
@@ -304,8 +304,8 @@ client-side fake report fixture SHALL exist (a guard test enforces this).
 
 - **GIVEN** the user activates the Report step
 - **WHEN** `reportOverlay.templateId` is present
-- **THEN** the render surface (f4) is shown
-- **AND** when it is absent, the empty builder (f4a) is shown.
+- **THEN** the render surface is shown
+- **AND** when it is absent, the empty builder is shown.
 
 ### Requirement: Report rendering SHALL have a live multi-doc path, not only a fixture
 

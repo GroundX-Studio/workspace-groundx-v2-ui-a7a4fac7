@@ -10,12 +10,18 @@ import { useConversation } from "@/conversation/useConversation";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 import type { CanvasIntentKind } from "@groundx/shared/intent-catalog";
 
-import type { HarnessState, IntentFixture, OverlayView, ScriptContext } from "./types";
+import type { HarnessState, IntentFixture, OverlayView, ScriptContext } from "@/conversation/intentFixtures/types";
 
 /**
  * Replay engine (TEST-ONLY). Fires a fixture's trigger through the REAL
  * derivation → orchestrator → sink pipeline with the LLM mocked, then waits for
  * the fixture's `assert` to hold against the resulting sink state. Zero LLM.
+ *
+ * Lives in `app/src/test/` (the harness directory) alongside
+ * `renderWithOnboardingProviders` + `frameToStep`: it is consumed only by
+ * `intentFixtures.replay.test.tsx` and uses the harness's `initialFrame`
+ * test-convenience, so it belongs with the test infrastructure, not the
+ * production-reachable `intentFixtures/` modules.
  */
 
 function makeSendResult(reply: ChatReply) {

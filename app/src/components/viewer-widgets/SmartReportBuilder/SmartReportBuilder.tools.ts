@@ -9,7 +9,7 @@
  * validation, same chip routing, same both-side mirror — since both operate on
  * the one shared Template lifecycle:
  *
- *   • `show_smart_report_edit` — open the builder (f4a) at a section (the
+ *   • `show_smart_report_edit` — open the builder surface at a section (the
  *     `_edit` sibling of `show_smart_report_render`). `read`-category nav.
  *   • `propose_report_section` — surface a ProposalCard in the builder.
  *   • `accept_report_section` / `reject_report_section` — act on a queued proposal.

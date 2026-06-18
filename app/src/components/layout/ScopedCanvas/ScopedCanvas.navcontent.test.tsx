@@ -37,7 +37,7 @@ describe("viewer nav content — onboarding journey", () => {
   });
 
   it("Analyze▸Interact: eyebrow 'Analyze', title 'Interact'", () => {
-    const step: ViewerStep = { kind: "interact-chat", scenarioId: "utility" };
+    const step: ViewerStep = { kind: "interact-chat" };
     renderWithOnboardingProviders(
       <ScopedCanvas scope={DOC_SCOPE} step={step} role="member" experience="onboarding" />,
     );

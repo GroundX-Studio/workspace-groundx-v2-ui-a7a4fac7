@@ -1,7 +1,7 @@
 import { describe, it } from "vitest";
 
 import { intentFixtures } from "./fixtures";
-import { replayIntentFixture } from "./replayIntent";
+import { replayIntentFixture } from "@/test/replayIntent";
 
 /**
  * Drives every FE intent fixture through the REAL derivation → dispatch → sink

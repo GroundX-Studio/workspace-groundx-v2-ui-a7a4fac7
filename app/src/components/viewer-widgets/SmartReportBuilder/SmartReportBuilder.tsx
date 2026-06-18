@@ -1,7 +1,8 @@
 /**
- * SmartReportBuilder — the Report **builder** surface (f4a / S3a).
+ * SmartReportBuilder — the Report **builder** surface (the `report` step's
+ * `surface: "builder"` sub-position; S3a in the spec).
  *
- * A **ScopedViewerWidget** mirroring the F3a schema-editor chrome
+ * A **ScopedViewerWidget** mirroring the schema-design editor chrome
  * (`SchemaView` / `ExtractView`): a pinned-samples row, `Sections` / `Render`
  * sub-tabs, a row list with an inline section editor, the `⋮` menu, and the
  * `export ▾ 🔒 · ↻ render · 💾 Save 🔒` control row. (Proposal cards — the
@@ -153,11 +154,11 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
   const openGate = onboardingSession?.openGate ?? (() => undefined);
   // standardized-viewer-control T6 — the canvas move to the render surface
   // DISPATCHES `showReport` through the orchestrator (the single viewer-mutation
-  // seam) instead of `advanceFrame("f4")`. This widget is genuinely shared, so it
-  // must work in BOTH experiences (D15): the orchestrator pushes the `report`
-  // render step in onboarding AND steady, and onboarding LAYERS the Report
-  // journey stage (f4) on top. Optional: a standalone mount with no orchestrator
-  // makes the render-surface move a no-op (the render endpoint still fires).
+  // seam). This widget is genuinely shared, so it must work in BOTH experiences
+  // (D15): the orchestrator pushes the `report` render step in onboarding AND
+  // steady, and onboarding LAYERS the Report journey stage on top. Optional: a
+  // standalone mount with no orchestrator makes the render-surface move a no-op
+  // (the render endpoint still fires).
   const orchestrator = useCanvasOrchestratorOptional();
 
   // The active session's report overlay (the draft diff) + the template id it
@@ -218,7 +219,7 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
   // is the render→builder + `show_smart_report_edit` hand-off.
   const effectiveSelectedSectionId =
     selectedSectionId ?? onboardingSession?.state.selectedReportSectionId ?? undefined;
-  // Only one row's inline editor is open at a time (the F3a invariant). Seeded
+  // Only one row's inline editor is open at a time (the schema-design editor invariant). Seeded
   // from the effective selected section.
   const [openRowId, setOpenRowId] = useState<string | null>(effectiveSelectedSectionId ?? null);
 
@@ -309,8 +310,8 @@ export const SmartReportBuilder: FC<SmartReportBuilderProps> = ({ scope, role, s
   // endpoint (`renderReport`), then move the canvas to the render surface to show
   // the result. The endpoint is the production caller (round-trip closed); the
   // render surface re-fetches its own first paint, so dispatching is sufficient.
-  // standardized-viewer-control T6 — the canvas move is now a `showReport`
-  // dispatch (render surface) through the orchestrator, not `advanceFrame("f4")`.
+  // standardized-viewer-control T6 — the canvas move is a `showReport` dispatch
+  // (render surface) through the orchestrator, the single viewer-mutation seam.
   const showRenderSurface = useCallback(() => {
     orchestrator?.dispatch({ kind: "showReport", templateId: templateIdentity.id, scope }, "user");
   }, [orchestrator, templateIdentity.id, scope]);
@@ -574,7 +575,7 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
   // The user-chosen variable token (step-16 follow-up — no longer a hardcoded
   // literal). Sanitized to a `{token}`-safe slug on record.
   const [variableName, setVariableName] = useState("");
-  // The `⋮` menu open state (reused from the F3a row menu).
+  // The `⋮` menu open state (reused from the schema-design row menu).
   const [menuOpen, setMenuOpen] = useState(false);
   const textareaSx = {
     width: "100%",

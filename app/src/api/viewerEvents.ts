@@ -27,8 +27,9 @@ export interface RecordViewerEventInput {
   entityKey: string | null;
   action:
     | "opened"
-    // standardized-viewer-control T6b (D14) — frame-free journey-progress
-    // advance, replacing the retired frame-coupled `frame-advanced`.
+    // standardized-viewer-control T6b (D14) — journey-progress advance fired
+    // when a journey stage is first reached. The action vocabulary names no
+    // viewer surface, only the journey stage transition.
     | "journey-advanced"
     | "extracted-value-viewed"
     | "citation-clicked"

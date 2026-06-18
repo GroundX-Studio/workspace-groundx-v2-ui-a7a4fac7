@@ -1,6 +1,6 @@
 # Spec Delta — observability
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: The viewer-event action vocabulary SHALL be frame-free
 

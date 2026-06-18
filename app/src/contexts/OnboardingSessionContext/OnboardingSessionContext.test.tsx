@@ -52,6 +52,32 @@ describe("OnboardingSessionContext", () => {
     expect(result.current.state.sessionId).toBe("sess_abc");
   });
 
+  it("exposes the durable reachedStages set on session state (seeded by pickScenario, grown by markStageReached)", () => {
+    // standardized-viewer-control T6b — the persisted, server-twinned reached-set
+    // (`EntitySession.reachedStages`) is now PROJECTED onto the session state so
+    // the StepStrip reads ONE source of truth (no strip-local re-accumulation).
+    const { result } = renderHook(() => useOnboardingSession(), { wrapper });
+    // Pre-scenario: no active entity → empty set (stable identity).
+    expect([...result.current.state.reachedStages]).toEqual([]);
+    const emptyA = result.current.state.reachedStages;
+    const emptyB = result.current.state.reachedStages;
+    expect(emptyA).toBe(emptyB); // stable empty-set const keeps the memo stable
+
+    // pickScenario seeds the journey-origin stages.
+    act(() => result.current.pickScenario("utility"));
+    expect([...result.current.state.reachedStages].sort()).toEqual(["ingest", "understand"]);
+
+    // markStageReached(Extract) adds `analyze` to the durable set.
+    act(() =>
+      result.current.markStageReached({ kind: "extract-workbench", scenarioId: "utility" }),
+    );
+    expect([...result.current.state.reachedStages].sort()).toEqual([
+      "analyze",
+      "ingest",
+      "understand",
+    ]);
+  });
+
   it("markStageReached advances the resume anchor + records the reached stage (inside an active sample)", () => {
     // standardized-viewer-control — `markStageReached` operates on the active
     // entity (frame-free successor to `advanceFrame`). From the picker with
@@ -178,7 +204,7 @@ describe("OnboardingSessionContext", () => {
       const { result } = renderHook(() => useOnboardingSession(), { wrapper });
       act(() => result.current.pickScenario("utility"));
       vi.mocked(track).mockReset();
-      act(() => result.current.markStageReached({ kind: "interact-chat", scenarioId: "utility" }));
+      act(() => result.current.markStageReached({ kind: "interact-chat" }));
       expect(findTrack("understand.completed")).toBeUndefined();
     });
 

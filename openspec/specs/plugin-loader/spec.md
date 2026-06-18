@@ -7,7 +7,6 @@ manifest shape, allowed UI slots, the tool-surface the loader hands to
 the agent-tool registry, and the relationship between `PLUGIN_PRESET`
 and `APP_MODE_PRESET`. The loader itself is deferred; this capability
 keeps the contract stable so plugins can be authored against it.
-
 ## Requirements
 ### Requirement: ADR SHALL document the plugin tool-surface contract before PLUG-01..05 ship
 
@@ -81,14 +80,18 @@ for overlay UX.
 
 The intent dispatcher SHALL accept `source: "tour"` in addition to
 `source: "user" | "agent"`. The tour state machine, supplied by a
-loaded plugin, drives frame transitions through `dispatchIntent({source:
-"tour"})`. Blocked on PLUG-01.
+loaded plugin, drives canvas transitions through `dispatchIntent({source:
+"tour", …})` using the per-destination navigation intents (e.g. `showExtract`,
+`showInteract`, `showReport`, `showIntegrate`), NOT a frame-named intent. There SHALL
+be no `advanceFrame` / `switchFrame` intent kind for the tour to emit. Blocked on
+PLUG-01.
 
-#### Scenario: Tour advances a frame via dispatchIntent
+#### Scenario: Tour advances the canvas via dispatchIntent
 
-- **WHEN** the tour state machine emits `dispatchIntent({source: "tour", kind: "advanceFrame", to: "f3"})`
-- **THEN** the canvas advances to F3
+- **WHEN** the tour state machine emits `dispatchIntent({source: "tour", kind: "showExtract", scope, schemaId})`
+- **THEN** the canvas shows the Extract (extract-workbench) surface
 - **AND** the intent log records source `tour`
+- **AND** no frame-named intent (`advanceFrame` / `switchFrame`) is emitted.
 
 ### Requirement: PLUGIN_PRESET env SHALL choose which plugin bundle the LLM-side harness loads
 

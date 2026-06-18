@@ -75,15 +75,17 @@ export interface ViewerEvent {
   entityKey: EntityKey | null;
   action:
     | "opened"
-    // standardized-viewer-control T6b (D14) — frame-free journey-progress
-    // advance, replacing the retired frame-coupled `frame-advanced`.
+    // standardized-viewer-control T6b (D14) — journey-progress advance fired
+    // when a journey stage is first reached. The action names no viewer
+    // surface, only the journey stage transition.
     | "journey-advanced"
     | "extracted-value-viewed"
     | "citation-clicked"
     | "scan-completed"
     | "intent-dispatched"
     // `left` is intentionally kept — it records leaving the active
-    // entity/journey, not "left frame f1" (carries no frame name).
+    // entity/journey (e.g. a return to the ingest picker); it names no
+    // viewer surface.
     | "left";
   // 2026-05-31-chat-wire-types-shared — single-sourced off the shared `Source`.
   source: Source;
@@ -177,7 +179,7 @@ export type SchemaFieldEdit = Partial<{
  * shared `Template` (`Template + Scope + Results`). Generalized from the
  * Extract-only `PendingSchemaOverlay` in 2026-05-29-smart-report-screen Phase 4,
  * driven by its **real second consumer**, the Report builder
- * (`SmartReportBuilder`, f4a/S3a).
+ * (`SmartReportBuilder`, the report builder surface).
  *
  * The shell is the MECHANISM (added items · removed ids · per-item edits ·
  * proposal queue · pinned samples); the item shape is the DATA that varies by
@@ -379,13 +381,14 @@ export type ViewerStep =
       documentId: string;
       page?: number;
       /**
-       * WF-01 C5 — the F2 "GroundX is reading the doc" beat. When true,
+       * WF-01 C5 — the Understand "GroundX is reading the doc" beat. When true,
        * <ScopedCanvas> mounts the PdfViewer with `showScanAnimation` so the
        * page renders under the sweeping scan-line while the chat
-       * ThinkingStream plays. Set ONLY by the F2 frame projection
-       * (`frameToStepStandalone`); citation-jump doc-viewer steps (pushed by
-       * the cite-click sink) omit it, so a cite-click never replays the
-       * reading sweep. Optional/absent → no scan (the default).
+       * ThinkingStream plays. Set ONLY by the Understand scanning beat (the
+       * `presentExperienceBeat` `understand-scanning` handler); citation-jump
+       * doc-viewer steps (pushed by the cite-click sink) omit it, so a
+       * cite-click never replays the reading sweep. Optional/absent → no scan
+       * (the default).
        */
       scanning?: boolean;
       /**
@@ -429,10 +432,10 @@ export type ViewerStep =
       /**
        * standardized-viewer-control T2 (R7, steady-first) — the Extract
        * sub-position, MIRRORING `report.surface` ("render" | "builder"):
-       *   • "fields"  — the extracted-fields workbench (the default; old F3).
-       *   • "design"  — the schema DESIGN surface (old frame f3a / `SchemaView`
-       *                 design pane). Reachable for AUTHENTICATED users via the
-       *                 `editSchema` outcome (T5), NOT a frame.
+       *   • "fields"  — the extracted-fields workbench (the default).
+       *   • "design"  — the schema DESIGN surface (the `SchemaView` design
+       *                 pane). Reachable for AUTHENTICATED users via the
+       *                 `editSchema` outcome (T5).
        * Absent ⇒ "fields". NOT a new `mode` field — `mode` is the widget-
        * contract "onboarding | steady" prop, and Extract/Report share this
        * surface meta-pattern.
@@ -441,7 +444,6 @@ export type ViewerStep =
     }
   | {
       kind: "interact-chat";
-      scenarioId: string;
       /**
        * standardized-viewer-control T5 — the resolved GroundX document the
        * Interact (chat-with-sources) canvas mounts. The `showInteract` handler
@@ -487,7 +489,6 @@ export function toPersistedViewerStep(step: ViewerStep): PersistedViewerStep {
     case "interact-chat":
       return {
         kind: "interact-chat",
-        scenarioId: step.scenarioId,
         ...(step.documentId !== undefined ? { documentId: step.documentId } : {}),
       };
     case "report":
@@ -577,9 +578,9 @@ export interface ChatSession {
   // endpoint is Phase 6.
   reportOverlay: PendingReportOverlay;
 
-  // `master-viewer-session` Phase 1 — paired ViewerSession. Phase 1
-  // ships the slot + persistence; Phase 2+ wire the surfaces against
-  // it (gate as overlay, currentFrame as derived).
+  // `master-viewer-session` Phase 1 — paired ViewerSession. The active
+  // `ViewerStep` is the single source of truth for the canvas surface; the
+  // gate is a z-stacked overlay on top.
   viewer: ViewerSession;
 
   // Onboarding-only special-case state (always present on the type

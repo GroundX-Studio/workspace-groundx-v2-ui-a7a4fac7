@@ -36,6 +36,11 @@ import { describe, expect, it } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, "..");
+// The shared package source tree (`@groundx/shared`). Guard (f)'s kind→stage
+// check scans it too: the canonical kind→journey-stage literal lives there
+// (`viewerStepKindToJourneyStage`), and the app catalog now DERIVES from it, so
+// a second hand-written copy in EITHER tree is the drift we forbid.
+const SHARED_SRC = resolve(HERE, "..", "..", "..", "shared", "src");
 
 /** Recursively collect every non-test `.ts`/`.tsx` source file under `dir`. */
 function listSourceFiles(dir: string): string[] {
@@ -353,30 +358,42 @@ describe("§5(d) — every app *Error class extends the shared ApiError", () => 
 
 // ── Guard (f) — single source for the journey vocabulary ────────────────────
 //
-// viewer-nav-redesign (2026-06-16): the StepStrip pill labels AND the
-// `ViewerStep.kind → journey step` mapping live ONCE, in
-// `components/layout/StepStrip/journeyCatalog.ts`. A second hand-maintained copy
-// (the tell: the old `OnboardingShell` `VIEWER_STEP_KIND_TO_STEP_ID` literal, or
-// re-typed "1 Ingest"/"2 Understand"/"4 Integrate" pill labels) is the drift
-// this guard forbids. Proven to fire by temporarily re-adding a copy to
-// OnboardingShell, then reverted.
+// viewer-nav-redesign (2026-06-16): the StepStrip pill labels live ONCE, in the
+// app catalog `components/layout/StepStrip/journeyCatalog.ts`. A second
+// hand-maintained copy (re-typed "1 Ingest"/"2 Understand"/"4 Integrate" pill
+// labels) is the drift this guard forbids.
+//
+// standardized-viewer-control (2026-06-17): the kind → journey-STAGE literal
+// now has its single source in `@groundx/shared`
+// (`viewerStepKindToJourneyStage`); the app catalog's `VIEWER_STEP_TO_JOURNEY`
+// DERIVES its top-level `step` from it (only the strip-specific `substep` is
+// owned app-side). So the kind→stage check scans BOTH the app tree AND the
+// shared tree, and exempts the ONE canonical site (`shared/src/index.ts`) — a
+// bare-form kind→stage literal anywhere else (the old `OnboardingShell`
+// `VIEWER_STEP_KIND_TO_STEP_ID`, or a re-typed copy in shared) is the forbidden
+// drift. Proven to fire by temporarily re-adding a copy, then reverted.
 describe("§nav — journey vocabulary has a single source (journeyCatalog)", () => {
   const CATALOG_REL = join("components", "layout", "StepStrip", "journeyCatalog.ts");
-  const files = listSourceFiles(SRC);
+  const appFiles = listSourceFiles(SRC);
+  // The ONE allowed home for the kind → journey-stage literal map.
+  const SHARED_CANONICAL_REL = join("shared", "src", "index.ts");
+  /** Display a file path relative to whichever tree root it lives under. */
+  const relLabel = (file: string) =>
+    file.startsWith(SHARED_SRC) ? join("shared", "src", file.slice(SHARED_SRC.length + 1)) : file.slice(SRC.length + 1);
 
   it("the journey catalog exists and is the one definition site", () => {
-    expect(files.some((f) => f.endsWith(CATALOG_REL))).toBe(true);
+    expect(appFiles.some((f) => f.endsWith(CATALOG_REL))).toBe(true);
   });
 
   it("the StepStrip pill labels appear ONLY in the catalog", () => {
     const labels = ["1 Ingest", "2 Understand", "4 Integrate"];
     const offenders: string[] = [];
-    for (const file of files) {
+    for (const file of appFiles) {
       if (file.endsWith(CATALOG_REL)) continue;
       const src = readFileSync(file, "utf8");
       for (const label of labels) {
         if (src.includes(`"${label}"`) || src.includes(`'${label}'`)) {
-          offenders.push(`${file.slice(SRC.length + 1)} › "${label}"`);
+          offenders.push(`${relLabel(file)} › "${label}"`);
         }
       }
     }
@@ -387,20 +404,23 @@ describe("§nav — journey vocabulary has a single source (journeyCatalog)", ()
     ).toBe(true);
   });
 
-  it("the viewer-step → journey-step mapping is not re-declared outside the catalog", () => {
-    // The old OnboardingShell map's tell: `"doc-viewer": "understand"` (kind →
-    // bare StepId). The catalog uses `"doc-viewer": { step: "understand" }`, a
-    // different shape, so it does not match this signature.
+  it("the viewer-step → journey-STAGE literal map lives ONLY in @groundx/shared", () => {
+    // Tell: the bare kind → stage form `"doc-viewer": "understand"` (kind →
+    // bare stage string), the shape of the canonical shared
+    // `viewerStepKindToJourneyStage`. The app catalog's `VIEWER_STEP_TO_JOURNEY`
+    // is the `{ step: ... }` shape AND now derives from shared, so it carries no
+    // such literal at all. Scan BOTH trees; exempt the one canonical shared site.
     const tell = /["']doc-viewer["']\s*:\s*["']understand["']/;
     const offenders: string[] = [];
-    for (const file of files) {
-      if (file.endsWith(CATALOG_REL)) continue;
-      if (tell.test(readFileSync(file, "utf8"))) offenders.push(file.slice(SRC.length + 1));
+    for (const file of [...appFiles, ...listSourceFiles(SHARED_SRC)]) {
+      if (file.endsWith(SHARED_CANONICAL_REL)) continue; // the single allowed home
+      if (tell.test(readFileSync(file, "utf8"))) offenders.push(relLabel(file));
     }
     expect(
       offenders.length === 0,
-      `A viewer-step→journey-step mapping is re-declared outside journeyCatalog.ts — ` +
-        `use VIEWER_STEP_TO_JOURNEY (single source):\n  ${offenders.join("\n  ")}`,
+      `A viewer-step→journey-STAGE literal is declared outside the canonical shared ` +
+        `\`viewerStepKindToJourneyStage\` (shared/src/index.ts) — derive from it instead ` +
+        `(single source):\n  ${offenders.join("\n  ")}`,
     ).toBe(true);
   });
 });

@@ -15,7 +15,7 @@ OnboardingShell                               <- root, mounted at /onboarding/*
 │   - Labeled (180px) ↔ icon rail (48px), chevron toggle
 │   - State persisted in localStorage via useOnboardingNavCollapsed
 │   - Logged-out items: W/P (disabled), Book-a-call CTA, Docs
-├── F1 IngestView overlay (when currentFrame === f1)
+├── F1 IngestView overlay (when the active viewer step is `ingest-picker`)
 ├── Sign-up overlay (when viewer.overlays carries a `sign-up` entry)
 └── AppShell 3-pane
     ├── (nav slot empty; nav is shell-level above)
@@ -71,7 +71,7 @@ drift guard at `app/src/test/no-hardcoded-styles.test.ts` walks every
 | `AppModeContext` | provider mounts in `App.tsx` | App-wide mode (onboarding / steady), auth state, current scenario id |
 | `ChatStoreContext` | **root state container** | `sessions: Map<id, ChatSession>` (each carries a paired `ViewerSession`). Actions: `appendMessage`, `appendViewerEvent`, `pushStep`, `pushOverlay`/`mutateOverlay`/`popOverlay`, `gotoDocViewer`, plus the schema-overlay mutators. DB-source-of-truth for anon + authed (since 2026-05-25); localStorage is a cache |
 | `EntityRegistryContext` | thin facade | `useEntityRegistry()` reads from `ChatStore.activeSession.entities`. Mutation actions delegate to ChatStore. Provider auto-mounts ChatStoreProvider with seed-or-rehydrate |
-| `OnboardingSessionContext` | façade | Exposes `state` (current frame, scenario, gate) + actions (`pickScenario`, `advanceFrame`, `openGate`, `dismissGate`, `commitGate`). Each action emits a ViewerEvent + pushes a ViewerStep via ChatStore |
+| `OnboardingSessionContext` | façade | Exposes `state` (scenario, gate) + actions (`pickScenario`, `markStageReached`, `openGate`, `dismissGate`, `commitGate`, entity-deactivate). No frame action — canvas navigation goes through the orchestrator `dispatch`; this context layers journey-progress (resume anchor + reached-stage set), the gate lifecycle, and onboarding-only side effects on top, emitting a ViewerEvent per transition |
 | `ScenarioRegistryContext` | loads `/api/scenarios` | Scenarios + bucketId for canonical URLs |
 | `CanvasOrchestratorContext` | **live (post-mvs-cleanup)** | Generic `dispatch`/`registerAdapter` surface for `CanvasIntent` union; named convenience channels `openCitation` (push citation-peek overlay) + `docOpened` (append assistant chat message). Built-in handler for `highlightCitation` routes to `ChatStore.gotoDocViewer`. Soft-degrade when no ChatStoreProvider is in the tree |
 | `OnboardingSkillContext` | empty stub | Plugin-loaded skills; loader not yet implemented |
@@ -125,9 +125,9 @@ Idempotent migration (`ensureChatSessionsViewerColumns`) ALTERs in
 missing columns on existing deployments. RT-04 PATCH semantics merge
 the three fields with null-preserving semantics.
 
-The render path reads `viewer.currentStep.kind` (with a
-`currentFrame`-derived fallback) to pick the canvas widget. The
-overlay stack renders on top.
+The render path reads `viewer.currentStep.kind` to pick the canvas
+widget — the active `ViewerStep` is the single source of truth for
+what's shown (no frame fallback). The overlay stack renders on top.
 
 ## Frontend routing
 
@@ -162,7 +162,7 @@ middleware/src/app.ts (createApp)
 ├── /api/chat-sessions/:id   → PATCH merge (RT-04: currentIntent, activeEntityKey, viewerHistory, viewerOverlays, viewerWorkspace)
 ├── /api/chat-sessions/:id/messages          → GET (RT-01 hydrate; citations parsed from citations_json)
 ├── /api/chat-sessions/:id/entities/:key     → PUT upsert + server-side merge (RT-03)
-├── /api/viewer-events       → POST (RT-02 — citation-clicked, frame-advanced, intent-dispatched, ...)
+├── /api/viewer-events       → POST (RT-02 — citation-clicked, journey-advanced, intent-dispatched, ...)
 ├── /api/intent              → POST (UI-10b — canvas-orchestrator dispatch trail)
 ├── /api/chat/messages       → chatHandler: validate → persist user → context bundle → routeChat (mock OR live RAG/structured/hybrid) → persist assistant + citations_json
 ├── /api/extract-field       → focused per-field extraction for ProposeCard Accept

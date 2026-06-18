@@ -40,9 +40,9 @@ test.describe("reduced-motion CI sweep (TS-09)", () => {
 
   // The AppShell root carries the attribute in BOTH the desktop and the
   // compact (tablet/mobile) layout, so this runs at every viewport. We wait on
-  // the appshell root itself, NOT `onboarding-frame-f2`: in compact mode the
-  // canvas slot (where the F2 frame lives) is removed from the DOM until the
-  // view-swap pill reveals it, so an f2 wait would falsely fail on mobile.
+  // the appshell root itself, NOT `onboarding-step-doc-viewer`: in compact mode the
+  // canvas slot (where the doc-viewer step lives) is removed from the DOM until the
+  // view-swap pill reveals it, so a doc-viewer wait would falsely fail on mobile.
   test("AppShell exposes the reduced-motion data attribute after a scenario pick", async ({ page }) => {
     await page.goto("/onboarding");
     // Pick Utility so the shell mounts (AppShell only renders inside the
@@ -101,9 +101,9 @@ test.describe("reduced-motion CI sweep (TS-09)", () => {
     await page.getByTestId("sample-utility").click();
     // The shell appears in the same tick under reduced-motion. If the
     // 80 ms global default got stuck on the page-swipe animation, the
-    // f2 testid would not be visible immediately. We give Playwright
+    // doc-viewer step testid would not be visible immediately. We give Playwright
     // a tight timeout so this fails loudly if the reduced-motion path
     // ever regresses to "still animates for 200 ms+".
-    await expect(page.getByTestId("onboarding-frame-f2")).toBeVisible({ timeout: 1_500 });
+    await expect(page.getByTestId("onboarding-step-doc-viewer")).toBeVisible({ timeout: 1_500 });
   });
 });

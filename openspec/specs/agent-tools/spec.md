@@ -24,37 +24,39 @@ folds into its answer inline.
 ### Requirement: show_understand tool SHALL dispatch the F2/Understand canvas surface
 
 The agent-tool registry SHALL include `show_understand({doc_id, progress})`.
-On invocation, the canvas dispatcher SHALL transition to F2 with the
-named document active.
+On invocation, the canvas dispatcher SHALL push the Understand (doc-viewer) viewer
+step with the named document active. "Understand" is the journey-stage name for this
+surface; the dispatcher SHALL NOT read or write a frame value.
 
-#### Scenario: Tool advances canvas to F2
+#### Scenario: Tool dispatches the Understand surface
 
 - **WHEN** the LLM emits `show_understand` with a valid `doc_id`
-- **THEN** the canvas advances to F2 (Understand)
+- **THEN** the canvas shows the Understand (doc-viewer) surface
 - **AND** the supplied document is the active doc in the PDF viewer
 
 ### Requirement: show_extraction tool SHALL dispatch the F3/Extract canvas surface
 
 The agent-tool registry SHALL include `show_extraction({schema_id, doc_id, category?, render?})`.
-On invocation, the canvas dispatcher SHALL transition to F3 with the
-named schema + doc + (optional) category active.
+On invocation, the canvas dispatcher SHALL push or mutate the Extract (extract-workbench)
+viewer step with the named schema + doc + (optional) category active. The dispatcher
+SHALL NOT read or write a frame value.
 
-#### Scenario: Tool advances canvas to F3
+#### Scenario: Tool dispatches the Extract surface
 
 - **WHEN** the LLM emits `show_extraction` with valid arguments
-- **THEN** the canvas advances to F3
+- **THEN** the canvas shows the Extract (extract-workbench) surface
 - **AND** the named schema and category are the active selection
 
 ### Requirement: show_field_citation tool SHALL open the F4 expanded-citation peek
 
 The agent-tool registry SHALL include `show_field_citation({field_id, doc_id, page})`.
-On invocation, the canvas dispatcher SHALL open the F4 citation peek
-on the named field + page.
+On invocation, the canvas dispatcher SHALL open the field citation peek
+on the named field + page. The dispatcher SHALL NOT read or write a frame value.
 
-#### Scenario: Tool opens F4 citation peek
+#### Scenario: Tool opens the field citation peek
 
 - **WHEN** the LLM emits `show_field_citation`
-- **THEN** the F4 peek surface opens
+- **THEN** the field citation peek surface opens
 - **AND** the named field + doc + page are visible with the relevant region highlighted
 
 ### Requirement: pin_to_report tool SHALL pin literal turn text to a report template
@@ -76,28 +78,30 @@ capability.
 ### Requirement: propose_schema_field tool SHALL emit a ProposalCard in F3a
 
 The agent-tool registry SHALL include `propose_schema_field({field_def})`.
-On invocation, a ProposalCard SHALL surface in F3a's Fields tab; on
-Accept the field SHALL be added to the active schema. (See
-`onboarding-schema-editor` capability for the surface contract.)
+On invocation, a ProposalCard SHALL surface in the schema-design surface's Fields tab
+(the `extract-workbench` step's `surface: "design"` sub-position, reached via the
+`editSchema` intent — NOT a frame); on Accept the field SHALL be added to the active
+schema. (See `onboarding-schema-editor` capability for the surface contract.)
 
 #### Scenario: Tool surfaces a propose-card
 
 - **WHEN** the LLM emits `propose_schema_field`
-- **THEN** a ProposalCard renders in F3a's Fields tab
+- **THEN** a ProposalCard renders in the schema-design surface's Fields tab
 - **AND** Accept lands the field via the existing `addSchemaField` flow
 
 ### Requirement: propose_report_section tool SHALL emit a ProposalCard in S3a
 
 The agent-tool registry SHALL include `propose_report_section({section_def})`. On invocation, a
-ProposalCard SHALL surface in the report builder (frame f4a / S3a) section list; on Accept the
+ProposalCard SHALL surface in the report builder (the `report` step's `surface: "builder"`
+sub-position — NOT a frame) section list; on Accept the
 section SHALL be added to the active template via the shared template-edit method. The ProposalCard
 surface contract is owned by the `smart-report` capability and mirrors `propose_schema_field`.
 
 #### Scenario: Tool surfaces a section propose-card
 
 - **WHEN** the LLM emits `propose_report_section`
-- **THEN** a ProposalCard renders in the report builder (frame f4a)
-- **AND** Accept lands the section into the template via the shared edit-template method.
+- **THEN** a ProposalCard renders in the report builder (the `report` `surface: "builder"`)
+- **AND** Accept lands the section via the shared template-edit method.
 
 ### Requirement: Tool error recovery SHALL fall back after 3 consecutive failures
 
@@ -291,8 +295,8 @@ family was spec-only and would have failed the quality guard the moment it was a
 
 The registry SHALL include `show_smart_report_render({ template_id?, scope })` and
 `show_smart_report_edit({ template_id, selected_section_id? })`, where `scope` is a `ContentScope`.
-`show_smart_report_render` SHALL move the canvas to the report render surface (frame f4 / S3) for the
-given scope; `show_smart_report_edit` SHALL move the canvas to the builder (frame f4a / S3a) with the
+`show_smart_report_render` SHALL move the canvas to the report render surface (S3) for the
+given scope; `show_smart_report_edit` SHALL move the canvas to the builder (S3a) with the
 named section pre-selected when supplied. Each SHALL be mirrored on BOTH the app `*.tools.ts` AND the
 middleware `SERVER_TOOL_CATALOG`, with the drift-guard test green. The surface contract is owned by
 the `smart-report` capability.
@@ -300,12 +304,12 @@ the `smart-report` capability.
 #### Scenario: Render tool opens the report surface for a scope
 
 - **WHEN** the LLM emits `show_smart_report_render` with a `scope`
-- **THEN** the canvas moves to the report render surface (frame f4) rendered over that scope.
+- **THEN** the canvas moves to the report render surface rendered over that scope.
 
 #### Scenario: Edit tool opens the builder with a section selected
 
 - **WHEN** the LLM emits `show_smart_report_edit` with a `selected_section_id`
-- **THEN** the canvas moves to the report builder (frame f4a) with the named section pre-selected.
+- **THEN** the canvas moves to the report builder with the named section pre-selected.
 
 ### Requirement: Report template-mutation tools SHALL share the Extract builder tool family
 
@@ -479,7 +483,7 @@ full-shape drift, SHALL fail automated validation naming the offending tool.
 
 #### Scenario: Server-only tool remains explicit
 
-- **GIVEN** a server-only tool such as `suggest_intent`
+- **GIVEN** a server-only tool such as `lookup_groundx_docs`
 - **WHEN** parity validation runs
 - **THEN** the tool is allowed only because it appears in the server-only
   allowlist
@@ -539,7 +543,7 @@ contribute no guidance to that turn's prompt.
 - **GIVEN** the prompts module
 - **WHEN** the grounded prompt source is inspected
 - **THEN** it contains no hand-written per-tool paragraph (the former
-  `propose_schema_field` / `suggest_intent` prose is gone).
+  `propose_schema_field` prose is gone).
 
 ### Requirement: Server-executed tools SHALL be declared via `serverExecute` and excluded from intent routing
 
@@ -553,7 +557,7 @@ the user-facing text for the reply's `toolActivity` annotation). Executor
 dependencies SHALL arrive via an injected `ServerExecuteContext` built from
 the grounded seam's deps (test-injectable) — an executor SHALL NOT close
 over module-level live dependencies. Server-executed tools SHALL appear in the
-app-side parity guard's existing server-only allowlist (the `suggest_intent`
+app-side parity guard's existing server-only allowlist (the same allowlist
 mechanism — no new exclusion machinery). Every server-executed tool SHALL be
 covered by an LLM-free scripted LOOP-transcript fixture (the counterpart of
 the intentBuilder corpus): a stubbed provider emits the call, the suite
@@ -656,4 +660,91 @@ content the turn's authorized retrieval did not.
 - **WHEN** the model calls the secondary-extraction tool with a `documentId` (B) that was NOT surfaced this turn
 - **THEN** the middleware performs NO extraction fetch for B and feeds back a terse "not available" result
 - **AND** the turn still succeeds.
+
+### Requirement: A navigation tool MAY be offered via an `offerAs` disposition
+
+A navigation tool SHALL support being OFFERED as a clickable affordance instead of
+performed, expressed as an optional `offerAs` field on the tool's own input schema
+(`offerAs: { label, anchor? }`). When `offerAs` is absent the tool SHALL
+auto-dispatch per its category (read navigation lands on `reply.intents[]`). When
+`offerAs` is present the middleware SHALL build the intent through the tool's
+existing `intentBuilder` (so it is server-validated, never free-form) and surface
+it as an OFFERED `suggestedActions` entry carrying that intent, `label`, and
+optional `anchor`, and SHALL NOT auto-dispatch it. There SHALL be no new offer tool
+and no new verb prefix; the `ALLOWED_VERBS` allowlist is unchanged. Because `offerAs`
+lives on the tool's domain input schema, it SHALL carry a `.describe(...)` (the
+every-field rule), and each navigation tool's `intentBuilder` SHALL ignore `offerAs`
+so it never leaks into the built intent.
+
+#### Scenario: Offering a navigation produces a validated, non-auto suggested action
+
+- **GIVEN** the agent calls `show_extraction` with `offerAs: { label: "See the Meters" }` and a focusedCategory argument
+- **WHEN** the middleware processes the turn
+- **THEN** it builds the `showExtract` intent via `show_extraction`'s `intentBuilder`
+- **AND** the intent appears as a `suggestedActions` entry, not on `reply.intents[]`
+
+#### Scenario: Absent `offerAs` auto-dispatches as today
+
+- **GIVEN** the agent calls a read navigation tool with no `offerAs`
+- **THEN** its intent auto-dispatches on `reply.intents[]`
+
+#### Scenario: `offerAs` never leaks into the built intent
+
+- **GIVEN** a navigation tool call carrying `offerAs`
+- **WHEN** the intent is built via the tool's `intentBuilder`
+- **THEN** the built intent contains the domain fields only and no `offerAs`
+
+### Requirement: The agent SHALL be able to both perform and offer viewer actions in one turn
+
+The agent SHALL be able to both perform a viewer action and offer one in the same
+turn, and the same action SHALL be expressible either way. Performing is a
+navigation tool call without `offerAs`; offering is the same tool call with
+`offerAs`. Performing behavior SHALL be unchanged by the affordance mechanism.
+
+#### Scenario: A turn performs one action and offers others
+
+- **GIVEN** a turn where the agent calls `show_extraction` without `offerAs` AND calls navigation tools twice with `offerAs`
+- **THEN** the first intent auto-dispatches
+- **AND** two offered suggested actions are returned for the user to click
+
+### Requirement: Offer-eligibility SHALL be governed by the intent catalog
+
+A tool SHALL be offer-eligible only if it has an `intentBuilder` and is marked
+LLM-emittable in the shared `intentCatalog`. The UI-only intents (`showSample`,
+`openDocument`, `showCitations`) SHALL NOT be offerable. A new interact navigation tool
+emitting `showInteract` SHALL be added and marked LLM-emittable in the catalog with its
+coverage prompt. The navigation tool **`show_extraction_edit`** (the `_edit` sibling of
+`show_extraction`, mirroring the shipped `show_smart_report_edit`) SHALL be added,
+emitting `editSchema`, `category: "read"`, marked LLM-emittable — so the agent MAY offer a
+clickable "edit this schema" action; `editSchema` is no longer UI-only. There SHALL be no
+novel `show_schema_editor` tool.
+
+#### Scenario: A UI-only intent cannot be offered
+
+- **GIVEN** an attempt to offer an action whose intent kind is `showSample`, `openDocument`, or `showCitations`
+- **THEN** no suggested action is produced for it
+
+#### Scenario: The schema editor can be offered
+
+- **GIVEN** the agent calls the schema-editor navigation tool with `offerAs`
+- **THEN** an `editSchema` `suggestedActions` entry is produced (not auto-dispatched)
+
+### Requirement: Navigation intents SHALL fully describe their destination
+
+Each per-destination navigation intent SHALL carry everything needed to render its
+destination. The showExtract intent SHALL carry scope, schemaId, and an optional
+focusedCategoryId. The showReport intent SHALL carry templateId and scope. The
+editTemplate intent SHALL carry templateId and an optional selectedSectionId. The
+showIntegrate intent SHALL carry scope. The openDocument intent SHALL carry
+documentId and an optional page. A showInteract intent SHALL be added for the
+Interact destination, carrying scope (the interact-chat step resolves its document
+from that scope). The editSchema intent SHALL reach the schema-design surface by
+moving the active extract-workbench step into its design sub-position (NOT a frame),
+and SHALL work in both the steady and onboarding experiences. There SHALL be no
+frame-named navigation intent.
+
+#### Scenario: showExtract carries category focus
+
+- **GIVEN** a `show_extraction` tool call with a focusedCategory argument
+- **THEN** the built showExtract intent carries that value as focusedCategoryId
 

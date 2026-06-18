@@ -13,7 +13,7 @@
  *      table depending on auth state (server picks the right read). The
  *      position is described FRAME-FREE (standardized-viewer-control D13):
  *      the journey STAGE (ingest | understand | analyze | integrate) plus the
- *      active ViewerStep KIND — never a frame word (f1…f7).
+ *      active ViewerStep KIND — no frame vocabulary.
  *   3. viewerTrail — the recent slice of viewer_events for the
  *      session. Always server-side (telemetry).
  *
@@ -70,8 +70,8 @@ export interface BundleEntityInput {
   journeyStage: JourneyStage | null;
   /**
    * The active ViewerStep kind the user is currently on (e.g. "doc-viewer",
-   * "extract-workbench"). The frame-free replacement for the old `lastFrame`
-   * resume anchor in the LLM context.
+   * "extract-workbench"). The frame-free "where they are" signal in the LLM
+   * context, paired with `journeyStage`.
    */
   activeStepKind: string | null;
   extractedValues: Record<string, unknown> | null;

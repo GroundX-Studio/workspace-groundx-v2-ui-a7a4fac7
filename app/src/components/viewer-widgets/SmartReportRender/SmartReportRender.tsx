@@ -1,5 +1,6 @@
 /**
- * SmartReportRender — the Report render surface (f4 / S3).
+ * SmartReportRender — the Report render surface (the `report` step's
+ * `surface: "render"` sub-position; S3 in the spec).
  *
  * A **ScopedViewerWidget** (PdfViewer · Extract · SmartReport · Integrate):
  * it takes a REQUIRED `scope: ContentScope` and adapts its data on
@@ -42,7 +43,7 @@
  * Export / Save are locked-for-anonymous (`widgetRoleCanEdit`); a sample-doc
  * render is `preview_only` (#9). The `✎ edit §N` affordance per heading dispatches
  * the `editTemplate` CanvasIntent through the orchestrator (the same intent the
- * `show_smart_report_edit` tool emits), routing to the builder (f4a) with the
+ * `show_smart_report_edit` tool emits), routing to the builder surface with the
  * section pre-selected — no host callback prop (the `{ scope, role }` ScopedCanvas
  * contract can't supply one).
  */
@@ -335,7 +336,7 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
                 orchestrator.dispatch(
                   {
                     kind: "editTemplate",
-                    // The handler routes to the builder (f4a), which reads the
+                    // The handler routes to the builder surface, which reads the
                     // in-memory `reportOverlay` draft; `templateId` is a required
                     // intent field but unused for an unsaved draft, so route by
                     // the active report state's template id when set, else a sentinel.
