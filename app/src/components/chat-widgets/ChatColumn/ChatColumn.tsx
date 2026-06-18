@@ -123,8 +123,8 @@ export const ChatColumn: FC<ChatColumnProps> = ({
   // FCs on every call; constructing it inline handed <ConversationFlow> a new
   // `experience` (new component identities) every render, so React unmounted +
   // remounted the Choreography, resetting its `firstSendFiredRef` and
-  // re-firing `advanceFrame("f5")` on any re-render during the journey — making
-  // the frame un-holdable after the first send. The registry entry, scenario
+  // re-firing the first-send Interact auto-advance on any re-render during the
+  // journey — making the surface un-holdable after the first send. The registry entry, scenario
   // object, and its derived fields are all stable references, so this memo is
   // recomputed only when the scenario actually changes. (Regression:
   // ChatColumn.test.tsx "stable-experience-identity …".) Computed
@@ -160,7 +160,7 @@ export const ChatColumn: FC<ChatColumnProps> = ({
 
   // The picker: the active step is the ingest-picker (journey stage `ingest`),
   // OR there's no journey at all (no step, no scenario) — the pre-scenario idle
-  // state. (Was `currentFrame === "f1"`.)
+  // state.
   const isF1 = journeyStage === "ingest" || (journeyStage == null && !scenario);
 
   // The onboarding journey gets the onboarding experience. The conversation
@@ -170,11 +170,11 @@ export const ChatColumn: FC<ChatColumnProps> = ({
   // (Analyze covers Extract / Interact / Report — the `report` step is Analyze,
   // so the BUILDER keeps the working chat exactly like the render; omitting it
   // dropped the chat to a static placeholder — Regression: ChatColumn.test.tsx
-  // "on F4a (report builder) …"). Under the book-call overlay (booking, not
-  // sign-in) the onboarding experience also stays mounted for the journey-
+  // "…(report builder), keeps the working conversation chat…"). Under the book-call overlay (booking,
+  // not sign-in) the onboarding experience also stays mounted for the journey-
   // adjacent stages (Integrate / Ingest / pre-step) so the conversation sliding
-  // behind the calendar shows the journey, not the bare flow (was the f6/f7/f1
-  // booking special case).
+  // behind the calendar shows the journey, not the bare flow (the booking
+  // special case, formerly keyed on the gate/integrate/ingest surfaces).
   const isInScenarioJourney =
     journeyStage === "understand" ||
     journeyStage === "analyze" ||

@@ -2,17 +2,18 @@
  * Integrate — LLM tool declarations
  * (2026-05-30-onboarding-shell-shared-view Phase 3b).
  *
- * The canvas-dispatch tool for the connectors/plugins surface (frame f7). Per
- * the agent-tools spec, `show_` is the canonical canvas-dispatch verb for every
- * ScopedViewerWidget (already allowlisted in `check-tool-quality`). It mirrors
- * `show_extraction` / `show_smart_report_render`: a `read`-category navigation
- * tool that MOVES the canvas to the Integrate surface for a scope.
+ * The canvas-dispatch tool for the connectors/plugins surface (the Integrate
+ * step). Per the agent-tools spec, `show_` is the canonical canvas-dispatch
+ * verb for every ScopedViewerWidget (already allowlisted in
+ * `check-tool-quality`). It mirrors `show_extraction` /
+ * `show_smart_report_render`: a `read`-category navigation tool that MOVES the
+ * canvas to the Integrate surface for a scope.
  *
  * Round-trip: the LLM emits `show_integrate` → middleware validates + invokes
  * the `intentBuilder` → result is a `showIntegrate` `CanvasIntent` → the
- * orchestrator's built-in handler routes to `advanceFrame("f7")` (the SAME
- * canvas move the Integrate step-strip pill performs) → `<ScopedCanvas>` mounts
- * the Integrate connectors surface for the `integrate` step.
+ * orchestrator's built-in handler pushes the `integrate` step (the SAME canvas
+ * move the Integrate step-strip pill performs) → `<ScopedCanvas>` mounts the
+ * Integrate connectors surface for the `integrate` step.
  */
 import { z } from "zod";
 

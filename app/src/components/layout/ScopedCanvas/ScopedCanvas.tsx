@@ -10,9 +10,9 @@
  * registry, so "unregistered" == "unreachable".
  *
  * It is NOT a new abstraction — it is the `ScopedViewerWidget` contract
- * (core-data) consumed at the canvas slot. `session.currentFrame` is no
- * longer on the canvas render path; the canvas reacts to the active
- * viewer step.
+ * (core-data) consumed at the canvas slot. The canvas render path reads
+ * only the active viewer step — no onboarding session surface field feeds
+ * it; the canvas is a pure function of the active viewer step.
  *
  * Direction-1 totality: `stepToCanvasKind` maps a step to a `CanvasKind`
  * or `null`. When it returns a `CanvasKind`, the `switch` over it has a

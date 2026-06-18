@@ -2,7 +2,7 @@
  * SmartReportRender — LLM tool declarations (2026-05-29-smart-report-screen
  * Phase 5).
  *
- * The canvas-dispatch tool for the Report **render** surface (f4 / S3). Per the
+ * The canvas-dispatch tool for the Report **render** surface (S3). Per the
  * agent-tools spec, `show_` is the canonical canvas-dispatch verb for every
  * ScopedViewerWidget (allowlisted ONCE in `check-tool-quality` by this phase).
  *

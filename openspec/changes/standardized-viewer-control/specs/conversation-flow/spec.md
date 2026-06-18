@@ -1,6 +1,6 @@
 # Spec Delta — conversation-flow
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: A suggested action SHALL render as a pill or as inline clickable text
 
@@ -48,3 +48,38 @@ list and the one render path.
 - **THEN** all appear on `suggestedActions`
 - **AND** clicking the tool-derived ones dispatches a server-validated intent, and clicking the UI-driven one dispatches its fixed typed intent
 - **AND** all dispatch through the orchestrator with no free-form-text intent
+
+## MODIFIED Requirements
+
+### Requirement: There SHALL be exactly one conversation flow engine + view
+
+The live chat conversation SHALL be implemented by a single durable engine (`useConversation`) and a
+single view (`ConversationFlow`), used for BOTH the authenticated/steady experience and onboarding.
+There SHALL NOT be per-mode forked flow components that re-implement the chat engine (state, message
+projection, send, suggested-action handling, render). The engine SHALL be experience-agnostic: it
+SHALL NOT import or depend on onboarding journey state, scripts, or navigation, and SHALL read per-session
+flags (e.g. `isOnboarding`) from the active chat session rather than hardcoding them.
+
+#### Scenario: One engine serves steady and onboarding
+
+- **GIVEN** the steady chat surface and the onboarding chat surface
+- **WHEN** their conversation behavior (state, message projection, send, suggested-action handling) is inspected
+- **THEN** both resolve to the one `useConversation` engine + `ConversationFlow` view
+- **AND** there is no second flow component duplicating that engine
+- **AND** the engine contains no `advanceFrame` / scripted-intro / navigation references (navigation flows through the orchestrator dispatch seam).
+
+### Requirement: The conversation SHALL persist across onboarding frame advances without a routing hack
+
+The conversation SHALL retain its `liveTurns` across onboarding journey advances
+(e.g. Understand → Extract → Interact) without any keep-mounted routing workaround —
+this follows structurally from one always-mounted `ConversationFlow` with onboarding
+rendered as decoration around it. The previous mount-persistence routing hack SHALL be
+removed. Journey advances are produced by dispatched navigation intents through the
+orchestrator, NOT by `advanceFrame` or any frame value.
+
+#### Scenario: liveTurns survive a journey advance
+
+- **GIVEN** an onboarding conversation with live turns
+- **WHEN** the onboarding journey advances (e.g. a `showExtract` then a `showInteract` dispatch)
+- **THEN** the existing live turns are retained (the conversation is not remounted/wiped)
+- **AND** no keep-mounted routing workaround is required to achieve it.

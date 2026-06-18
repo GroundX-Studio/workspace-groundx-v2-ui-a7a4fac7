@@ -150,12 +150,13 @@ export const IngestView: FC = () => {
         </Typography>
       </Stack>
 
-      {/* `f3a-save-signin-gate-handoff`: pre-attached schema banner.
-          When the user saved a custom schema on F3a and signed in to
-          persist it, the resulting schema id lands on the session and
-          this banner surfaces it on F1 so the next ingest pre-attaches
-          the schema. Stays visible until the user picks a new sample
-          (which clears the handoff on F2 transition) or signs out. */}
+      {/* `save-schema-gate-handoff`: pre-attached schema banner.
+          When the user saved a custom schema on the schema-design surface and
+          signed in to persist it, the resulting schema id lands on the session
+          and this banner surfaces it on the ingest picker so the next ingest
+          pre-attaches the schema. Stays visible until the user picks a new
+          sample (which clears the handoff when the Understand surface mounts)
+          or signs out. */}
       {preAttachedSchemaId && (
         <Box
           data-testid="ingest-pre-attached-schema"

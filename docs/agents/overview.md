@@ -8,9 +8,14 @@ brings their own), watches GroundX parse it, sees the extracted
 structured values with citations, then chats about the document
 or moves on to integrate.
 
-Frame sequence (F-series):
+Surface sequence (F-series labels). **The F-series frame machine is
+retired** — there is no frame field, no frame-advance call, no
+frame-keyed completion/resume state. Movement is driven by the active
+`ViewerStep` (with an onboarding journey-progress stage layered on);
+F1–F7 below are UX surface LABELS that survive for readability, not a
+state mechanism.
 
-| Frame | What | Status |
+| Surface | What | Status |
 |---|---|---|
 | F1 | Ingest — sample picker + BYO tiles | Real |
 | F2 | Understand — scan animation + thinking-notes streaming in chat + live chat input | Real |

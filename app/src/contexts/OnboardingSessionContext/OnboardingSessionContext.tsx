@@ -49,9 +49,9 @@ interface OnboardingSessionProviderProps {
 }
 
 /**
- * Internal facade hook — derives the legacy `OnboardingSessionState`
+ * Internal facade hook — derives the `OnboardingSessionState`
  * shape from the active entity in the EntityRegistry, and routes the
- * legacy mutation API (pickScenario / advanceFrame / openGate / …)
+ * mutation API (pickScenario / markStageReached / openGate / …)
  * into registry operations.
  *
  * The legacy hook (`useOnboardingSession`) and the legacy state
@@ -99,12 +99,12 @@ function useSessionFacade(): OnboardingSessionApi {
   // boolean + the session-level gate.
   // standardized-viewer-control (D2) — the shell now detects the signup surface
   // from the sign-up overlay / route (`signupSurfaceActive`), not this flag; the
-  // value binding fed only the retired `currentFrame` projection, so only the
+  // value binding fed only the retired session surface projection, so only the
   // setter (which other paths still toggle as part of the gate lifecycle) remains.
   const [, setSignupOpen] = useState<boolean>(false);
-  // The report section the builder (f4a) should pre-open. Set by the
-  // render→builder `✎ edit §N` hand-off via `advanceFrame`; cleared when the
-  // user leaves the builder frame.
+  // The report section the builder surface should pre-open. Set by the
+  // render→builder `✎ edit §N` hand-off (the `editTemplate` dispatch); cleared
+  // when the user leaves the builder surface.
   const [selectedReportSectionId, setSelectedReportSectionId] = useState<string | null>(null);
 
   // Live ref to the registry's current activeKey. Action callbacks
@@ -119,12 +119,12 @@ function useSessionFacade(): OnboardingSessionApi {
     ? registry.state.entities.get(registry.state.activeKey)
     : undefined;
 
-  // standardized-viewer-control (D2) — the legacy `currentFrame` reverse
-  // projection is GONE. The user's journey position lives entirely on the active
-  // viewer step (rendered via the `onboarding-step-*` testid + read by the
-  // frame-free StepStrip off `VIEWER_STEP_TO_JOURNEY`); the resume anchor is the
-  // entity's `lastStep`. This state record carries only the session-level fields
-  // that are not derivable from the active step.
+  // standardized-viewer-control (D2) — there is no session surface field. The
+  // user's journey position lives entirely on the active viewer step (rendered
+  // via the `onboarding-step-*` testid + read by the StepStrip off
+  // `VIEWER_STEP_TO_JOURNEY`); the resume anchor is the entity's `lastStep`.
+  // This state record carries only the session-level fields that are not
+  // derivable from the active step.
   const state: OnboardingSessionState = useMemo(() => {
     return {
       sessionId,
@@ -246,11 +246,12 @@ function useSessionFacade(): OnboardingSessionApi {
   );
 
   // standardized-viewer-control deletion-phase — return to the Ingest picker AND
-  // deactivate the active entity (the f1 BACKWARD-transition side effects: gate
+  // deactivate the active entity (the backward-to-ingest side effects: gate
   // reset, the "left" viewer event, the ingest-picker step push). The
   // `presentExperienceBeat` `ingest-picker` beat handler calls this; the optional
-  // `attachedSchema` rides onto the picker step so the F3a Save → sign-in →
-  // persist → picker hand-off lands the freshly-saved schema. Onboarding-only.
+  // `attachedSchema` rides onto the picker step so the schema-design Save →
+  // sign-in → persist → picker hand-off lands the freshly-saved schema.
+  // Onboarding-only.
   const returnToIngestPicker = useCallback(
     (attachedSchema?: { schemaId: string; name: string }) => {
       setSelectedReportSectionId(null);
@@ -273,11 +274,11 @@ function useSessionFacade(): OnboardingSessionApi {
     [activate, appendViewerEvent, pushStep],
   );
 
-  // standardized-viewer-control deletion-phase — `advanceFrame` is GONE. All
-  // canvas navigation now dispatches a CanvasIntent through the orchestrator
+  // standardized-viewer-control deletion-phase — there is no frame-advance API.
+  // All canvas navigation now dispatches a CanvasIntent through the orchestrator
   // (the de-forked `show*`/`editTemplate` handlers push the step + call
-  // `markStageReached`); the f1 backward return is `returnToIngestPicker`; the
-  // three residual onboarding-overlay beats route through `presentExperienceBeat`.
+  // `markStageReached`); the backward return to ingest is `returnToIngestPicker`;
+  // the residual onboarding-overlay beats route through `presentExperienceBeat`.
 
   // standardized-viewer-control T5 (R1/R6) — the Extract first-reach signal.
   // The orchestrator's `showExtract` handler calls this; it fires

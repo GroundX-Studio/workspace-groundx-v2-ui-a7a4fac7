@@ -157,7 +157,7 @@ const PREAMBLE: Record<GateTrigger, string> = {
 };
 
 /**
- * `f3a-save-signin-gate-handoff`: when the gate carries a `cause`,
+ * `save-schema-gate-handoff`: when the gate carries a `cause`,
  * override the generic per-trigger preamble with cause-specific copy.
  * The cause is set by callers like `openGate("save", { cause: "save-schema" })`.
  */
@@ -186,12 +186,12 @@ export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope
   const { state, dismissGate, commitGate } = useOnboardingSession();
   const orchestrator = useCanvasOrchestratorOptional();
   // FLOW chrome, re-sourced from the active viewer step (the journey stage), not
-  // from a frame read or a widget prop. The committed "Continue to Integrate"
-  // nav CTA shows while the journey has NOT already reached the Integrate stage
-  // (standardized-viewer-control T6 — was `PRE_INTEGRATE_FRAMES.has(currentFrame)`).
-  // Live Extract unlocks can open and commit the gate from the Analyze stage
-  // without first passing through the historical gate frame, so keying this to
-  // "not yet on Integrate" still covers them.
+  // from any session surface field or a widget prop. The committed "Continue to
+  // Integrate" nav CTA shows while the journey has NOT already reached the
+  // Integrate stage (standardized-viewer-control T6). Live Extract unlocks can
+  // open and commit the gate from the Analyze stage without first passing
+  // through the historical gate surface, so keying this to "not yet on
+  // Integrate" still covers them.
   const canContinueToIntegrate = useIsPreIntegrateStage();
   const navigate = useNavigate();
   const location = useLocation();
@@ -257,10 +257,9 @@ export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope
   }, [location.pathname, location.search, navigate]);
 
   // standardized-viewer-control T6 — "Continue to Integrate" DISPATCHES
-  // `showIntegrate` through the orchestrator (the single viewer-mutation seam)
-  // instead of `advanceFrame("f7")`. The orchestrator pushes the `integrate`
-  // step and (in onboarding) layers the f7 journey-progress + the stale sign-up
-  // overlay pop — the exact side effects the old `advanceFrame("f7")` produced.
+  // `showIntegrate` through the orchestrator (the single viewer-mutation seam).
+  // The orchestrator pushes the `integrate` step and (in onboarding) layers the
+  // Integrate journey-progress + the stale sign-up overlay pop.
   // The gate rail is session-scoped, so the intent carries the empty document
   // scope (`showIntegrate`'s handler ignores scope — the connectors surface is
   // scope-independent; the field exists only for context/telemetry).
@@ -312,7 +311,7 @@ export const GateChatRail: FC<GateChatRailProps> = ({ role: _role, scope: _scope
   if (state.gate.status !== "open") return null;
 
   const trigger = state.gate.trigger;
-  // `f3a-save-signin-gate-handoff`: cause-specific preamble override.
+  // `save-schema-gate-handoff`: cause-specific preamble override.
   const preamble = state.gate.cause ? PREAMBLE_BY_CAUSE[state.gate.cause] : PREAMBLE[trigger];
 
   return (

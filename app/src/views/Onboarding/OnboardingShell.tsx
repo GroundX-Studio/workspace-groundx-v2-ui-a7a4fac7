@@ -79,13 +79,11 @@ const F1_OVERLAY_EASE = [0.32, 0.72, 0, 1] as const;
 const F2_ZOOM_SCALE = 0.985;
 const F2_ZOOM_OPACITY = 0.92;
 
-// standardized-viewer-control T3 — the strip's `FRAME_TO_STEP` map is RETIRED:
-// the current stage now sources off the active ViewerStep kind via
-// `VIEWER_STEP_TO_JOURNEY` (no frame fallback), and the reached-set is an
-// in-memory SET of reached stages, not `completedFrames` mapped through frames.
-// The canvas-side frame projection (`stepKindFallback`) is a separate concern
-// (T6); the frame machine itself (`advanceFrame`/`currentFrame`/…) stays
-// functional this phase.
+// standardized-viewer-control T3 — the current journey stage sources off the
+// active ViewerStep kind via `VIEWER_STEP_TO_JOURNEY` (no fallback), and the
+// reached-set is an in-memory SET of reached stages. The canvas surface is a
+// pure function of the active ViewerStep; there is no frame vocabulary on any
+// of these paths.
 
 // Linear journey order. The progress gate (2026-06-12) uses this to forbid
 // JUMPING AHEAD of the step the user has actually reached.
@@ -176,9 +174,9 @@ export const OnboardingShell: FC = () => {
   // standardized-viewer-control T6 — the step-strip pills, Analyze sub-pills,
   // the post-gate "Continue to Integrate", and the Understand pill MOVE the
   // canvas ONLY by dispatching the corresponding intent (the single
-  // viewer-mutation seam) instead of `advanceFrame(frame)`. OnboardingShell is
-  // always mounted inside `CanvasOrchestratorProvider` (App.tsx +
-  // renderWithOnboardingProviders), so the required hook is safe here.
+  // viewer-mutation seam). OnboardingShell is always mounted inside
+  // `CanvasOrchestratorProvider` (App.tsx + renderWithOnboardingProviders), so
+  // the required hook is safe here.
   const { dispatch } = useCanvasOrchestrator();
   const { state: scenarioRegistry, byId: scenarioById } = useScenarioRegistry();
   // ChatStore is read up here so the StepStrip pill state below can
@@ -204,11 +202,10 @@ export const OnboardingShell: FC = () => {
   const latestViewerStepEarly = selectActiveStep(activeChatSessionEarly);
   // standardized-viewer-control T3 — the StepStrip's CURRENT STAGE is sourced
   // off the active ViewerStep kind via the shared `VIEWER_STEP_TO_JOURNEY` map
-  // (single source, also read by the viewer nav). The frame fallback is GONE:
-  // the active step is always present (seeded on mount via
-  // `OnboardingSessionProvider`/`frameToStepStandalone`, pushed on every
-  // dispatch thereafter). Clickable citations push a `doc-viewer` step → maps to
-  // the Understand pill, so the nav indicator matches what the canvas surfaces.
+  // (single source, also read by the viewer nav). The active step is always
+  // present (seeded on mount, pushed on every dispatch thereafter). Clickable
+  // citations push a `doc-viewer` step → maps to the Understand pill, so the nav
+  // indicator matches what the canvas surfaces.
   // The only non-step source is the pre-scenario sign-up surface (no active
   // entity yet); absent both, the journey hasn't started → Ingest.
   const activeJourney = latestViewerStepEarly
@@ -218,12 +215,12 @@ export const OnboardingShell: FC = () => {
     signupSurfaceActiveEarly && session.scenario == null
       ? "ingest"
       : activeJourney?.step ?? "ingest";
-  // standardized-viewer-control T6 — `isF1` (the F1 ingest-picker overlay gate)
-  // reads the ACTIVE STEP KIND, not `currentFrame`. The picker is up when the
-  // active viewer step is `ingest-picker` (the step the return-to-picker path
-  // pushes), OR when no step has landed yet AND no scenario is active (the
-  // first-mount / deactivated state, which the frame-free strip resolves to
-  // Ingest). Book-call / sign-up surfaces suppress it (they overlay the canvas).
+  // standardized-viewer-control T6 — `isF1` (the ingest-picker overlay gate)
+  // reads the ACTIVE STEP KIND. The picker is up when the active viewer step is
+  // `ingest-picker` (the step the return-to-picker path pushes), OR when no step
+  // has landed yet AND no scenario is active (the first-mount / deactivated
+  // state, which the strip resolves to Ingest). Book-call / sign-up surfaces
+  // suppress it (they overlay the canvas).
   const isF1 =
     (latestViewerStepEarly
       ? latestViewerStepEarly.kind === "ingest-picker"
@@ -321,9 +318,9 @@ export const OnboardingShell: FC = () => {
     }
     if (path === "/onboarding" || path === "/onboarding/") {
       // Picker. standardized-viewer-control deletion-phase — dispatch the generic
-      // `presentExperienceBeat` `ingest-picker` beat through the STANDARD seam
-      // (was `advanceFrame("f1")`). The beat handler deactivates any active entity
-      // AND resets an open gate, and pushes the ingest-picker step. Pop the
+      // `presentExperienceBeat` `ingest-picker` beat through the STANDARD seam.
+      // The beat handler deactivates any active entity AND resets an open gate,
+      // and pushes the ingest-picker step. Pop the
       // sign-up overlay so the viewer-side overlay disappears in lockstep with the
       // route/session reset.
       popOverlayRef.current("sign-up");
@@ -357,15 +354,14 @@ export const OnboardingShell: FC = () => {
     };
   }, [api.session, bootstrapSession, session.sessionId]);
 
-  // standardized-viewer-control T3 — the reached-set replaces the
-  // `completedFrames`-derived `completedSteps`. It is a SET of reached stages
-  // (NOT a monotonic high-water value — R3): `integrate` is auth-gated and
-  // reachable from anywhere, so the set is genuinely non-contiguous. A stage is
-  // ADDED on its FIRST reach (when it first becomes the current stage) and never
-  // removed, so a later citation jump back to Understand (which moves the
-  // current stage off Analyze) does not re-lock the already-traversed bracket.
-  // Frame-free: derived purely from `currentStep` (the active-step-sourced
-  // stage), no frame read. The DURABLE reached-set now lives on the EntitySession
+  // standardized-viewer-control T3 — the reached-set drives the strip
+  // checkmarks. It is a SET of reached stages (NOT a monotonic high-water value
+  // — R3): `integrate` is auth-gated and reachable from anywhere, so the set is
+  // genuinely non-contiguous. A stage is ADDED on its FIRST reach (when it first
+  // becomes the current stage) and never removed, so a later citation jump back
+  // to Understand (which moves the current stage off Analyze) does not re-lock
+  // the already-traversed bracket. Derived purely from `currentStep` (the
+  // active-step-sourced stage). The DURABLE reached-set now lives on the EntitySession
   // (`reachedStages`, persisted + server-twinned in T6b); this strip-local set is
   // the live UI accumulation seeded from the resumed stage. Seeding it from the
   // persisted entity set (so cross-reload checkmarks survive verbatim) is the
@@ -454,8 +450,7 @@ export const OnboardingShell: FC = () => {
       }
       // T6 — each pill MOVES the canvas by dispatching its destination intent
       // (the single seam). The orchestrator's handler layers the onboarding
-      // journey-progress (markFrameReached) + first-reach analytics on top, so
-      // the side effects `advanceFrame(frame)` produced are preserved.
+      // journey-progress (markStageReached) + first-reach analytics on top.
       // (`analyze` has no clickable header — the strip renders it as a bracket
       // GROUP whose sub-pills route through `handleSubstepClick`; only the
       // Pill-rendered steps reach here.)
@@ -475,7 +470,7 @@ export const OnboardingShell: FC = () => {
   // WF-01 C3 (2026-05-28). Sub-pill clicks (Extract / Interact / Report).
   // standardized-viewer-control T6 — each dispatches its destination intent
   // (showExtract / showInteract / showReport / editTemplate) through the
-  // orchestrator, never `advanceFrame`.
+  // orchestrator, the single viewer-mutation seam.
   // 2026-05-29-smart-report-screen Phase 1 — Report is reachable for all
   // scenarios. report-empty-state: Report routing is TEMPLATE-AWARE — a present
   // report template id → the render surface (`showReport`); absent → the empty
@@ -546,7 +541,7 @@ export const OnboardingShell: FC = () => {
   // Canvas precedence:
   //   1. bookCall=1                → BookCallView overlay on the active viewer
   //   2. sign-up overlay/route     → SignUpWidget overlay on the active viewer
-  //   3. currentFrame/viewer step  → ScopedCanvas / ingest picker
+  //   3. active viewer step        → ScopedCanvas / ingest picker
   const activeChatSession =
     chatStoreState.activeSessionId != null
       ? chatStoreState.sessions.get(chatStoreState.activeSessionId)
@@ -667,13 +662,11 @@ export const OnboardingShell: FC = () => {
   ]);
 
   // post-mvs-cleanup Phase B / standardized-viewer-control T6 — the canvas
-  // switches on the ACTIVE ViewerStep kind, never the legacy `currentFrame`.
-  // Every navigation (StepStrip pill, sub-pill, citation, auto-advance) now
-  // pushes its ViewerStep through `dispatch`, and the active step is seeded on
-  // mount (`OnboardingSessionProvider`/`frameToStepStandalone`), so the step is
-  // always present — the old `currentFrame`→kind projection fallback (T3/R3) is
-  // GONE. The only stepless edge (no active session yet) defaults to the
-  // `ingest-picker` overlay, matching the frame-free strip's "no step → Ingest".
+  // switches on the ACTIVE ViewerStep kind. Every navigation (StepStrip pill,
+  // sub-pill, citation, auto-advance) pushes its ViewerStep through `dispatch`,
+  // and the active step is seeded on mount, so the step is always present.
+  // The only stepless edge (no active session yet) defaults to the
+  // `ingest-picker` overlay, matching the strip's "no step → Ingest".
   const latestViewerStep = selectActiveStep(activeChatSession);
   const effectiveStepKind: import("@/contexts/ChatStoreContext").ViewerStep["kind"] =
     latestViewerStep?.kind ?? "ingest-picker";
@@ -758,10 +751,10 @@ export const OnboardingShell: FC = () => {
 
   // standardized-viewer-control T6 (R4) — render vs builder is a sub-position on
   // the active `report` ViewerStep's `surface` field (pushed by `showReport` →
-  // "render" / `editTemplate` → "builder"), NOT the retired `currentFrame ===
-  // "f4a"` read. `ScopedCanvas.stepToCanvasKind` already prefers `step.surface`
-  // over this prop, so this is only the fallback for the synthesized stepless
-  // `canvasStep` (which carries no surface); default to render.
+  // "render" / `editTemplate` → "builder"). `ScopedCanvas.stepToCanvasKind`
+  // already prefers `step.surface` over this prop, so this is only the fallback
+  // for the synthesized stepless `canvasStep` (which carries no surface);
+  // default to render.
   const reportSurface: "render" | "builder" =
     latestViewerStep?.kind === "report" && latestViewerStep.surface === "builder"
       ? "builder"
@@ -787,17 +780,17 @@ export const OnboardingShell: FC = () => {
   const handleSignInContinue = useCallback(() => {
     // standardized-viewer-control T6 — "Continue to Integrate" MOVES the canvas
     // via `showIntegrate` (the single seam). The orchestrator pushes the
-    // `integrate` step and layers the onboarding f7 journey advance (which also
-    // pops a stale sign-up overlay) — the exact side effects `advanceFrame("f7")`
-    // produced. Session-scoped (the connectors surface is scope-independent).
+    // `integrate` step and layers the onboarding Integrate journey advance (which
+    // also pops a stale sign-up overlay). Session-scoped (the connectors surface
+    // is scope-independent).
     dispatch({ kind: "showIntegrate", scope: { type: "documents", documentIds: [] } }, "user");
   }, [dispatch]);
 
   const signInCloseLabel = session.scenario == null ? "Back to samples" : "Close sign-in";
 
   const baseCanvasContent = useMemo(() => {
-    // ARCH-06B: the F1 ingest picker is rendered ONLY inside the F1 overlay
-    // (see render below); the canvas underneath stays blank during the
+    // ARCH-06B: the ingest picker is rendered ONLY inside the ingest-picker
+    // overlay (see render below); the canvas underneath stays blank during the
     // return-window so the user doesn't see it duplicated.
     if (effectiveStepKind === "ingest-picker") return null;
     return (
@@ -1105,12 +1098,11 @@ export const OnboardingShell: FC = () => {
       <Box
         sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }}
         // When isF1, the AppShell canvas slot is intentionally empty
-        // (F1 overlay covers it). Omit the testid so it doesn't
-        // duplicate the F1 overlay's own `onboarding-step-ingest-picker`
-        // and break selector-based assertions.
+        // (the ingest-picker overlay covers it). Omit the testid so it doesn't
+        // duplicate the ingest-picker overlay's own
+        // `onboarding-step-ingest-picker` and break selector-based assertions.
         // standardized-viewer-control (D2) — the diagnostic testid is sourced off
-        // the ACTIVE viewer step (kind + sub-position), NOT the retired
-        // `session.currentFrame` reverse projection.
+        // the ACTIVE viewer step (kind + sub-position).
         data-testid={
           isF1 || !latestViewerStepEarly
             ? undefined

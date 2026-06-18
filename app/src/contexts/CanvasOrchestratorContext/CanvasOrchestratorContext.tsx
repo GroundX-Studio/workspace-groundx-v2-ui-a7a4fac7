@@ -346,9 +346,9 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // tool MOVES the canvas to the extraction workbench. ONE outcome (both
         // experiences): push/mutate the `extract-workbench` step honoring the
         // intent payload (D6 — `schemaId` is the workbench's scenarioId; no more
-        // hardcoded "utility"). Onboarding LAYERS journey-progress (analyze/f3) +
-        // the Extract first-reach analytic on top — it no longer FORKS into
-        // `advanceFrame` for the canvas move.
+        // hardcoded "utility"). Onboarding LAYERS journey-progress (the analyze
+        // stage) + the Extract first-reach analytic on top — it does not fork
+        // the canvas move by experience.
         case "showExtract": {
           // T4/T5 — a re-entry while the workbench is ALREADY the active step
           // mutates IN PLACE (history unchanged). Two sub-position rules,
@@ -390,7 +390,7 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // Interact (chat-with-sources) surface. ONE outcome (both experiences):
         // push an `interact-chat` step RESOLVING the document from `intent.scope`
         // so the shared PdfViewer canvas isn't doc-less in steady. Onboarding
-        // layers the Interact journey stage (f5) on top.
+        // layers the Interact journey stage on top.
         case "showInteract": {
           if (chatStore) {
             const docId = primaryDocumentFromScope(intent.scope);
@@ -421,7 +421,8 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // (both experiences): `show_smart_report_render` (`showReport`) pushes the
         // render step; `show_smart_report_edit` (`editTemplate`) pushes the builder
         // step threading the section to pre-open. Onboarding layers the Report
-        // journey stage (f4 render / f4a builder) on top.
+        // journey stage on top (the render vs builder distinction lives on the
+        // `report` step's `surface` field, not a journey stage).
         case "showReport":
           if (chatStore) chatStore.pushStep({ kind: "report", surface: "render" });
           if (routeThroughOnboarding) {
@@ -476,12 +477,12 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // in the production tree, i.e. silent no-ops. Each now routes to the
         // SAME mutator the on-screen control calls (no parallel path),
         // soft-failing in the steady tree like the other onboarding cases.
-        // (standardized-viewer-control T7 retired the `switchFrame` kind + its
-        // `suggest_intent` source — per-destination navigation intents
+        // (standardized-viewer-control T7 retired the generic any-destination
+        // navigator — per-destination navigation intents
         // (`showExtract`/`showReport`/`showInteract`/`showIntegrate`) replace it.)
         // standardized-viewer-control T5 (R7) — `showSample` is EXPLICITLY
         // ONBOARDING-SCOPED: it activates a demo sample via the SAME
-        // `pickScenario` the F1 Ingest picker calls (idempotent on an
+        // `pickScenario` the Ingest picker calls (idempotent on an
         // already-active entity). In STEADY there is no sample journey, so this
         // is an HONEST no-op WITH A REASON (not a silent dead intent) — the
         // authenticated experience navigates documents, not onboarding samples.
@@ -491,27 +492,29 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
           break;
         // standardized-viewer-control deletion-phase — the generic experience/
         // overlay-internal SCRIPTED viewer beat. ONBOARDING-SCOPED choreography
-        // (the three residual `advanceFrame` sites: Extract save-and-return,
-        // OnboardingShell URL-return, the experience intro-snap) routed through
-        // the ONE standard dispatch seam instead of onboarding-specific
-        // destination intents. The typed `beat` discriminator is the VALUES; this
-        // single kind is the MECHANISM. Soft-fails in the steady tree (no
-        // provider) like the other onboarding cases — steady has no scripted
-        // onboarding choreography.
+        // (the three residual backward/lateral onboarding transitions: Extract
+        // save-and-return, OnboardingShell URL-return, the experience intro-snap)
+        // routed through the ONE standard dispatch seam instead of
+        // onboarding-specific destination intents. The typed `beat` discriminator
+        // is the VALUES; this single kind is the MECHANISM. Soft-fails in the
+        // steady tree (no provider) like the other onboarding cases — steady has
+        // no scripted onboarding choreography.
         case "presentExperienceBeat":
           if (onboardingSession) {
             switch (intent.beat.kind) {
               case "ingest-picker":
-                // Return to the picker AND deactivate the active entity (the f1
-                // BACKWARD transition: gate reset + "left" event + picker step).
-                // The optional attachedSchema rides onto the picker step.
+                // Return to the picker AND deactivate the active entity (the
+                // BACKWARD transition to ingest: gate reset + "left" event +
+                // picker step). The optional attachedSchema rides onto the
+                // picker step.
                 onboardingSession.returnToIngestPicker(intent.beat.attachedSchema);
                 break;
               case "understand-scanning": {
                 // Snap to the Understand "GroundX is reading the doc" scanning
                 // beat AND set the Understand journey edge. Push the scanning
                 // doc-viewer step (the canvas outcome) then layer the journey
-                // advance (the f2 edge) via markStageReached — one seam, no fork.
+                // advance (the Understand stage edge) via markStageReached —
+                // one seam, no fork.
                 const scenario = onboardingSession.state.scenario;
                 const scanStep = {
                   kind: "doc-viewer" as const,
@@ -535,12 +538,13 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // EXPERIENCE-AGNOSTIC sub-position on the `extract-workbench` step
         // (`surface: "design"`), MIRRORING how `editTemplate` pushes `report`
         // `surface: "builder"`. This CLOSES a production bug: authenticated
-        // (steady) users could not reach the schema editor at all (the old
-        // `advanceFrame("f3a")` no-ops without an OnboardingSession). ONE outcome
-        // both experiences: if the workbench is already active, flip it to design
-        // in place; otherwise push a workbench step opened on the design surface.
-        // The journey stage stays `analyze` (Extract) — design is a sub-position,
-        // NOT a new frame — so no `markFrameReached`.
+        // (steady) users could not reach the schema editor at all (the legacy
+        // design-surface entry no-opped without an OnboardingSession). ONE
+        // outcome both experiences: if the workbench is already active, flip it
+        // to design in place; otherwise push a workbench step opened on the
+        // design surface. The journey stage stays `analyze` (Extract) — design
+        // is a sub-position, not a separate journey stage — so no
+        // markStageReached.
         case "editSchema": {
           const activeExtract = chatStore ? activeExtractWorkbenchStep(chatStore) : null;
           if (chatStore && activeExtract) {

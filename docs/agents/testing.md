@@ -39,14 +39,25 @@ graph. Options:
 
 ```ts
 renderWithOnboardingProviders(<MyView />, {
-  initialFrame: "f2",          // sets session.currentFrame
+  initialFrame: "f2",          // test-only convenience: seeds the initial
+                               // ViewerStep via testFrameToStep(initialFrame,
+                               // scenario). It does NOT set any session frame
+                               // field (none exists) — it maps the F-label to a
+                               // starting `ViewerStep` so a test can begin on a
+                               // given surface. See app/src/test/frameToStep.ts.
   initialScenario: "utility",  // activates the entity + URL
   initialAuthState: "anonymous",
   initialScenarios: allTestScenarios,  // override the registry
-  initialUrl: "/onboarding/28454/utility?focus=meters",  // custom URL
+  initialUrl: "/onboarding/28454/utility",  // custom URL
   registryBucketId: 28454,
 });
 ```
+
+> The `initialFrame` option (and the `testFrameToStep` / `TestFrame`
+> helper it uses) is a deliberate **test-only** convenience for picking
+> a starting surface by its familiar F-label — it is the one sanctioned
+> place the F-labels appear in code. Production has no frame vocabulary;
+> the helper just seeds a `ViewerStep`.
 
 If you don't pass `initialUrl`, it derives one from
 `initialScenario` so the URL ↔ state sync doesn't immediately
@@ -63,14 +74,18 @@ to `ScenarioManifest`, update these fixtures too.
 For testing context behavior, use a tiny probe inside the harness:
 
 ```tsx
-function FrameProbe({ onFrame }: { onFrame: (f: string) => void }) {
-  const { state } = useOnboardingSession();
-  onFrame(state.currentFrame);
+function StepProbe({ onStep }: { onStep: (kind: string | null) => void }) {
+  // useActiveStepDiagnostic() returns the active ViewerStep kind
+  // (app/src/test/activeStepDiagnostic.ts) — the test-only successor to
+  // the old frame-reading probe.
+  onStep(useActiveStepDiagnostic());
   return null;
 }
 ```
 
-Then mount it next to the SUT and assert the captured value.
+Then mount it next to the SUT and assert the captured active-step
+kind (the canvas surface is a pure function of the active `ViewerStep`,
+so that is what behavior-tests assert against — not a frame field).
 
 ### Middleware setup
 

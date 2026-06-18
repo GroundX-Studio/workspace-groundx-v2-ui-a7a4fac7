@@ -2,7 +2,7 @@
  * Extract — LLM tool declarations
  * (2026-05-30-onboarding-shell-shared-view Phase 3a).
  *
- * The canvas-dispatch tool for the extraction workbench (frame f3). Per the
+ * The canvas-dispatch tool for the extraction workbench. Per the
  * agent-tools spec, `show_` is the canonical canvas-dispatch verb for every
  * ScopedViewerWidget (already allowlisted in `check-tool-quality`). This is
  * the FIRST extract canvas-dispatch tool — it mirrors `show_smart_report_render`:
@@ -11,7 +11,7 @@
  *
  * Round-trip: the LLM emits `show_extraction` → middleware validates +
  * invokes the `intentBuilder` → result is a `showExtract` `CanvasIntent` →
- * the orchestrator's built-in handler routes to `advanceFrame("f3")` (the
+ * the orchestrator's built-in handler pushes the `extract-workbench` step (the
  * SAME canvas move the Extract step-strip sub-pill performs) → `<ScopedCanvas>`
  * mounts the Extract workbench for the `extract-workbench` step.
  */

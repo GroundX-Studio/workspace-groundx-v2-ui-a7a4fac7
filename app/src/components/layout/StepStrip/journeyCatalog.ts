@@ -68,10 +68,9 @@ export const VIEWER_STEP_TO_JOURNEY: Readonly<
 
 /**
  * standardized-viewer-control (D2) — the FRAME-FREE diagnostic identifier for an
- * active viewer step. It is the successor to the retired `onboarding-frame-fN`
- * data-testid (and the `currentFrame` reverse-projection it read): it conveys the
- * SAME two facts the frame did — the active viewer step kind AND its sub-position
- * — straight off the step, no frame vocabulary. Rendered as
+ * active viewer step. It is the successor to the retired onboarding-surface
+ * data-testid: it conveys the active viewer step kind AND its sub-position
+ * straight off the step, no frame vocabulary. Rendered as
  * `data-testid={`onboarding-step-${viewerStepDiagnosticId(step)}`}` and read by
  * the onboarding shell tests. The sub-position suffix mirrors the step's own
  * `surface` field (Extract fields/design, Report render/builder); a step without

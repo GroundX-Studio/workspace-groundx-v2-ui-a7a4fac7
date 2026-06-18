@@ -23,7 +23,7 @@ import {
  * standardized-viewer-control D13/R5 — the resume anchor for a freshly-created
  * entity (before any navigation lands a real step). The ingest-picker step is
  * the journey origin; `pickScenario`/the orchestrator overwrite `lastStep` with
- * the real destination on first advance. Replaced the old `lastFrame: "f1"`.
+ * the real destination on the first navigation dispatch.
  */
 const DEFAULT_PERSISTED_STEP: PersistedViewerStep = { kind: "ingest-picker" };
 import type {

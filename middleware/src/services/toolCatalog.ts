@@ -462,8 +462,8 @@ const showInteractTool: ServerTool = {
 
 // onboarding-shell-shared-view Phase 3b — mirror of the app-side Integrate
 // widget's show_integrate canvas-dispatch tool. Moves the canvas to the
-// Integrate connectors surface (frame f7). Returns the `showIntegrate`
-// CanvasIntent the orchestrator routes to advanceFrame("f7").
+// Integrate connectors surface. Returns the `showIntegrate` CanvasIntent the
+// orchestrator routes to a push of the `integrate` step.
 const showIntegrate: ServerTool = {
   name: "show_integrate",
   description:

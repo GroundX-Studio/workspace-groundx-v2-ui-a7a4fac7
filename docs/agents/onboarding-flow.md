@@ -1,27 +1,36 @@
 # Onboarding Flow (F1–F7)
 
-How a user actually moves through the app. The frame inventory +
+How a user actually moves through the app. The surface inventory +
 the transitions + the rules that decide which surface mounts.
 
-## Frame inventory
+> **F1–F7 are UX surface LABELS, not a state machine.** The frame
+> machine is retired: there is no frame field, no frame-advance call,
+> and no frame-keyed state. Movement = the active `ViewerStep` kind
+> (plus, in onboarding, the journey-progress stage layered on top).
+> The labels below name surfaces for readability only.
+
+## Surface inventory
 
 | Frame | URL | Canvas content | Chat-column content |
 |---|---|---|---|
 | F1 | `/onboarding` | IngestView (sample picker + BYO) — mounted as overlay above the AppShell | IdleChatPlaceholder underneath |
 | F1 BYO sign-up | `/onboarding/signup` | `sign-up` overlay z-stacked on the current step. Underlying canvas keeps its content | ConversationFlow in the same onboarding chat session |
 | F2 | `/onboarding/<bucketId>/<scenarioId>` | UnderstandView (PdfViewerWidget mount; reads doc-viewer ViewerStep when present) | ConversationFlow with the onboarding experience (header + bubbles + streaming notes + Pick-a-view pills + live chat input + CiteChips on assistant turns) |
-| F3 | (URL stays at F2's; frame state advances) | ExtractView (schema-driven fields panel + citation chips) — `?focus=<categoryId>` opens to a specific slice | ConversationFlow stays mounted (chat persists across F2→F5) |
+| F3 | (URL stays at F2's; the active step advances to `extract-workbench`) | ExtractView (schema-driven fields panel + citation chips) — the active step's `focusedCategoryId` opens to a specific slice | ConversationFlow stays mounted (chat persists across F2→F5) |
 | F3a | (URL stays the same) | SchemaView — schema-agent loop: inline editor, ProposeCard above the field list, save → sign-in overlay. Reached from F3's fields-panel hamburger menu (NOT a chat pill) | ConversationFlow with Schema-Agent header chip + earlier-turns compaction summary |
 | F4 | — | retired; folded into F3a 2026-05-27 | — |
 | F5 | … | InteractView (chat-with-sources placeholder) | ConversationFlow continues |
 | F6 (sign-in active) | `/onboarding/signup` OR an `openGate` intent from the active sample | Underlying canvas (whatever step is active) stays mounted; `sign-up` overlay z-stacks on top | ConversationFlow stays mounted; sign-in guidance appears as normal assistant messages |
 | F7 | … (post-sign-in) | IntegrateView (API snippets + plugin downloads — stub) | IdleChatPlaceholder |
 
-The URL is the **source of truth** for which surface mounts. The
-URL → state useEffect in `OnboardingShell` reads `useParams()` + 
-`useLocation()` and calls the right session action. Direct
-`advanceFrame()` calls from views are short-circuits that don't
-change the URL (which is sometimes wrong — prefer navigate).
+The **active `ViewerStep`** is the source of truth for which surface
+mounts — the canvas is a pure function of the active step kind. The
+URL → state useEffect in `OnboardingShell` reads `useParams()` +
+`useLocation()` and dispatches the matching navigation intent through
+the orchestrator (it does NOT mutate the viewer directly). Every
+surface change — pill click, auto-advance, URL effect — goes through
+`dispatch(intent, source)`; there is no direct viewer mutation from a
+view, so the URL and the active step never diverge.
 
 ## Transitions
 
@@ -57,7 +66,7 @@ change the URL (which is sometimes wrong — prefer navigate).
 - During leaving: F1 mounts underneath; SlideOverlay renders all
   three panes sliding OUT (nav + chat to the left, canvas to the
   right). Chat + canvas pane contents are `ChatColumn`
-  + `UnderstandView` with `overrideScenarioId={leavingScenarioSnapshot}` + `overrideFrame="f2"` so the user sees the F2 chrome slide away with content intact.
+  + `UnderstandView` with `overrideScenarioId={leavingScenarioSnapshot}` so the user sees the Understand chrome slide away with content intact.
 - After SWIPE_DURATION_MS all three panes unmount + the snapshot
   clears. The nav is gone (F1 has no nav per spec).
 
@@ -66,16 +75,25 @@ change the URL (which is sometimes wrong — prefer navigate).
 - Pills are derived from `scenario.manifest.extractionSchema.categories`
   (one pill per category) plus `edit schema`. Schemaless scenarios
   (Solar) get a single `show me chat` pill that jumps to F5.
-- Clicking a category pill calls `advanceFrame("f3")` + navigates
-  with `?focus=<categoryId>`. ExtractView reads the focus param
-  on mount and pre-selects the first field in that category.
-- "edit schema" pill goes to F3a. "show me chat" pill goes to F5.
+- Clicking a category pill dispatches `showExtract` with
+  `focusedCategoryId=<categoryId>` through the orchestrator. The
+  Extract widget reads the focused category from the active step's
+  prop (reactive — re-focusing live re-selects without a remount; the
+  old `?focus=` URL carrier is gone). The "Done" auto-advance also
+  dispatches `showExtract` — same seam, no direct viewer mutation.
+- The "edit schema" pill dispatches `editSchema`, which flips the
+  `extract-workbench` step to `surface:"design"` (the schema-design
+  sub-position, reachable in both onboarding and steady). "show me
+  chat" dispatches `showInteract`.
 
 ### F5/F6 → F7 (gate committed)
 
 - Gate commit calls `commitGate(method)` which marks
   `state.gate.status = "committed"` + emits a ViewerEvent.
-- Frame advance to F7 + URL navigate.
+- Post-commit, the orchestrator dispatches `showIntegrate` (pushing
+  the `integrate` step + popping any stale sign-up overlay) and the
+  URL navigates. The arrival at Integrate is what pops the overlay —
+  a second arrival with a live gate still clears it.
 
 ## Scenarios
 

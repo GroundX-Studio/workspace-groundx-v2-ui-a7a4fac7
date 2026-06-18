@@ -267,8 +267,9 @@ export async function runRagPipeline(
   // `SuggestedActionChips` renders in array order.
   for (const chip of mutateChips) suggestedActions.push(chip);
   // standardized-viewer-control T7 — offered navigation entries last (a
-  // user-triggered "→ go there" chip / inline anchor; standardized-viewer-control
-  // succeeds the retired `suggest_intent` tool's any-frame suggestion).
+  // user-triggered "→ go there" chip / inline anchor; the per-destination
+  // `offerAs` disposition succeeds the retired generic any-destination
+  // navigation suggestion).
   for (const chip of offeredChips) suggestedActions.push(chip);
 
   const answer = grounded.body.trim();
@@ -364,8 +365,8 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
   // `suggestedIntent`, and `proposedSchemaField`. The latter two
   // have migrated to native LLM function-calling (`propose_schema_field`; the
   // navigation tools + their `offerAs` disposition replaced the retired
-  // `suggest_intent` tool — standardized-viewer-control T7). This
-  // parser retains ONLY the `citations` branch — citations are
+  // generic any-destination navigation tool — standardized-viewer-control T7).
+  // This parser retains ONLY the `citations` branch — citations are
   // metadata on the answer, not a tool surface. The
   // `suggestedIntent` and `proposedSchemaField` fields on the
   // return type are preserved (always `null`) for one release as a

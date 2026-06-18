@@ -158,9 +158,8 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({
       : undefined;
   const copy = gateCause ? SIGNUP_COPY_BY_CAUSE[gateCause] : SIGNUP_COPY[trigger];
   // standardized-viewer-control T6 — the committed "Continue" CTA is gated on the
-  // active viewer step's journey stage (the step-based successor to the legacy
-  // `PRE_INTEGRATE_FRAMES.has(currentFrame)` read): it shows only while the
-  // journey has NOT already reached Integrate.
+  // active viewer step's journey stage: it shows only while the journey has NOT
+  // already reached Integrate.
   const canContinueToIntegrate = useIsPreIntegrateStage();
 
   const handleBookCall = useCallback(() => {
@@ -187,9 +186,8 @@ export const SignUpWidget: FC<SignUpWidgetProps> = ({
   // standardized-viewer-control T6 — Continue prefers the host-supplied
   // `onContinueIntegrate` (the mount site may own the transition); absent it,
   // DISPATCH `showIntegrate` through the orchestrator (the single viewer-mutation
-  // seam) instead of `advanceFrame("f7")`. The orchestrator pushes the
-  // `integrate` step and (in onboarding) layers the f7 journey-progress + the
-  // stale sign-up overlay pop — the exact side effects `advanceFrame("f7")` had.
+  // seam). The orchestrator pushes the `integrate` step and (in onboarding)
+  // layers the Integrate journey-progress + the stale sign-up overlay pop.
   // Sign-up is session-scoped, so the intent carries the empty document scope
   // (`showIntegrate`'s handler ignores scope — connectors are scope-independent).
   const handleContinueIntegrate = useCallback(() => {

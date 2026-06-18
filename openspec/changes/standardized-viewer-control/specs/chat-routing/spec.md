@@ -1,6 +1,6 @@
 # Spec Delta — chat-routing
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Offered viewer actions SHALL route onto `suggestedActions`, not a new field
 
@@ -20,15 +20,54 @@ boundary.
 - **THEN** `suggestedActions` contains an entry with the label, the validated intent, and the optional anchor
 - **AND** that intent is absent from `reply.intents[]`
 
-## REMOVED Requirements
+## MODIFIED Requirements
 
-### Requirement: The `suggest_intent` router path and `switchFrame` emission
+### Requirement: The fenced-JSON proposal paths SHALL be retired
+
+After this change lands, the chat router SHALL emit
+`proposedSchemaField` via native LLM function-calling tools only. The
+fenced-JSON parser SHALL retain only its `citations` branch — `citations` are
+metadata on the answer, not a tool surface.
+
+The chat router previously emitted `proposedSchemaField` and a
+`suggestedIntent` by parsing a fenced ```json block from the
+grounded LLM's answer. After this change, `proposedSchemaField` SHALL be
+emitted via native function-calling instead, and the `suggestedIntent` /
+`suggest_intent` path SHALL be removed entirely (offered navigation is now the
+`offerAs` disposition on the per-destination navigation tools, see the
+agent-tools and conversation-flow deltas). The fenced-JSON parser
+SHALL retain only its `citations` branch.
+
+`ChatReply.proposedSchemaField` SHALL become a derived back-compat
+shim for one release window — its value is the first matching
+`tool:propose_schema_field` entry on `reply.suggestedActions[]`.
+After the shim window closes, the field SHALL be removed from the
+`ChatReply` type.
 
 The router SHALL NOT use the legacy `suggest_intent` tool and SHALL NOT emit
-`switchFrame`. Offering a viewer action is produced from the `offerAs` disposition
-on navigation tools; performing one is produced from a direct navigation tool call.
+`switchFrame`. The pre-existing `key === "suggested-intent"` chip and any
+`tool:suggest_intent` chip key SHALL be removed (no back-compat shim — pre-launch).
+Offered navigation lands on `suggestedActions` via `offerAs`; performing one is a
+direct navigation tool call. No reply entry SHALL be `suggest_intent`-derived and no
+intent SHALL be `switchFrame`.
 
-#### Scenario: No suggest_intent path remains
+#### Scenario: Grounded LLM emits a `propose_schema_field` tool call
+
+- **GIVEN** the user asks "add a field for total tax"
+- **WHEN** the grounded LLM emits a `propose_schema_field`
+  function-call with `{ name, type, description, categoryId }`
+- **THEN** the middleware validates the args against the Zod
+  schema, builds a `proposeSchemaField` intent, and routes it to
+  `reply.suggestedActions[]` (key `tool:propose_schema_field`) per
+  the mutate-category routing rule (`design.md` §C).
+- **AND** the legacy `ChatReply.proposedSchemaField` field returns
+  the same payload during the one-release shim window.
+- **AND** the system prompt sent to the LLM no longer describes a
+  fenced `proposedSchemaField` JSON envelope.
+
+#### Scenario: No suggest_intent path or switchFrame emission remains
 
 - **GIVEN** a turn after this change
-- **THEN** the reply contains no `suggest_intent`-derived entries and no `switchFrame` intent
+- **THEN** the reply contains no `suggest_intent`-derived entries (no
+  `tool:suggest_intent` chip, no `key === "suggested-intent"` chip)
+- **AND** no reply intent is `switchFrame`.

@@ -133,12 +133,15 @@ jsdom has no `matchMedia`, so anything Motion-driven looks
 tests; leave default for tests that should assert the reduced-
 motion path.
 
-### URL is the source of truth for which surface mounts
+### Navigate the canvas only through the orchestrator `dispatch`
 
-Don't call `advanceFrame(frame)` from a view and expect the URL
-to update — `advanceFrame` flips the session state but doesn't
-navigate. Use `navigate(...)` for surface changes that should
-be linkable / refreshable.
+Don't mutate the viewer from a view (no direct step push, no legacy
+frame flip) and expect the URL to follow — viewer mutators are
+confined to the orchestrator. Dispatch the matching navigation intent
+(`showExtract`/`showInteract`/`showReport`/`editSchema`/…) and pair it
+with `navigate(...)` when the surface should be linkable / refreshable;
+the URL effect itself re-dispatches, so the active step and the URL
+stay in sync.
 
 ### `EntityRegistry` is a derived facade — don't add state to it
 

@@ -29,8 +29,8 @@ export interface UpsertChatSessionEntityInput {
   entityKey: string;
   /**
    * JSON-stringified `PersistedViewerStep` — the resume anchor (the active
-   * viewer step, navigational payload only). Replaced the frame-keyed
-   * `lastFrame` (standardized-viewer-control D13/R5).
+   * viewer step, navigational payload only) (standardized-viewer-control
+   * D13/R5).
    */
   lastStepJson: string;
   /** JSON-stringified array of reached `JourneyStage` values (checkmarks). */

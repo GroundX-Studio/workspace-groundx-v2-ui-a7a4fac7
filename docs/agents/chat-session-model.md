@@ -33,8 +33,10 @@ ChatSession
 ```
 
 `EntitySession` represents a sample / project / report tab the
-user has visited inside this chat session — its `lastFrame`,
-`completedFrames`, `scanProgress`, `extractedValues`.
+user has visited inside this chat session — its `lastStep` (the
+persisted active `ViewerStep` resume anchor, restored verbatim),
+`reachedStages` (the SET of journey stages reached, for checkmarks),
+`scanProgress`, `extractedValues`.
 
 A user's onboarding session has exactly one ChatSession
 (`isOnboardingSession: true`). Steady mode has N.
@@ -98,9 +100,9 @@ calls the LLM, it bundles three axes via
    latest summary is the head of the compression chain (a written
    compression of older messages); the live tail is every message
    that hasn't been compressed yet.
-2. **Current entity axis** — `entityKey`, `lastFrame`,
-   `completedFrames`, `extractedValues`. What the user is looking
-   at right now.
+2. **Current entity axis** — `entityKey`, the journey stage + active
+   `ViewerStep` kind (the frame-free "where they are" signal),
+   `extractedValues`. What the user is looking at right now.
 3. **Viewer trail axis** — recent slice of `viewer_events`
    (typically last 10). Always server-side (telemetry, not user
    content).
@@ -214,8 +216,8 @@ Every user-action boundary in `OnboardingSessionContext` calls
 | Action | When | Detail |
 |---|---|---|
 | `opened` | pickScenario fires | `{ entityKey }` |
-| `frame-advanced` | advanceFrame fires | `{ from, to }` |
-| `left` | advanceFrame back to f1 | `{ from }` |
+| `journey-advanced` | a journey stage is first reached | `{ from, to }` (stage/step, no frame) |
+| `left` | the active entity/journey is left (e.g. return to the ingest picker) | `{ from }` |
 | `intent-dispatched` | openGate / dismissGate / commitGate | `{ intent, trigger?, method? }` |
 | `citation-clicked` | F3 field row click | `{ field, citationId }` (future) |
 | `extracted-value-viewed` | F3 field row click | `{ field }` (future) |

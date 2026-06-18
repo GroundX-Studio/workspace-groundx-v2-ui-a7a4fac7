@@ -841,9 +841,8 @@ export function createApp({
       }
       // All four body fields are optional but must be the right type
       // WHEN provided. standardized-viewer-control D13/R5 — the resume
-      // anchor moved off frames: lastStepJson (JSON-encoded
-      // PersistedViewerStep) + reachedStagesJson (JSON-encoded stage
-      // array) replace the frame-keyed lastFrame/completedFramesJson.
+      // anchor is lastStepJson (JSON-encoded PersistedViewerStep) +
+      // reachedStagesJson (JSON-encoded stage array).
       // All four *Json fields must be string-or-null (JSON-encoded payload).
       const lastStepOk =
         body.lastStepJson === undefined ||

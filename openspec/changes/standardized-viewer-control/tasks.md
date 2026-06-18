@@ -363,7 +363,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T10 — Structural encapsulation + guard · SEQUENTIAL
 
-- [ ] Confine the viewer-step mutators so they are reachable only from the
+- [x] Confine the viewer-step mutators so they are reachable only from the
       orchestrator module (no re-export to component/view/experience modules). Add a
       guard test that fails if any production module outside the orchestrator
       references a step mutator, or if an `advanceFrame` / `currentFrame` /
@@ -371,7 +371,28 @@ only after its adversarial review gate passes against the plan AND the real code
       COMMENTS naming the removed symbols (objective grep found 5: `router.tsx:113`,
       `useConversation.ts:14`, `ChatColumn.tsx:121`, `ScopedCanvas.tsx:13`,
       `contextBundler.ts:10-11`) — clean them; don't leave the vocabulary in prose.
+      (DONE — the last structural mutator bypass was `Extract.tsx`'s synchronous
+      `handleSave` direct `pushStep`; it now dispatches `presentExperienceBeat`
+      `ingest-picker` through the orchestrator, mirroring the post-commit path, so
+      `Extract` no longer destructures `pushStep`. Guard:
+      `app/src/test/viewer-mutation-seam.guard.test.ts` — (A) walks `app/src`, fails if
+      any module outside the orchestration core (`CanvasOrchestratorContext` +
+      `ChatStoreContext` def + `OnboardingSessionContext`) CALLS or destructures a
+      viewer-step mutator (comment mentions stripped, so prose like
+      "calls ChatStore.gotoDocViewer" is not a false positive); (B) walks
+      `app/src` + `middleware/src`, fails on any retired frame symbol / bare frame
+      literal (`"f1"`…`"f7"`, `"f3a"`/`"f4a"`) / `onboarding-frame-` / `advance-to-f`
+      test-id / `(frame f` prose in CODE OR COMMENTS. Test-infra excluded by the
+      "imports vitest/@testing-library" signal + the `app/src/test/` harness dir — the
+      documented `frameToStep.ts` exception and the `initialFrame` convenience
+      (`renderWithOnboardingProviders.tsx`, `intentFixtures/replayIntent.tsx`) fall under
+      it. Ships 2 meta self-tests proving every detector matches a known-bad sample.)
 - **Gate:** the guard passes and genuinely fails on a planted violation (prove it).
+      (DONE — clean tree: 6/6 green. Planted a real `pushStep(...)` call in a view
+      (`SteadyShell.tsx`) and an `advanceFrame("f3")` in middleware (`ragPipeline.ts`):
+      BOTH invariant tests went RED naming the exact offender + line, the 4 other tests
+      stayed green; reverted byte-identical, 6/6 green again. `tsc --noEmit` app +
+      middleware clean.)
 
 ## T11 — Drift guards + full verification · SEQUENTIAL
 
@@ -427,10 +448,13 @@ those durable requirements survive untouched and the spec set self-contradicts.
 > address the REMOVED-block frame symbols; this note adds the MODIFIED-header fix to
 > every one.
 
-- [ ] **app-architecture** — add MODIFIED/REMOVED blocks targeting the REAL durable
+- [x] **app-architecture** — add MODIFIED/REMOVED blocks targeting the REAL durable
       headers: `The frame model SHALL include a report builder frame f4a` (:584,
-      REMOVE/replace), `The orphaned per-frame onboarding views SHALL be removed`
-      (:658), `Orchestrator dispatch SHALL be exhaustive over the CanvasIntent union`
+      REMOVED — the whole frame model incl. FFrame), ~~`The orphaned per-frame onboarding
+      views SHALL be removed` (:658)~~ (carries NO removed *machine* symbol — only prose
+      about deleting per-frame views, which this change COMPLETES rather than contradicts;
+      symbol-grep does not flag it, so no delta is needed — the GATE is symbol-based),
+      `Orchestrator dispatch SHALL be exhaustive over the CanvasIntent union`
       (:781 — drop the `switchFrame`→`advanceFrame` and `editSchema`→`advanceFrame("f3a")`
       cases), `ViewerSession SHALL be the master viewer-state record per chat session`
       (:65 — drop `currentFrame`/`lastFrame`), AND `F1 overlay SHALL hide the underneath
@@ -441,39 +465,66 @@ those durable requirements survive untouched and the spec set self-contradicts.
       (`:357`, consumed at `OnboardingShell.tsx:1090-1091` for `aria-hidden`/`inert`) —
       the delta MUST state the replacement predicate (active step kind is `ingest-picker`),
       not just delete the frame word, so the a11y guarantee doesn't regress.
-- [ ] **agent-tools** — MODIFY the durable F-series tool requirements (`show_understand`
+- [x] **agent-tools** — MODIFY the durable F-series tool requirements (`show_understand`
       F2 :24, `show_extraction` F3 :36, `show_field_citation` F4 :48,
-      `propose_schema_field` F3a :76, `propose_report_section` S3a :89) and the
-      `suggest_intent` references in the catalog-agreement (:457/:480), per-tool-guidance
-      (:520), and server-executed (:544/:555) requirements.
-- [ ] **chat-routing** — MODIFY `The fenced-JSON proposal paths SHALL be retired`
-      (:232 — it mandates the `tool:suggest_intent` chip + `switchFrame` dispatch).
-- [ ] **conversation-flow** — MODIFY `The conversation SHALL persist across onboarding
-      frame advances without a routing hack` (:83) AND the SEPARATE requirement at :21
-      ("the engine contains no `advanceFrame`/navigation references") — two requirements,
-      not one.
-- [ ] **ui-views** — MODIFY the durable F-series view requirements that name frames
-      (the actual headers, not the invented ones currently in the delta), e.g. the
-      F2/F3/F4/F5 view + transition + auto-advance requirements (:145/:269/:522/:667/:721…).
-      Explicitly strip the 5 HARD `currentFrame` symbols at :149/:156/:228/:271/:749
-      (label-only F-series text may survive as UX names; the symbols must not).
-- [ ] **observability** — the change ALREADY ships an observability delta, but it
+      `propose_schema_field` F3a :76, `propose_report_section` S3a :89, all re-stated
+      frame-free) and the `suggest_intent` references in the catalog-agreement (:457),
+      per-tool-guidance (:520), and server-executed (:544) requirements (the
+      `suggest_intent` example swapped for the surviving server-only `lookup_groundx_docs`).
+      The orphaned MODIFIED "Navigation intents SHALL fully describe their destination"
+      moved to ADDED (genuinely new); the orphaned REMOVED "The `suggest_intent` tool and
+      frame-named navigation" deleted (suggest_intent is not a standalone durable
+      requirement — its removal is the MODIFIED-of-examples above; this REMOVED block was
+      what HARD-FAILED the dry-run archive).
+- [x] **chat-routing** — MODIFY `The fenced-JSON proposal paths SHALL be retired`
+      (:232 — it mandated the `tool:suggest_intent` chip + `switchFrame` dispatch; now
+      re-stated to drop them, keep the propose_schema_field native-tool path). The
+      genuinely-new "Offered viewer actions SHALL route onto `suggestedActions`" moved to
+      ADDED; the orphaned REMOVED "The `suggest_intent` router path…" deleted (folded into
+      the :232 MODIFIED).
+- [x] **conversation-flow** — MODIFY `The conversation SHALL persist across onboarding
+      frame advances without a routing hack` (:83) AND the SEPARATE requirement at :6
+      (its :21 scenario "the engine contains no `advanceFrame` references"). The two
+      genuinely-new affordance requirements moved to ADDED.
+- [x] **ui-views** — MODIFY the 4 durable requirements carrying the HARD `currentFrame`
+      symbol — `F-series view transitions…` (:145, symbols at :149/:156), `F1 IngestView…`
+      (:224, symbol :228), `F2 UnderstandView…` (:269, symbol :271), and `The onboarding
+      entry SHALL compose a ChatExperience…` (:736, symbol :749 — NOTE: :749 sits in the
+      :736 requirement, NOT :721 as the old note guessed). All 5 hard symbols stripped.
+      The 2 invented MODIFIED headers moved to ADDED. Label-only F-series UX text in other
+      requirements (:507/:522/:667 etc.) survives as UX names — carries no removed symbol.
+- [x] **observability** — the change ALREADY ships an observability delta, but it
       MODIFIES a header (`The viewer-event action vocabulary SHALL be frame-free`) that
       does NOT exist in durable observability (its 6 reqs are Hotjar/Sentry/Prometheus/
       Alerts/pino/frontend-error). `frame-advanced` has ZERO durable-spec presence (it
       lives in `middleware/src/types.ts` + the route-contract test). FIX: make the
       observability delta an `## ADDED` requirement (or relocate the viewer-event
       vocabulary contract to its real durable home, e.g. `data-tier`/`app-architecture`),
-      not a MODIFIED-of-nonexistent.
-- [ ] **plugin-loader** (no delta today) — add a delta MODIFYING the tour requirement
-      that dispatches `{kind:"advanceFrame", to:"f3"}` (:84) to the per-destination
-      intent. Dormant (PLUG-blocked) but references a deleted intent kind.
-- [ ] **onboarding-schema-editor** (no delta today) — add a delta for the hard
-      `advanceFrame("f3")` (:73) and `currentFrame === "f3a"` (:335) references.
-- [ ] **testing-suite / smart-report** — verify the frame *vocabulary* (frame testids
-      `onboarding-frame-f2`, `data-viewer-frame-active`; "frame f4/f4a") — decide and
-      record whether F-series UX labels survive as names while the machine is retired,
-      or whether these need deltas too. (Softer than the hard-symbol set above.)
+      not a MODIFIED-of-nonexistent. DONE: made it `## ADDED` (frame-advanced has ZERO
+      durable presence, so there is no MODIFIED target — confirmed by grepping all durable
+      specs; it lives only in `middleware/src/types.ts` + the route-contract test).
+- [x] **plugin-loader** (no delta today) — added a delta MODIFYING `Tour state machine
+      SHALL accept tour as a third intent source` (the req at :80 holding the
+      `{kind:"advanceFrame", to:"f3"}` intent at :84/:89) to dispatch the per-destination
+      intents. Dormant (PLUG-blocked) but referenced a deleted intent kind. (The :66
+      "inline F1-F7 flow" prose is a UX-flow-shape label, carries no removed machine
+      symbol — left as-is.)
+- [x] **onboarding-schema-editor** (no delta today) — added a delta MODIFYING `F3a topbar
+      SHALL render the spec'd chrome` (hard `advanceFrame("f3")` at :73) and `Schema-Agent
+      chat affordances SHALL surface earlier-turns + confidence delta` (hard
+      `currentFrame === "f3a"` at :335) — both re-stated off the `extract-workbench` step's
+      `surface: "fields" | "design"` sub-position. The pervasive "F3a" surface-name prose
+      survives as a UX name.
+- [x] **testing-suite / smart-report** — ASSESSED + RECORDED: NO delta needed for either.
+      Neither carries a removed *machine* symbol (`advanceFrame`/`currentFrame`/
+      `switchFrame`/`completedFrames`/`frameToStepStandalone`/`frame-advanced`/
+      `suggest_intent`/`lastFrame`/`FFrame`) — verified by grep. testing-suite has only the
+      frame *testids* (`onboarding-frame-f2/f3/f5`, `data-viewer-frame-active`) and the
+      F1→F7 golden-path label; smart-report has only "frame f4/f4a" as render/builder
+      surface NAMES which map onto the surviving `report.surface: "render"|"builder"` field
+      this change preserves. F-series UX labels + DOM testids survive as names while the
+      frame machine is retired; no durable spec there asserts a removed symbol/testid as a
+      live mechanism, so the GATE (matching-block-per-removed-symbol) requires nothing.
 - **Gate:** grep every `openspec/specs/*/spec.md` for the removed symbols → only the
       change's own delta files (or zero) remain; every durable requirement carrying a
       removed symbol has a matching MODIFIED/REMOVED block whose header matches the

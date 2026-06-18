@@ -11,7 +11,8 @@
  *     reply intents; enqueues field proposals)
  *   - `handleSuggestedAction` (chip → canvas intent)
  *   - lifecycle the experience layer observes (`onFirstUserSend`) — the
- *     engine NEVER calls `advanceFrame`; choreography stays in the caller.
+ *     engine NEVER mutates the viewer directly; navigation choreography
+ *     stays in the caller and goes through the orchestrator dispatch.
  *
  * `isOnboarding` is read from `activeChatSession.isOnboardingSession` (not
  * hardcoded), so the SAME `send` serves both the onboarding journey and a
@@ -208,10 +209,10 @@ export function suggestedActionToIntent(action: ChatSuggestedAction): CanvasInte
     }
     return null;
   }
-  // standardized-viewer-control T7 — the legacy `suggested-intent` string-label
-  // chip (mapped to the retired `switchFrame` kind) is gone; the middleware no
-  // longer emits it (the `suggest_intent` tool was removed). Navigation is now
-  // per-destination intents carried on `tool:<name>` chips (handled above).
+  // standardized-viewer-control T7 — the legacy generic string-label
+  // navigation chip is gone; the middleware no longer emits a general
+  // any-destination navigator. Navigation is now per-destination intents
+  // carried on `tool:<name>` chips (handled above).
   return null;
 }
 

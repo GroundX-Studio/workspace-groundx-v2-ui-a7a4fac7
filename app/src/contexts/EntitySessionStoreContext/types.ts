@@ -48,16 +48,16 @@ export interface EntitySession {
   /**
    * The RESUME ANCHOR — the active viewer step the user was last on within
    * this entity's journey, restored VERBATIM on reload (standardized-viewer-
-   * control D13/R5). Replaced the frame-keyed `lastFrame`. Carries only the
-   * navigational payload (`PersistedViewerStep`); ephemeral citation
-   * highlights / the scan beat are rebuilt on demand, never persisted.
+   * control D13/R5). Carries only the navigational payload
+   * (`PersistedViewerStep`); ephemeral citation highlights / the scan beat are
+   * rebuilt on demand, never persisted.
    */
   lastStep: PersistedViewerStep;
   /**
    * The journey stages the user has REACHED inside this entity — a SET (NOT a
    * monotonic watermark — R3: `integrate` is reachable from anywhere, so the
    * set is genuinely non-contiguous). Drives the step-strip checkmarks only;
-   * never the resume anchor. Replaced the frame-keyed `completedFrames`.
+   * never the resume anchor.
    */
   reachedStages: ReadonlySet<JourneyStage>;
   /** Unix-ms when this entity was first created in this session. */

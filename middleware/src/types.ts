@@ -106,8 +106,8 @@ export interface ChatSessionEntityRecord {
   entityKey: string;
   /**
    * JSON-stringified `PersistedViewerStep` (the resume anchor — the active
-   * viewer step). Replaced the frame-keyed `lastFrame` (standardized-viewer-
-   * control D13/R5). Null only for a legacy/blank row.
+   * viewer step) (standardized-viewer-control D13/R5). Null only for a
+   * legacy/blank row.
    */
   lastStepJson: string | null;
   /** JSON-stringified array of reached `JourneyStage` values (checkmarks). */
@@ -146,17 +146,17 @@ export interface ChatSessionEntityRecord {
 
 export const viewerEventActionSchema = z.enum([
   "opened",
-  // standardized-viewer-control T6b (D14) — frame-free journey-progress
-  // advance (carries `{ stage, step }` detail), replacing the retired
-  // frame-coupled `frame-advanced`. The action vocabulary names no frame.
+  // standardized-viewer-control T6b (D14) — journey-progress advance fired
+  // when a journey stage is first reached (carries `{ stage, step }` detail).
+  // The action vocabulary names no viewer surface.
   "journey-advanced",
   "extracted-value-viewed",
   "citation-clicked",
   "scan-completed",
   "intent-dispatched",
   // `left` is INTENTIONALLY KEPT (T6b assessment): it records leaving the
-  // active entity/journey (the return-to-ingest entity-deactivate), not
-  // "left frame f1" — the name carries no frame, so it stays as-is.
+  // active entity/journey (the return-to-ingest entity-deactivate); the name
+  // carries no viewer surface, so it stays as-is.
   "left",
 ]);
 export type ViewerEventAction = z.infer<typeof viewerEventActionSchema>;

@@ -70,8 +70,6 @@ novel `show_schema_editor` tool.
 - **GIVEN** the agent calls the schema-editor navigation tool with `offerAs`
 - **THEN** an `editSchema` `suggestedActions` entry is produced (not auto-dispatched)
 
-## MODIFIED Requirements
-
 ### Requirement: Navigation intents SHALL fully describe their destination
 
 Each per-destination navigation intent SHALL carry everything needed to render its
@@ -91,21 +89,159 @@ frame-named navigation intent.
 - **GIVEN** a `show_extraction` tool call with a focusedCategory argument
 - **THEN** the built showExtract intent carries that value as focusedCategoryId
 
-## REMOVED Requirements
+## MODIFIED Requirements
 
-### Requirement: The `suggest_intent` tool and frame-named navigation
+### Requirement: show_understand tool SHALL dispatch the F2/Understand canvas surface
 
-The legacy `suggest_intent` server tool and its mapping to `switchFrame` SHALL be
-removed. `suggest_intent` is a general any-frame navigator; before removal, every
-destination it serves SHALL be confirmed to map to a per-destination intent (f3 to
-`showExtract`, f4 to `showReport`, f5 to `showInteract`, f7 to `showIntegrate`; f1
-the picker and f2 the auto-shown doc need no offered navigation). No destination
-SHALL be left unmapped. Offering a viewer action is then done through the `offerAs`
-disposition; performing one through the per-destination navigation tools. No tool
-SHALL emit a frame-named intent, and the intent corpus and `intentCatalog` SHALL drop
-the `switchFrame` entry.
+The agent-tool registry SHALL include `show_understand({doc_id, progress})`.
+On invocation, the canvas dispatcher SHALL push the Understand (doc-viewer) viewer
+step with the named document active. "Understand" is the journey-stage name for this
+surface; the dispatcher SHALL NOT read or write a frame value.
 
-#### Scenario: No suggest_intent remains
+#### Scenario: Tool dispatches the Understand surface
 
-- **GIVEN** the server tool catalog after this change
-- **THEN** it contains no `suggest_intent` tool and no tool that emits `switchFrame`
+- **WHEN** the LLM emits `show_understand` with a valid `doc_id`
+- **THEN** the canvas shows the Understand (doc-viewer) surface
+- **AND** the supplied document is the active doc in the PDF viewer
+
+### Requirement: show_extraction tool SHALL dispatch the F3/Extract canvas surface
+
+The agent-tool registry SHALL include `show_extraction({schema_id, doc_id, category?, render?})`.
+On invocation, the canvas dispatcher SHALL push or mutate the Extract (extract-workbench)
+viewer step with the named schema + doc + (optional) category active. The dispatcher
+SHALL NOT read or write a frame value.
+
+#### Scenario: Tool dispatches the Extract surface
+
+- **WHEN** the LLM emits `show_extraction` with valid arguments
+- **THEN** the canvas shows the Extract (extract-workbench) surface
+- **AND** the named schema and category are the active selection
+
+### Requirement: show_field_citation tool SHALL open the F4 expanded-citation peek
+
+The agent-tool registry SHALL include `show_field_citation({field_id, doc_id, page})`.
+On invocation, the canvas dispatcher SHALL open the field citation peek
+on the named field + page. The dispatcher SHALL NOT read or write a frame value.
+
+#### Scenario: Tool opens the field citation peek
+
+- **WHEN** the LLM emits `show_field_citation`
+- **THEN** the field citation peek surface opens
+- **AND** the named field + doc + page are visible with the relevant region highlighted
+
+### Requirement: propose_schema_field tool SHALL emit a ProposalCard in F3a
+
+The agent-tool registry SHALL include `propose_schema_field({field_def})`.
+On invocation, a ProposalCard SHALL surface in the schema-design surface's Fields tab
+(the `extract-workbench` step's `surface: "design"` sub-position, reached via the
+`editSchema` intent — NOT a frame); on Accept the field SHALL be added to the active
+schema. (See `onboarding-schema-editor` capability for the surface contract.)
+
+#### Scenario: Tool surfaces a propose-card
+
+- **WHEN** the LLM emits `propose_schema_field`
+- **THEN** a ProposalCard renders in the schema-design surface's Fields tab
+- **AND** Accept lands the field via the existing `addSchemaField` flow
+
+### Requirement: propose_report_section tool SHALL emit a ProposalCard in S3a
+
+The agent-tool registry SHALL include `propose_report_section({section_def})`. On invocation, a
+ProposalCard SHALL surface in the report builder (the `report` step's `surface: "builder"`
+sub-position — NOT a frame) section list; on Accept the
+section SHALL be added to the active template via the shared template-edit method. The ProposalCard
+surface contract is owned by the `smart-report` capability and mirrors `propose_schema_field`.
+
+#### Scenario: Tool surfaces a section propose-card
+
+- **WHEN** the LLM emits `propose_report_section`
+- **THEN** a ProposalCard renders in the report builder (the `report` `surface: "builder"`)
+- **AND** Accept lands the section via the shared template-edit method.
+
+### Requirement: The app and server tool catalogs SHALL agree on declarative tool metadata
+
+The app's declarative tool metadata and middleware `SERVER_TOOL_CATALOG` SHALL
+agree on FULL tool shape — mirrored tool names, descriptions (verbatim),
+`category`, `availableSteps`, role visibility, chat-widget `rendersWidget`
+bindings, AND input schemas (compared as JSON-Schema via the middleware's
+`zodToJsonSchema` bridge) — enforced by the app-side cross-package parity guard
+(`app/src/tools/catalog-parity.test.ts`), which is the ONLY mechanism that can
+load both catalogs (the app catalog is assembled via Vite's `import.meta.glob`).
+There SHALL be no committed manifest artifact (gate-answered decision,
+2026-05-31, reaffirmed 2026-06-11): the live cross-package test IS the source of
+truth, and the `toolCatalog.ts` header SHALL document this instead of promising
+a future codegen manifest. Server-only tools SHALL be explicitly allowlisted in
+the parity guard. A tool present on one side but absent on the other, or any
+full-shape drift, SHALL fail automated validation naming the offending tool.
+
+#### Scenario: Mirrored metadata drift fails
+
+- **GIVEN** an app tool declaration named `open_document`
+- **WHEN** the server catalog omits it, changes its description or category, or
+  narrows its input schema
+- **THEN** the parity guard fails and names the mismatched tool and field.
+
+#### Scenario: Server-only tool remains explicit
+
+- **GIVEN** a server-only tool such as `lookup_groundx_docs`
+- **WHEN** parity validation runs
+- **THEN** the tool is allowed only because it appears in the server-only
+  allowlist
+- **AND** any server-only tool with a `rendersWidget` binding must be enumerated
+  in the chat-widget reachability guard.
+
+### Requirement: Per-tool prompt guidance SHALL be declared with the tool, not in the prompt
+
+Tool usage guidance rendered into the grounded system prompt SHALL be generated
+from the step-filtered tool catalog — each entry's `description` plus an
+optional `ServerTool.promptGuidance` field for tools needing more than their
+description — as a single generated "TOOL NOTES" section. Hand-written per-tool
+paragraphs in prompt text are FORBIDDEN: guidance lives exactly once, on the
+tool declaration. A tool absent from the current step's filtered catalog SHALL
+contribute no guidance to that turn's prompt.
+
+#### Scenario: Guidance tracks the filtered catalog
+
+- **GIVEN** a chat turn on a step where `propose_schema_field` is offered
+- **WHEN** the grounded system prompt is assembled
+- **THEN** the TOOL NOTES section contains that tool's declared guidance
+- **AND** contains no entry for tools not offered on this step.
+
+#### Scenario: No duplicated hand-written guidance
+
+- **GIVEN** the prompts module
+- **WHEN** the grounded prompt source is inspected
+- **THEN** it contains no hand-written per-tool paragraph (the former
+  `propose_schema_field` prose is gone).
+
+### Requirement: Server-executed tools SHALL be declared via `serverExecute` and excluded from intent routing
+
+`ServerTool` SHALL gain an optional `serverExecute` executor. A tool declaring
+it is executed by the middleware inside the grounded tool-result loop and
+SHALL NOT declare an `intentBuilder`, SHALL NOT produce a `CanvasIntent`,
+SHALL NOT surface as a chip, and SHALL be `category: "read"` — invariants
+enforced by a catalog test (exactly one of `serverExecute` / `intentBuilder`
+present; `serverExecute ⇒ read`; `serverExecute ⇒ activityLabel` present,
+the user-facing text for the reply's `toolActivity` annotation). Executor
+dependencies SHALL arrive via an injected `ServerExecuteContext` built from
+the grounded seam's deps (test-injectable) — an executor SHALL NOT close
+over module-level live dependencies. Server-executed tools SHALL appear in the
+app-side parity guard's existing server-only allowlist (the same allowlist
+mechanism — no new exclusion machinery). Every server-executed tool SHALL be
+covered by an LLM-free scripted LOOP-transcript fixture (the counterpart of
+the intentBuilder corpus): a stubbed provider emits the call, the suite
+asserts execution, transcript shape, and absence from `intents[]`/chips.
+
+#### Scenario: Catalog invariants hold
+
+- **GIVEN** the `SERVER_TOOL_CATALOG`
+- **WHEN** the invariant test runs
+- **THEN** every tool has exactly one of `serverExecute` / `intentBuilder`
+- **AND** every `serverExecute` tool is `category: "read"`
+- **AND** every `serverExecute` tool declares an `activityLabel`.
+
+#### Scenario: A server-executed tool without loop coverage fails the guard
+
+- **GIVEN** a new tool declaring `serverExecute` with no loop-transcript fixture
+- **WHEN** the coverage guard runs
+- **THEN** it fails, naming the uncovered tool.
+
