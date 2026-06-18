@@ -115,7 +115,10 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
     await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
-    await page.getByTestId("onboarding-chat-pick-view-interact").click({ timeout: 15_000 });
+    await page
+      .getByTestId("step-strip-wrapper")
+      .getByRole("button", { name: "Interact", exact: true })
+      .click({ timeout: 15_000 });
     // The InteractView (F5) canvas mounts. The interact chat is LIVE (no
     // MOCK_MODE): the seed prompt is offered as a suggestion, not auto-sent, and
     // any answer is a non-deterministic LLM response — so we assert the F5
@@ -315,7 +318,10 @@ test.describe("F1–F7 axe a11y @desktop-only", () => {
     // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
     await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
-    await page.getByTestId("onboarding-chat-pick-view-interact").click({ timeout: 15_000 });
+    await page
+      .getByTestId("step-strip-wrapper")
+      .getByRole("button", { name: "Interact", exact: true })
+      .click({ timeout: 15_000 });
     await expect(page.getByTestId("onboarding-step-interact-chat")).toBeVisible();
     await expectAxeClean(page, "F5");
   });

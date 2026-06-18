@@ -98,7 +98,10 @@ test.describe.skip("F1–F7 · Loan Eligibility scenario · golden journey @desk
   test("F5 InteractView replays Loan DTI question", async ({ page }) => {
     await page.getByTestId("sample-loan").click();
     await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
-    await page.getByTestId("onboarding-chat-pick-view-interact").click();
+    await page
+      .getByTestId("step-strip-wrapper")
+      .getByRole("button", { name: "Interact", exact: true })
+      .click();
     await expect(page.getByText(/35% DTI threshold/)).toBeVisible();
     await expect(page.getByText(/Estimated DTI is 22%/)).toBeVisible();
   });
