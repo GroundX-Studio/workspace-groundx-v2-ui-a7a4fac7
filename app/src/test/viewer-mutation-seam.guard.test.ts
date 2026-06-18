@@ -24,11 +24,11 @@
  * Scope: every non-test `.ts`/`.tsx` under `app/src` + `middleware/src`,
  * EXCLUDING (1) `*.test.ts`/`*.test.tsx`, (2) the whole `app/src/test/` harness
  * directory (which legitimately carries the `initialFrame`/`testFrameToStep`
- * test conveniences — `frameToStep.ts` is the documented test-only exception),
- * and (3) any module that statically imports `vitest` / `@testing-library`
- * (test-infrastructure such as `conversation/intentFixtures/replayIntent.tsx`,
- * which uses the `initialFrame` harness convenience). The exclusion is by the
- * "imports a test runner" SIGNAL, not a brittle per-file path allowlist.
+ * test conveniences — `frameToStep.ts` is the documented test-only exception,
+ * and `replayIntent.tsx` (the replay harness) lives here too), and (3) any
+ * module that statically imports `vitest` / `@testing-library` (other
+ * test-infrastructure). The exclusion is by the "imports a test runner"
+ * SIGNAL, not a brittle per-file path allowlist.
  *
  * Per TDD discipline: the guard ships with meta self-tests proving every
  * detector matches a known-bad sample, so it provably fails on a planted

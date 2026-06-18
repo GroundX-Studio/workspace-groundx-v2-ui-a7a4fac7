@@ -579,10 +579,13 @@ those durable requirements survive untouched and the spec set self-contradicts.
   schema, the serializer, the two production set-sites (`showInteract` handler +
   `OnboardingShell` canvas-step fallback, which had hardcoded `?? "utility"`), the test
   fixtures, and `data-model.md`. (`extract-workbench.scenarioId` stays — it is the real
-  schemaId.) tsc/app 1909/mw 1016/guards/validate all green. (b) STILL OPEN: move
-  `app/src/conversation/intentFixtures/replayIntent.tsx` under `app/src/test/` so the
-  single test-only frame-literal exception lives on one named path (test-only; never
-  shipped).
+  schemaId.) tsc/app 1909/mw 1016/guards/validate all green. (b) **DONE 2026-06-18 — moved**
+  `replayIntent.tsx` from `app/src/conversation/intentFixtures/` to `app/src/test/`
+  (its `./types` import → `@/conversation/intentFixtures/types`; importers updated;
+  the seam-guard doc comment updated). Now ALL test-only frame conveniences live under
+  the one `app/src/test/` directory (the guard's documented exclusion #2), so the only
+  frame vocabulary anywhere is that single test-harness directory. tsc/app 1909/mw 1016
+  green.
 
 > **discipline §8:** the first two items are deferred future work and MUST each be filed
 > as a GitHub Issue before this change is archived (don't leave them as orphaned bullets).
