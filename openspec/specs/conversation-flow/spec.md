@@ -9,7 +9,7 @@ The live chat conversation SHALL be implemented by a single durable engine (`use
 single view (`ConversationFlow`), used for BOTH the authenticated/steady experience and onboarding.
 There SHALL NOT be per-mode forked flow components that re-implement the chat engine (state, message
 projection, send, suggested-action handling, render). The engine SHALL be experience-agnostic: it
-SHALL NOT import or depend on onboarding frames, scripts, or navigation, and SHALL read per-session
+SHALL NOT import or depend on onboarding journey state, scripts, or navigation, and SHALL read per-session
 flags (e.g. `isOnboarding`) from the active chat session rather than hardcoding them.
 
 #### Scenario: One engine serves steady and onboarding
@@ -18,7 +18,7 @@ flags (e.g. `isOnboarding`) from the active chat session rather than hardcoding 
 - **WHEN** their conversation behavior (state, message projection, send, suggested-action handling) is inspected
 - **THEN** both resolve to the one `useConversation` engine + `ConversationFlow` view
 - **AND** there is no second flow component duplicating that engine
-- **AND** the engine contains no `advanceFrame` / scripted-intro / navigation references.
+- **AND** the engine contains no `advanceFrame` / scripted-intro / navigation references (navigation flows through the orchestrator dispatch seam).
 
 ### Requirement: A directed initial experience SHALL be an OPTIONAL `ChatExperience` selected by composition
 
@@ -82,15 +82,17 @@ without violating the Rules of Hooks; `Choreography` is a render-null component 
 
 ### Requirement: The conversation SHALL persist across onboarding frame advances without a routing hack
 
-The conversation SHALL retain its `liveTurns` across onboarding frame advances (f2→f3→f5) without any
-keep-mounted routing workaround — this follows structurally from one always-mounted `ConversationFlow`
-with onboarding rendered as decoration around it. The previous mount-persistence routing hack SHALL be
-removed.
+The conversation SHALL retain its `liveTurns` across onboarding journey advances
+(e.g. Understand → Extract → Interact) without any keep-mounted routing workaround —
+this follows structurally from one always-mounted `ConversationFlow` with onboarding
+rendered as decoration around it. The previous mount-persistence routing hack SHALL be
+removed. Journey advances are produced by dispatched navigation intents through the
+orchestrator, NOT by `advanceFrame` or any frame value.
 
-#### Scenario: liveTurns survive a frame advance
+#### Scenario: liveTurns survive a journey advance
 
 - **GIVEN** an onboarding conversation with live turns
-- **WHEN** the onboarding frame advances (e.g. f2 → f3 → f5)
+- **WHEN** the onboarding journey advances (e.g. a `showExtract` then a `showInteract` dispatch)
 - **THEN** the existing live turns are retained (the conversation is not remounted/wiped)
 - **AND** no keep-mounted routing workaround is required to achieve it.
 
@@ -198,4 +200,51 @@ the relevant view now."
   replays the same route state
 - **THEN** the same opener is not appended again.
 - **AND** restored chat history is checked before appending a UI-click opener.
+
+### Requirement: A suggested action SHALL render as a pill or as inline clickable text
+
+The existing `suggestedActions` entry SHALL gain one optional field, `anchor` (an
+inline-binding phrase); no separate affordance list SHALL be introduced. Each
+suggested action SHALL render as a follow-up pill when it has no anchor (the
+existing chip rendering), or as inline clickable text when it has an anchor phrase.
+With an anchor, a remark plugin (a sibling of the citation marker plugin) SHALL
+locate that phrase in the answer prose using the citation answerSpan alignment and
+wrap its first occurrence as inline clickable text. When the anchor phrase is not
+found, the action SHALL fall back to a pill so it is never lost. Clicking either
+rendering SHALL dispatch the action's server-validated intent through the
+orchestrator with source "user".
+
+#### Scenario: Inline action wraps the anchored phrase
+
+- **GIVEN** a suggested action with `anchor: "Meters section"` and the answer prose contains "the Meters section"
+- **THEN** "Meters section" renders as inline clickable text
+- **AND** clicking it dispatches the action's intent with source "user"
+
+#### Scenario: Missing anchor falls back to a pill
+
+- **GIVEN** a suggested action whose anchor phrase does not appear in the prose
+- **THEN** it renders as a follow-up pill
+- **AND** clicking it dispatches the same intent
+
+#### Scenario: No anchor renders a pill
+
+- **GIVEN** a suggested action with no anchor
+- **THEN** it renders as a follow-up pill
+
+### Requirement: The chat SHALL dispatch suggested actions through the orchestrator only
+
+A clicked suggested action SHALL dispatch through the orchestrator and SHALL NOT
+construct an intent from free-form text. Tool-derived actions (offered navigation
+and mutate actions) carry a server-validated intent. A small set of UI-driven
+actions (e.g. "show all sources") instead map to a fixed, typed client-built intent
+(no tool, no free-form text); these too dispatch through the orchestrator. Offered
+navigation, mutate, and UI-driven actions SHALL share the one `suggestedActions`
+list and the one render path.
+
+#### Scenario: Tool-derived and UI-driven actions share the list and the seam
+
+- **GIVEN** a turn with an offered navigation action, a mutate-tool action, and a "show all sources" action
+- **THEN** all appear on `suggestedActions`
+- **AND** clicking the tool-derived ones dispatches a server-validated intent, and clicking the UI-driven one dispatches its fixed typed intent
+- **AND** all dispatch through the orchestrator with no free-form-text intent
 

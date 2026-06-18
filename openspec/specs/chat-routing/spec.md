@@ -232,15 +232,17 @@ SHALL NOT call into an app-side `toolRegistry` or app-side tool `handler`.
 ### Requirement: The fenced-JSON proposal paths SHALL be retired
 
 After this change lands, the chat router SHALL emit
-`proposedSchemaField` and `suggestedIntent` via native LLM
-function-calling tools only. The fenced-JSON parser SHALL retain
-only its `citations` branch — `citations` are metadata on the
-answer, not a tool surface.
+`proposedSchemaField` via native LLM function-calling tools only. The
+fenced-JSON parser SHALL retain only its `citations` branch — `citations` are
+metadata on the answer, not a tool surface.
 
-The chat router previously emitted `proposedSchemaField` and
+The chat router previously emitted `proposedSchemaField` and a
 `suggestedIntent` by parsing a fenced ```json block from the
-grounded LLM's answer. After this change, both surfaces SHALL be
-emitted via native function-calling instead. The fenced-JSON parser
+grounded LLM's answer. After this change, `proposedSchemaField` SHALL be
+emitted via native function-calling instead, and the `suggestedIntent` /
+`suggest_intent` path SHALL be removed entirely (offered navigation is now the
+`offerAs` disposition on the per-destination navigation tools, see the
+agent-tools and conversation-flow deltas). The fenced-JSON parser
 SHALL retain only its `citations` branch.
 
 `ChatReply.proposedSchemaField` SHALL become a derived back-compat
@@ -249,10 +251,12 @@ shim for one release window — its value is the first matching
 After the shim window closes, the field SHALL be removed from the
 `ChatReply` type.
 
-`ChatReply.suggestedActions[]` SHALL include `tool:suggest_intent`
-chips when the LLM emits a `suggest_intent` tool call. The
-pre-existing `key === "suggested-intent"` chip key SHALL be
-preserved for one release as a back-compat shim, then removed.
+The router SHALL NOT use the legacy `suggest_intent` tool and SHALL NOT emit
+`switchFrame`. The pre-existing `key === "suggested-intent"` chip and any
+`tool:suggest_intent` chip key SHALL be removed (no back-compat shim — pre-launch).
+Offered navigation lands on `suggestedActions` via `offerAs`; performing one is a
+direct navigation tool call. No reply entry SHALL be `suggest_intent`-derived and no
+intent SHALL be `switchFrame`.
 
 #### Scenario: Grounded LLM emits a `propose_schema_field` tool call
 
@@ -268,15 +272,12 @@ preserved for one release as a back-compat shim, then removed.
 - **AND** the system prompt sent to the LLM no longer describes a
   fenced `proposedSchemaField` JSON envelope.
 
-#### Scenario: Grounded LLM emits a `suggest_intent` tool call
+#### Scenario: No suggest_intent path or switchFrame emission remains
 
-- **GIVEN** the LLM reasons that the user should pivot to the
-  extract view
-- **WHEN** the LLM emits `suggest_intent({intent: "show-extract", reason: "compare line items", confidence: 0.92})`
-- **THEN** the chip lands on `reply.suggestedActions[]` with key
-  `tool:suggest_intent` and `detail.intent: "show-extract"`.
-- **AND** clicking the chip dispatches a `switchFrame` intent to
-  `f3` via the app-side `suggestedActionToIntent` mapper.
+- **GIVEN** a turn after this change
+- **THEN** the reply contains no `suggest_intent`-derived entries (no
+  `tool:suggest_intent` chip, no `key === "suggested-intent"` chip)
+- **AND** no reply intent is `switchFrame`.
 
 ### Requirement: Chat citations SHALL carry page + normalized bbox resolved from X-Ray or the search result
 
@@ -1395,4 +1396,22 @@ has no `fileName` SHALL fall back to the `documentId` for display (never blank).
 - **GIVEN** a `search.results` chunk with `fileName` `"utility-bill-april-2026.pdf"` for `documentId` D
 - **WHEN** the middleware resolves a citation for D
 - **THEN** the citation carries `fileName` `"utility-bill-april-2026.pdf"` and the chunk's `sourceUrl`
+
+### Requirement: Offered viewer actions SHALL route onto `suggestedActions`, not a new field
+
+The router SHALL surface an offered viewer action (a navigation tool call carrying
+`offerAs`) as a `suggestedActions` entry whose intent is server-validated (built via
+the target tool's `intentBuilder`, never free-form), carrying the `offerAs` label
+and optional `anchor`. The `suggestedActions` entry shape SHALL gain the optional
+`anchor` field; NO new top-level affordance list SHALL be added. Mutate-tool
+confirmation actions SHALL continue to surface on this same `suggestedActions` list.
+The reply SHALL be single-sourced in `@groundx/shared` and validated at the wire
+boundary.
+
+#### Scenario: An offered action arrives on suggestedActions
+
+- **GIVEN** the agent calls a navigation tool with `offerAs`
+- **WHEN** the reply is built
+- **THEN** `suggestedActions` contains an entry with the label, the validated intent, and the optional anchor
+- **AND** that intent is absent from `reply.intents[]`
 
