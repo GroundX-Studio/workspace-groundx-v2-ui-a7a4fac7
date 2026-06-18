@@ -9,6 +9,7 @@ import {
   useChatStoreActions,
   useChatStoreState,
 } from "./ChatStoreContext";
+import { selectActiveStep } from "./selectors";
 
 const ensureAnonSession = vi.fn();
 const ensureServerChatSession = vi.fn();
@@ -363,6 +364,58 @@ describe("ChatStoreContext", () => {
       // The reached-set is restored independently (drives checkmarks only) and
       // is genuinely non-contiguous — it still carries `integrate`.
       expect([...entity.reachedStages].sort()).toEqual(["analyze", "ingest", "integrate", "understand"]);
+    });
+
+    it("rehydrates the CANVAS — the viewer resumes the active entity's lastStep with no re-push (#30)", () => {
+      // standardized-viewer-control #30 — the entity `lastStep` round-trips, but
+      // the rendered canvas reads `viewer.history[currentStep.stepIndex]`
+      // (selectActiveStep), NOT the entity field. On a bare reload a returning
+      // user must see their last surface (here Interact) WITHOUT any orchestrator
+      // re-push — the deep-link `sampleAlreadyActive` guard skips the re-push for
+      // an already-active entity, so an empty hydrated viewer would drop the user
+      // back on the ingest-picker. LC4: "returning users land in their last
+      // sample." Regression guard for the persisted-but-never-consumed seam.
+      const persistedSessionId = "c-resume-canvas";
+      const snapshot = {
+        version: 2,
+        ownerKey: "anon-test",
+        activeSessionId: persistedSessionId,
+        sessions: [
+          {
+            id: persistedSessionId,
+            title: "Onboarding",
+            createdAt: 1000,
+            updatedAt: 2000,
+            messages: [],
+            entities: [
+              [
+                "sample:utility",
+                {
+                  kind: "sample",
+                  id: "utility",
+                  lastStep: { kind: "interact-chat" },
+                  reachedStages: ["ingest", "understand", "analyze"],
+                  createdAt: 1000,
+                  lastVisitedAt: 1500,
+                },
+              ],
+            ],
+            activeEntityKey: "sample:utility",
+            isOnboardingSession: true,
+            signupOpen: false,
+          },
+        ],
+      };
+      window.localStorage.setItem("groundx-onboarding.chat-store.v1", JSON.stringify(snapshot));
+
+      const wrap = ({ children }: { children: React.ReactNode }) => (
+        withChatStoreApi(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>)
+      );
+      const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
+
+      const active = result.current.state.sessions.get(persistedSessionId)!;
+      // The CANVAS (not just the entity field) resumes the Interact step.
+      expect(selectActiveStep(active)).toEqual({ kind: "interact-chat" });
     });
 
     it("rehydrates a report-builder step verbatim (the surface survives reload)", () => {

@@ -6,7 +6,8 @@
  *
  *   (A) The viewer-step MUTATORS (`pushStep`, `mutateActiveStep`,
  *       `gotoDocViewer`, `showCitationRegions`, `clearCitationHighlight`,
- *       `clearCitationRegions`) are reachable ONLY from the orchestration core
+ *       `clearCitationRegions`) AND the journey mutators (`pickScenario`,
+ *       `returnToIngestPicker`) are reachable ONLY from the orchestration core
  *       — the orchestrator's `dispatch` plus the session-state core it drives.
  *       NO component, view, or chat-experience module may CALL a mutator or
  *       destructure one out of `useChatStore()`. Design §3.3: "Bypass is made
@@ -44,21 +45,33 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const APP_SRC = resolve(HERE, ".."); // app/src
 const MIDDLEWARE_SRC = resolve(APP_SRC, "..", "..", "middleware", "src");
 
-/** The viewer-step mutators that must stay behind the seam. */
+/**
+ * The mutators that must stay behind the seam:
+ *  • viewer-step mutators (ChatStore) — push/replace the active ViewerStep
+ *    and its citation overlays.
+ *  • journey mutators (OnboardingSession) — activate / deactivate the sample
+ *    entity (`pickScenario` / `returnToIngestPicker`). The orchestrator drives
+ *    them from its `showSample` / `presentExperienceBeat` handlers ONLY; no
+ *    view (incl. the deep-link URL effect) calls them directly any more.
+ */
 const MUTATORS = [
+  // viewer-step mutators (ChatStore)
   "pushStep",
   "mutateActiveStep",
   "gotoDocViewer",
   "showCitationRegions",
   "clearCitationHighlight",
   "clearCitationRegions",
+  // journey mutators (OnboardingSession) — orchestrator-only
+  "pickScenario",
+  "returnToIngestPicker",
 ] as const;
 
 /**
  * The orchestration core — the only modules permitted to reach a mutator.
  * Paths are POSIX-relative to `app/src`. The orchestrator's `dispatch` calls
- * the mutators directly; the ChatStore module DEFINES them; the
- * OnboardingSession context performs the journey/sample-activation state
+ * the mutators directly; the ChatStore module DEFINES the viewer-step mutators;
+ * the OnboardingSession context DEFINES + performs the journey/sample-activation
  * mutations the orchestrator drives (`pickScenario` / `returnToIngestPicker`).
  */
 const ORCHESTRATION_CORE = new Set<string>([
@@ -203,6 +216,10 @@ describe("viewer-mutation seam + retired-frame-vocabulary guard (T10)", () => {
     expect(mutatorReachesFor("foo();\npushStep({ kind: 'integrate' });")).toContain("pushStep(...) call");
     // Member-access reach through a held store ref must also trip.
     expect(mutatorReachesFor("chatStore.pushStep({ kind: 'integrate' });")).toContain("pushStep(...) call");
+    // Journey mutators (OnboardingSession) are equally orchestrator-only — a
+    // view calling either directly must trip.
+    expect(mutatorReachesFor("onboardingSession.pickScenario('utility');")).toContain("pickScenario(...) call");
+    expect(mutatorReachesFor("returnToIngestPicker();")).toContain("returnToIngestPicker(...) call");
     expect(
       mutatorReachesFor("const { state, gotoDocViewer } = useChatStore();"),
     ).toContain("gotoDocViewer destructured from useChatStore");

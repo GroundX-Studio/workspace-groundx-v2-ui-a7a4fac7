@@ -161,7 +161,7 @@ export const ChatColumn: FC<ChatColumnProps> = ({
   // The picker: the active step is the ingest-picker (journey stage `ingest`),
   // OR there's no journey at all (no step, no scenario) — the pre-scenario idle
   // state.
-  const isF1 = journeyStage === "ingest" || (journeyStage == null && !scenario);
+  const isIngestPicker = journeyStage === "ingest" || (journeyStage == null && !scenario);
 
   // The onboarding journey gets the onboarding experience. The conversation
   // stays mounted across the whole journey so auto-advance doesn't wipe
@@ -190,7 +190,7 @@ export const ChatColumn: FC<ChatColumnProps> = ({
     return <ConversationFlow chatSessionId={activeSessionId} />;
   }
 
-  if (isF1) return <IdleChatPlaceholder />;
+  if (isIngestPicker) return <IdleChatPlaceholder />;
   if (!scenario) return <ByoChatPlaceholder />;
   return <IdleChatPlaceholder />;
 };

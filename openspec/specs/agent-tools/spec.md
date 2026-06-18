@@ -89,14 +89,14 @@ Accept the field SHALL be added to the active schema. (See
 ### Requirement: propose_report_section tool SHALL emit a ProposalCard in S3a
 
 The agent-tool registry SHALL include `propose_report_section({section_def})`. On invocation, a
-ProposalCard SHALL surface in the report builder (frame f4a / S3a) section list; on Accept the
+ProposalCard SHALL surface in the report builder (S3a) section list; on Accept the
 section SHALL be added to the active template via the shared template-edit method. The ProposalCard
 surface contract is owned by the `smart-report` capability and mirrors `propose_schema_field`.
 
 #### Scenario: Tool surfaces a section propose-card
 
 - **WHEN** the LLM emits `propose_report_section`
-- **THEN** a ProposalCard renders in the report builder (frame f4a)
+- **THEN** a ProposalCard renders in the report builder
 - **AND** Accept lands the section into the template via the shared edit-template method.
 
 ### Requirement: Tool error recovery SHALL fall back after 3 consecutive failures
@@ -291,8 +291,8 @@ family was spec-only and would have failed the quality guard the moment it was a
 
 The registry SHALL include `show_smart_report_render({ template_id?, scope })` and
 `show_smart_report_edit({ template_id, selected_section_id? })`, where `scope` is a `ContentScope`.
-`show_smart_report_render` SHALL move the canvas to the report render surface (frame f4 / S3) for the
-given scope; `show_smart_report_edit` SHALL move the canvas to the builder (frame f4a / S3a) with the
+`show_smart_report_render` SHALL move the canvas to the report render surface (S3) for the
+given scope; `show_smart_report_edit` SHALL move the canvas to the builder (S3a) with the
 named section pre-selected when supplied. Each SHALL be mirrored on BOTH the app `*.tools.ts` AND the
 middleware `SERVER_TOOL_CATALOG`, with the drift-guard test green. The surface contract is owned by
 the `smart-report` capability.
@@ -300,12 +300,12 @@ the `smart-report` capability.
 #### Scenario: Render tool opens the report surface for a scope
 
 - **WHEN** the LLM emits `show_smart_report_render` with a `scope`
-- **THEN** the canvas moves to the report render surface (frame f4) rendered over that scope.
+- **THEN** the canvas moves to the report render surface rendered over that scope.
 
 #### Scenario: Edit tool opens the builder with a section selected
 
 - **WHEN** the LLM emits `show_smart_report_edit` with a `selected_section_id`
-- **THEN** the canvas moves to the report builder (frame f4a) with the named section pre-selected.
+- **THEN** the canvas moves to the report builder with the named section pre-selected.
 
 ### Requirement: Report template-mutation tools SHALL share the Extract builder tool family
 

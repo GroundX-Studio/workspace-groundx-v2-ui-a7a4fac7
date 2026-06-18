@@ -467,7 +467,7 @@ describe("OnboardingShell", () => {
   // otherwise screen-reader / keyboard-Tab users hit phantom sidebar +
   // chat elements that have no visible affordance. The fix: wrap the
   // underneath shell in a div carrying `aria-hidden="true"` and `inert`
-  // while `isF1` is true; clear both on F2.
+  // while the ingest picker is shown; clear both once a sample is active.
   it("WF-01 C1: F1 marks the underneath shell aria-hidden + inert", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
     const wrap = screen.getByTestId("onboarding-shell-underneath");

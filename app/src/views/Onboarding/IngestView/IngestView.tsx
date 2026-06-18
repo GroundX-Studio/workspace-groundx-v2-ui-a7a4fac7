@@ -98,8 +98,8 @@ export const IngestView: FC = () => {
       // on an already-active entity). Going through the seam (not a direct
       // `pickScenario` call ALSO followed by the dispatch) avoids running the
       // pick twice. AppMode + the canonical URL are updated alongside so deep
-      // links + back/forward work; OnboardingShell's URL-sync useEffect calling
-      // `pickScenario` on the URL change is idempotent.
+      // links + back/forward work; OnboardingShell's URL-sync useEffect
+      // dispatching `showSample` on the URL change is idempotent.
       setScenario(scenario);
       dispatch({ kind: "showSample", scenario }, "user");
       if (registry.bucketId != null) {

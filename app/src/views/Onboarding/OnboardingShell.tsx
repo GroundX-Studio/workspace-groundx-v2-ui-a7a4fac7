@@ -46,12 +46,12 @@ import { isResolvedDocumentId } from "@/api/documentId";
 import { viewerOverlayFrameDescriptors } from "./viewerOverlayFrameDescriptors";
 
 // ─────────────────────────────────────────────────────────────────────
-// ARCH-06 F1 overlay animation spec (locked 2026-05-26).
+// ARCH-06 ingest-picker overlay animation spec (locked 2026-05-26).
 //
-// Mental model: F1 (the picker) is an OVERLAY on top of F2+ (the
-// canonical AppShell). When the user picks a sample / clicks BYO,
-// F1 lifts up off the top edge to reveal what was always underneath.
-// When they click the Ingest pill, F1 returns over the top.
+// Mental model: the ingest picker is an OVERLAY on top of the canonical
+// AppShell canvas. When the user picks a sample / clicks BYO, the picker
+// lifts up off the top edge to reveal what was always underneath. When
+// they click the Ingest pill, the picker returns over the top.
 //
 // Spec — A · Sheet dismiss (Iris/Curtain alternatives evaluated &
 // rejected; A is the "premium calm" choice for a first-impression
@@ -59,25 +59,25 @@ import { viewerOverlayFrameDescriptors } from "./viewerOverlayFrameDescriptors";
 //
 //   • Easing: cubic-bezier(0.32, 0.72, 0, 1) — iOS-style ease-out
 //     curve. Front-loaded distance, no overshoot.
-//   • Dismiss (F1 leaves, 900ms): F1 translates Y 0 → -100%; opacity
+//   • Dismiss (picker leaves, 900ms): translates Y 0 → -100%; opacity
 //     holds at 1 through the first 70% of the timeline, then wipes
 //     1 → 0 over the final 30% (270ms). The held-opacity window
 //     reads as a physical lift instead of a dissolve.
-//   • Return (F1 comes back, 700ms): F1 translates Y -100% → 0;
+//   • Return (picker comes back, 700ms): translates Y -100% → 0;
 //     opacity fades 0 → 1 over the first 30% (210ms), then holds.
 //     Asymmetric duration is intentional — return is slightly
-//     snappier so users don't feel "stuck on F1" when bouncing back.
-//   • F2 zoom: scale 0.985 → 1, opacity 0.92 → 1 on dismiss; inverse
+//     snappier so users don't feel "stuck on the picker" when bouncing back.
+//   • Canvas zoom: scale 0.985 → 1, opacity 0.92 → 1 on dismiss; inverse
 //     on return. Deliberately subtle (~1.5% scale) so it reads as
 //     "settling into focus" rather than swelling.
 //   • Reduced motion: animations bypassed; instant swap.
 // ─────────────────────────────────────────────────────────────────────
-const F1_DISMISS_DURATION_S = 0.9;
-const F1_RETURN_DURATION_S = 0.7;
-const F1_OPACITY_PORTION = 0.3; // 30% of the duration for the fade tail
-const F1_OVERLAY_EASE = [0.32, 0.72, 0, 1] as const;
-const F2_ZOOM_SCALE = 0.985;
-const F2_ZOOM_OPACITY = 0.92;
+const PICKER_DISMISS_DURATION_S = 0.9;
+const PICKER_RETURN_DURATION_S = 0.7;
+const PICKER_OPACITY_PORTION = 0.3; // 30% of the duration for the fade tail
+const PICKER_OVERLAY_EASE = [0.32, 0.72, 0, 1] as const;
+const CANVAS_ZOOM_SCALE = 0.985;
+const CANVAS_ZOOM_OPACITY = 0.92;
 
 // standardized-viewer-control T3 — the current journey stage sources off the
 // active ViewerStep kind via `VIEWER_STEP_TO_JOURNEY` (no fallback), and the
@@ -102,8 +102,8 @@ function pillState(
   // Integrate is reachable only after sign-in (post-gate). AUTH-gated, not
   // progress-gated — a signed-in user reaches it from anywhere.
   if (stepId === "integrate" && !authSignedIn) return "disabled";
-  // Understand, Analyze can't be jumped to until a sample is picked on F1 —
-  // they need a scenario to render anything meaningful.
+  // Understand, Analyze can't be jumped to until a sample is picked on the
+  // ingest picker — they need a scenario to render anything meaningful.
   if ((stepId === "understand" || stepId === "analyze") && !scenarioPicked) return "disabled";
   // Progress gate (2026-06-12): you cannot jump AHEAD of the step you're on.
   // Analyze stays disabled until the user has actually reached it (the guided
@@ -148,29 +148,31 @@ function analyzeSubsteps(
 }
 
 /**
- * OnboardingShell — composes the F1–F7 frames behind a shared
- * shell-level left-rail nav.
+ * OnboardingShell — composes the onboarding journey behind a shared
+ * shell-level left-rail nav. The journey is a sequence of viewer steps,
+ * not a frame machine; the only special surface is the ingest-picker
+ * overlay that floats over the canvas before a sample is active.
  *
- *   • OnboardingNav lives at the shell root, mounted on every frame.
- *     It owns its own collapsed/expanded state (chevron) and never
- *     animates during F1 ↔ F2 transitions.
- *   • F1 (Ingest) — the right-of-nav slot is the full-width picker
+ *   • OnboardingNav lives at the shell root, mounted throughout. It owns
+ *     its own collapsed/expanded state (chevron) and never animates during
+ *     the picker ↔ canvas transition.
+ *   • Ingest picker — the right-of-nav slot is the full-width picker
  *     (StepStrip on top, IngestView below). No chat column.
- *   • F2–F7 — the right-of-nav slot is the AppShell chat | canvas
+ *   • Active sample — the right-of-nav slot is the AppShell chat | canvas
  *     split. Chat column hosts ConversationFlow; canvas hosts the
  *     active ScopedViewerWidget via `<ScopedCanvas>` and viewer
  *     overlays such as sign-in and booking.
- *   • The F1 ↔ shell transition slides ONLY chat + canvas; the nav
+ *   • The picker ↔ shell transition slides ONLY chat + canvas; the nav
  *     is stable.
  *
- * Step strip lives at the top of the canvas (or the top of F1's
- * picker), NOT in the nav.
+ * Step strip lives at the top of the canvas (or the top of the picker),
+ * NOT in the nav.
  */
 export const OnboardingShell: FC = () => {
   const api = useApi();
   const { state: appMode } = useAppMode();
   const widgetRole = useWidgetRole();
-  const { state: session, bootstrapSession, pickScenario, openGate, dismissGate, commitGate } = useOnboardingSession();
+  const { state: session, bootstrapSession, openGate, dismissGate, commitGate } = useOnboardingSession();
   // standardized-viewer-control T6 — the step-strip pills, Analyze sub-pills,
   // the post-gate "Continue to Integrate", and the Understand pill MOVE the
   // canvas ONLY by dispatching the corresponding intent (the single
@@ -215,13 +217,13 @@ export const OnboardingShell: FC = () => {
     signupSurfaceActiveEarly && session.scenario == null
       ? "ingest"
       : activeJourney?.step ?? "ingest";
-  // standardized-viewer-control T6 — `isF1` (the ingest-picker overlay gate)
+  // standardized-viewer-control T6 — `isIngestPicker` (the ingest-picker overlay gate)
   // reads the ACTIVE STEP KIND. The picker is up when the active viewer step is
   // `ingest-picker` (the step the return-to-picker path pushes), OR when no step
   // has landed yet AND no scenario is active (the first-mount / deactivated
   // state, which the strip resolves to Ingest). Book-call / sign-up surfaces
   // suppress it (they overlay the canvas).
-  const isF1 =
+  const isIngestPicker =
     (latestViewerStepEarly
       ? latestViewerStepEarly.kind === "ingest-picker"
       : session.scenario == null) &&
@@ -235,7 +237,7 @@ export const OnboardingShell: FC = () => {
   // -- URL ↔ surface sync ----------------------------------------
   //
   // The URL is the source of truth for which surface is mounted:
-  //   /onboarding                                  → F1 picker
+  //   /onboarding                                  → ingest picker
   //   /onboarding/signup                           → BYO signup surface
   //   /onboarding/<bucketId>/<scenarioId>          → that sample active
   //
@@ -248,18 +250,16 @@ export const OnboardingShell: FC = () => {
   // mutates the URL. The useEffect then re-derives state from the
   // new URL — no double-write, no loop, because session actions are
   // idempotent when invoked with the same target.
-  // Refs to the latest session actions so the useEffect below has
-  // stable references. The actions themselves are stable
-  // (useCallback []), but pickScenario etc. depend on `registry`
-  // which we don't pass into the dep array — keep refs to dodge
-  // exhaustive-deps complaints without re-firing on identity.
-  const pickScenarioRef = useRef(pickScenario);
+  // Refs to the latest session actions + the orchestrator dispatch so the
+  // useEffect below has stable references. The actions themselves are stable
+  // (useCallback []), but they depend on `registry` which we don't pass into
+  // the dep array — keep refs to dodge exhaustive-deps complaints without
+  // re-firing on identity.
   const openGateRef = useRef(openGate);
   const dispatchRef = useRef(dispatch);
   const activeScenarioRef = useRef(session.scenario);
   const activeEntityKeyRef = useRef(activeEntityKeyEarly);
   const appScenarioRef = useRef(appMode.scenario);
-  pickScenarioRef.current = pickScenario;
   openGateRef.current = openGate;
   dispatchRef.current = dispatch;
   activeScenarioRef.current = session.scenario;
@@ -303,7 +303,12 @@ export const OnboardingShell: FC = () => {
         activeEntityKeyRef.current === targetEntityKey ||
         appScenarioRef.current === params.scenarioId;
       if (!sampleAlreadyActive) {
-        pickScenarioRef.current(params.scenarioId as Scenario);
+        // Activate the sample through the ONE dispatch seam — `showSample`'s
+        // orchestrator handler calls `pickScenario` (resume-preserving,
+        // idempotent on an already-active entity). No view reaches into the
+        // session mutators directly; the deep-link mirrors IngestView's
+        // sample-card click.
+        dispatchRef.current({ kind: "showSample", scenario: params.scenarioId as Scenario }, "user");
       }
       return;
     }
@@ -439,15 +444,15 @@ export const OnboardingShell: FC = () => {
   const handleStepClick = useCallback(
     (stepId: StepId) => {
       if (stepId === "integrate" && appMode.authState !== "signed-in") return;
-      // Understand + Analyze need a scenario; on F1 the user must click a
-      // sample card (or BYO) first.
+      // Understand + Analyze need a scenario; on the ingest picker the user
+      // must click a sample card (or BYO) first.
       if ((stepId === "understand" || stepId === "analyze") && session.scenario == null) return;
       if (stepId === "ingest") {
-        // Returning to the F1 picker is a URL navigation. The session
+        // Returning to the ingest picker is a URL navigation. The session
         // scenario gets cleared by the URL→state effect; AppShell
         // underneath keeps rendering whatever the canvas resolves to
         // (likely UnderstandView's BYO placeholder during the brief
-        // return window before F1 covers it).
+        // return window before the picker covers it).
         navigate("/onboarding");
         return;
       }
@@ -514,10 +519,10 @@ export const OnboardingShell: FC = () => {
     [dispatch, session.scenario, navDocScope, navReportScope, navScenarioId, chatStoreState],
   );
 
-  // F6a — Book a Call · Calendly embed.
+  // Book a Call · Calendly embed.
   // Activated by `?bookCall=1` in the URL (set by the nav CTA, the
   // sign-in viewer, or the book_call tool). Lives on the same route
-  // as F2-F7 so all back-
+  // as the active-sample surfaces so all back-
   // button / reload semantics work out of the box: the URL is the
   // source of truth. When the param is present we push a viewer overlay
   // for Calendly and keep the active chat timeline mounted; booking
@@ -684,7 +689,7 @@ export const OnboardingShell: FC = () => {
   // ScopedViewerWidgets (`doc-viewer`/`extract-workbench`/`report`/
   // `report-builder`/`integrate`) that `<ScopedCanvas>` mounts for real — no
   // canvas placeholder remains for any production frame. The ONLY remaining
-  // ScopedCanvas placeholder kind is `ingest-picker` (the F1 overlay).
+  // ScopedCanvas placeholder kind is `ingest-picker` (the picker overlay).
   //
   // Gate / book-call remain WIDGET mounts the shell shows directly (NOT
   // views routed through ScopedCanvas) — they're anonymous-context
@@ -926,9 +931,9 @@ export const OnboardingShell: FC = () => {
   const theme = useTheme();
   const stripCompact = useMediaQuery(theme.breakpoints.down("md"));
 
-  const f1Layout = (
+  const pickerLayout = (
     <Box
-      // standardized-viewer-control (D2) — the F1 ingest overlay is always the
+      // standardized-viewer-control (D2) — the ingest overlay is always the
       // `ingest-picker` step; its frame-free diagnostic testid is fixed
       // (the dynamic canvas testid below is omitted while this overlay covers it).
       data-testid={`onboarding-step-${viewerStepDiagnosticId({ kind: "ingest-picker" })}`}
@@ -955,12 +960,12 @@ export const OnboardingShell: FC = () => {
     </Box>
   );
 
-  // ARCH-06B (2026-05-26): F1 ↔ F2 transition is now driven by the
-  // AnimatePresence on the F1 overlay in render below; the previous
+  // ARCH-06B (2026-05-26): the picker ↔ canvas transition is now driven by
+  // the AnimatePresence on the picker overlay in render below; the previous
   // transitionPhase state machine + setTimeout-based leaving-snapshot
   // ref was retired when the dual-shell mount pattern was replaced
   // by a single AppShell + overlay model. AppShell stays mounted at
-  // all times; F1 enters/exits over top of it. See animation spec
+  // all times; the picker enters/exits over top of it. See animation spec
   // constants at the top of this file.
   const reducedMotion = useReducedMotion();
 
@@ -1034,9 +1039,9 @@ export const OnboardingShell: FC = () => {
     [location.pathname, location.search, navigate],
   );
 
-  // The chat + canvas split that lives in the right-of-nav slot for
-  // F2+. Sign-in and booking mount in the viewer stack; the chat column
-  // keeps ConversationFlow mounted.
+  // The chat + canvas split that lives in the right-of-nav slot once a
+  // sample is active. Sign-in and booking mount in the viewer stack; the
+  // chat column keeps ConversationFlow mounted.
   const chatIdle = (
     <Box
       data-testid="onboarding-shell-chat-pane"
@@ -1100,14 +1105,14 @@ export const OnboardingShell: FC = () => {
     >
       <Box
         sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }}
-        // When isF1, the AppShell canvas slot is intentionally empty
+        // When isIngestPicker, the AppShell canvas slot is intentionally empty
         // (the ingest-picker overlay covers it). Omit the testid so it doesn't
         // duplicate the ingest-picker overlay's own
         // `onboarding-step-ingest-picker` and break selector-based assertions.
         // standardized-viewer-control (D2) — the diagnostic testid is sourced off
         // the ACTIVE viewer step (kind + sub-position).
         data-testid={
-          isF1 || !latestViewerStepEarly
+          isIngestPicker || !latestViewerStepEarly
             ? undefined
             : `onboarding-step-${viewerStepDiagnosticId(latestViewerStepEarly)}`
         }
@@ -1141,11 +1146,11 @@ export const OnboardingShell: FC = () => {
   );
 
   // OnboardingNav is the AppShell's nav slot. It's always mounted now
-  // (ARCH-06B 2026-05-26): F1 used to NOT mount the AppShell at all,
-  // so the nav literally wasn't in the DOM on the picker. Today
-  // AppShell is the canonical underlay and F1 floats over it as an
-  // overlay — the nav is in the DOM, just visually obscured while F1
-  // covers the viewport. When F1 dismisses, the nav is revealed.
+  // (ARCH-06B 2026-05-26): the picker used to NOT mount the AppShell at
+  // all, so the nav literally wasn't in the DOM on the picker. Today
+  // AppShell is the canonical underlay and the picker floats over it as
+  // an overlay — the nav is in the DOM, just visually obscured while the
+  // picker covers the viewport. When the picker dismisses, the nav is revealed.
   const navIdle = (
     <OnboardingNav
       accountState="loggedOut"
@@ -1157,17 +1162,17 @@ export const OnboardingShell: FC = () => {
   );
 
   // ARCH-06B transitions — see the locked spec at the top of this file.
-  // F2 zoom (the AppShell underneath) and F1 overlay translate/fade are
-  // expressed as framer-motion variants so the reduced-motion gate
-  // collapses both to instant on the appropriate setting.
-  const f2ZoomAnimate = isF1
-    ? { scale: F2_ZOOM_SCALE, opacity: F2_ZOOM_OPACITY }
+  // Canvas zoom (the AppShell underneath) and the picker overlay's
+  // translate/fade are expressed as framer-motion variants so the
+  // reduced-motion gate collapses both to instant on the appropriate setting.
+  const canvasZoomAnimate = isIngestPicker
+    ? { scale: CANVAS_ZOOM_SCALE, opacity: CANVAS_ZOOM_OPACITY }
     : { scale: 1, opacity: 1 };
-  const f2ZoomTransition = reducedMotion
+  const canvasZoomTransition = reducedMotion
     ? { duration: 0 }
     : {
-        duration: isF1 ? F1_RETURN_DURATION_S : F1_DISMISS_DURATION_S,
-        ease: F1_OVERLAY_EASE,
+        duration: isIngestPicker ? PICKER_RETURN_DURATION_S : PICKER_DISMISS_DURATION_S,
+        ease: PICKER_OVERLAY_EASE,
       };
 
   return (
@@ -1184,36 +1189,36 @@ export const OnboardingShell: FC = () => {
 
       {/* AppShell — always mounted, the canonical underneath. Wrapped
           in a motion.div so the entire shell does a subtle scale +
-          opacity settle when F1 dismisses (and the inverse when F1
-          returns), reinforcing the "shell coming into focus" feel
-          without any one element doing the heavy lift. */}
+          opacity settle when the picker dismisses (and the inverse when
+          the picker returns), reinforcing the "shell coming into focus"
+          feel without any one element doing the heavy lift. */}
       <motion.div
         data-testid="onboarding-shell-underneath"
-        // WF-01 C1 (2026-05-28). While F1 is up, the underneath shell is
-        // visually masked by the opaque F1 overlay AND must be hidden
+        // WF-01 C1 (2026-05-28). While the picker is up, the underneath shell is
+        // visually masked by the opaque picker overlay AND must be hidden
         // from assistive tech + keyboard navigation. `aria-hidden`
         // pulls it out of the a11y tree; `inert` blocks focus + click
         // (React 19's first-class attr; we set it as a string for
         // React 18 forward-compat).
-        aria-hidden={isF1 || undefined}
-        {...(isF1 ? { inert: "" as unknown as undefined } : {})}
+        aria-hidden={isIngestPicker || undefined}
+        {...(isIngestPicker ? { inert: "" as unknown as undefined } : {})}
         style={{
           position: "absolute",
           inset: 0,
           zIndex: 0,
           transformOrigin: "center center",
         }}
-        animate={f2ZoomAnimate}
-        transition={f2ZoomTransition}
+        animate={canvasZoomAnimate}
+        transition={canvasZoomTransition}
       >
         {/* ARCH-06B (2026-05-26): keep AppShell fully populated even
-            on F1. Toggling hideNav/hideChat would re-trigger AppShell's
-            internal AnimatePresence width-grow on nav + chat as F1
-            lifts away — visually competing with the F1 overlay's lift.
-            With nav/chat always mounted, the underneath shell is
-            stable; only the wrapper's F2 zoom + the F1 overlay's lift
-            play during the transition. The user sees the shell as
-            "always already there." */}
+            while the picker is up. Toggling hideNav/hideChat would
+            re-trigger AppShell's internal AnimatePresence width-grow on
+            nav + chat as the picker lifts away — visually competing with
+            the picker overlay's lift. With nav/chat always mounted, the
+            underneath shell is stable; only the wrapper's canvas zoom +
+            the picker overlay's lift play during the transition. The user
+            sees the shell as "always already there." */}
         <AppShell
           nav={navIdle}
           header={headerStrip}
@@ -1225,18 +1230,18 @@ export const OnboardingShell: FC = () => {
         />
       </motion.div>
 
-      {/* F1 overlay — the picker floats on top of the always-there
-          AppShell. Lifts up on dismiss (900ms, opacity held till 70%
-          for a tactile lift instead of dissolve), returns down on
+      {/* Ingest-picker overlay — the picker floats on top of the
+          always-there AppShell. Lifts up on dismiss (900ms, opacity held
+          till 70% for a tactile lift instead of dissolve), returns down on
           Ingest-pill click (700ms, opacity fades in over first 30%).
-          AnimatePresence drives the mount/unmount via the isF1 flag;
+          AnimatePresence drives the mount/unmount via the isIngestPicker flag;
           initial={false} suppresses the entrance animation on first
-          page load so users landing on /onboarding don't see F1 fly
-          in from above. */}
+          page load so users landing on /onboarding don't see the picker
+          fly in from above. */}
       <AnimatePresence initial={false}>
-        {isF1 ? (
+        {isIngestPicker ? (
           <motion.div
-            key="f1-overlay"
+            key="picker-overlay"
             style={{ position: "absolute", inset: 0, zIndex: 10 }}
             initial={{ y: "-100%", opacity: 0 }}
             animate={{
@@ -1245,10 +1250,10 @@ export const OnboardingShell: FC = () => {
               transition: reducedMotion
                 ? { duration: 0 }
                 : {
-                    y: { duration: F1_RETURN_DURATION_S, ease: F1_OVERLAY_EASE },
+                    y: { duration: PICKER_RETURN_DURATION_S, ease: PICKER_OVERLAY_EASE },
                     opacity: {
-                      duration: F1_RETURN_DURATION_S * F1_OPACITY_PORTION,
-                      ease: F1_OVERLAY_EASE,
+                      duration: PICKER_RETURN_DURATION_S * PICKER_OPACITY_PORTION,
+                      ease: PICKER_OVERLAY_EASE,
                     },
                   },
             }}
@@ -1258,16 +1263,16 @@ export const OnboardingShell: FC = () => {
               transition: reducedMotion
                 ? { duration: 0 }
                 : {
-                    y: { duration: F1_DISMISS_DURATION_S, ease: F1_OVERLAY_EASE },
+                    y: { duration: PICKER_DISMISS_DURATION_S, ease: PICKER_OVERLAY_EASE },
                     opacity: {
-                      duration: F1_DISMISS_DURATION_S * F1_OPACITY_PORTION,
-                      ease: F1_OVERLAY_EASE,
-                      delay: F1_DISMISS_DURATION_S * (1 - F1_OPACITY_PORTION),
+                      duration: PICKER_DISMISS_DURATION_S * PICKER_OPACITY_PORTION,
+                      ease: PICKER_OVERLAY_EASE,
+                      delay: PICKER_DISMISS_DURATION_S * (1 - PICKER_OPACITY_PORTION),
                     },
                   },
             }}
           >
-            {f1Layout}
+            {pickerLayout}
           </motion.div>
         ) : null}
       </AnimatePresence>
