@@ -587,6 +587,6 @@ those durable requirements survive untouched and the spec set self-contradicts.
   frame vocabulary anywhere is that single test-harness directory. tsc/app 1909/mw 1016
   green.
 
-> **discipline §8:** the first two items are deferred future work and MUST each be filed
-> as a GitHub Issue before this change is archived (don't leave them as orphaned bullets).
-> The last is a non-action (explicitly nothing to do), so no Issue is needed.
+> **discipline §8 (satisfied 2026-06-18):** the two deferred features are filed as GitHub
+> Issues — **#28** (steady per-category pills) and **#29** (persistent destination-switcher
+> decision). The persisted-intent item is a non-action (nothing to do), so no Issue.
