@@ -25,8 +25,8 @@ test.describe("F2 compact mode", () => {
     await page.setViewportSize(MOBILE);
     await page.goto("/onboarding");
     await page.getByTestId("sample-utility").click();
-    // Compact mode mounts the top bar as soon as F2 enters; the
-    // `onboarding-frame-f2` element lives in the canvas slot which is
+    // Compact mode mounts the top bar as soon as the sample opens; the
+    // `onboarding-step-doc-viewer` element lives in the canvas slot which is
     // unmounted until the user taps "View canvas".
     await expect(page.getByTestId("appshell-compact-topbar")).toBeVisible();
 
@@ -51,8 +51,8 @@ test.describe("F2 compact mode", () => {
     await page.setViewportSize(MOBILE);
     await page.goto("/onboarding");
     await page.getByTestId("sample-utility").click();
-    // Compact mode mounts the top bar as soon as F2 enters; the
-    // `onboarding-frame-f2` element lives in the canvas slot which is
+    // Compact mode mounts the top bar as soon as the sample opens; the
+    // `onboarding-step-doc-viewer` element lives in the canvas slot which is
     // unmounted until the user taps "View canvas".
     await expect(page.getByTestId("appshell-compact-topbar")).toBeVisible();
 
@@ -81,8 +81,8 @@ test.describe("F2 compact mode", () => {
     await page.setViewportSize(MOBILE);
     await page.goto("/onboarding");
     await page.getByTestId("sample-utility").click();
-    // Compact mode mounts the top bar as soon as F2 enters; the
-    // `onboarding-frame-f2` element lives in the canvas slot which is
+    // Compact mode mounts the top bar as soon as the sample opens; the
+    // `onboarding-step-doc-viewer` element lives in the canvas slot which is
     // unmounted until the user taps "View canvas".
     await expect(page.getByTestId("appshell-compact-topbar")).toBeVisible();
     // The chat content must stay within the viewport — no surprise
@@ -105,8 +105,8 @@ test.describe("F2 compact mode", () => {
     await page.setViewportSize(DESKTOP);
     await page.goto("/onboarding");
     await page.getByTestId("sample-utility").click();
-    // At desktop the canvas slot mounts and the f2 frame is rendered there.
-    await expect(page.getByTestId("onboarding-frame-f2")).toBeVisible();
+    // At desktop the canvas slot mounts and the Understand doc-viewer step is rendered there.
+    await expect(page.getByTestId("onboarding-step-doc-viewer")).toBeVisible();
     await expect(page.getByTestId("appshell-compact-topbar")).toHaveCount(0);
     await expect(page.locator("aside[aria-label='Primary navigation']")).toBeVisible();
   });

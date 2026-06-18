@@ -45,16 +45,16 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // Structural: the F2 frame mounts. (The former `April 2026 Statement`
     // assertion was a MOCK_MODE fixture title; against the live doc the title is
     // not a stable contract.)
-    await expect(page.getByTestId("onboarding-frame-f2")).toBeVisible();
+    await expect(page.getByTestId("onboarding-step-doc-viewer")).toBeVisible();
   });
 
   test("F2 reveals the 'Show me the extract' affordance after thinking notes", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2 plays a 6-note thinking stream then AUTO-advances to F3
-    // (experience.tsx onDone → advanceFrame("f3")). Assert the auto-advance
-    // lands on the F3 frame rather than the legacy "advance-to-f3" pill, which
-    // the auto-advance preempts. Timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    // The Understand beat plays a 6-note thinking stream then AUTO-advances to
+    // Extract (experience.tsx onDone → dispatchIntent({ kind: "showExtract" })).
+    // Assert the auto-advance lands on the extract-workbench step rather than
+    // clicking a pill the auto-advance preempts. Timeout covers the live stream.
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
   });
 
   // Structural, live-data-stable: the extract renders schema rows and at least
@@ -63,11 +63,12 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
   // names/values (those were MOCK_MODE fixtures).
   test("F3 surfaces schema rows with citation chips", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     // At least one extracted field row renders.
     await expect(page.locator('[data-testid^="field-row-"]').first()).toBeVisible({ timeout: 15_000 });
     // At least one field carries a citation chip.
@@ -82,11 +83,12 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
   // ──────────────────────────────────────────────────────────────────────
   test("F4 citation peek opens when a cited field row is clicked", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     // Click a row that actually carries a citation, so the peek has one to show.
     const citedRow = page
       .locator('[data-testid^="field-row-"]', { has: page.locator('[data-testid^="cite-chip-"]') })
@@ -107,26 +109,28 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
 
   test("F5 InteractView mounts after advancing from Extract", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
-    await page.getByTestId("advance-to-f5").click({ timeout: 15_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
+    await page.getByTestId("onboarding-chat-pick-view-interact").click({ timeout: 15_000 });
     // The InteractView (F5) canvas mounts. The interact chat is LIVE (no
     // MOCK_MODE): the seed prompt is offered as a suggestion, not auto-sent, and
     // any answer is a non-deterministic LLM response — so we assert the F5
     // surface mounts, not specific conversation text.
-    await expect(page.getByTestId("onboarding-frame-f5")).toBeVisible();
+    await expect(page.getByTestId("onboarding-step-interact-chat")).toBeVisible();
   });
 
   test("F6 gate opens on Save and is dismissable (LC5 back-out)", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     // Anon gate-open: the Extract "unlock" banner fires openGate("save")
     // (the removed `advance-to-f6` affordance). Save itself is disabled until
     // there are unsaved edits, so the banner is the reliable anon trigger.
@@ -149,11 +153,12 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     });
 
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     // Anon gate-open: the Extract "unlock" banner fires openGate("save")
     // (the removed `advance-to-f6` affordance). Save itself is disabled until
     // there are unsaved edits, so the banner is the reliable anon trigger.
@@ -174,11 +179,12 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
 
   test("F6 gate: Send with an empty email is a no-op (gate stays open)", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     await page.getByTestId("extract-unlock-banner").click({ timeout: 15_000 });
     await expect(page.getByTestId("sign-up-viewer-surface")).toBeVisible();
 
@@ -205,11 +211,12 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // underlay but is aria-hidden/inert while sign-in is active; closing sign-in
     // returns to the same Extract workbench.
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     // Pre-condition: the Extract sample workbench is on canvas.
     await expect(page.getByTestId("extract-workbench")).toBeVisible({ timeout: 15_000 });
 
@@ -232,11 +239,12 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
 
   test("F6 gate honors 'keep exploring' link dismiss (LC5 back-out)", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     // Anon gate-open: the Extract "unlock" banner fires openGate("save")
     // (the removed `advance-to-f6` affordance). Save itself is disabled until
     // there are unsaved edits, so the banner is the reliable anon trigger.
@@ -289,34 +297,37 @@ test.describe("F1–F7 axe a11y @desktop-only", () => {
 
   test("F3 extract is axe-clean", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible();
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible();
     await expectAxeClean(page, "F3");
   });
 
   test("F5 interact is axe-clean", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
-    await page.getByTestId("advance-to-f5").click({ timeout: 15_000 });
-    await expect(page.getByTestId("onboarding-frame-f5")).toBeVisible();
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
+    await page.getByTestId("onboarding-chat-pick-view-interact").click({ timeout: 15_000 });
+    await expect(page.getByTestId("onboarding-step-interact-chat")).toBeVisible();
     await expectAxeClean(page, "F5");
   });
 
   test("F6 sign-in viewer overlay is axe-clean", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
-    // F2's thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
-    // advances to F3 on completion (experience.tsx onDone → advanceFrame("f3")),
-    // so we wait for the F3 frame rather than clicking a pill the auto-advance
+    // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
+    // advances to Extract on completion (experience.tsx onDone →
+    // dispatchIntent({ kind: "showExtract" })), so we wait for the
+    // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
-    await expect(page.getByTestId("onboarding-frame-f3")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     // Anon gate-open: the Extract "unlock" banner fires openGate("save")
     // (the removed `advance-to-f6` affordance). Save itself is disabled until
     // there are unsaved edits, so the banner is the reliable anon trigger.
