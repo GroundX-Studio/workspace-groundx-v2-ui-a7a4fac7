@@ -662,3 +662,11 @@ each tested but the SEAM between them was not.
 > **discipline §8 (satisfied 2026-06-18):** the two deferred features are filed as GitHub
 > Issues — **#28** (steady per-category pills) and **#29** (persistent destination-switcher
 > decision). The persisted-intent item is a non-action (nothing to do), so no Issue.
+>
+> **#30 (filed 2026-06-18, PRE-EXISTING, surfaced in the final review):** verify/fix that
+> `lastStep` restores the CANVAS on a returning-user reload, not just the entity field. The
+> resume anchor is persisted + restored as a field, but the viewer is reset to EMPTY on
+> hydrate and the `pickScenario` re-push is conditionally skipped by the `sampleAlreadyActive`
+> guard — canvas-level resume is UNTESTED. This change PRESERVED that pre-existing resume
+> mechanism (it only swapped `lastFrame`→`lastStep`), so it is NOT a regression introduced
+> here; tracked as #30.
