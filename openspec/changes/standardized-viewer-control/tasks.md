@@ -608,15 +608,18 @@ each tested but the SEAM between them was not.
       ONLY through `dispatch({kind:"showSample"})` (whose orchestrator handler calls
       `pickScenario`); the direct `pickScenario(scenario)` call + its dep were removed. Failing
       seam test first: counts `track("sample.picked")` = 1 (was 2), proven non-vacuous by
-      re-introducing the call → RED, then restored. The seam-guard WIDENING assessment for
-      `pickScenario`/`returnToIngestPicker` is NOT taken here (left as a deliberate follow-up;
-      out of scope for the double-call fix).
+      re-introducing the call → RED, then restored. The seam-guard WIDENING for
+      `pickScenario`/`returnToIngestPicker` is now DONE 2026-06-18 (commit `268b63a`): both are
+      added to the guard's MUTATORS list (with self-test samples), and OnboardingShell's deep-link
+      URL effect was converted to `dispatch({kind:"showSample"})` (removing the last direct
+      `pickScenario` caller + the now-dead `pickScenarioRef`), so no view reaches the journey
+      mutators outside the orchestration core. Guard green.
 - [x] **NOTE fixes:** `StepId = JourneyStage` alias (third vocab copy); de-dup the
       `scanningDocViewerStep`/"scenario:unknown" literal (orchestrator reuses one source);
       correct the `showInteract` comment that claims a scenario-fallback that doesn't exist;
       consider re-stating the residual "frame f4/f4a" LABELS in agent-tools/smart-report durable
       specs onto `report.surface:"builder"`; rename `isF1` (frame-free semantics).
-      DONE 2026-06-18 (3 of 5) — (a) `StepId` now `= JourneyStage` (imported from
+      DONE 2026-06-18 (5 of 5) — (a) `StepId` now `= JourneyStage` (imported from
       `@groundx/shared`); the redundant `as ReadonlySet<StepId>` cast + stale "value-identical"
       comment in `OnboardingShell` removed; tsc clean (the unions were structurally identical).
       (b) `scanningDocViewerStep` extracted to its own module
@@ -625,8 +628,14 @@ each tested but the SEAM between them was not.
       from this ONE source (no inline `scenario:unknown` literal rebuild). (c) `showInteract`
       comment in `onboarding/experience.tsx` corrected to state the handler resolves the step's
       doc ONLY from `scope` (no scenario-fallback) and the onboarding canvas is fed from the
-      shell's `canvasScope` prop. The two remaining sub-items (re-state f4/f4a durable-spec
-      LABELS; rename `isF1`) are NOT done — left as separate follow-ups (out of scope here).
+      shell's `canvasScope` prop. (d) DONE 2026-06-18 (commit `268b63a`) — reworded the residual
+      "frame f4 / f4a" LABELS in the `smart-report` + `agent-tools` durable specs to the report
+      render/builder surfaces (kept the design `S3`/`S3a` screen codes; left `app-architecture`'s
+      f4a requirement alone — the change's REMOVED delta deletes it on archive). validate + archive
+      dry-run green, no frame labels post-archive. (e) DONE 2026-06-18 (commit `268b63a`) — renamed
+      `isF1`→`isIngestPicker` (OnboardingShell + ChatColumn) and the coupled `F1_`/`F2_`/`f1`/`f2`
+      animation identifiers to `PICKER_`/`CANVAS_`/picker/canvas names, plus the F1/F2 comment prose
+      (legitimate design widget-`Frame` terms untouched).
 - **Gate:** `session.reachedStages` has a real reader; cross-reload checkmarks tested; one
       kind→stage map (cross-checked + guard scans shared/src); no double-pickScenario; full
       suites + guards + validate + archive dry-run green.
@@ -670,3 +679,11 @@ each tested but the SEAM between them was not.
 > guard — canvas-level resume is UNTESTED. This change PRESERVED that pre-existing resume
 > mechanism (it only swapped `lastFrame`→`lastStep`), so it is NOT a regression introduced
 > here; tracked as #30.
+>
+> **#30 RESOLVED 2026-06-18 (commit `268b63a`):** added `viewerFromActiveEntity()` and seed
+> the viewer from the active entity's `lastStep` on `deserialize`; removed the
+> `hydrateFromServer` local-merge branch's `viewer: EMPTY_VIEWER_SESSION` override so `...local`
+> preserves the resumed viewer (it now matches its own comment — client-only state survives the
+> server merge). Added an end-to-end canvas-level resume test (`selectActiveStep` after
+> rehydrate) that was RED before the fix. Both hydrate paths covered; full app suite + seam
+> guard + validate + archive dry-run green.
