@@ -78,9 +78,11 @@ import { SchemaView } from "./SchemaView";
  *
  * The scenario manifest is still the fallback schema/values source (BYO,
  * placeholder ids, pre-resolve, errors) and drives the loan-only JSON render
- * mode + the skips-extract copy — read off the onboarding session/appMode
- * (the workbench is an onboarding-only surface today; SteadyShell mounts only
- * the doc-viewer kind through `<ScopedCanvas>`).
+ * mode + the skips-extract copy — read off the onboarding session/appMode.
+ * (standardized-viewer-control R7 — the extract-workbench step, incl. its
+ * `surface:"design"` schema editor, is reachable in BOTH experiences: SteadyShell
+ * mounts it through `<ScopedCanvas>` via `showExtract`/`editSchema`. It is no
+ * longer onboarding-only.)
  *
  * Per `widget-role-access`: `role: WidgetRole` is the authorization axis
  * (export / Save locked-for-anonymous via the padlock affordances + the

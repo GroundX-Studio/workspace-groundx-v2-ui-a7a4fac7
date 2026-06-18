@@ -74,7 +74,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T2 — Shared contract + intent catalog (`@groundx/shared`) · SEQUENTIAL
 
-- [ ] Add `showInteract` to `canvasIntentSchema`; ~~add optional `focusedCategoryId`
+- [x] Add `showInteract` to `canvasIntentSchema`; ~~add optional `focusedCategoryId`
       to `showExtract`~~ (ALREADY SHIPPED); ~~add optional `anchor` to the
       `suggestedActions` entry shape~~ (ALREADY SHIPPED, `index.ts:641`);
       add an optional `offerAs: { label, anchor? }` to the navigation tool input
@@ -82,7 +82,7 @@ only after its adversarial review gate passes against the plan AND the real code
       `switchFrame` entry, add `showInteract` with its `llm` coverage prompt, and
       mark offer-eligibility (intentBuilder + llm-emittable). NOTE: the catalog
       completeness guard is schema-derived — no count to bump.
-- [ ] **R7 (RESOLVED — steady-first, see design.md §0):** add a
+- [x] **R7 (RESOLVED — steady-first, see design.md §0):** add a
       **`surface: "fields" | "design"`** sub-position to the `extract-workbench`
       ViewerStep — MIRRORING `report.surface` (NOT a new `mode` field; `mode` is the
       widget-contract prop). `ScopedCanvas` forwards it; Extract reads `isDesignSurface`
@@ -98,7 +98,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T3 — Frame-free journey-progress source · SEQUENTIAL
 
-- [ ] `currentStep`, `completedSteps`, and `analyzeSubsteps` are ALL frame-derived
+- [x] `currentStep`, `completedSteps`, and `analyzeSubsteps` are ALL frame-derived
       today (`FRAME_TO_STEP[currentFrame]`, `completedFrames`→`FRAME_TO_STEP`,
       `analyzeSubsteps(currentFrame)`). Keep the strip's consumer shape
       (`JOURNEY_CATALOG`/`pillState`/`StepDescriptor`) but re-source it: the current
@@ -110,7 +110,7 @@ only after its adversarial review gate passes against the plan AND the real code
       `analyzeSubsteps` are fully
       frame-derived. Preserve the `analyzeReached` rule (a citation jump must not
       re-lock a traversed bracket) and the existing jump-ahead regression test.
-- [ ] **Watermark-shape correction (review R3/C2/C4):** the reached-set replacement
+- [x] **Watermark-shape correction (review R3/C2/C4):** the reached-set replacement
       MUST be a **SET of reached stages**, NOT a single monotonic high-water value —
       `integrate` is auth-gated/reachable-from-anywhere, so `completedFrames` is
       genuinely non-contiguous (the persisted fixture is `["f1","f2","f3","f7"]` with
@@ -138,7 +138,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T5 — Orchestrator: one outcome, payload honored, journey advance, side effects · SEQUENTIAL
 
-- [ ] Remove the `routeThroughOnboarding` fork for the `show*` / `editTemplate`
+- [x] Remove the `routeThroughOnboarding` fork for the `show*` / `editTemplate`
       handlers; each pushes/mutates its step honoring the payload (fix `showExtract`
       hardcoded `"utility"`). Add the `showInteract` handler. **Steady-gap closures
       (production bugs, R7/steady audit):** give `editSchema` a real experience-agnostic
@@ -153,7 +153,7 @@ only after its adversarial review gate passes against the plan AND the real code
       only when a stage is first ADDED to the reached-set (R3), NOT on the raw intent
       handler, so a re-dispatch to a stage already reached (category re-focus, an offered
       or step-strip jump) does not re-fire them.
-- [ ] **Side-effect re-homing corrections (review R1/R2/R6 — "fire on stage-watermark
+- [x] **Side-effect re-homing corrections (review R1/R2/R6 — "fire on stage-watermark
       increment" is WRONG for these):** (a) `understand.completed` must fire on the
       `showExtract` FIRST-REACH specifically, NOT on the `analyze`-stage increment —
       f5/interact also reaches `analyze` and a test asserts no fire on `f2→f5`. (b) the
@@ -167,11 +167,11 @@ only after its adversarial review gate passes against the plan AND the real code
       `completedFrames:["f1"]`, `OnboardingSessionContext.tsx:192-194`), PRESERVE its two
       analytics — `track("understand.started")` (`:207`) and `gaSetDefaults({currentSample})`
       (`:209`); they survive only by accident otherwise.
-- [ ] **`showInteract` document bridge (hard-scan note):** the `interact-chat` ViewerStep
+- [x] **`showInteract` document bridge (hard-scan note):** the `interact-chat` ViewerStep
       carries only `scenarioId` (`types.ts:422`) and mounts the SAME `doc-viewer` canvas
       (PdfViewer) as `openDocument`. The `showInteract` handler MUST resolve a document
       from its `scope` so the interact canvas isn't a doc-less PdfViewer. Gate in T5 tests.
-- [ ] **M4 (hard scan) — `save-schema` gate re-trigger round-trip test:** the multi-hop
+- [x] **M4 (hard scan) — `save-schema` gate re-trigger round-trip test:** the multi-hop
       chain 401→`openGate("save",{cause:"save-schema"})`→dismiss(preserves cause)→
       re-open→commit→post-commit retry (`Extract.tsx:419-456`) TERMINATES in the f1/ingest
       return being rewritten (R7). Add an end-to-end test for it so the re-trigger
@@ -187,7 +187,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T6 — Migrate the `advanceFrame` call sites (18 verified, not 36) · WORKFLOW (gated per unit)
 
-- [ ] Per production unit that calls `advanceFrame`, replace `advanceFrame(frame[, opts])`
+- [x] Per production unit that calls `advanceFrame`, replace `advanceFrame(frame[, opts])`
       with the corresponding dispatched intent. **Corrected unit list (18 verified call
       sites, 2026-06-17 — the old list named 2 PHANTOM units and OMITTED 2 real ones):**
       - **Extract** ×6 (`Extract.tsx:382` f3, `:446` **f1 — NO destination intent yet**,
@@ -209,7 +209,7 @@ only after its adversarial review gate passes against the plan AND the real code
       SignUpWidget/OnboardingShell/experience use the REQUIRED `useOnboardingSession()`
       and cannot be steady-tested — D15's "add steady coverage" applies only to the
       two shared widgets.
-- [ ] **Migrate the behavioral frame STATE READS (not just `advanceFrame` calls)** —
+- [x] **Migrate the behavioral frame STATE READS (not just `advanceFrame` calls)** —
       T3 covers only the strip/journey reads; these gate real behavior and are
       otherwise stranded: `experience.tsx:156/349` (`currentFrame === "f2"` guards),
       `experience.tsx:261` (`=== "f3a"` schema-agent header), `Extract.tsx:380`
@@ -229,7 +229,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T6b — Frame-coupled cross-cutting migrations · SEQUENTIAL (each its own gate)
 
-- [ ] **LLM context:** replace `lastFrame` + `completedFrames` in the chat-request
+- [x] **LLM context:** replace `lastFrame` + `completedFrames` in the chat-request
       entity snapshot with the journey stage + active step kind. **Review-found extra
       sites (must also migrate):** `middleware/src/services/structuredHandler.ts` bakes
       frame vocabulary into LLM-facing PROMPT TEXT at `:184-185`, `:456-457`, `:554-555`
@@ -244,7 +244,7 @@ only after its adversarial review gate passes against the plan AND the real code
       2026-06-17 — T6b previously named only chatHandler/structuredHandler). **Gate:** no
       frame value in the snapshot, the LLM prompt text, the context bundler, or the debug
       overlay; middleware request validation accepts the new shape.
-- [ ] **Persisted snapshot:** replace `lastFrame` with a persisted **active viewer
+- [x] **Persisted snapshot:** replace `lastFrame` with a persisted **active viewer
       step** (kind + payload) as the resume anchor, restored VERBATIM on hydrate (NOT
       a watermark — preserve the documented no-stale-resume rule); replace
       `completedFrames`/`completedFramesJson` with a small **reached-stage set** (R3)
@@ -268,11 +268,11 @@ only after its adversarial review gate passes against the plan AND the real code
       **Gate:** a returning user resumes on their last view verbatim incl. report
       surface; overlays do not restore; no `lastFrame`/`completedFramesJson` remains in
       localStorage OR the DB; the snapshot round-trips the active step + reached-set.
-- [ ] **Intent corpus + `intentCatalog`:** remove the `switchFrame` fixture (and its
+- [x] **Intent corpus + `intentCatalog`:** remove the `switchFrame` fixture (and its
       `suggest_intent` trigger) from `intentFixtures/fixtures.tsx`; add a
       `showInteract` fixture + its `intentCatalog` `llm` prompt. **Gate:** the replay
       + key-gated live-coverage suites are green; no `switchFrame` in the catalog.
-- [ ] **`frame-advanced` viewer-event:** migrate `viewerEventActionSchema` + its
+- [x] **`frame-advanced` viewer-event:** migrate `viewerEventActionSchema` + its
       `app.ts` validation + the client twin `app/src/api/viewerEvents.ts` + the
       `apiRouteContract` test to a stage/step action. **Also
       assess the `"left"` action** (`middleware/src/types.ts` enum + app twin
@@ -284,7 +284,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T7 — `offerAs` disposition (middleware + app mirror) · SEQUENTIAL
 
-- [ ] Add optional `offerAs: { label, anchor? }` to the navigation tools' input
+- [x] Add optional `offerAs: { label, anchor? }` to the navigation tools' input
       schemas, each with a `.describe(...)`; route a call carrying `offerAs` to a
       `suggestedActions` entry (validated intent via the tool's `intentBuilder` +
       label + optional anchor) instead of auto-dispatch; absence auto-dispatches per
@@ -303,13 +303,13 @@ only after its adversarial review gate passes against the plan AND the real code
       (no app `*.tools.ts` mirror), so its removal MUST also drop it from the
       `SERVER_ONLY` set + comment in `app/src/tools/catalog-parity.test.ts:44` (an
       obligation the original gate wording missed).
-- [ ] **Hand-maintained test fixtures (hard-scan #3 — adding 2 tools / removing
+- [x] **Hand-maintained test fixtures (hard-scan #3 — adding 2 tools / removing
       `suggest_intent` breaks these; named in NO task, would surface as red mid-T7):**
       `toolCatalog.test.ts` `EXPECTED_NAMES` (the authoritative `.toEqual` name list) and
       its per-step `toolsForStep(...).toEqual([...])` assertions; `intentToolCorpus.test.ts`
       `TOOL_ARGS` (the `{toolName→args}` map asserted `.toBeDefined()` per emittable
       entry) needs `show_interact` + `show_extraction_edit` entries.
-- [ ] **`offerAs` parity discipline (hard-scan #4):** define `offerAs` as ONE shared Zod
+- [x] **`offerAs` parity discipline (hard-scan #4):** define `offerAs` as ONE shared Zod
       constant imported by every navigation tool on BOTH app + middleware, so the
       full-shape JSON-Schema parity (`catalog-parity.test.ts:308-334`) is identical by
       construction (it is added to N navigation tools — N×2 drift surfaces otherwise).
@@ -325,7 +325,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T8 — Affordance rendering: extend `suggestedActions` (pill + inline) · SEQUENTIAL
 
-- [ ] Render a `suggestedActions` entry as a pill (no `anchor`) via the existing
+- [x] Render a `suggestedActions` entry as a pill (no `anchor`) via the existing
       chip rendering, or, with `anchor`, as inline clickable text, first occurrence;
       fall back to a pill when the phrase is not found. Inline anchoring is
       navigation-only; mutate and UI-driven actions (e.g. "show all sources",
@@ -353,7 +353,7 @@ only after its adversarial review gate passes against the plan AND the real code
 - [x] Make the onboarding pick-a-view pills (the existing `PickViewPill`) dispatch
       `showExtract` with `focusedCategoryId` directly through the orchestrator; keep
       per-category. (DONE `97d6e19` — `experience.tsx:380`.)
-- [ ] Confirm the auto-advance-on-"Done" dispatches `showExtract`. **NOT DONE** —
+- [x] Confirm the auto-advance-on-"Done" dispatches `showExtract`. **NOT DONE** —
       `experience.tsx:350` still calls `advanceFrame("f3")` directly; migrate it to
       `dispatch(showExtract …)` (overlaps T6's OnboardingShell/experience unit + the
       `ui-views` "auto-advance through dispatch" requirement).
@@ -396,7 +396,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T11 — Drift guards + full verification · SEQUENTIAL
 
-- [ ] `npm --workspace app test` + the middleware suite green (incl. the intent
+- [x] `npm --workspace app test` + the middleware suite green (incl. the intent
       replay + key-gated live-coverage suites); `npx tsc --noEmit` clean (app +
       middleware + shared); no-hardcoded-styles + widget-contract + catalog-parity +
       check-tool-quality green; `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1
@@ -415,7 +415,7 @@ only after its adversarial review gate passes against the plan AND the real code
 
 ## T12 — Whole-plan adversarial review · SEQUENTIAL
 
-- [ ] One hostile review against the plan AND the code: every `show*` produces one
+- [x] One hostile review against the plan AND the code: every `show*` produces one
       outcome; no frame vocabulary remains anywhere (incl. the LLM context + the
       persisted snapshot + the intent corpus); affordances are server-validated and
       share one `suggestedActions` list; the seam is the sole viewer-mutation path;
@@ -532,29 +532,29 @@ those durable requirements survive untouched and the spec set self-contradicts.
 
 ## T14 — Reference-doc sync · SEQUENTIAL (review-surfaced; AGENTS.md mandate)
 
-- [ ] **`docs/agents/data-model.md`** (BLOCKER per `AGENTS.md` — "you MUST update the
+- [x] **`docs/agents/data-model.md`** (BLOCKER per `AGENTS.md` — "you MUST update the
       reconciliation matrix in the same change"): drop `switchFrame` from the
       CanvasIntent union (:114), `lastFrame`/`completedFrames` from EntitySession
       (:116), `currentFrame` from OnboardingSession (:117); add `showInteract`, the
       `editSchema` real outcome, the `extract-workbench.surface` field, and the
       active-step + reached-set fields.
-- [ ] **`docs/agents/architecture.md`** — update the `advanceFrame` action (:74), the
+- [x] **`docs/agents/architecture.md`** — update the `advanceFrame` action (:74), the
       `currentFrame`-derived fallback note (:129), and the `frame-advanced` viewer-event
       (:165).
-- [ ] **`docs/agents/onboarding-flow.md`** — rewrite the `advanceFrame`/`?focus=`
+- [x] **`docs/agents/onboarding-flow.md`** — rewrite the `advanceFrame`/`?focus=`
       dead-button mechanism (:23/:69/:78) now that pills dispatch and `?focus=` is gone.
-- [ ] **`docs/agents/overview.md`** — note the F-series frame machine is retired
+- [x] **`docs/agents/overview.md`** — note the F-series frame machine is retired
       (labels may survive as UX names; the `advanceFrame`/`currentFrame`/`completedFrames`
       machine does not).
-- [ ] **`docs/agents/chat-session-model.md`** (review-found miss) — `lastFrame`/
+- [x] **`docs/agents/chat-session-model.md`** (review-found miss) — `lastFrame`/
       `completedFrames` as the "current entity axis" (:36/:101-102) and the viewer-event
       table rows `frame-advanced`/`advanceFrame` (:217-218). Most material doc after
       data-model.md.
-- [ ] **`docs/agents/gotchas.md`** (miss) — instructs calling `advanceFrame(frame)`
+- [x] **`docs/agents/gotchas.md`** (miss) — instructs calling `advanceFrame(frame)`
       (:138-139).
-- [ ] **`docs/agents/testing.md`** (miss) — the `initialFrame` harness option that sets
+- [x] **`docs/agents/testing.md`** (miss) — the `initialFrame` harness option that sets
       `session.currentFrame` (:42/:68); reconcile with the new step-seed harness.
-- [ ] **`docs/agents/widget-contract.md`** (miss) — `OnboardingNav` "the LLM dispatches
+- [x] **`docs/agents/widget-contract.md`** (miss) — `OnboardingNav` "the LLM dispatches
       `switchFrame` intents" (:811).
 - **Gate:** no removed symbol is documented as current/canonical in any `docs/agents/`
       reference doc (grep the full `docs/agents/` tree for the removed symbols → clean).
@@ -570,6 +570,14 @@ those durable requirements survive untouched and the spec set self-contradicts.
   capability.
 - Persisted-intent data migration is NOT required (pre-launch; `parseCanvasIntent`
   degrades unknown kinds to null).
+- **NOTE-level closeout follow-ups (from the T12 hostile review; not load-bearing):**
+  (a) make `interact-chat.scenarioId` OPTIONAL so the steady `showInteract` handler
+  drops the vestigial `?? "utility"` placeholder (the canvas resolves its document from
+  `scope`, so `scenarioId` is a label/telemetry artifact on interact-chat — a small
+  ViewerStep + PersistedViewerStep schema change, deferred to avoid a sign-off schema
+  ripple); (b) move `app/src/conversation/intentFixtures/replayIntent.tsx` under
+  `app/src/test/` so the single test-only frame-literal exception lives on one named
+  path. Both are test-/label-only; neither affects shipped behavior.
 
 > **discipline §8:** the first two items are deferred future work and MUST each be filed
 > as a GitHub Issue before this change is archived (don't leave them as orphaned bullets).
