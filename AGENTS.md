@@ -32,3 +32,30 @@ skills) and this codebase.
 ## Conventions for additions
 
 New top-level concern → new file under `docs/agents/` + a one-line entry here. Keep this file a strict ToC. Anything that needs more than one line of explanation goes in the linked file.
+
+## OpenSpec
+
+OpenSpec manages the **documentation lifecycle** for this repo (proposal → specs → design →
+tasks). **Implementation** is done with **Superpowers** (brainstorm → plan → TDD → review →
+finish), which is ambient in the harness and triggers automatically. All spec work runs inside
+this repo on the feature branch.
+
+**Schema:** `spec-driven` (official)   **Role:** `frontend`   **Profile:** `custom`   **Default command:** `/opsx:continue`
+
+Per-artifact content rules live in `openspec/config.yaml`. Inspect templates and runtime
+guidance with `openspec instructions <artifact>`.
+
+### Default slash command
+
+`/opsx:continue` — the recommended driver for this repo.
+- `/opsx:ff` — small, low-risk changes; all artifacts at once.
+- `/opsx:continue` — large or correctness-sensitive flows; one gated artifact at a time.
+- `/opsx:explore` — think first; useful when the approach is unclear.
+
+### Skills used by the artifacts
+
+- Open design questions in a proposal → `superpowers:brainstorming`.
+- Given/When/Then scenarios in specs → `superpowers:test-driven-development`.
+- Architectural decisions → `architectural-decision-records` skill; write ADRs to
+  `docs/adr/<LINEAR-TICKET>-<kebab>.md` (Linear ticket prefix mandatory). Cross-service
+  decisions live in the **producing** repo and are referenced from consumers' `design.md`.
