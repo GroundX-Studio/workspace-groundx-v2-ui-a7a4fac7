@@ -21,8 +21,10 @@ vi.mock("@/lib/ga", () => ({
 import { gaSetDefaults } from "@/lib/ga";
 
 import { ApiProvider } from "@/contexts/ApiContext";
+import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
 import { makeFakeApi } from "@/test/makeFakeApi";
-import { OnboardingSessionProvider, frameToStepStandalone, useOnboardingSession } from "./OnboardingSessionContext";
+import { useActiveStepDiagnostic, useResumeAnchorDiagnostic } from "@/test/activeStepDiagnostic";
+import { OnboardingSessionProvider, useOnboardingSession } from "./OnboardingSessionContext";
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <ApiProvider value={makeFakeApi()}>
@@ -31,13 +33,17 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 );
 
 describe("OnboardingSessionContext", () => {
-  it("starts on F1, no scenario, idle gate, no session id", () => {
-    const { result } = renderHook(() => useOnboardingSession(), { wrapper });
-    expect(result.current.state.currentFrame).toBe("f1");
-    expect(result.current.state.scenario).toBeNull();
-    expect(result.current.state.gate.status).toBe("idle");
-    expect(result.current.state.sessionId).toBeNull();
-    expect(result.current.state.completedFrames.size).toBe(0);
+  it("starts on the ingest picker (no active viewer step), no scenario, idle gate, no session id", () => {
+    const { result } = renderHook(
+      () => ({ session: useOnboardingSession(), stepDiagnostic: useActiveStepDiagnostic() }),
+      { wrapper },
+    );
+    // No scenario picked → no active viewer step yet (the frame-free successor
+    // to the old `currentFrame === "f1"` picker default).
+    expect(result.current.stepDiagnostic).toBeNull();
+    expect(result.current.session.state.scenario).toBeNull();
+    expect(result.current.session.state.gate.status).toBe("idle");
+    expect(result.current.session.state.sessionId).toBeNull();
   });
 
   it("bootstrapSession sets server-issued id", () => {
@@ -46,17 +52,25 @@ describe("OnboardingSessionContext", () => {
     expect(result.current.state.sessionId).toBe("sess_abc");
   });
 
-  it("advanceFrame marks the previous frame completed (inside an active sample)", () => {
-    // advanceFrame operates on the active entity. From the F1 picker
-    // with no entity active it's a no-op — the user must
-    // pickScenario (or trigger BYO) first. Picking a sample lands
-    // the user on f2; advancing then marks f2 completed.
-    const { result } = renderHook(() => useOnboardingSession(), { wrapper });
-    act(() => result.current.pickScenario("utility"));
-    expect(result.current.state.currentFrame).toBe("f2");
-    act(() => result.current.advanceFrame("f3"));
-    expect(result.current.state.currentFrame).toBe("f3");
-    expect(result.current.state.completedFrames.has("f2")).toBe(true);
+  it("markStageReached advances the resume anchor + records the reached stage (inside an active sample)", () => {
+    // standardized-viewer-control — `markStageReached` operates on the active
+    // entity (frame-free successor to `advanceFrame`). From the picker with
+    // no entity active it's a no-op — the user must pickScenario first. Picking
+    // a sample lands the user on the Understand doc-viewer step; reaching Extract
+    // moves the resume anchor to the extract-workbench step and records the
+    // `analyze` stage in the reached-set. `markStageReached` (unlike the
+    // orchestrator's full canvas outcome) mutates only the resume anchor
+    // (`lastStep`), so this isolated test reads the anchor's step kind directly.
+    const { result } = renderHook(
+      () => ({ session: useOnboardingSession(), resumeAnchor: useResumeAnchorDiagnostic() }),
+      { wrapper },
+    );
+    act(() => result.current.session.pickScenario("utility"));
+    expect(result.current.resumeAnchor).toBe("doc-viewer");
+    act(() =>
+      result.current.session.markStageReached({ kind: "extract-workbench", scenarioId: "utility" }),
+    );
+    expect(result.current.resumeAnchor).toBe("extract-workbench");
   });
 
   it("openGate sets open status with trigger", () => {
@@ -145,25 +159,26 @@ describe("OnboardingSessionContext", () => {
     });
 
     // standardized-viewer-control T5 (R1) — `understand.completed` re-homed
-    // OFF `advanceFrame`'s f3/f3a edge and ONTO the Extract first-reach signal
+    // OFF the journey-advance edge and ONTO the Extract first-reach signal
     // (`notifyExtractReached`), which the orchestrator's `showExtract` handler
-    // fires. Bare frame advances no longer emit it: f3/f3a/f5 all map to the
-    // single `analyze` stage, so binding the event to a frame edge mis-fired.
-    it("advanceFrame(f3) → does NOT fire understand.completed (re-homed onto notifyExtractReached, T5/R1)", () => {
+    // fires. Bare journey advances no longer emit it: extract/interact/report
+    // all map to the single `analyze` stage, so binding the event to a stage
+    // edge mis-fired.
+    it("markStageReached(extract-workbench) → does NOT fire understand.completed (re-homed onto notifyExtractReached, T5/R1)", () => {
       vi.mocked(track).mockReset();
       const { result } = renderHook(() => useOnboardingSession(), { wrapper });
       act(() => result.current.pickScenario("utility"));
       vi.mocked(track).mockReset(); // ignore the pick-scenario events
-      act(() => result.current.advanceFrame("f3"));
+      act(() => result.current.markStageReached({ kind: "extract-workbench", scenarioId: "utility" }));
       expect(findTrack("understand.completed")).toBeUndefined();
     });
 
-    it("advanceFrame(f5) → does NOT fire understand.completed (F5 is past F3)", () => {
+    it("markStageReached(interact-chat) → does NOT fire understand.completed (interact is also analyze stage)", () => {
       vi.mocked(track).mockReset();
       const { result } = renderHook(() => useOnboardingSession(), { wrapper });
       act(() => result.current.pickScenario("utility"));
       vi.mocked(track).mockReset();
-      act(() => result.current.advanceFrame("f5"));
+      act(() => result.current.markStageReached({ kind: "interact-chat", scenarioId: "utility" }));
       expect(findTrack("understand.completed")).toBeUndefined();
     });
 
@@ -238,26 +253,42 @@ describe("OnboardingSessionContext", () => {
   // `scanning: true` flag. <ScopedCanvas> forwards it to the PdfViewer's
   // `showScanAnimation`. Citation-jump doc-viewer steps (pushed by the
   // cite-click sink, NOT this projection) carry no flag and never scan.
-  describe("WF-01 C5 — F2 reading-scan flag on the doc-viewer step", () => {
-    it("f2 → a doc-viewer step with scanning:true", () => {
-      const step = frameToStepStandalone("f2", "utility");
-      expect(step).toMatchObject({
+  describe("WF-01 C5 — reading-scan flag on the freshly-opened sample's doc-viewer step", () => {
+    // standardized-viewer-control (D2) — the frame projection is gone; the
+    // scanning beat is seeded directly by `pickScenario` (the sole production
+    // caller). Assert the LIVE active viewer step rather than a deleted helper.
+    const renderWithStep = () =>
+      renderHook(
+        () => {
+          const session = useOnboardingSession();
+          const store = useChatStore();
+          const active = store.state.activeSessionId
+            ? store.state.sessions.get(store.state.activeSessionId)
+            : null;
+          return { session, pushStep: store.pushStep, step: selectActiveStep(active) };
+        },
+        { wrapper },
+      );
+
+    it("pickScenario → active step is a doc-viewer with scanning:true on the scenario doc", () => {
+      const { result } = renderWithStep();
+      act(() => result.current.session.pickScenario("utility"));
+      expect(result.current.step).toMatchObject({
         kind: "doc-viewer",
         documentId: "scenario:utility",
         scanning: true,
       });
     });
 
-    it("f2 with no scenario still flags scanning (the reading beat runs on the placeholder doc)", () => {
-      const step = frameToStepStandalone("f2", null);
-      expect(step).toMatchObject({ kind: "doc-viewer", scanning: true });
-    });
-
-    it("non-F2 frames do not produce a scanning doc-viewer step", () => {
-      // f5/f6 project to interact-chat (a different kind entirely) — no
-      // doc-viewer scan. Assert the f2 flag isn't leaking onto other kinds.
-      expect(frameToStepStandalone("f5", "utility")).not.toMatchObject({ scanning: true });
-      expect(frameToStepStandalone("f3", "utility")).not.toMatchObject({ scanning: true });
+    it("advancing past Understand does not leave a scanning doc-viewer step active", () => {
+      const { result } = renderWithStep();
+      act(() => result.current.session.pickScenario("utility"));
+      act(() => {
+        // The orchestrator pushes the destination step in production; mirror that
+        // by reaching Extract (a different kind entirely — no scan).
+        result.current.pushStep({ kind: "extract-workbench", scenarioId: "utility" });
+      });
+      expect(result.current.step).not.toMatchObject({ scanning: true });
     });
   });
 });

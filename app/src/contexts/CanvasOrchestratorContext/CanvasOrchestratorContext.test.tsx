@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { Api } from "@/api/client";
 import { ChatStoreProvider, useChatStore } from "@/contexts/ChatStoreContext";
 import { OnboardingSessionProvider, useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { VIEWER_STEP_TO_JOURNEY } from "@/components/layout/StepStrip/journeyCatalog";
+import { useActiveStepDiagnostic } from "@/test/activeStepDiagnostic";
+import { testFrameToStep } from "@/test/frameToStep";
 import { withApiProvider } from "@/test/withApiProvider";
 
 import { CanvasOrchestratorProvider, useCanvasOrchestrator } from "./CanvasOrchestratorContext";
@@ -227,14 +230,14 @@ describe("CanvasOrchestratorContext", () => {
       const { result } = renderHook(useBoth, { wrapper: wiredWrapper });
       // Seed an active entity so updateActiveEntity has something to mutate.
       act(() => {
-        result.current.chatStore.upsertEntityAndActivate("sample", "utility", { lastFrame: "f1" });
+        result.current.chatStore.upsertEntityAndActivate("sample", "utility", { lastStep: { kind: "ingest-picker" } });
       });
       // Register an adapter that fires updateActiveEntity on showSample.
       act(() => {
         result.current.orchestrator.registerAdapter({
           kind: "showSample",
           apply: () => {
-            result.current.chatStore.updateActiveEntity((e) => ({ ...e, lastFrame: "f3" }));
+            result.current.chatStore.updateActiveEntity((e) => ({ ...e, lastStep: { kind: "extract-workbench", scenarioId: "utility" } }));
           },
         });
       });
@@ -245,7 +248,7 @@ describe("CanvasOrchestratorContext", () => {
         result.current.chatStore.state.activeSessionId!,
       )!;
       const entity = active.entities.get(active.activeEntityKey!);
-      expect(entity?.lastFrame).toBe("f3");
+      expect(entity?.lastStep).toEqual({ kind: "extract-workbench", scenarioId: "utility" });
     });
 
     it("UI-10b: dispatch POSTs to /api/intent with chatSessionId + source + intent", () => {
@@ -773,38 +776,43 @@ describe("CanvasOrchestratorContext", () => {
   //    `show_smart_report_render` tool emits `showReport` and
   //    `show_smart_report_edit` emits `editTemplate`; both are routed
   //    through a built-in orchestrator handler (mirroring commitGate/
-  //    dismissGate) to `OnboardingSession.advanceFrame`. Without this the
-  //    tools are no-op telemetry. These tests dispatch the intent and
-  //    assert the frame advances + the builder section pre-selects.
-  describe("smart-report Phase 5 — showReport / editTemplate advance the canvas frame", () => {
+  //    dismissGate) that pushes the destination viewer step + advances the
+  //    journey. Without this the tools are no-op telemetry. These tests dispatch
+  //    the intent and assert the canvas step advances + the builder section
+  //    pre-selects.
+  describe("smart-report Phase 5 — showReport / editTemplate advance the canvas step", () => {
     // The orchestrator routes these through the OPTIONAL OnboardingSession,
-    // so the wrapper mounts it with an active scenario entity (advanceFrame
-    // only flips non-f1 frames when an entity is active). The scenario seeds
-    // at f3 so an advance to f4/f4a is an observable transition.
+    // so the wrapper mounts it with an active scenario entity (the journey
+    // advances only when an entity is active). The scenario seeds on the
+    // extract-workbench step so an advance to the report step is observable.
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
       withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
-        <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
+        <OnboardingSessionProvider initialStep={testFrameToStep("f3", "utility")} initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
       </ChatStoreProvider>)
     );
     function useBoth() {
-      return { orchestrator: useCanvasOrchestrator(), session: useOnboardingSession() };
+      return {
+        orchestrator: useCanvasOrchestrator(),
+        session: useOnboardingSession(),
+        stepDiagnostic: useActiveStepDiagnostic(),
+      };
     }
 
-    it("showReport advances the canvas to the render frame (f4)", () => {
+    it("showReport advances the canvas to the render step (report-render)", () => {
       const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
-      expect(result.current.session.state.currentFrame).toBe("f3");
+      expect(result.current.stepDiagnostic).toBe("extract-workbench");
       act(() => {
         result.current.orchestrator.dispatch(
           { kind: "showReport", templateId: "draft", scope: { type: "bucket", bucketId: 28454 } },
           "agent",
         );
       });
-      expect(result.current.session.state.currentFrame).toBe("f4");
+      expect(result.current.stepDiagnostic).toBe("report-render");
     });
 
-    it("editTemplate advances the canvas to the builder frame (f4a) and pre-selects the section", () => {
+    it("editTemplate advances the canvas to the builder step (report-builder) and pre-selects the section", () => {
       const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
       act(() => {
         result.current.orchestrator.dispatch(
@@ -812,33 +820,33 @@ describe("CanvasOrchestratorContext", () => {
           "agent",
         );
       });
-      expect(result.current.session.state.currentFrame).toBe("f4a");
+      expect(result.current.stepDiagnostic).toBe("report-builder");
       expect(result.current.session.state.selectedReportSectionId).toBe("anomalies");
     });
 
-    it("editTemplate without a selectedSectionId advances to f4a with no pre-selected section", () => {
+    it("editTemplate without a selectedSectionId advances to the builder step with no pre-selected section", () => {
       const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
       act(() => {
         result.current.orchestrator.dispatch({ kind: "editTemplate", templateId: "draft" }, "agent");
       });
-      expect(result.current.session.state.currentFrame).toBe("f4a");
+      expect(result.current.stepDiagnostic).toBe("report-builder");
       expect(result.current.session.state.selectedReportSectionId).toBeNull();
     });
 
     // 2026-05-30-onboarding-shell-shared-view Phase 3b — the
     // `show_integrate` canvas-dispatch tool emits `showIntegrate`, routed
-    // (mirroring showExtract → f3 / showReport → f4) through the built-in
-    // orchestrator handler to `OnboardingSession.advanceFrame("f7")`.
-    it("showIntegrate advances the canvas to the Integrate frame (f7)", () => {
+    // (mirroring showExtract / showReport) through the built-in orchestrator
+    // handler, which pushes the integrate step + advances the journey.
+    it("showIntegrate advances the canvas to the Integrate step", () => {
       const { result } = renderHook(useBoth, { wrapper: onboardingWrapper });
-      expect(result.current.session.state.currentFrame).toBe("f3");
+      expect(result.current.stepDiagnostic).toBe("extract-workbench");
       act(() => {
         result.current.orchestrator.dispatch(
           { kind: "showIntegrate", scope: { type: "bucket", bucketId: 28454 } },
           "agent",
         );
       });
-      expect(result.current.session.state.currentFrame).toBe("f7");
+      expect(result.current.stepDiagnostic).toBe("integrate");
     });
 
     it("showExtract / showIntegrate push product viewer steps without an OnboardingSessionProvider", () => {
@@ -972,7 +980,7 @@ describe("CanvasOrchestratorContext", () => {
   describe("openGate intent routes to OnboardingSession.openGate", () => {
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
       withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
-        <OnboardingSessionProvider initialFrame="f5" initialScenario="utility">
+        <OnboardingSessionProvider initialStep={testFrameToStep("f5", "utility")} initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
       </ChatStoreProvider>)
@@ -1017,7 +1025,7 @@ describe("CanvasOrchestratorContext", () => {
   describe("T5 — de-forked show* outcome + showInteract document bridge", () => {
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
       withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
-        <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
+        <OnboardingSessionProvider initialStep={testFrameToStep("f3", "utility")} initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
       </ChatStoreProvider>)
@@ -1028,16 +1036,16 @@ describe("CanvasOrchestratorContext", () => {
       </ChatStoreProvider>)
     );
     // standardized-viewer-control T3 — the onboarding seed now PRIMES the viewer
-    // with the step for `initialFrame` (so the frame-free StepStrip resolves on
+    // with the seeded `initialStep` (so the frame-free StepStrip resolves on
     // first render). To exercise the FRESH-PUSH branch of `showExtract` (the
-    // "honors schemaId, no hardcoded utility" assertion), seed at f2/Understand
+    // "honors schemaId, no hardcoded utility" assertion), seed the Understand
     // — a `doc-viewer` step — so the dispatch pushes a NEW workbench step rather
     // than re-entering an already-active one (re-entry mutates focus/surface in
     // place and intentionally does NOT change scenarioId — see the showExtract
     // handler's T4/T5 in-place rules).
     const onboardingWrapperAtUnderstand = ({ children }: { children: React.ReactNode }) => (
       withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
-        <OnboardingSessionProvider initialFrame="f2" initialScenario="utility">
+        <OnboardingSessionProvider initialStep={testFrameToStep("f2", "utility")} initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
       </ChatStoreProvider>)
@@ -1065,9 +1073,13 @@ describe("CanvasOrchestratorContext", () => {
       if (current?.kind === "extract-workbench") expect(current.scenarioId).toBe("loan");
     });
 
-    it("showExtract advances onboarding journey progress (currentFrame → analyze/f3) while pushing the step", () => {
+    it("showExtract advances onboarding journey progress (analyze/Extract) while pushing the step", () => {
       const { result } = renderHook(
-        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore(), session: useOnboardingSession() }),
+        () => ({
+          orchestrator: useCanvasOrchestrator(),
+          chatStore: useChatStore(),
+          stepDiagnostic: useActiveStepDiagnostic(),
+        }),
         { wrapper: onboardingWrapper },
       );
       act(() => {
@@ -1076,8 +1088,8 @@ describe("CanvasOrchestratorContext", () => {
           "user",
         );
       });
-      // The workbench journey stage is reached (f3 = analyze/Extract).
-      expect(result.current.session.state.currentFrame).toBe("f3");
+      // The workbench journey step is reached (analyze/Extract).
+      expect(result.current.stepDiagnostic).toBe("extract-workbench");
     });
 
     it("showInteract resolves a document from scope onto the interact-chat step (steady — not doc-less)", () => {
@@ -1114,9 +1126,13 @@ describe("CanvasOrchestratorContext", () => {
       if (current?.kind === "interact-chat") expect(current.documentId).toBeUndefined();
     });
 
-    it("showInteract advances onboarding journey progress to Interact (f5) while pushing the step", () => {
+    it("showInteract advances onboarding journey progress to Interact while pushing the step", () => {
       const { result } = renderHook(
-        () => ({ orchestrator: useCanvasOrchestrator(), chatStore: useChatStore(), session: useOnboardingSession() }),
+        () => ({
+          orchestrator: useCanvasOrchestrator(),
+          chatStore: useChatStore(),
+          stepDiagnostic: useActiveStepDiagnostic(),
+        }),
         { wrapper: onboardingWrapper },
       );
       act(() => {
@@ -1125,7 +1141,7 @@ describe("CanvasOrchestratorContext", () => {
           "user",
         );
       });
-      expect(result.current.session.state.currentFrame).toBe("f5");
+      expect(result.current.stepDiagnostic).toBe("interact-chat");
       const current = topStep(result.current.chatStore);
       expect(current?.kind).toBe("interact-chat");
     });
@@ -1167,6 +1183,128 @@ describe("CanvasOrchestratorContext", () => {
     });
   });
 
+  // ── standardized-viewer-control deletion-phase — presentExperienceBeat ─────
+  //
+  // The ONE generic, NOT-LLM-emittable intent for experience/overlay-internal
+  // SCRIPTED viewer beats (the onboarding choreography the LLM/affordance seam
+  // must never offer). The typed `beat` discriminator carries the VALUES so
+  // future overlay scenarios add a beat, not a new intent kind. Two beats today:
+  //   • ingest-picker      — return to the Ingest picker AND deactivate the
+  //                          active entity + reset an open gate (the
+  //                          return-to-picker BACKWARD-transition side effects).
+  //   • understand-scanning — snap to the Understand doc-scanning beat AND set the
+  //                          Understand journey edge.
+  describe("presentExperienceBeat — overlay-internal scripted viewer beats", () => {
+    const onboardingWrapperAtAnalyze = ({ children }: { children: React.ReactNode }) => (
+      withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+        <OnboardingSessionProvider initialStep={testFrameToStep("f3", "utility")} initialScenario="utility">
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </OnboardingSessionProvider>
+      </ChatStoreProvider>)
+    );
+    function useTrio() {
+      return {
+        orchestrator: useCanvasOrchestrator(),
+        chatStore: useChatStore(),
+        session: useOnboardingSession(),
+        stepDiagnostic: useActiveStepDiagnostic(),
+      };
+    }
+    function topStep(chatStore: ReturnType<typeof useChatStore>) {
+      const s = chatStore.state.sessions.get(chatStore.state.activeSessionId!);
+      return s ? s.viewer.history[s.viewer.currentStep.stepIndex] : null;
+    }
+
+    it("ingest-picker beat deactivates the active entity AND pushes the ingest-picker step", () => {
+      const { result } = renderHook(useTrio, { wrapper: onboardingWrapperAtAnalyze });
+      // An entity is active (scenario seeded) and the journey is past Ingest.
+      expect(result.current.session.state.scenario).toBe("utility");
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "presentExperienceBeat", beat: { kind: "ingest-picker" } },
+          "user",
+        );
+      });
+      // The active entity is deactivated — the canvas returns to the picker step.
+      expect(result.current.session.state.scenario).toBeNull();
+      expect(result.current.stepDiagnostic).toBe("ingest-picker");
+      // The canvas shows the ingest-picker step.
+      expect(topStep(result.current.chatStore)?.kind).toBe("ingest-picker");
+    });
+
+    it("ingest-picker beat resets an OPEN gate (the f1 gate-reset side effect)", () => {
+      const { result } = renderHook(useTrio, { wrapper: onboardingWrapperAtAnalyze });
+      act(() => {
+        result.current.orchestrator.dispatch({ kind: "openGate", trigger: "save" }, "user");
+      });
+      expect(result.current.session.state.gate.status).toBe("open");
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "presentExperienceBeat", beat: { kind: "ingest-picker" } },
+          "user",
+        );
+      });
+      expect(result.current.session.state.gate.status).not.toBe("open");
+    });
+
+    it("ingest-picker beat carries an attachedSchema onto the picker step (the save-and-return choreography)", () => {
+      const { result } = renderHook(useTrio, { wrapper: onboardingWrapperAtAnalyze });
+      act(() => {
+        result.current.orchestrator.dispatch(
+          {
+            kind: "presentExperienceBeat",
+            beat: { kind: "ingest-picker", attachedSchema: { schemaId: "tmpl-9", name: "Utility (custom)" } },
+          },
+          "user",
+        );
+      });
+      const current = topStep(result.current.chatStore);
+      expect(current?.kind).toBe("ingest-picker");
+      if (current?.kind === "ingest-picker") {
+        expect(current.attachedSchema).toEqual({ schemaId: "tmpl-9", name: "Utility (custom)" });
+      }
+    });
+
+    it("understand-scanning beat pushes the scanning doc-viewer step AND sets the Understand journey edge", () => {
+      // Seed at Ingest so the snap to Understand is an observable forward edge.
+      const onboardingAtIngest = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+          <OnboardingSessionProvider initialStep={testFrameToStep("f2", "utility")} initialScenario="utility">
+            <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+          </OnboardingSessionProvider>
+        </ChatStoreProvider>)
+      );
+      const { result } = renderHook(useTrio, { wrapper: onboardingAtIngest });
+      act(() => {
+        result.current.orchestrator.dispatch(
+          { kind: "presentExperienceBeat", beat: { kind: "understand-scanning" } },
+          "user",
+        );
+      });
+      // The Understand journey step is reached (doc-viewer).
+      expect(result.current.stepDiagnostic).toBe("doc-viewer");
+      const current = topStep(result.current.chatStore);
+      expect(current?.kind).toBe("doc-viewer");
+      // The doc-viewer carries the reading scan-line beat (scanning: true).
+      if (current?.kind === "doc-viewer") expect(current.scanning).toBe(true);
+    });
+
+    it("either beat is a no-op (no throw) without an OnboardingSessionProvider", () => {
+      const productWrapper = ({ children }: { children: React.ReactNode }) => (
+        withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
+          <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
+        </ChatStoreProvider>)
+      );
+      const { result } = renderHook(() => useCanvasOrchestrator(), { wrapper: productWrapper });
+      expect(() => {
+        act(() => {
+          result.current.dispatch({ kind: "presentExperienceBeat", beat: { kind: "ingest-picker" } });
+          result.current.dispatch({ kind: "presentExperienceBeat", beat: { kind: "understand-scanning" } });
+        });
+      }).not.toThrow();
+    });
+  });
+
   // 2026-06-10 — the previously adapter-registry-only kinds gained built-in
   // handlers after a live-canvas audit found them dispatching (POST /api/intent
   // logged) with NO registered adapter anywhere in the production tree — silent
@@ -1182,7 +1320,7 @@ describe("CanvasOrchestratorContext", () => {
   describe("formerly-silent kinds get built-in handlers (showSample / editSchema / openDocument)", () => {
     const onboardingWrapper = ({ children }: { children: React.ReactNode }) => (
       withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
-        <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
+        <OnboardingSessionProvider initialStep={testFrameToStep("f3", "utility")} initialScenario="utility">
           <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
         </OnboardingSessionProvider>
       </ChatStoreProvider>)
@@ -1202,13 +1340,13 @@ describe("CanvasOrchestratorContext", () => {
     // standardized-viewer-control T5 (R7) — `editSchema` is now an
     // experience-AGNOSTIC outcome: it pushes/mutates the extract-workbench step
     // into `surface: "design"` (the schema DESIGN surface), mirroring how
-    // `editTemplate` pushes `report` `surface: "builder"`. No `advanceFrame("f3a")`,
-    // no experience fork. The journey stage stays `analyze` (Extract); design is a
-    // sub-position, NOT a new frame — so `currentFrame` stays put (f3), not f3a.
+    // `editTemplate` pushes `report` `surface: "builder"`. No experience fork.
+    // The journey stage stays `analyze` (Extract); design is a sub-position of the
+    // extract-workbench step, not a separate journey position.
     it("editSchema mutates the active extract-workbench step into surface='design' (onboarding)", () => {
       const onboardingWithChat = ({ children }: { children: React.ReactNode }) => (
         withCanvasApi(<ChatStoreProvider autoSeedDefaultSession>
-          <OnboardingSessionProvider initialFrame="f3" initialScenario="utility">
+          <OnboardingSessionProvider initialStep={testFrameToStep("f3", "utility")} initialScenario="utility">
             <CanvasOrchestratorProvider now={() => 1700000000000}>{children}</CanvasOrchestratorProvider>
           </OnboardingSessionProvider>
         </ChatStoreProvider>)
@@ -1238,8 +1376,9 @@ describe("CanvasOrchestratorContext", () => {
       const current = session.viewer.history[session.viewer.currentStep.stepIndex];
       expect(current.kind).toBe("extract-workbench");
       if (current.kind === "extract-workbench") expect(current.surface).toBe("design");
-      // The journey stage is unchanged — design is a sub-position of Extract.
-      expect(result.current.session.state.currentFrame).toBe("f3");
+      // The journey stage is unchanged — design is a sub-position of the
+      // extract-workbench step, which still maps to the analyze/Extract stage.
+      expect(VIEWER_STEP_TO_JOURNEY[current.kind]).toMatchObject({ step: "analyze", substep: "extract" });
     });
 
     it("openDocument pushes a doc-viewer step (defaults to page 1)", () => {

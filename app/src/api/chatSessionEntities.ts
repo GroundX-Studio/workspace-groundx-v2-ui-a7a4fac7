@@ -10,10 +10,10 @@
  * bundled context.
  *
  * Merge semantics on the server: only the fields the client knows
- * about (lastFrame + the JSON blobs) get overlaid; server-only
- * scope refs (bucketId / projectIds / groupId / documentIds)
- * survive a client PUT. That's why this helper's input type is
- * narrow — those fields aren't ours to set.
+ * about (lastStep + reachedStages + the JSON blobs) get overlaid;
+ * server-only scope refs (bucketId / projectIds / groupId /
+ * documentIds) survive a client PUT. That's why this helper's input
+ * type is narrow — those fields aren't ours to set.
  *
  * Added in RT-03 to close the "write-only-via-tests" gap audited
  * 2026-05-27. Before RT-03 chatHandler.ts:249 + structuredHandler
@@ -27,9 +27,14 @@ import { captureException } from "@/lib/sentry";
 export interface UpsertChatSessionEntityInput {
   chatSessionId: string;
   entityKey: string;
-  lastFrame: string | null;
-  /** JSON-stringified array of completed frame names. */
-  completedFramesJson: string;
+  /**
+   * JSON-stringified `PersistedViewerStep` — the resume anchor (the active
+   * viewer step, navigational payload only). Replaced the frame-keyed
+   * `lastFrame` (standardized-viewer-control D13/R5).
+   */
+  lastStepJson: string;
+  /** JSON-stringified array of reached `JourneyStage` values (checkmarks). */
+  reachedStagesJson: string;
   /** JSON-stringified scan progress payload, or null when none. */
   scanProgressJson?: string | null;
   /** JSON-stringified extracted values, or null when none. */
@@ -57,8 +62,8 @@ export async function upsertChatSessionEntity(
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        lastFrame: input.lastFrame,
-        completedFramesJson: input.completedFramesJson,
+        lastStepJson: input.lastStepJson,
+        reachedStagesJson: input.reachedStagesJson,
         scanProgressJson: input.scanProgressJson ?? null,
         extractedValuesJson: input.extractedValuesJson ?? null,
       }),

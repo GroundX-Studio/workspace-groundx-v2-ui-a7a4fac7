@@ -4,7 +4,7 @@ import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
 // module (type-only → erased → cycle-free with the orchestrator's runtime
 // dependency on ChatStore). Re-exported below for back-compat consumers.
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
-import type { Citation, ContentScope, NormalizedBbox, SchemaFieldExtractionResult, Source, TemplateFieldType } from "@groundx/shared";
+import type { Citation, ContentScope, NormalizedBbox, PersistedViewerStep, SchemaFieldExtractionResult, Source, TemplateFieldType } from "@groundx/shared";
 
 /**
  * Chat session foundation — see /memory/project_chat_session_model.md.
@@ -454,6 +454,52 @@ export type ViewerStep =
     }
   | { kind: "report"; surface?: "render" | "builder"; selectedSectionId?: string }
   | { kind: "integrate" };
+
+/**
+ * Project an in-memory `ViewerStep` down to the `PersistedViewerStep` the
+ * resume anchor stores (standardized-viewer-control D13/R5). Drops the
+ * EPHEMERAL fields — `doc-viewer.scanning` (a one-shot animation beat) and
+ * `doc-viewer.highlight` / `doc-viewer.litRegions` (citation overlays rebuilt
+ * on re-click). The persisted shape is single-sourced in `@groundx/shared`
+ * (`persistedViewerStepSchema`); this helper is the write-side pruner, and the
+ * persisted value reconstructs an in-memory step (ephemeral fields absent) on
+ * read. Total over the `ViewerStep` union.
+ */
+export function toPersistedViewerStep(step: ViewerStep): PersistedViewerStep {
+  switch (step.kind) {
+    case "ingest-picker":
+      return step.attachedSchema
+        ? { kind: "ingest-picker", attachedSchema: step.attachedSchema }
+        : { kind: "ingest-picker" };
+    case "doc-viewer":
+      return {
+        kind: "doc-viewer",
+        documentId: step.documentId,
+        ...(step.page !== undefined ? { page: step.page } : {}),
+      };
+    case "extract-workbench":
+      return {
+        kind: "extract-workbench",
+        scenarioId: step.scenarioId,
+        ...(step.focusedCategoryId !== undefined ? { focusedCategoryId: step.focusedCategoryId } : {}),
+        ...(step.surface !== undefined ? { surface: step.surface } : {}),
+      };
+    case "interact-chat":
+      return {
+        kind: "interact-chat",
+        scenarioId: step.scenarioId,
+        ...(step.documentId !== undefined ? { documentId: step.documentId } : {}),
+      };
+    case "report":
+      return {
+        kind: "report",
+        ...(step.surface !== undefined ? { surface: step.surface } : {}),
+        ...(step.selectedSectionId !== undefined ? { selectedSectionId: step.selectedSectionId } : {}),
+      };
+    case "integrate":
+      return { kind: "integrate" };
+  }
+}
 
 /**
  * Transient surfaces that sit on top of the current step in a z-stack.

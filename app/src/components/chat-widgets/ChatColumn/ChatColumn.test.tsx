@@ -26,6 +26,7 @@ import { useLiveExtractionSchema } from "@/hooks/useLiveExtractionSchema";
 import type { WidgetRole } from "@groundx/shared";
 
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useActiveStepDiagnostic, useResumeAnchorDiagnostic } from "@/test/activeStepDiagnostic";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -95,20 +96,22 @@ describe("ChatColumn", () => {
   // frame (Interact/Integrate) is incoherent. With real turns in the thread,
   // a returning user is NOT yanked back.
   describe("scripted-intro replay snaps the canvas to Understand", () => {
-    function FrameProbe() {
-      const { state } = useOnboardingSession();
-      return <div data-testid="frame-probe">{state.currentFrame}</div>;
+    // standardized-viewer-control (D2) — renders the FRAME-FREE active viewer
+    // step diagnostic (was the retired `currentFrame`); empty when no step.
+    function StepProbe() {
+      const step = useActiveStepDiagnostic();
+      return <div data-testid="step-probe">{step ?? ""}</div>;
     }
 
-    it("resuming a later frame with an empty thread snaps back to f2 when the intro will play", async () => {
+    it("resuming a later step with an empty thread snaps back to the doc-viewer when the intro will play", async () => {
       renderWithChatColumnApi(
         <>
           <ChatColumn role="anonymous" scope={{ type: "none" }} />
-          <FrameProbe />
+          <StepProbe />
         </>,
         { initialFrame: "f5", initialScenario: "utility" },
       );
-      await waitFor(() => expect(screen.getByTestId("frame-probe")).toHaveTextContent("f2"));
+      await waitFor(() => expect(screen.getByTestId("step-probe")).toHaveTextContent("doc-viewer"));
     });
 
     it("does NOT snap when the intro is a replay-restore (doneness persisted)", async () => {
@@ -116,16 +119,16 @@ describe("ChatColumn", () => {
       renderWithChatColumnApi(
         <>
           <ChatColumn role="anonymous" scope={{ type: "none" }} />
-          <FrameProbe />
+          <StepProbe />
         </>,
         { initialFrame: "f5", initialScenario: "utility" },
       );
-      // The intro restores instantly (no animation) — the resumed frame stands.
+      // The intro restores instantly (no animation) — the resumed step stands.
       await screen.findByTestId("onboarding-chat-bot-lead");
-      expect(screen.getByTestId("frame-probe")).toHaveTextContent("f5");
+      expect(screen.getByTestId("step-probe")).toHaveTextContent("interact-chat");
     });
 
-    it("does NOT snap when the thread has real turns (returning user keeps their frame)", async () => {
+    it("does NOT snap when the thread has real turns (returning user keeps their step)", async () => {
       listChatMessages.mockResolvedValue([
         { id: "m1", role: "user", content: "what is the total?", citations: [] },
         { id: "m2", role: "assistant", content: "$7,613.20.", citations: [] },
@@ -133,7 +136,7 @@ describe("ChatColumn", () => {
       renderWithChatColumnApi(
         <>
           <ChatColumn role="anonymous" scope={{ type: "none" }} />
-          <FrameProbe />
+          <StepProbe />
         </>,
         { initialFrame: "f5", initialScenario: "utility" },
       );
@@ -142,7 +145,7 @@ describe("ChatColumn", () => {
       await act(async () => {
         await new Promise((r) => setTimeout(r, 50));
       });
-      expect(screen.getByTestId("frame-probe")).toHaveTextContent("f5");
+      expect(screen.getByTestId("step-probe")).toHaveTextContent("interact-chat");
     });
   });
 
@@ -233,14 +236,13 @@ describe("ChatColumn", () => {
   });
 
   // standardized-viewer-control T6 — the conversation-journey predicate reads
-  // the ACTIVE VIEWER STEP (its journey stage), NOT `session.currentFrame`.
-  // This discriminates the migration: a raw `pushStep` moves the active step
-  // WITHOUT touching `lastFrame`/`currentFrame` (only `advanceFrame`/
-  // `markFrameReached` do that). Pushing an `ingest-picker` step over a seeded
-  // journey frame must drop the conversation chrome to the idle placeholder
-  // (ingest is NOT in the journey whitelist) — a frame-based read would still
-  // see the seeded f2 and wrongly keep the chrome.
-  it("follows the active viewer step (not the seeded frame) for the conversation-journey predicate", async () => {
+  // the ACTIVE VIEWER STEP (its journey stage). This discriminates the migration:
+  // a raw `pushStep` moves the active step WITHOUT touching the resume anchor.
+  // Pushing an `ingest-picker` step over a seeded journey step must drop the
+  // conversation chrome to the idle placeholder (ingest is NOT in the journey
+  // whitelist) — a resume-anchor-only read would still see the seeded
+  // doc-viewer step and wrongly keep the chrome.
+  it("follows the active viewer step (not the resume anchor) for the conversation-journey predicate", async () => {
     function StepPusher() {
       const { pushStep } = useChatStore();
       return (
@@ -258,7 +260,7 @@ describe("ChatColumn", () => {
     );
     // Seeded on the Understand step → onboarding conversation chrome shows.
     expect(screen.getByTestId("onboarding-chat-conversation")).toBeInTheDocument();
-    // Move the ACTIVE STEP to ingest-picker (frame/lastFrame unchanged).
+    // Move the ACTIVE STEP to ingest-picker (resume anchor unchanged).
     act(() => {
       screen.getByTestId("push-ingest-step").click();
     });
@@ -331,18 +333,17 @@ describe("ChatColumn", () => {
     expect(screen.getByTestId("onboarding-chat-pick-a-view")).toBeInTheDocument();
   });
 
-  it("Pick-a-view pills advance to F3 on click", () => {
+  it("Pick-a-view pills advance to the Extract step on click", () => {
     vi.useFakeTimers();
-    let lastFrame = "";
-    function FrameProbe() {
-      const { state } = useOnboardingSession();
-      lastFrame = state.currentFrame;
+    let lastStep: string | null = null;
+    function StepProbe() {
+      lastStep = useActiveStepDiagnostic();
       return null;
     }
     renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
-        <FrameProbe />
+        <StepProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -357,7 +358,7 @@ describe("ChatColumn", () => {
     act(() => {
       pill.click();
     });
-    expect(lastFrame).toBe("f3");
+    expect(lastStep).toBe("extract-workbench");
   });
 
   it("derives Pick-a-view pills from the active scenario's extraction schema (Loan != Utility)", () => {
@@ -399,18 +400,17 @@ describe("ChatColumn", () => {
     expect(screen.getByTestId("onboarding-chat-pick-view-meters")).toBeInTheDocument();
   });
 
-  it("on a schemaless scenario (Solar), surfaces a single 'show me chat' pill that jumps to F5", () => {
+  it("on a schemaless scenario (Solar), surfaces a single 'show me chat' pill that jumps to Interact", () => {
     vi.useFakeTimers();
-    let lastFrame = "";
-    function FrameProbe() {
-      const { state } = useOnboardingSession();
-      lastFrame = state.currentFrame;
+    let lastStep: string | null = null;
+    function StepProbe() {
+      lastStep = useActiveStepDiagnostic();
       return null;
     }
     renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
-        <FrameProbe />
+        <StepProbe />
       </>,
       { initialFrame: "f2", initialScenario: "solar" },
     );
@@ -423,7 +423,7 @@ describe("ChatColumn", () => {
     act(() => {
       pill.click();
     });
-    expect(lastFrame).toBe("f5");
+    expect(lastStep).toBe("interact-chat");
   });
 
   it("the sample switcher chip exposes the other scenarios as a menu", () => {
@@ -442,11 +442,11 @@ describe("ChatColumn", () => {
   // Schema-Agent header + earlier-turns summary above the conversation.
   //
   // standardized-viewer-control T6 — the header is now driven by the ACTIVE
-  // VIEWER STEP `surface === "design"` (the dispatched `editSchema` step), NOT
-  // the retired `currentFrame === "f3a"`. So it tracks the design surface in
-  // BOTH onboarding and steady. The design surface is reached by DISPATCHING
-  // `editSchema` (the production path), mirroring SchemaView's `openDesign` — a
-  // bare `initialFrame:"f3a"` seeds the FIELDS workbench (no design surface).
+  // VIEWER STEP `surface === "design"` (the dispatched `editSchema` step). So it
+  // tracks the design surface in BOTH onboarding and steady. The design surface
+  // is reached by DISPATCHING `editSchema` (the production path), mirroring
+  // SchemaView's `openDesign` — a freshly seeded extract-workbench step opens on
+  // the FIELDS surface (no design surface) until `editSchema` is dispatched.
   // ────────────────────────────────────────────────────────────────────
   describe("schema-agent-chat-affordances", () => {
     const DesignOpener = ({ schemaId }: { schemaId: string }) => {
@@ -1021,15 +1021,15 @@ describe("ChatColumn", () => {
       compressionRan: false,
     });
 
-    // Observe the live frame so the test can confirm the journey actually
-    // advanced (the property is meaningless if the frame never changed).
-    const framesSeen: string[] = [];
-    let lastFrame = "";
-    function FrameProbe() {
-      const { state } = useOnboardingSession();
-      lastFrame = state.currentFrame;
-      if (framesSeen[framesSeen.length - 1] !== state.currentFrame) {
-        framesSeen.push(state.currentFrame);
+    // Observe the live active step so the test can confirm the journey actually
+    // advanced (the property is meaningless if the step never changed).
+    const stepsSeen: string[] = [];
+    let lastStep: string | null = null;
+    function StepProbe() {
+      const step = useActiveStepDiagnostic();
+      lastStep = step;
+      if (step && stepsSeen[stepsSeen.length - 1] !== step) {
+        stepsSeen.push(step);
       }
       return null;
     }
@@ -1038,13 +1038,13 @@ describe("ChatColumn", () => {
     renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
-        <FrameProbe />
+        <StepProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
 
-    // The journey starts on f2.
-    expect(lastFrame).toBe("f2");
+    // The journey starts on the Understand doc-viewer step.
+    expect(lastStep).toBe("doc-viewer");
 
     // Seed a real round-trip turn at f2.
     const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -1054,16 +1054,17 @@ describe("ChatColumn", () => {
     await waitFor(() => {
       expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent("Totals reconciled.");
     });
-    // The first send also fires the onboarding Choreography's onFirstUserSend →
-    // advanceFrame("f5"), so the journey auto-advances f2 → f5: a genuine
-    // onboarding frame advance happens as a side-effect of the seeded turn.
+    // The first send also fires the onboarding Choreography's onFirstUserSend,
+    // dispatching showInteract, so the journey auto-advances doc-viewer →
+    // interact-chat: a genuine onboarding journey advance happens as a
+    // side-effect of the seeded turn.
     await waitFor(() => {
-      expect(lastFrame).toBe("f5");
+      expect(lastStep).toBe("interact-chat");
     });
-    // The frame REALLY changed (guards against a vacuous pass if the journey
-    // never moved): we observed both f2 and f5.
-    expect(framesSeen).toContain("f2");
-    expect(framesSeen).toContain("f5");
+    // The step REALLY changed (guards against a vacuous pass if the journey
+    // never moved): we observed both doc-viewer and interact-chat.
+    expect(stepsSeen).toContain("doc-viewer");
+    expect(stepsSeen).toContain("interact-chat");
 
     // After that frame advance, the conversation must NOT have remounted: the
     // optimistic turn — held ONLY in the engine's local liveTurns — survives,
@@ -1086,17 +1087,18 @@ describe("ChatColumn", () => {
   // with a NEW component IDENTITY → React unmounted + remounted the
   // Choreography, resetting its internal `firstSendFiredRef`.
   //
-  // Consequence: after the first user send auto-advances f2→f5, any later
-  // re-render that lands while still in the scenario journey re-mounted the
-  // Choreography and re-fired `advanceFrame("f5")` — so the frame was
-  // un-holdable against the choreography. Drive an explicit advance back to f3
-  // and the spurious re-fire bounces it straight back to f5.
+  // Consequence: after the first user send auto-advances Understand→Interact, any
+  // later re-render that lands while still in the scenario journey re-mounted the
+  // Choreography and re-fired the first-send showInteract — so the journey was
+  // un-holdable against the choreography. Drive an explicit advance back to
+  // Extract and the spurious re-fire bounces it straight back to Interact.
   //
-  // This test seeds a first send (auto f2→f5), then drives an explicit
-  // advanceFrame("f3") and asserts the frame STAYS f3 (the choreography must not
-  // bounce it back to f5). Against the inline-construction implementation the
-  // remounted Choreography re-fires and the frame flips back to f5 → FAIL.
-  it("stable-experience-identity: an explicit advance back to f3 STAYS f3 (choreography does not re-fire to f5)", async () => {
+  // This test seeds a first send (auto Understand→Interact), then drives an
+  // explicit Extract reach and asserts the resume anchor STAYS extract-workbench
+  // (the choreography must not bounce it back to Interact). Against the
+  // inline-construction implementation the remounted Choreography re-fires and the
+  // resume anchor flips back to interact-chat → FAIL.
+  it("stable-experience-identity: an explicit Extract reach STAYS at Extract (choreography does not re-fire to Interact)", async () => {
     sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-id",
       assistantMessageId: "a-id",
@@ -1112,12 +1114,15 @@ describe("ChatColumn", () => {
       compressionRan: false,
     });
 
-    let lastFrame = "";
-    let driveAdvance: (frame: "f3") => void = () => {};
-    function FrameProbe() {
-      const { state, advanceFrame } = useOnboardingSession();
-      lastFrame = state.currentFrame;
-      driveAdvance = (frame) => advanceFrame(frame);
+    let resumeAnchor: string | null = null;
+    let driveAdvance: () => void = () => {};
+    function StepProbe() {
+      const { state, markStageReached } = useOnboardingSession();
+      resumeAnchor = useResumeAnchorDiagnostic();
+      // standardized-viewer-control — drive the Extract reach via the frame-free
+      // `markStageReached` (it moves the resume anchor to the extract-workbench
+      // step without pushing a new active viewer step).
+      driveAdvance = () => markStageReached({ kind: "extract-workbench", scenarioId: state.scenario ?? "utility" });
       return null;
     }
 
@@ -1125,35 +1130,36 @@ describe("ChatColumn", () => {
     renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
-        <FrameProbe />
+        <StepProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
 
-    expect(lastFrame).toBe("f2");
+    expect(resumeAnchor).toBe("doc-viewer");
 
-    // First real send → onboarding Choreography auto-advances f2 → f5.
+    // First real send → onboarding Choreography auto-advances Understand →
+    // Interact.
     const input = screen.getByTestId("chat-live-input").querySelector("input")!;
     await user.type(input, "Reconcile the totals.");
     await user.click(screen.getByTestId("chat-live-send"));
     await waitFor(() => {
-      expect(lastFrame).toBe("f5");
+      expect(resumeAnchor).toBe("interact-chat");
     });
 
-    // Now drive an explicit advance back to f3 (still inside the scenario
-    // journey, so ChatColumn keeps mounting the onboarding experience). The
-    // choreography's first-send side-effect already fired once and must NOT
-    // fire again — the frame must HOLD at f3.
+    // Now drive an explicit Extract reach (still inside the scenario journey, so
+    // ChatColumn keeps mounting the onboarding experience). The choreography's
+    // first-send side-effect already fired once and must NOT fire again — the
+    // resume anchor must HOLD at extract-workbench.
     act(() => {
-      driveAdvance("f3");
+      driveAdvance();
     });
 
-    // Give any spurious remount-driven effect a chance to fire, then assert
-    // the frame did NOT bounce back to f5.
+    // Give any spurious remount-driven effect a chance to fire, then assert the
+    // resume anchor did NOT bounce back to interact-chat.
     await act(async () => {
       await Promise.resolve();
     });
-    expect(lastFrame).toBe("f3");
+    expect(resumeAnchor).toBe("extract-workbench");
   });
 
   // widget-llm-integration Phase 1 — render `suggestedActions[]` as a chip

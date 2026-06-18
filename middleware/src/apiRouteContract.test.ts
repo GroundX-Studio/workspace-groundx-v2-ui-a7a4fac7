@@ -918,16 +918,18 @@ describe("middleware API route contract", () => {
   // after each in-memory mutation, persisting the entity's
   // last-frame + completed-frames + scope refs.
   //
-  // Body is a partial: the thin client only knows about lastFrame
-  // + completedFrames + timestamps, NOT bucketId/projectIds/groupId/
+  // Body is a partial: the thin client only knows about lastStepJson
+  // + reachedStagesJson + timestamps, NOT bucketId/projectIds/groupId/
   // documentIds (those get populated server-side from chat-handler
   // processing). The endpoint merges body onto any existing row so
   // server-only fields survive a client PUT.
+  // standardized-viewer-control D13/R5 — the resume anchor moved off frames:
+  // lastStepJson (PersistedViewerStep) + reachedStagesJson (stage array).
   describe("PUT /api/chat-sessions/:id/entities/:entityKey (RT-03)", () => {
     function entityBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
       return {
-        lastFrame: "f2",
-        completedFramesJson: JSON.stringify(["f1"]),
+        lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:utility" }),
+        reachedStagesJson: JSON.stringify(["ingest", "understand"]),
         scanProgressJson: null,
         extractedValuesJson: null,
         ...overrides,
@@ -961,8 +963,8 @@ describe("middleware API route contract", () => {
       expect(rows[0]).toMatchObject({
         chatSessionId: "rt03-anon",
         entityKey: "sample:utility",
-        lastFrame: "f2",
-        completedFramesJson: JSON.stringify(["f1"]),
+        lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:utility" }),
+        reachedStagesJson: JSON.stringify(["ingest", "understand"]),
         bucketId: null,
         projectIdsJson: null,
         groupId: null,
@@ -978,8 +980,8 @@ describe("middleware API route contract", () => {
       await repository.upsertChatSessionEntity({
         chatSessionId: "rt03-anon",
         entityKey: "sample:utility",
-        lastFrame: "f1",
-        completedFramesJson: "[]",
+        lastStepJson: JSON.stringify({ kind: "ingest-picker" }),
+        reachedStagesJson: "[]",
         scanProgressJson: null,
         extractedValuesJson: null,
         bucketId: 28454,
@@ -992,15 +994,15 @@ describe("middleware API route contract", () => {
 
       await agent
         .put("/api/chat-sessions/rt03-anon/entities/sample%3Autility")
-        .send(entityBody({ lastFrame: "f3", completedFramesJson: JSON.stringify(["f1", "f2"]) }))
+        .send(entityBody({ lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }), reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]) }))
         .expect(200);
 
       const rows = await repository.listChatSessionEntities("rt03-anon");
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
         // Updated by the PUT.
-        lastFrame: "f3",
-        completedFramesJson: JSON.stringify(["f1", "f2"]),
+        lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+        reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]),
         // Preserved from the seed — client didn't send these.
         bucketId: 28454,
         projectIdsJson: JSON.stringify(["P1"]),
@@ -1019,11 +1021,11 @@ describe("middleware API route contract", () => {
         .expect(400);
     });
 
-    it("returns 400 when lastFrame is not a string", async () => {
+    it("returns 400 when lastStepJson is not a string", async () => {
       const { agent } = await setupAnonSession();
       await agent
         .put("/api/chat-sessions/rt03-anon/entities/sample%3Autility")
-        .send(entityBody({ lastFrame: 42 }))
+        .send(entityBody({ lastStepJson: 42 }))
         .expect(400);
     });
 
@@ -1071,7 +1073,7 @@ describe("middleware API route contract", () => {
       const { repository, agent } = await setupAnonSession();
       await agent
         .put("/api/chat-sessions/rt03-anon/entities/sample%3Autility")
-        .send(entityBody({ lastFrame: "f5", completedFramesJson: JSON.stringify(["f1", "f2", "f3"]) }))
+        .send(entityBody({ lastStepJson: JSON.stringify({ kind: "interact-chat", scenarioId: "utility" }), reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]) }))
         .expect(200);
       // Same call signature chatHandler.ts:249 + structuredHandler.ts:141/159/397
       // invoke during context bundling. Returning the row here proves
@@ -1080,8 +1082,8 @@ describe("middleware API route contract", () => {
       expect(bundled).toHaveLength(1);
       expect(bundled[0]).toMatchObject({
         entityKey: "sample:utility",
-        lastFrame: "f5",
-        completedFramesJson: JSON.stringify(["f1", "f2", "f3"]),
+        lastStepJson: JSON.stringify({ kind: "interact-chat", scenarioId: "utility" }),
+        reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]),
       });
     });
 
@@ -1166,16 +1168,16 @@ describe("middleware API route contract", () => {
         .put("/api/chat-sessions/scp-anon/entities/sample%3Autility")
         .send(entityBody())
         .expect(200);
-      // Second write (frame advance) must preserve the produced scope,
+      // Second write (journey advance) must preserve the produced scope,
       // not re-run / clobber it.
       await agent
         .put("/api/chat-sessions/scp-anon/entities/sample%3Autility")
-        .send(entityBody({ lastFrame: "f4", completedFramesJson: JSON.stringify(["f1", "f2", "f3"]) }))
+        .send(entityBody({ lastStepJson: JSON.stringify({ kind: "report", surface: "render" }), reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]) }))
         .expect(200);
       const rows = await repository.listChatSessionEntities("scp-anon");
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
-        lastFrame: "f4",
+        lastStepJson: JSON.stringify({ kind: "report", surface: "render" }),
         bucketId: 28454,
         projectIdsJson: JSON.stringify([SAMPLE_PROJECT_ID]),
       });
@@ -1610,8 +1612,8 @@ describe("middleware API route contract", () => {
       await repository.upsertChatSessionEntity({
         chatSessionId,
         entityKey: "sample:utility",
-        lastFrame: "f3",
-        completedFramesJson: JSON.stringify(["f1", "f2"]),
+        lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+        reachedStagesJson: JSON.stringify(["ingest", "understand"]),
         scanProgressJson: null,
         extractedValuesJson: null,
         bucketId: null,
@@ -1676,7 +1678,7 @@ describe("middleware API route contract", () => {
       const { agent } = await bootstrappedAgent();
       await agent
         .put("/api/chat-sessions/pop-1/entities/sample%3Autility")
-        .send({ lastFrame: "f4" })
+        .send({ lastStepJson: JSON.stringify({ kind: "report", surface: "render" }) })
         .expect(200);
     });
 

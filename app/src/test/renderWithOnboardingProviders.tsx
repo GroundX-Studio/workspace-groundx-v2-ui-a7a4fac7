@@ -16,11 +16,17 @@ import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
 import { GxThemeProvider } from "@/ThemeProvider";
 import { makeFakeApi, type ApiOverrides } from "@/test/makeFakeApi";
 import { allTestScenarios } from "@/test/scenarioFixtures";
-import type { AuthState, FFrame, Scenario } from "@/types/onboarding";
+import { testFrameToStep, type TestFrame } from "@/test/frameToStep";
+import type { AuthState, Scenario } from "@/types/onboarding";
 import type { ScenarioConfig } from "@/types/scenarios";
 
 interface RenderOnboardingOptions {
-  initialFrame?: FFrame;
+  /**
+   * TEST-ONLY position selector. Translated to a seed `ViewerStep`
+   * (`testFrameToStep`) at this harness boundary — production carries no frame
+   * vocabulary. Defaults to "f1" (the ingest picker).
+   */
+  initialFrame?: TestFrame;
   initialAuthState?: AuthState;
   initialScenario?: Scenario | null;
   initialScenarios?: ScenarioConfig[];
@@ -88,7 +94,10 @@ export const renderWithOnboardingProviders = (
                   DocumentsContext. The provider sits inside the loading
                   + message bar wrappers because it dispatches to both. */}
               <DocumentsProvider>
-                <OnboardingSessionProvider initialFrame={initialFrame} initialScenario={initialScenario}>
+                <OnboardingSessionProvider
+                  initialStep={initialScenario ? testFrameToStep(initialFrame, initialScenario) : null}
+                  initialScenario={initialScenario}
+                >
                   <CanvasOrchestratorProvider>
                     <OnboardingSkillProvider>
                       <HelmetProvider>

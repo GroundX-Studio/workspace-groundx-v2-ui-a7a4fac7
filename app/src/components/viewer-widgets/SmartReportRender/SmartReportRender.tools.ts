@@ -25,7 +25,7 @@ import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 const showSmartReportRender: WidgetTool = {
   name: "show_smart_report_render",
   description:
-    "Move the canvas to the Report render surface (frame f4) for a scope. Use when " +
+    "Move the canvas to the Report render surface for a scope. Use when " +
     "the user asks to see the report, says \"make me a report\", or you've reasoned a " +
     "rendered IC-brief is the natural next surface for what they're analyzing.",
   category: "read",

@@ -40,7 +40,7 @@ interface EntitySessionStoreProviderProps {
    *
    * Tests use this to drop the store into a known state, and
    * OnboardingSessionProvider uses it to translate
-   * initialFrame/initialScenario props into seed entities.
+   * initialStep/initialScenario props into seed entities.
    */
   initialEntities?: ReadonlyMap<EntityKey, EntitySession>;
   initialActiveKey?: EntityKey | null;
@@ -49,9 +49,9 @@ interface EntitySessionStoreProviderProps {
    * positioned on. When provided, the seeded ChatStore session's `viewer` is
    * primed with this one step (history length 1, currentStep.stepIndex 0) so
    * `selectActiveStep` is non-null on first render. The frame-free StepStrip
-   * (which reads the active step kind, no frame fallback) needs this; production
-   * resume (T6b) will seed the same way from the persisted active step.
-   * `OnboardingSessionProvider` computes it via `frameToStepStandalone`.
+   * (which reads the active step kind) needs this; production resume (T6b) will
+   * seed the same way from the persisted active step.
+   * `OnboardingSessionProvider` passes its frame-free `initialStep` through here.
    */
   initialViewerStep?: ViewerStep | null;
 }

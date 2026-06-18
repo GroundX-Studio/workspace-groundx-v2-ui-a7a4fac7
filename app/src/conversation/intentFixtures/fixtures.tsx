@@ -153,12 +153,12 @@ export const intentFixtures: IntentFixture[] = [
     trigger: { via: "dispatch", source: "user", intent: { kind: "editSchema", schemaId: "schema-1" } },
     assert: (s) => assert(s.adapterCapturedKind === "editSchema", `captured ${s.adapterCapturedKind}`),
   },
-  // standardized-viewer-control T2 — `showInteract` (Interact / chat-with-
-  // sources surface). NOT LLM-emittable until its `show_interact` tool lands
-  // in T7, so it is exercised via a direct dispatch (like the other `llm:false`
-  // kinds). The built-in orchestrator case runs `advanceFrame("f5")` in
-  // onboarding; the spy adapter still captures the kind after the built-in
-  // side effect (T5 refines the steady push to resolve a doc from `scope`).
+  // standardized-viewer-control — `showInteract` (Interact / chat-with-sources
+  // surface). Exercised via a direct dispatch alongside the LLM path. The
+  // built-in orchestrator case pushes the `interact-chat` step (resolving a doc
+  // from `scope`) and, in onboarding, advances the Interact journey stage via
+  // `markStageReached`; the spy adapter still captures the kind after the
+  // built-in side effect.
   {
     kind: "showInteract",
     trigger: {
@@ -167,6 +167,21 @@ export const intentFixtures: IntentFixture[] = [
       intent: { kind: "showInteract", scope: { type: "documents", documentIds: [DOC] } },
     },
     assert: (s) => assert(s.adapterCapturedKind === "showInteract", `captured ${s.adapterCapturedKind}`),
+  },
+  // standardized-viewer-control deletion-phase — `presentExperienceBeat` is the
+  // generic experience/overlay-internal SCRIPTED viewer beat. NOT LLM-emittable
+  // (`llm: false`) + NOT offerable — it is onboarding choreography dispatched only
+  // by the experience itself, so it is exercised via a direct dispatch like the
+  // other `llm: false` kinds. The orchestrator's built-in case handles the beat;
+  // the spy adapter still captures the kind after the built-in side effect.
+  {
+    kind: "presentExperienceBeat",
+    trigger: {
+      via: "dispatch",
+      source: "user",
+      intent: { kind: "presentExperienceBeat", beat: { kind: "ingest-picker" } },
+    },
+    assert: (s) => assert(s.adapterCapturedKind === "presentExperienceBeat", `captured ${s.adapterCapturedKind}`),
   },
   // Emittable adapter kinds → via:reply (P4).
   {

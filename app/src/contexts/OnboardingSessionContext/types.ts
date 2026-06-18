@@ -1,4 +1,5 @@
-import type { FFrame, GateTrigger, Scenario } from "@/types/onboarding";
+import type { ViewerStep } from "@/contexts/ChatStoreContext";
+import type { GateTrigger, Scenario } from "@/types/onboarding";
 
 /**
  * `f3a-save-signin-gate-handoff`: optional discriminator carried on the
@@ -19,10 +20,6 @@ export type GateStatus =
 export interface OnboardingSessionState {
   /** Server-issued session ID — `null` until the anonymous session is bootstrapped. */
   sessionId: string | null;
-  /** Current F-series frame the user is on. */
-  currentFrame: FFrame;
-  /** Frames the user has successfully completed (for step strip ✓ states). */
-  completedFrames: ReadonlySet<FFrame>;
   /** Active scenario, set when user picks a sample in F1. */
   scenario: Scenario | null;
   /** Gate lifecycle (LC3) — single source of truth for F6. */
@@ -41,27 +38,27 @@ export interface OnboardingSessionApi {
   bootstrapSession: (sessionId: string) => void;
   pickScenario: (scenario: Scenario) => void;
   /**
-   * Advance the F-series frame. Pass `options.selectedReportSectionId` to carry
-   * the report section the builder (f4a) should pre-open — the render→builder
-   * `✎ edit §N` hand-off uses it. Advancing to any non-f4a frame clears it.
+   * standardized-viewer-control — advance the onboarding JOURNEY STATE for a
+   * destination VIEWER STEP, WITHOUT pushing it (FRAME-FREE; replaced both
+   * `advanceFrame` and the old `markFrameReached`). The orchestrator's
+   * de-forked `show*`/`editTemplate` handlers (and the `presentExperienceBeat`
+   * understand-scanning beat) push the viewer step themselves (the one canvas
+   * outcome, both experiences) and call this to layer onboarding
+   * journey-progress on top: the resume anchor (`lastStep`) + the reached-stage
+   * SET (`reachedStages`) + the journey-advanced event + the integrate gate-pop
+   * + the report-builder section pre-select (all read off the step). The
+   * ingest-picker return (entity-deactivate) is `returnToIngestPicker`.
    */
-  advanceFrame: (
-    frame: FFrame,
-    options?: { selectedReportSectionId?: string; focusedCategoryId?: string },
-  ) => void;
+  markStageReached: (step: ViewerStep) => void;
   /**
-   * standardized-viewer-control T5 — advance the onboarding JOURNEY STATE for a
-   * frame WITHOUT pushing a viewer step (the side-effect half of `advanceFrame`:
-   * lastFrame + completedFrames + the journey-advanced event + the f7 gate-pop +
-   * the f4a section pre-select). The orchestrator's de-forked `show*`/`editTemplate`
-   * handlers push the viewer step themselves (the one canvas outcome, both
-   * experiences) and call this to layer onboarding journey-progress on top. f1
-   * (entity-deactivate) is NOT handled here — it stays on `advanceFrame`.
+   * standardized-viewer-control deletion-phase — return to the Ingest picker AND
+   * deactivate the active entity (the f1 BACKWARD-transition side effects: gate
+   * reset, the "left" viewer event, the ingest-picker step push). The
+   * `presentExperienceBeat` `ingest-picker` beat handler calls this; the optional
+   * `attachedSchema` rides onto the picker step (the F3a Save → sign-in → persist
+   * → picker hand-off). Onboarding-only.
    */
-  markFrameReached: (
-    frame: FFrame,
-    options?: { selectedReportSectionId?: string },
-  ) => void;
+  returnToIngestPicker: (attachedSchema?: { schemaId: string; name: string }) => void;
   /**
    * standardized-viewer-control T5 (R1/R6) — the Extract first-reach signal. The
    * orchestrator's `showExtract` handler calls this; it fires `understand.completed`

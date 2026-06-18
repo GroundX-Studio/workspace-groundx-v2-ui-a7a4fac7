@@ -27,8 +27,8 @@ const validSnapshot = {
           {
             kind: "sample",
             id: "doc-1",
-            lastFrame: "f2",
-            completedFrames: ["f1", "f2"],
+            lastStep: { kind: "doc-viewer", documentId: "scenario:doc-1" },
+            reachedStages: ["ingest", "understand"],
             createdAt: 4,
             lastVisitedAt: 5,
           },

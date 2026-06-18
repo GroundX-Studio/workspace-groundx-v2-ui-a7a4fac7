@@ -814,8 +814,8 @@ export function createApp({
   // tests did), so the reads always returned []. EntitySessionStore's
   // upsert/update paths now PUT here after each in-memory mutation.
   //
-  // Merge semantics: the thin client knows about lastFrame +
-  // completedFramesJson + the JSON blobs, NOT bucketId/projectIds/
+  // Merge semantics: the thin client knows about lastStepJson +
+  // reachedStagesJson + the JSON blobs, NOT bucketId/projectIds/
   // groupId/documentIds (those get populated server-side from
   // chat-handler processing). We READ the existing row first and
   // overlay the body fields onto it so server-only fields survive.
@@ -829,8 +829,8 @@ export function createApp({
       const entityKey = req.params.entityKey;
       const body = req.body as
         | {
-            lastFrame?: unknown;
-            completedFramesJson?: unknown;
+            lastStepJson?: unknown;
+            reachedStagesJson?: unknown;
             scanProgressJson?: unknown;
             extractedValuesJson?: unknown;
           }
@@ -840,16 +840,19 @@ export function createApp({
         return;
       }
       // All four body fields are optional but must be the right type
-      // WHEN provided. lastFrame must be string-or-null; the three
-      // *Json fields must be string-or-null (JSON-encoded payload).
-      const lastFrameOk =
-        body.lastFrame === undefined ||
-        body.lastFrame === null ||
-        typeof body.lastFrame === "string";
-      const completedOk =
-        body.completedFramesJson === undefined ||
-        body.completedFramesJson === null ||
-        typeof body.completedFramesJson === "string";
+      // WHEN provided. standardized-viewer-control D13/R5 — the resume
+      // anchor moved off frames: lastStepJson (JSON-encoded
+      // PersistedViewerStep) + reachedStagesJson (JSON-encoded stage
+      // array) replace the frame-keyed lastFrame/completedFramesJson.
+      // All four *Json fields must be string-or-null (JSON-encoded payload).
+      const lastStepOk =
+        body.lastStepJson === undefined ||
+        body.lastStepJson === null ||
+        typeof body.lastStepJson === "string";
+      const reachedOk =
+        body.reachedStagesJson === undefined ||
+        body.reachedStagesJson === null ||
+        typeof body.reachedStagesJson === "string";
       const scanOk =
         body.scanProgressJson === undefined ||
         body.scanProgressJson === null ||
@@ -858,7 +861,7 @@ export function createApp({
         body.extractedValuesJson === undefined ||
         body.extractedValuesJson === null ||
         typeof body.extractedValuesJson === "string";
-      if (!lastFrameOk || !completedOk || !scanOk || !extractedOk) {
+      if (!lastStepOk || !reachedOk || !scanOk || !extractedOk) {
         res.status(400).json({ error: "invalid_payload" });
         return;
       }
@@ -905,12 +908,12 @@ export function createApp({
       const merged = {
         chatSessionId,
         entityKey,
-        lastFrame:
-          body.lastFrame !== undefined ? (body.lastFrame as string | null) : existing?.lastFrame ?? null,
-        completedFramesJson:
-          body.completedFramesJson !== undefined
-            ? (body.completedFramesJson as string | null) ?? "[]"
-            : existing?.completedFramesJson ?? "[]",
+        lastStepJson:
+          body.lastStepJson !== undefined ? (body.lastStepJson as string | null) : existing?.lastStepJson ?? null,
+        reachedStagesJson:
+          body.reachedStagesJson !== undefined
+            ? (body.reachedStagesJson as string | null) ?? "[]"
+            : existing?.reachedStagesJson ?? "[]",
         scanProgressJson:
           body.scanProgressJson !== undefined
             ? (body.scanProgressJson as string | null)

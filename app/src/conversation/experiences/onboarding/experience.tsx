@@ -38,7 +38,6 @@ import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/Thinkin
 import type { ChatExperience, ChatExperienceComponentProps } from "@/conversation/ChatExperience";
 import { BotBubble, PickViewPill, UserBubble } from "@/conversation/chatPrimitives";
 import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
-import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useWidgetRole } from "@/lib/widgetRole";
@@ -107,10 +106,10 @@ export function derivePickViews(
 function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperienceComponentProps> {
   const OnboardingIntro: FC<ChatExperienceComponentProps> = ({ conversation }) => {
     const { scenarioId, thinkingScript } = config;
-    // `advanceFrame` is retained ONLY for the flagged intro-snap below (no
-    // Understand-snap intent exists yet — design §0 R2/R7). All forward canvas
-    // navigation goes through `dispatchIntent`.
-    const { advanceFrame } = useOnboardingSession();
+    // standardized-viewer-control deletion-phase — the intro-snap below now
+    // dispatches the `presentExperienceBeat` `understand-scanning` beat through
+    // the STANDARD seam (was `advanceFrame("f2")`). ALL canvas navigation —
+    // forward and the scripted intro-snap — goes through `dispatchIntent`.
     const { byId, state: registryState } = useScenarioRegistry();
     const { state: chatState } = useChatStore();
     const { dispatch: dispatchIntent } = useCanvasOrchestrator();
@@ -193,20 +192,21 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
       // "f2"`). Read off the synced ref so the once-only decision can't observe
       // a stale render value (R6).
       //
-      // FLAG SITE (design §0 R2/R7) — the snap stays on `advanceFrame("f2")`.
-      // This is a BACKWARD/lateral onboarding transition that must BOTH (a) push
-      // the Understand *scanning* doc-viewer beat and (b) set the f2 journey edge
-      // (`markFrameReached("f2")` → `currentFrame === "f2"`, which the ChatColumn
-      // intro-snap test + the OnboardingShell "wires reachable pills" test read).
-      // No `show*` intent reproduces that pair: `openDocument` pushes a doc-viewer
-      // step but CLEARS scanning and does NOT touch the journey edge; `showSample`
-      // re-runs `pickScenario` (wipes the reached-set + re-fires analytics). There
-      // is no Understand/ingest-return navigation intent in `canvasIntentSchema`
-      // today (same gap the Extract `advanceFrame("f1")` + OnboardingShell
-      // URL-effect sites flagged). Removable once a dedicated Understand-snap /
-      // ingest-picker intent + the symbol-deletion phase land.
-      if (!isOnUnderstandStepRef.current) advanceFrame("f2");
-    }, [introWillPlay, conversation.hydrated, conversation.liveTurns.length, advanceFrame]);
+      // standardized-viewer-control deletion-phase — the snap dispatches the
+      // generic `presentExperienceBeat` `understand-scanning` beat through the
+      // STANDARD seam (was `advanceFrame("f2")`). This BACKWARD/lateral onboarding
+      // beat must BOTH (a) push the Understand *scanning* doc-viewer step and (b)
+      // set the Understand journey edge — the orchestrator's beat handler does
+      // exactly that pair (pushStep(scanning doc-viewer) + markStageReached), so
+      // no onboarding-specific destination intent is added to the LLM/affordance
+      // seam: the beat is `llm: false` (experience-internal choreography only).
+      if (!isOnUnderstandStepRef.current) {
+        dispatchIntent(
+          { kind: "presentExperienceBeat", beat: { kind: "understand-scanning" } },
+          "user",
+        );
+      }
+    }, [introWillPlay, conversation.hydrated, conversation.liveTurns.length, dispatchIntent]);
 
     return (
       <Box data-testid="onboarding-chat-conversation">
@@ -423,12 +423,11 @@ function makeOnboardingIntro(config: OnboardingExperienceConfig): FC<ChatExperie
               <Box data-testid="onboarding-chat-pick-a-view" sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
                 <BotBubble>Pick a view:</BotBubble>
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
-                  {pickViews.map((view, idx) => (
+                  {pickViews.map((view) => (
                     <PickViewPill
                       key={view.key}
                       label={view.label}
                       testid={`onboarding-chat-pick-view-${view.key}`}
-                      legacyTestid={idx === 0 && view.key !== "interact" ? "advance-to-f3" : undefined}
                       onClick={() => {
                         if (view.key === "interact") {
                           // standardized-viewer-control T6 — the "Show me chat"

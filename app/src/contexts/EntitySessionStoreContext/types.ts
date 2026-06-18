@@ -1,4 +1,4 @@
-import type { FFrame } from "@/types/onboarding";
+import type { JourneyStage, PersistedViewerStep } from "@groundx/shared";
 
 /**
  * Kinds of "entities" that can live in the store. Each kind is a
@@ -7,7 +7,7 @@ import type { FFrame } from "@/types/onboarding";
  * report. Singleton UI surfaces (the F1 picker, the BYO sign-up
  * trigger) are NOT entities — they're URL routes with no per-instance
  * state. Putting them in the entity model meant carrying empty
- * lastFrame / completedFrames / gate fields that nobody read.
+ * lastStep / reachedStages / gate fields that nobody read.
  *
  * The store is kind-agnostic — adding a new kind doesn't require
  * changes to the store itself, only to the discriminated union
@@ -45,10 +45,21 @@ export const makeEntityKey = (kind: EntityKind, id: string): EntityKey =>
 export interface EntitySession {
   kind: EntityKind;
   id: string;
-  /** Last frame the user was on within this entity's journey. */
-  lastFrame: FFrame;
-  /** Frames the user has completed inside this entity. */
-  completedFrames: ReadonlySet<FFrame>;
+  /**
+   * The RESUME ANCHOR — the active viewer step the user was last on within
+   * this entity's journey, restored VERBATIM on reload (standardized-viewer-
+   * control D13/R5). Replaced the frame-keyed `lastFrame`. Carries only the
+   * navigational payload (`PersistedViewerStep`); ephemeral citation
+   * highlights / the scan beat are rebuilt on demand, never persisted.
+   */
+  lastStep: PersistedViewerStep;
+  /**
+   * The journey stages the user has REACHED inside this entity — a SET (NOT a
+   * monotonic watermark — R3: `integrate` is reachable from anywhere, so the
+   * set is genuinely non-contiguous). Drives the step-strip checkmarks only;
+   * never the resume anchor. Replaced the frame-keyed `completedFrames`.
+   */
+  reachedStages: ReadonlySet<JourneyStage>;
   /** Unix-ms when this entity was first created in this session. */
   createdAt: number;
   /** Unix-ms when the user last touched this entity. Used by LRU. */

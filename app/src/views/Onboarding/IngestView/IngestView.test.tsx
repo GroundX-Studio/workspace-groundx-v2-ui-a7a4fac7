@@ -10,6 +10,7 @@ import { CanvasOrchestratorProvider } from "@/contexts/CanvasOrchestratorContext
 import { OnboardingSessionProvider, useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { ScenarioRegistryProvider } from "@/contexts/ScenarioRegistryContext";
 import { makeFakeApi } from "@/test/makeFakeApi";
+import { useActiveStepDiagnostic } from "@/test/activeStepDiagnostic";
 import type { ScenarioConfig } from "@/types/scenarios";
 
 import { IngestView } from "./IngestView";
@@ -182,13 +183,13 @@ describe("IngestView (F1)", () => {
     }
   });
 
-  it("clicking a sample sets scenario + advances to F2", async () => {
+  it("clicking a sample sets scenario + advances to the Understand doc-viewer step", async () => {
     const user = userEvent.setup();
-    let snapshot: { scenario: string | null; frame: string } = { scenario: null, frame: "" };
+    let snapshot: { scenario: string | null; step: string | null } = { scenario: null, step: null };
     const Spy = () => {
       const mode = useAppMode();
-      const session = useOnboardingSession();
-      snapshot = { scenario: mode.state.scenario, frame: session.state.currentFrame };
+      const step = useActiveStepDiagnostic();
+      snapshot = { scenario: mode.state.scenario, step };
       return null;
     };
     render(
@@ -201,15 +202,16 @@ describe("IngestView (F1)", () => {
     );
     await user.click(screen.getByTestId("sample-utility"));
     expect(snapshot.scenario).toBe("utility");
-    expect(snapshot.frame).toBe("f2");
+    expect(snapshot.step).toBe("doc-viewer");
   });
 
-  it("clicking BYO opens the gate AND advances the frame to F2", async () => {
+  it("clicking BYO opens the gate (the signup surface is route-driven, not a viewer step)", async () => {
     const user = userEvent.setup();
-    let snapshot = { gateStatus: "", frame: "" };
+    let snapshot: { gateStatus: string; step: string | null } = { gateStatus: "", step: null };
     const Spy = () => {
       const session = useOnboardingSession();
-      snapshot = { gateStatus: session.state.gate.status, frame: session.state.currentFrame };
+      const step = useActiveStepDiagnostic();
+      snapshot = { gateStatus: session.state.gate.status, step };
       return null;
     };
     render(
@@ -223,9 +225,10 @@ describe("IngestView (F1)", () => {
     await user.click(screen.getByTestId("byo-pdf"));
     // Gate opens (existing behavior)…
     expect(snapshot.gateStatus).toBe("open");
-    // …AND we advance to F2 so the gate can render in the chat column
-    // (wireframe behavior: "Sign up triggers F1→F2 + loads the gate inline").
-    expect(snapshot.frame).toBe("f2");
+    // …and BYO is NOT an entity, so no viewer step is pushed. The shell shows the
+    // gate-in-chat + BYO placeholder off the signup route (`signupSurfaceActive`),
+    // not a viewer step. (Was the retired `currentFrame === "f2"` signup branch.)
+    expect(snapshot.step).toBeNull();
   });
 
   it("does NOT render the gate inside IngestView after BYO click (OnboardingShell hosts it in chat)", async () => {

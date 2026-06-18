@@ -250,8 +250,8 @@ describe("routeChat", () => {
     await repo.upsertChatSessionEntity({
       chatSessionId: "chat-1",
       entityKey: "sample:utility",
-      lastFrame: "f2",
-      completedFramesJson: "[]",
+      lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:utility" }),
+      reachedStagesJson: "[]",
       scanProgressJson: null,
       extractedValuesJson: null,
       createdAt: now,

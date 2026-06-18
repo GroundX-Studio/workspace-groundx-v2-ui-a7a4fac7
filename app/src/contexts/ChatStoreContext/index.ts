@@ -12,6 +12,7 @@ export {
   EMPTY_PENDING_REPORT_OVERLAY,
   EMPTY_PENDING_SCHEMA_OVERLAY,
   EMPTY_VIEWER_SESSION,
+  toPersistedViewerStep,
 } from "./types";
 export { selectActiveStep } from "./selectors";
 export type {

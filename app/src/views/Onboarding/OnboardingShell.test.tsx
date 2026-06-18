@@ -12,6 +12,8 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useEntitySessionStore } from "@/contexts/EntitySessionStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import { testFrameToStep, type TestFrame } from "@/test/frameToStep";
+import { useActiveStepDiagnostic, useResumeAnchorDiagnostic } from "@/test/activeStepDiagnostic";
 
 import { OnboardingShell } from "./OnboardingShell";
 
@@ -30,19 +32,52 @@ afterEach(() => {
   if (typeof window !== "undefined") window.sessionStorage.clear();
 });
 
-const SessionProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { sessionId: string | null; frame: string }) => void }) => {
+// standardized-viewer-control (D2) — the probe exposes the FRAME-FREE active
+// viewer step diagnostic (`onboarding-step-*` vocabulary) instead of the retired
+// `currentFrame`. `step` is null when no viewer step is active yet (the
+// pre-mount / deactivated picker state).
+const SessionProbe = ({ onSnapshot }: { onSnapshot: (snapshot: { sessionId: string | null; step: string | null }) => void }) => {
   const session = useOnboardingSession();
-  onSnapshot({ sessionId: session.state.sessionId, frame: session.state.currentFrame });
+  const step = useActiveStepDiagnostic();
+  onSnapshot({ sessionId: session.state.sessionId, step });
   return null;
 };
 
 /**
- * Test action probe — captures the session API so a test can drive
- * `advanceFrame` programmatically without going through the step
- * strip UI (the compact step strip hides pills at narrow viewports).
+ * Test action probe — captures the session API so a test can drive a journey
+ * advance programmatically without going through the step strip UI (the compact
+ * step strip hides pills at narrow viewports).
+ *
+ * standardized-viewer-control — `advanceFrame`/`frameToStepStandalone` are gone
+ * from production; the probe exposes a frame-driving SHIM over the frame-free
+ * API: f1 → `returnToIngestPicker`, everything else →
+ * `markStageReached(testFrameToStep(frame, scenario))`. The scenario is resolved
+ * from live session state (what production's `advanceFrame` did off the active
+ * entity key). This keeps the frame vocabulary at the TEST boundary only (the
+ * `testFrameToStep` helper), with zero frame symbols in production.
  */
-const SessionActionsProbe = ({ onReady }: { onReady: (api: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] }) => void }) => {
-  const { advanceFrame, openGate } = useOnboardingSession();
+const SessionActionsProbe = ({ onReady }: { onReady: (api: { advanceFrame: (f: TestFrame, options?: { selectedReportSectionId?: string; focusedCategoryId?: string }) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] }) => void }) => {
+  const { state, markStageReached, returnToIngestPicker, openGate } = useOnboardingSession();
+  const { pushStep } = useChatStore();
+  const advanceFrame = (
+    frame: TestFrame,
+    options?: { selectedReportSectionId?: string; focusedCategoryId?: string },
+  ) => {
+    if (frame === "f1") {
+      returnToIngestPicker();
+      return;
+    }
+    const step = testFrameToStep(frame, state.scenario, options?.focusedCategoryId);
+    const withSection =
+      step.kind === "report" && step.surface === "builder" && options?.selectedReportSectionId !== undefined
+        ? { ...step, selectedSectionId: options.selectedReportSectionId }
+        : step;
+    // Production: the orchestrator pushes the step AND calls markStageReached
+    // (the one canvas outcome + the onboarding journey layer). Mirror both so
+    // the canvas moves and the journey state advances, as `advanceFrame` did.
+    pushStep(withSection);
+    markStageReached(withSection);
+  };
   onReady({ advanceFrame, openGate });
   return null;
 };
@@ -129,7 +164,7 @@ const BOOKING_PREP =
 
 describe("OnboardingShell", () => {
   it("issues and stores an anonymous onboarding session on mount", async () => {
-    let snapshot = { sessionId: null as string | null, frame: "" };
+    let snapshot = { sessionId: null as string | null, step: null as string | null };
 
     renderWithOnboardingProviders(
       <>
@@ -156,7 +191,7 @@ describe("OnboardingShell", () => {
       api: { session: { ensureAnonSession } },
     });
 
-    expect(await screen.findByTestId("onboarding-frame-f2")).toBeInTheDocument();
+    expect(await screen.findByTestId("onboarding-step-doc-viewer")).toBeInTheDocument();
     // The F2 canvas now hosts the production PdfViewerWidget (the
     // onboarding view is a thin layout wrapper). The widget exposes a
     // stable testid; the underlying real-data wiring is covered by
@@ -166,7 +201,7 @@ describe("OnboardingShell", () => {
 
   it("wires reachable step-strip pills to frames", async () => {
     const user = userEvent.setup();
-    let snapshot = { sessionId: null as string | null, frame: "" };
+    let snapshot = { sessionId: null as string | null, step: null as string | null };
 
     renderWithOnboardingProviders(
       <>
@@ -181,8 +216,8 @@ describe("OnboardingShell", () => {
     await user.click(screen.getByText("Understand"));
 
     await waitFor(() => {
-      expect(snapshot.frame).toBe("f2");
-      expect(screen.getByTestId("onboarding-frame-f2")).toBeInTheDocument();
+      expect(snapshot.step).toBe("doc-viewer");
+      expect(screen.getByTestId("onboarding-step-doc-viewer")).toBeInTheDocument();
     });
   });
 
@@ -197,7 +232,7 @@ describe("OnboardingShell", () => {
     // shared PdfViewer via <ScopedCanvas>). Drive the gate open through the
     // session API instead — equivalent user-level coverage (gate opens),
     // without depending on retired view chrome.
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
+    let actions: { advanceFrame: (f: TestFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
     renderWithOnboardingProviders(
       <>
         <OnboardingShell />
@@ -234,7 +269,7 @@ describe("OnboardingShell", () => {
     // gate flow (production state; the snap only fires on a fresh resume).
     window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
 
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
+    let actions: { advanceFrame: (f: TestFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
     renderWithOnboardingProviders(
       <>
         <OnboardingShell />
@@ -245,7 +280,7 @@ describe("OnboardingShell", () => {
 
     // Pre-condition: canvas shows the F5 sample surface (the shared
     // PdfViewer via <ScopedCanvas>); the sign-in overlay is not yet up.
-    expect(screen.getByTestId("onboarding-frame-f5")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-step-interact-chat")).toBeInTheDocument();
     expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument();
 
     // Trigger the gate via the session API (the InteractView Save button
@@ -284,12 +319,15 @@ describe("OnboardingShell", () => {
 
     await user.click(screen.getByTestId("viewer-frame-close"));
     await waitFor(() => expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument());
-    expect(screen.getByTestId("onboarding-frame-f6")).toBeInTheDocument();
+    // standardized-viewer-control — the canvas diagnostic testid is sourced off
+    // the active viewer step kind (`interact-chat` here); matches the already-
+    // passing interact-chat assertion above.
+    expect(screen.getByTestId("onboarding-step-interact-chat")).toBeInTheDocument();
   });
 
   it("post-gate Continue to Integrate clears the sign-up overlay and mounts the F7 widget", async () => {
     const user = userEvent.setup();
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
+    let actions: { advanceFrame: (f: TestFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
 
     renderWithOnboardingProviders(
       <>
@@ -387,7 +425,7 @@ describe("OnboardingShell", () => {
   // resolve unambiguously to the visible-on-F1 instance.
   it("disables the Understand pill on F1 when no scenario has been picked", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
-    const f1 = within(screen.getByTestId("onboarding-frame-f1"));
+    const f1 = within(screen.getByTestId("onboarding-step-ingest-picker"));
     const understandPill = f1.getByText("Understand").closest('[role="button"]');
     expect(understandPill).toHaveAttribute("aria-disabled", "true");
     expect(understandPill).toHaveAttribute("tabIndex", "-1");
@@ -395,7 +433,7 @@ describe("OnboardingShell", () => {
 
   it("does not advance when the disabled Understand pill is clicked", async () => {
     const user = userEvent.setup();
-    let snapshot = { sessionId: null as string | null, frame: "" };
+    let snapshot = { sessionId: null as string | null, step: null as string | null };
 
     renderWithOnboardingProviders(
       <>
@@ -405,11 +443,13 @@ describe("OnboardingShell", () => {
       { initialFrame: "f1", initialScenario: null },
     );
 
-    const f1 = within(screen.getByTestId("onboarding-frame-f1"));
+    const f1 = within(screen.getByTestId("onboarding-step-ingest-picker"));
     await user.click(f1.getByText("Understand"));
-    // Frame must NOT change. Wait briefly to catch any async state flip.
+    // The active step must NOT advance — no scenario was picked, so the canvas
+    // stays on the ingest-picker step (it must not move to the Understand
+    // doc-viewer). Wait briefly to catch any async state flip.
     await new Promise((r) => setTimeout(r, 50));
-    expect(snapshot.frame).toBe("f1");
+    expect(snapshot.step).toBe("ingest-picker");
   });
 
   it("renders OnboardingNav on F2 (chat + canvas + nav)", () => {
@@ -455,7 +495,7 @@ describe("OnboardingShell", () => {
     //   - The AppShell root is in DOM (overlay model)
     //   - Both Nav and chat-pane are also in DOM (covered by F1)
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f1", initialScenario: null });
-    expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-step-ingest-picker")).toBeInTheDocument();
     expect(screen.getByTestId("appshell-root")).toBeInTheDocument();
     // Nav AND chat exist in DOM; F1 overlay is on top z-index-wise.
     expect(screen.getByTestId("onboarding-nav")).toBeInTheDocument();
@@ -478,7 +518,7 @@ describe("OnboardingShell", () => {
 
     // F1 → F2 (dismiss): click a sample, wait for F1 overlay to exit.
     await user.click(screen.getByTestId("sample-utility"));
-    await waitFor(() => expect(screen.queryByTestId("onboarding-frame-f1")).not.toBeInTheDocument(), {
+    await waitFor(() => expect(screen.queryByTestId("onboarding-step-ingest-picker")).not.toBeInTheDocument(), {
       timeout: 1500,
     });
     const afterDismiss = screen.getByTestId("appshell-root").getAttribute("data-shell-instance");
@@ -487,7 +527,7 @@ describe("OnboardingShell", () => {
     // F2 → F1 (return): click Ingest pill, wait for F1 overlay to enter.
     // StepStrip pill renders "Ingest" with the "1" in a separate badge.
     await user.click(screen.getByText("Ingest"));
-    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.getByTestId("onboarding-step-ingest-picker")).toBeInTheDocument(), {
       timeout: 1500,
     });
     const afterReturn = screen.getByTestId("appshell-root").getAttribute("data-shell-instance");
@@ -503,7 +543,7 @@ describe("OnboardingShell", () => {
     // The pre-condition we actually want to express is "user is on
     // F1 (overlay visible)" — assert that instead of a chat-absent
     // claim that no longer holds.
-    expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-step-ingest-picker")).toBeInTheDocument();
 
     // Click any BYO Sign Up tile (header, Upload, Connect, Email all
     // route through handleByoClick).
@@ -615,7 +655,7 @@ describe("OnboardingShell", () => {
     const user = userEvent.setup();
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     try {
-      let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void } | null = null;
+      let actions: { advanceFrame: (f: TestFrame) => void } | null = null;
       const listChatMessages = vi.fn().mockResolvedValue([
         { id: "m1", role: "user", content: "what do you know?", citations: [] },
         { id: "m2", role: "assistant", content: "The bill total is $7,613.20.", citations: [] },
@@ -668,7 +708,7 @@ describe("OnboardingShell", () => {
     // that scenario active in the registry. The URL is the source of
     // truth for which surface to render — a fresh page load that
     // lands at this URL should immediately resume the named sample.
-    let snapshot = { frame: "" };
+    let snapshot = { step: null as string | null };
 
     renderWithOnboardingProviders(
       <>
@@ -681,10 +721,10 @@ describe("OnboardingShell", () => {
     );
 
     // After mount: utility sample is active at F2.
-    await waitFor(() => expect(snapshot.frame).toBe("f2"));
+    await waitFor(() => expect(snapshot.step).toBe("doc-viewer"));
     // After the F1 → F2 slide-in finishes (~700ms), AppShell mounts
     // and the canvas-frame testid appears.
-    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f2")).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.getByTestId("onboarding-step-doc-viewer")).toBeInTheDocument(), {
       timeout: 2000,
     });
   });
@@ -934,7 +974,7 @@ describe("OnboardingShell", () => {
       observedStepIndex = session?.viewer.currentStep.stepIndex ?? -1;
       return null;
     };
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void } | null = null;
+    let actions: { advanceFrame: (f: TestFrame) => void } | null = null;
     renderWithOnboardingProviders(
       <>
         <OnboardingShell />
@@ -986,14 +1026,14 @@ describe("OnboardingShell", () => {
     // button (or the Ingest step pill) would take.
     act(() => nav!("/onboarding"));
     // F1 picker is back, the gate-driven signup overlay is gone.
-    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f1")).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.getByTestId("onboarding-step-ingest-picker")).toBeInTheDocument(), {
       timeout: 2000,
     });
     await waitFor(() => expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument());
     // Now pick a sample.
     await user.click(screen.getByTestId("sample-utility"));
     // The sample's F2 canvas mounts AND the gate overlay is not blocking it.
-    await waitFor(() => expect(screen.getByTestId("onboarding-frame-f2")).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.getByTestId("onboarding-step-doc-viewer")).toBeInTheDocument(), {
       timeout: 2000,
     });
     expect(screen.queryByTestId("sign-up-viewer-surface")).not.toBeInTheDocument();
@@ -1008,7 +1048,7 @@ describe("OnboardingShell", () => {
     // signal — answers feel ungrounded.
     const user = userEvent.setup();
     let snapshot: { events: Array<{ action: string; entityKey: string | null; source: string; detail?: Record<string, unknown> }> } = { events: [] };
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void } | null = null;
+    let actions: { advanceFrame: (f: TestFrame) => void } | null = null;
 
     renderWithOnboardingProviders(
       <>
@@ -1084,43 +1124,54 @@ describe("OnboardingShell", () => {
 
   it("preserves independent state for multiple samples", async () => {
     // Multi-entity preservation: visiting sample A, advancing it to
-    // F3, returning to the picker, visiting sample B, advancing it
-    // to F5, then returning and re-picking sample A → must resume A
-    // at F3 (not the default F2, and not B's F5). Each sample has
-    // its own entity in the EntitySessionStore with its own state.
+    // Extract, returning to the picker, visiting sample B, advancing it
+    // to Interact, then returning and re-picking sample A → must resume A
+    // at Extract (not the default Understand, and not B's Interact). Each
+    // sample has its own entity in the EntitySessionStore with its own state.
+    //
+    // standardized-viewer-control (D2) — this test asserts PRESERVED per-entity
+    // state, so it reads the RESUME ANCHOR (the successor to `currentFrame`),
+    // not the live active step: on re-pick the scripted intro can snap the active
+    // CANVAS step to the doc-viewer beat, but the preserved resume anchor is what
+    // proves the sample remembers its progress. A deactivated picker has no active
+    // entity → the anchor is `null`.
     const user = userEvent.setup();
-    let snapshot = { frame: "", scenario: null as string | null };
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void } | null = null;
+    let anchor: string | null = null;
+    let actions: { advanceFrame: (f: TestFrame) => void } | null = null;
     let registrySnap = { entityKeys: [] as string[] };
+    const AnchorProbe = () => {
+      anchor = useResumeAnchorDiagnostic();
+      return null;
+    };
 
     renderWithOnboardingProviders(
       <>
         <OnboardingShell />
-        <SessionProbe onSnapshot={(next) => (snapshot = { frame: next.frame, scenario: snapshot.scenario })} />
+        <AnchorProbe />
         <SessionActionsProbe onReady={(api) => (actions = api)} />
         <RegistryProbe onSnapshot={(s) => (registrySnap = s)} />
       </>,
       { initialFrame: "f1", initialScenario: null },
     );
 
-    // Pick utility → F2
+    // Pick utility → Understand doc-viewer
     await user.click(screen.getByTestId("sample-utility"));
-    await waitFor(() => expect(snapshot.frame).toBe("f2"));
-    // Advance utility to F3
+    await waitFor(() => expect(anchor).toBe("doc-viewer"));
+    // Advance utility to Extract
     act(() => actions!.advanceFrame("f3"));
-    await waitFor(() => expect(snapshot.frame).toBe("f3"));
+    await waitFor(() => expect(anchor).toBe("extract-workbench"));
 
-    // Return to picker
+    // Return to picker — the entity is deactivated, so there is no resume anchor.
     await user.click(screen.getByText("Ingest"));
-    await waitFor(() => expect(snapshot.frame).toBe("f1"));
+    await waitFor(() => expect(anchor).toBeNull());
 
-    // Pick loan (a different sample) → F2
+    // Pick loan (a different sample) → Understand doc-viewer
     await waitFor(() => expect(screen.getByTestId("sample-loan")).toBeInTheDocument());
     await user.click(screen.getByTestId("sample-loan"));
-    await waitFor(() => expect(snapshot.frame).toBe("f2"));
-    // Advance loan to F5
+    await waitFor(() => expect(anchor).toBe("doc-viewer"));
+    // Advance loan to Interact
     act(() => actions!.advanceFrame("f5"));
-    await waitFor(() => expect(snapshot.frame).toBe("f5"));
+    await waitFor(() => expect(anchor).toBe("interact-chat"));
 
     // Sanity: both entities should now be in the registry
     expect(registrySnap.entityKeys).toContain("sample:utility");
@@ -1128,70 +1179,76 @@ describe("OnboardingShell", () => {
 
     // Return to picker
     await user.click(screen.getByText("Ingest"));
-    await waitFor(() => expect(snapshot.frame).toBe("f1"));
+    await waitFor(() => expect(anchor).toBeNull());
 
-    // Re-pick utility → should resume at F3 (its preserved state,
-    // NOT loan's F5)
+    // Re-pick utility → should resume at Extract (its preserved state,
+    // NOT loan's Interact)
     await waitFor(() => expect(screen.getByTestId("sample-utility")).toBeInTheDocument());
     await user.click(screen.getByTestId("sample-utility"));
-    await waitFor(() => expect(snapshot.frame).toBe("f3"));
+    await waitFor(() => expect(anchor).toBe("extract-workbench"));
 
-    // Re-pick loan → should resume at F5
+    // Re-pick loan → should resume at Interact
     await user.click(screen.getByText("Ingest"));
-    await waitFor(() => expect(snapshot.frame).toBe("f1"));
+    await waitFor(() => expect(anchor).toBeNull());
     await waitFor(() => expect(screen.getByTestId("sample-loan")).toBeInTheDocument());
     await user.click(screen.getByTestId("sample-loan"));
-    await waitFor(() => expect(snapshot.frame).toBe("f5"));
+    await waitFor(() => expect(anchor).toBe("interact-chat"));
   });
 
-  it("preserves a sample's frame state across an F1 round-trip via the Ingest pill", async () => {
+  it("preserves a sample's progress across an ingest-picker round-trip via the Ingest pill", async () => {
     // Phase 1 of the state-preservation work: when the user picks a
-    // sample, advances to a later frame, then returns to F1 (Ingest
+    // sample, advances to a later step, then returns to the picker (Ingest
     // pill), then re-picks the SAME sample, they should resume at the
-    // later frame — not restart at F2. State is keyed per-entity in
+    // later step — not restart at Understand. State is keyed per-entity in
     // the EntitySessionStore (sample:utility, sample:loan, etc.), so each
-    // sample remembers its own progress independently.
+    // sample remembers its own progress independently. standardized-viewer-control
+    // (D2) — read the RESUME ANCHOR (successor to `currentFrame`); a deactivated
+    // picker has no active entity → the anchor is `null`.
     const user = userEvent.setup();
-    let snapshot = { frame: "" };
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void } | null = null;
+    let anchor: string | null = null;
+    let actions: { advanceFrame: (f: TestFrame) => void } | null = null;
+    const AnchorProbe = () => {
+      anchor = useResumeAnchorDiagnostic();
+      return null;
+    };
 
     renderWithOnboardingProviders(
       <>
         <OnboardingShell />
-        <SessionProbe onSnapshot={(next) => (snapshot = next)} />
+        <AnchorProbe />
         <SessionActionsProbe onReady={(api) => (actions = api)} />
       </>,
       { initialFrame: "f1", initialScenario: null },
     );
 
-    // Pick utility sample → F2
+    // Pick utility sample → Understand doc-viewer
     await user.click(screen.getByTestId("sample-utility"));
-    await waitFor(() => expect(snapshot.frame).toBe("f2"));
+    await waitFor(() => expect(anchor).toBe("doc-viewer"));
 
-    // Advance to F3 (drive via the API probe so we don't need to
-    // dig through the step strip UI in tests). In production, reaching F3 this
-    // way means the ThinkingStream finished and persisted its done marker; set
-    // the same marker because this test bypasses that animation.
+    // Advance to Extract (drive via the API probe so we don't need to
+    // dig through the step strip UI in tests). In production, reaching Extract
+    // this way means the ThinkingStream finished and persisted its done marker;
+    // set the same marker because this test bypasses that animation.
     window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     act(() => {
       actions!.advanceFrame("f3");
     });
-    await waitFor(() => expect(snapshot.frame).toBe("f3"));
+    await waitFor(() => expect(anchor).toBe("extract-workbench"));
 
-    // Return to F1 via Ingest pill
+    // Return to the picker via the Ingest pill
     await user.click(screen.getByText("Ingest"));
-    await waitFor(() => expect(snapshot.frame).toBe("f1"));
+    await waitFor(() => expect(anchor).toBeNull());
 
-    // After the slide-out completes, F1 picker is shown again. Pick
-    // the same sample — should resume at F3, not restart at F2.
+    // After the slide-out completes, the picker is shown again. Pick the same
+    // sample — should resume at Extract, not restart at Understand.
     await waitFor(() => expect(screen.getByTestId("sample-utility")).toBeInTheDocument(), { timeout: 2000 });
     await user.click(screen.getByTestId("sample-utility"));
-    await waitFor(() => expect(snapshot.frame).toBe("f3"));
+    await waitFor(() => expect(anchor).toBe("extract-workbench"));
   });
 
   it("only makes Integrate reachable from the step strip after sign-in", async () => {
     const user = userEvent.setup();
-    let snapshot = { sessionId: null as string | null, frame: "" };
+    let snapshot = { sessionId: null as string | null, step: null as string | null };
 
     renderWithOnboardingProviders(
       <>
@@ -1204,8 +1261,8 @@ describe("OnboardingShell", () => {
     await user.click(screen.getByText("Integrate"));
 
     await waitFor(() => {
-      expect(snapshot.frame).toBe("f7");
-      expect(screen.getByTestId("onboarding-frame-f7")).toBeInTheDocument();
+      expect(snapshot.step).toBe("integrate");
+      expect(screen.getByTestId("onboarding-step-integrate")).toBeInTheDocument();
     });
   });
 
@@ -1371,8 +1428,8 @@ describe("OnboardingShell", () => {
     // drives the f4↔f4a transition via the session `advanceFrame` API and
     // asserts <ScopedCanvas> mounts the right report surface for each frame
     // (`report` step kind + frame f4 → render widget; f4a → builder widget).
-    let snapshot = { sessionId: null as string | null, frame: "" };
-    let actions: { advanceFrame: (f: import("@/types/onboarding").FFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
+    let snapshot = { sessionId: null as string | null, step: null as string | null };
+    let actions: { advanceFrame: (f: TestFrame) => void; openGate: ReturnType<typeof useOnboardingSession>["openGate"] } | null = null;
     renderWithOnboardingProviders(
       <>
         <OnboardingShell />
@@ -1388,13 +1445,13 @@ describe("OnboardingShell", () => {
     // f4 → f4a: ScopedCanvas mounts the builder (report-builder CanvasKind).
     act(() => actions!.advanceFrame("f4a"));
     expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
-    await waitFor(() => expect(snapshot.frame).toBe("f4a"));
+    await waitFor(() => expect(snapshot.step).toBe("report-builder"));
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
 
     // f4a → f4: back to the render surface.
     act(() => actions!.advanceFrame("f4"));
     expect(await screen.findByTestId("smart-report-render")).toBeInTheDocument();
-    await waitFor(() => expect(snapshot.frame).toBe("f4"));
+    await waitFor(() => expect(snapshot.step).toBe("report-render"));
   });
 
   // report-default-template T6b — the render→builder `✎ edit §N` hand-off and
@@ -1438,7 +1495,7 @@ describe("OnboardingShell", () => {
 
   it("report-default-template: clicking ✎ edit on a rendered section opens that section in the builder", async () => {
     const user = userEvent.setup();
-    let snapshot = { sessionId: null as string | null, frame: "" };
+    let snapshot = { sessionId: null as string | null, step: null as string | null };
     renderWithOnboardingProviders(
       <>
         <OnboardingShell />
@@ -1458,7 +1515,7 @@ describe("OnboardingShell", () => {
 
     // ✎ edit §1 → the builder (f4a), with billing_summary's inline editor open.
     await user.click(editBillingSummary);
-    await waitFor(() => expect(snapshot.frame).toBe("f4a"));
+    await waitFor(() => expect(snapshot.step).toBe("report-builder"));
     expect(await screen.findByTestId("smart-report-builder")).toBeInTheDocument();
     expect(screen.queryByTestId("smart-report-render")).not.toBeInTheDocument();
     expect(await screen.findByTestId("report-builder-editor-billing_summary")).toBeInTheDocument();
@@ -1526,14 +1583,12 @@ describe("OnboardingShell", () => {
     );
   });
 
-  // Regression: clicking a citation while on F3 pushes a doc-viewer
-  // ViewerStep — canvas swaps to UnderstandView, but the StepStrip
-  // pill was reading `session.currentFrame` directly, so the nav
-  // still highlighted "Analyze" (F3) while the canvas showed F2
-  // content. The fix derives the active pill from the active viewer
-  // step's kind (which doc-viewer maps to "understand") rather than
-  // from `session.currentFrame`.
-  it("F3 + citation click → nav highlight moves to 'Understand' (matches the canvas swap)", async () => {
+  // Regression: clicking a citation while on the Extract step pushes a
+  // doc-viewer ViewerStep — the canvas swaps to the document viewer, and the
+  // StepStrip pill must follow. The fix derives the active pill from the active
+  // viewer step's kind (doc-viewer maps to "understand"), so the nav highlight
+  // tracks the canvas swap.
+  it("Extract + citation click → nav highlight moves to 'Understand' (matches the canvas swap)", async () => {
     // We exercise the citation-click side effect by calling
     // `gotoDocViewer` directly on the ChatStore (which is what the
     // CanvasOrchestrator's `highlightCitation` handler does

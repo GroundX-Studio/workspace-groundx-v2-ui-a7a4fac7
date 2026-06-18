@@ -933,6 +933,57 @@ export function journeyStageForStepKind(kind: string | null | undefined): Journe
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// PersistedViewerStep — the NAVIGATIONAL projection of the app's ViewerStep
+// union that survives a reload (standardized-viewer-control D13/R5).
+//
+// The resume anchor is the user's ACTIVE viewer step, restored VERBATIM on
+// hydrate (it is NOT a watermark — preserve the documented no-stale-resume
+// rule). But only the navigational payload is persisted; EPHEMERAL fields are
+// rebuilt on demand, never stored:
+//   • `doc-viewer.scanning` — a one-shot "GroundX is reading" animation beat.
+//   • `doc-viewer.highlight` / `doc-viewer.litRegions` — citation overlays
+//     produced by a click; re-derived when the user re-clicks a chip.
+// Overlays (`sign-up` / `citation-peek` / `book-call`) are NOT a step kind and
+// are NEVER part of the resume anchor (the gate resets to idle on hydrate).
+//
+// This is the SINGLE SOURCE for both persistence boundaries — localStorage
+// (`parseChatStoreSnapshot`) and the server twin (`chat_session_entities`) —
+// validating the same untrusted-input shape on both reads. The app's
+// `ViewerStep` is the richer in-memory union; a `toPersistedViewerStep`
+// helper in the ChatStore prunes the ephemeral fields on the write side, and
+// the in-memory step is reconstructed (ephemeral fields absent) on read.
+// ──────────────────────────────────────────────────────────────────────
+export const persistedViewerStepSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("ingest-picker"),
+    attachedSchema: z.object({ schemaId: z.string(), name: z.string() }).optional(),
+  }),
+  z.object({
+    kind: z.literal("doc-viewer"),
+    documentId: z.string(),
+    page: z.number().optional(),
+  }),
+  z.object({
+    kind: z.literal("extract-workbench"),
+    scenarioId: z.string(),
+    focusedCategoryId: z.string().optional(),
+    surface: z.enum(["fields", "design"]).optional(),
+  }),
+  z.object({
+    kind: z.literal("interact-chat"),
+    scenarioId: z.string(),
+    documentId: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("report"),
+    surface: z.enum(["render", "builder"]).optional(),
+    selectedSectionId: z.string().optional(),
+  }),
+  z.object({ kind: z.literal("integrate") }),
+]);
+export type PersistedViewerStep = z.infer<typeof persistedViewerStepSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
 // CanvasKind — the CLOSED set of canvas surfaces that have a built
 // `ScopedViewerWidget` today. This is deliberately NARROWER than
 // `ViewerStepKind`: a ViewerStep can carry a kind (`extract-workbench`,
@@ -983,9 +1034,9 @@ export type CanvasKind = z.infer<typeof canvasKindSchema>;
 // above): that discriminates which widget mounts; this discriminates which
 // command the orchestrator applies. They share no values and BOTH remain.
 //
-// `frame` / `scenario` are the app `FFrame` / `Scenario` string-literal
-// unions inlined here as the wire contract (they are the persisted intent
-// payload). Shared field shapes reuse the existing schemas
+// `scenario` is the app `Scenario` string-literal union inlined here as the
+// wire contract (part of the persisted intent payload). Shared field shapes
+// reuse the existing schemas
 // (`normalizedBboxSchema`, `citationTierSchema`, `contentScopeSchema`,
 // `templateFieldTypeSchema`).
 //
@@ -1054,6 +1105,33 @@ export const canvasIntentSchema = z.discriminatedUnion("kind", [
   // navigation tool that emits it is wired in T7; the orchestrator handler is
   // refined in T5.
   z.object({ kind: z.literal("showInteract"), scope: contentScopeSchema }),
+  // standardized-viewer-control deletion-phase — the ONE generic, NOT-LLM-
+  // emittable intent for experience/overlay-internal SCRIPTED viewer beats (the
+  // onboarding choreography the LLM/affordance seam must never offer). The three
+  // residual `advanceFrame` sites (Extract save-and-return, OnboardingShell
+  // URL-return, the experience intro-snap) are onboarding-OVERLAY beats with no
+  // shared destination meaning — they route through the standard dispatch seam
+  // via this one intent instead of adding onboarding-specific destination kinds.
+  // The MECHANISM is this kind; the VALUES are the typed, extensible `beat`
+  // discriminator, so a future overlay scenario adds a `beat` variant rather than
+  // a new intent kind. Marked `llm: false` in the intent catalog (not offerable).
+  //   • ingest-picker — return to the Ingest picker AND deactivate the active
+  //                      entity (a BACKWARD transition); the optional
+  //                      `attachedSchema` carries a freshly-saved schema onto the
+  //                      picker step (the F3a Save → sign-in → persist → picker
+  //                      hand-off).
+  //   • understand-scanning — snap to the Understand "GroundX is reading the doc"
+  //                      scanning beat AND set the Understand journey edge.
+  z.object({
+    kind: z.literal("presentExperienceBeat"),
+    beat: z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("ingest-picker"),
+        attachedSchema: z.object({ schemaId: z.string(), name: z.string() }).optional(),
+      }),
+      z.object({ kind: z.literal("understand-scanning") }),
+    ]),
+  }),
   z.object({ kind: z.literal("showIntegrate"), scope: contentScopeSchema }),
   z.object({ kind: z.literal("showReport"), templateId: z.string(), scope: contentScopeSchema }),
   z.object({ kind: z.literal("editTemplate"), templateId: z.string(), selectedSectionId: z.string().optional() }),

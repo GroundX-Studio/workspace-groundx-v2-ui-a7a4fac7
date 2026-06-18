@@ -89,6 +89,12 @@ export const intentCatalog: IntentCatalogEntry[] = [
   // sources) surface. Now LLM-emittable via the dedicated `show_interact`
   // navigation tool (verb `show_`, category read).
   { kind: "showInteract", class: "viewer-loading", llm: { toolName: "show_interact", prompt: "Switch me to the Interact screen so I can chat with the sources." } },
+  // standardized-viewer-control deletion-phase — the generic experience/overlay-
+  // internal SCRIPTED viewer beat (return-to-ingest-picker, Understand scanning
+  // snap). NOT LLM-emittable + NOT offerable: it is onboarding choreography
+  // dispatched only by the experience itself, never by the model or an offered
+  // affordance. Reached via direct dispatch (like the other `llm: false` kinds).
+  { kind: "presentExperienceBeat", class: "viewer-loading", llm: false },
   { kind: "showIntegrate", class: "viewer-loading", llm: { toolName: "show_integrate", prompt: "Show me the integration / connector options." } },
   { kind: "showReport", class: "viewer-loading", llm: { toolName: "show_smart_report_render", prompt: "Show me the smart report for this document." } },
   { kind: "editTemplate", class: "viewer-loading", llm: { toolName: "show_smart_report_edit", prompt: "Open the report builder so I can edit the report template." } },

@@ -374,7 +374,7 @@ const reportRenderAsEnum = z
 const showExtraction: ServerTool = {
   name: "show_extraction",
   description:
-    "Move the canvas to the extraction workbench (frame f3) for a scope. Use when " +
+    "Move the canvas to the extraction workbench for a scope. Use when " +
     "the user asks to see the extracted fields, says \"show the extraction\", or you've " +
     "reasoned the structured-field view is the natural next surface for what they're analyzing.",
   category: "read",
@@ -467,7 +467,7 @@ const showInteractTool: ServerTool = {
 const showIntegrate: ServerTool = {
   name: "show_integrate",
   description:
-    "Move the canvas to the Integrate surface (frame f7) — the connectors / agent " +
+    "Move the canvas to the Integrate surface — the connectors / agent " +
     "plugins + API snippets for shipping this sample into a stack. Use when " +
     "the user asks to integrate, ship, connect an agent (Claude / OpenAI / Gemini / " +
     "Cursor), or get the API / SDK snippet for the content being analyzed.",
@@ -494,7 +494,7 @@ const showIntegrate: ServerTool = {
 const showSmartReportRender: ServerTool = {
   name: "show_smart_report_render",
   description:
-    "Move the canvas to the Report render surface (frame f4) for a scope. Use when " +
+    "Move the canvas to the Report render surface for a scope. Use when " +
     "the user asks to see the report, says \"make me a report\", or you've reasoned a " +
     "rendered IC-brief is the natural next surface for what they're analyzing.",
   category: "read",
@@ -526,7 +526,7 @@ const showSmartReportRender: ServerTool = {
 const showSmartReportEdit: ServerTool = {
   name: "show_smart_report_edit",
   description:
-    "Open the Report builder (frame f4a) with a section pre-selected. Use when the " +
+    "Open the Report builder with a section pre-selected. Use when the " +
     "user asks to edit the report, change a section's question, or you want to surface " +
     "the section editor for a specific section.",
   category: "read",

@@ -104,8 +104,14 @@ export interface ConversationSummaryRecord {
 export interface ChatSessionEntityRecord {
   chatSessionId: string;
   entityKey: string;
-  lastFrame: string | null;
-  completedFramesJson: string;
+  /**
+   * JSON-stringified `PersistedViewerStep` (the resume anchor — the active
+   * viewer step). Replaced the frame-keyed `lastFrame` (standardized-viewer-
+   * control D13/R5). Null only for a legacy/blank row.
+   */
+  lastStepJson: string | null;
+  /** JSON-stringified array of reached `JourneyStage` values (checkmarks). */
+  reachedStagesJson: string;
   scanProgressJson: string | null;
   extractedValuesJson: string | null;
   /**

@@ -24,7 +24,7 @@ import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 const showIntegrate: WidgetTool = {
   name: "show_integrate",
   description:
-    "Move the canvas to the Integrate surface (frame f7) — the connectors / agent " +
+    "Move the canvas to the Integrate surface — the connectors / agent " +
     "plugins + API snippets for shipping this sample into a stack. Use when " +
     "the user asks to integrate, ship, connect an agent (Claude / OpenAI / Gemini / " +
     "Cursor), or get the API / SDK snippet for the content being analyzed.",

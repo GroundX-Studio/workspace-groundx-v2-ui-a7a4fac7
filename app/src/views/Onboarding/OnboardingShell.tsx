@@ -26,8 +26,12 @@ import { OnboardingNav } from "@/components/layout/OnboardingNav/OnboardingNav";
 import type { OnboardingNavItemKey } from "@/components/layout/OnboardingNav/OnboardingNav";
 import { StepStrip } from "@/components/layout/StepStrip";
 import type { AnalyzeSubstep, StepDescriptor, StepId, StepPillState } from "@/components/layout/StepStrip";
-import { JOURNEY_CATALOG, VIEWER_STEP_TO_JOURNEY } from "@/components/layout/StepStrip/journeyCatalog";
-import type { FFrame, Scenario } from "@/types/onboarding";
+import {
+  JOURNEY_CATALOG,
+  VIEWER_STEP_TO_JOURNEY,
+  viewerStepDiagnosticId,
+} from "@/components/layout/StepStrip/journeyCatalog";
+import type { Scenario } from "@/types/onboarding";
 
 import type { ContentScope } from "@groundx/shared";
 
@@ -168,7 +172,7 @@ export const OnboardingShell: FC = () => {
   const api = useApi();
   const { state: appMode } = useAppMode();
   const widgetRole = useWidgetRole();
-  const { state: session, advanceFrame, bootstrapSession, pickScenario, openGate, dismissGate, commitGate } = useOnboardingSession();
+  const { state: session, bootstrapSession, pickScenario, openGate, dismissGate, commitGate } = useOnboardingSession();
   // standardized-viewer-control T6 — the step-strip pills, Analyze sub-pills,
   // the post-gate "Continue to Integrate", and the Understand pill MOVE the
   // canvas ONLY by dispatching the corresponding intent (the single
@@ -254,13 +258,13 @@ export const OnboardingShell: FC = () => {
   // exhaustive-deps complaints without re-firing on identity.
   const pickScenarioRef = useRef(pickScenario);
   const openGateRef = useRef(openGate);
-  const advanceFrameRef = useRef(advanceFrame);
+  const dispatchRef = useRef(dispatch);
   const activeScenarioRef = useRef(session.scenario);
   const activeEntityKeyRef = useRef(activeEntityKeyEarly);
   const appScenarioRef = useRef(appMode.scenario);
   pickScenarioRef.current = pickScenario;
   openGateRef.current = openGate;
-  advanceFrameRef.current = advanceFrame;
+  dispatchRef.current = dispatch;
   activeScenarioRef.current = session.scenario;
   activeEntityKeyRef.current = activeEntityKeyEarly;
   appScenarioRef.current = appMode.scenario;
@@ -316,12 +320,14 @@ export const OnboardingShell: FC = () => {
       return;
     }
     if (path === "/onboarding" || path === "/onboarding/") {
-      // Picker. advanceFrame("f1") deactivates any entity AND clears
-      // the legacy signupOpen + gate state. Pop the sign-up overlay
-      // so the viewer-side overlay disappears in lockstep with the
+      // Picker. standardized-viewer-control deletion-phase — dispatch the generic
+      // `presentExperienceBeat` `ingest-picker` beat through the STANDARD seam
+      // (was `advanceFrame("f1")`). The beat handler deactivates any active entity
+      // AND resets an open gate, and pushes the ingest-picker step. Pop the
+      // sign-up overlay so the viewer-side overlay disappears in lockstep with the
       // route/session reset.
       popOverlayRef.current("sign-up");
-      advanceFrameRef.current("f1");
+      dispatchRef.current({ kind: "presentExperienceBeat", beat: { kind: "ingest-picker" } }, "user");
     }
   }, [params.bucketId, params.scenarioId, location.pathname, scenarioRegistry.bucketId]);
 
@@ -358,9 +364,12 @@ export const OnboardingShell: FC = () => {
   // ADDED on its FIRST reach (when it first becomes the current stage) and never
   // removed, so a later citation jump back to Understand (which moves the
   // current stage off Analyze) does not re-lock the already-traversed bracket.
-  // Held in memory for this phase; full persistence + the server twin migration
-  // (`completedFramesJson` → reached-set) is T6b. Frame-free: derived purely
-  // from `currentStep` (the active-step-sourced stage), no frame read.
+  // Frame-free: derived purely from `currentStep` (the active-step-sourced
+  // stage), no frame read. The DURABLE reached-set now lives on the EntitySession
+  // (`reachedStages`, persisted + server-twinned in T6b); this strip-local set is
+  // the live UI accumulation seeded from the resumed stage. Seeding it from the
+  // persisted entity set (so cross-reload checkmarks survive verbatim) is the
+  // remaining strip-wiring item folded into the D2 onboarding-frame churn.
   const [reachedStages, setReachedStages] = useState<Set<StepId>>(() => new Set([currentStep]));
   useEffect(() => {
     setReachedStages((prev) => {
@@ -923,7 +932,10 @@ export const OnboardingShell: FC = () => {
 
   const f1Layout = (
     <Box
-      data-testid="onboarding-frame-f1"
+      // standardized-viewer-control (D2) — the F1 ingest overlay is always the
+      // `ingest-picker` step; its frame-free diagnostic testid is fixed
+      // (the dynamic canvas testid below is omitted while this overlay covers it).
+      data-testid={`onboarding-step-${viewerStepDiagnosticId({ kind: "ingest-picker" })}`}
       sx={{
         height: "100%",
         overflow: "auto",
@@ -1094,9 +1106,16 @@ export const OnboardingShell: FC = () => {
         sx={{ flex: 1, overflow: "hidden", minHeight: 0, height: "100%" }}
         // When isF1, the AppShell canvas slot is intentionally empty
         // (F1 overlay covers it). Omit the testid so it doesn't
-        // duplicate the F1 overlay's own `onboarding-frame-f1` and
-        // break selector-based assertions.
-        data-testid={isF1 ? undefined : `onboarding-frame-${session.currentFrame}`}
+        // duplicate the F1 overlay's own `onboarding-step-ingest-picker`
+        // and break selector-based assertions.
+        // standardized-viewer-control (D2) — the diagnostic testid is sourced off
+        // the ACTIVE viewer step (kind + sub-position), NOT the retired
+        // `session.currentFrame` reverse projection.
+        data-testid={
+          isF1 || !latestViewerStepEarly
+            ? undefined
+            : `onboarding-step-${viewerStepDiagnosticId(latestViewerStepEarly)}`
+        }
       >
         {canvasContent}
       </Box>

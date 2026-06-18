@@ -27,7 +27,7 @@ vi.mock("framer-motion", async () => {
 });
 
 import { useChatStore } from "@/contexts/ChatStoreContext";
-import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
+import { useActiveStepDiagnostic } from "@/test/activeStepDiagnostic";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
 import type { ChatExperience } from "./ChatExperience";
@@ -181,18 +181,17 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     expect(screen.getAllByTestId(/thinking-note-/).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("auto-advances to f3 when the scripted intro finishes (Choreography intro-done → f3)", () => {
+  it("auto-advances to the Extract step when the scripted intro finishes (Choreography intro-done)", () => {
     vi.useFakeTimers();
-    let lastFrame = "";
-    function FrameProbe() {
-      const { state } = useOnboardingSession();
-      lastFrame = state.currentFrame;
+    let lastStep: string | null = null;
+    function StepProbe() {
+      lastStep = useActiveStepDiagnostic();
       return null;
     }
     renderWithConversationApi(
       <>
         <ActiveConversationFlow experience={onboardingExperience()} />
-        <FrameProbe />
+        <StepProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -205,10 +204,10 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     act(() => {
       vi.advanceTimersByTime(1200);
     });
-    expect(lastFrame).toBe("f3");
+    expect(lastStep).toBe("extract-workbench");
   });
 
-  it("auto-advances to f5 on the first user send (Choreography onFirstUserSend → f5)", async () => {
+  it("auto-advances to the Interact step on the first user send (Choreography onFirstUserSend)", async () => {
     sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-f5",
       assistantMessageId: "a-f5",
@@ -224,10 +223,9 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
       compressionRan: false,
     });
 
-    let lastFrame = "";
-    function FrameProbe() {
-      const { state } = useOnboardingSession();
-      lastFrame = state.currentFrame;
+    let lastStep: string | null = null;
+    function StepProbe() {
+      lastStep = useActiveStepDiagnostic();
       return null;
     }
 
@@ -235,7 +233,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     renderWithConversationApi(
       <>
         <ActiveConversationFlow experience={onboardingExperience()} />
-        <FrameProbe />
+        <StepProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -245,7 +243,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     await user.click(screen.getByTestId("chat-live-send"));
 
     await waitFor(() => {
-      expect(lastFrame).toBe("f5");
+      expect(lastStep).toBe("interact-chat");
     });
   });
 
@@ -292,7 +290,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     expect(arg.sessionMeta.title).toBe("Onboarding");
   });
 
-  it("does NOT auto-advance to f5 when a persisted USER turn is hydrated (only a genuine send fires it)", async () => {
+  it("does NOT auto-advance to Interact when a persisted USER turn is hydrated (only a genuine send fires it)", async () => {
     // A returning user with a persisted user turn must NOT trip the
     // first-send choreography on mount — `firstUserMessageSent` is set only by
     // a real `send()`, not by RT-01 hydration.
@@ -300,16 +298,15 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
       { id: "m1", chatSessionId: "rt", turnIndex: 1, role: "user", content: "prior question", errorCode: null, citations: [] },
     ]);
 
-    let lastFrame = "";
-    function FrameProbe() {
-      const { state } = useOnboardingSession();
-      lastFrame = state.currentFrame;
+    let lastStep: string | null = null;
+    function StepProbe() {
+      lastStep = useActiveStepDiagnostic();
       return null;
     }
     renderWithConversationApi(
       <>
         <ActiveConversationFlow experience={onboardingExperience()} />
-        <FrameProbe />
+        <StepProbe />
       </>,
       { initialFrame: "f2", initialScenario: "utility" },
     );
@@ -317,7 +314,7 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
     await waitFor(() => {
       expect(screen.getByTestId("chat-live-user")).toHaveTextContent("prior question");
     });
-    // Hydration alone must not fire the first-send choreography (no jump to f5).
-    expect(lastFrame).not.toBe("f5");
+    // Hydration alone must not fire the first-send choreography (no jump to Interact).
+    expect(lastStep).not.toBe("interact-chat");
   });
 });

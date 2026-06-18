@@ -8,6 +8,7 @@ import type { RenderReportInput, RenderReportResult } from "@/api/smartReport";
 import type { RenderedReport } from "@/types/report";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import { useActiveStepDiagnostic } from "@/test/activeStepDiagnostic";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 
@@ -253,17 +254,17 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     // no longer relies on a host `onEditSection` callback (the `{ scope, role }`
     // ScopedCanvas contract can't supply it). It dispatches the `editTemplate`
     // CanvasIntent through the orchestrator — the SAME intent the
-    // `show_smart_report_edit` tool emits — which routes to
-    // `advanceFrame("f4a", { selectedReportSectionId })`. We assert the
-    // user-visible result of that routing via a session probe.
+    // `show_smart_report_edit` tool emits — which pushes the report builder step
+    // + pre-selects the section. We assert the user-visible result via a probe.
     const user = userEvent.setup();
-    let snapshot: { frame: string; selectedSectionId: string | null } = {
-      frame: "",
+    let snapshot: { step: string | null; selectedSectionId: string | null } = {
+      step: null,
       selectedSectionId: null,
     };
     const SessionProbe: FC = () => {
       const { state } = useOnboardingSession();
-      snapshot = { frame: state.currentFrame, selectedSectionId: state.selectedReportSectionId };
+      const step = useActiveStepDiagnostic();
+      snapshot = { step, selectedSectionId: state.selectedReportSectionId };
       return null;
     };
     renderWithTemplate(
@@ -275,7 +276,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     );
     await user.click(await screen.findByTestId("report-section-edit-billing_summary"));
     await waitFor(() => {
-      expect(snapshot.frame).toBe("f4a");
+      expect(snapshot.step).toBe("report-builder");
       expect(snapshot.selectedSectionId).toBe("billing_summary");
     });
   });

@@ -44,28 +44,6 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistryOptional } from "@/contexts/ScenarioRegistryContext";
 
-/**
- * standardized-viewer-control T6 — map the frame-typed `overrideFrame` PROP to a
- * journey stage. This exists ONLY to honor that (caller-less) prop's contract
- * without reading `session.currentFrame`; the live journey stage is sourced from
- * the active viewer step. The keys are the prop's own frame vocabulary (NOT a
- * `ViewerStep.kind → stage` mapping — that single source is `VIEWER_STEP_TO_JOURNEY`
- * and must not be re-declared). Mirrors `frameToStepStandalone`'s frame grouping:
- * f1→ingest, f2→understand, f3/f3a/f4/f5/f6→analyze (Extract/Report/Interact),
- * f7→integrate. (The prop union has no `f4a`; the builder is reached via a step,
- * not this prop.)
- */
-const FRAME_TO_STAGE: Record<NonNullable<ChatColumnProps["overrideFrame"]>, StepId> = {
-  f1: "ingest",
-  f2: "understand",
-  f3: "analyze",
-  f3a: "analyze",
-  f4: "analyze",
-  f5: "analyze",
-  f6: "analyze",
-  f7: "integrate",
-};
-
 export interface ChatColumnProps {
   /**
    * 2026-05-30-widget-role-access — widget AUTHORIZATION role.
@@ -91,15 +69,6 @@ export interface ChatColumnProps {
    */
   overrideScenarioId?: string | null;
   /**
-   * Override the journey stage the chat derives, by frame. Same slide-out use
-   * case as `overrideScenarioId`. standardized-viewer-control T6 — the chat's
-   * conversation-journey predicate is now sourced from the ACTIVE VIEWER STEP's
-   * journey stage, not `session.currentFrame`; this frame-typed override is
-   * mapped to a stage (`FRAME_TO_STAGE`) so the prop's contract is preserved
-   * without reading session frame state. (No production caller passes it today.)
-   */
-  overrideFrame?: "f1" | "f2" | "f3" | "f3a" | "f4" | "f5" | "f6" | "f7";
-  /**
    * Booking is a viewer overlay, not a replacement chat mode. While the
    * calendar is open, keep the current conversation mounted even if the
    * underlying onboarding gate is open/committed.
@@ -114,7 +83,6 @@ export interface ChatColumnProps {
 
 export const ChatColumn: FC<ChatColumnProps> = ({
   overrideScenarioId,
-  overrideFrame,
   bookingActive = false,
   signInActive = false,
 }) => {
@@ -135,16 +103,14 @@ export const ChatColumn: FC<ChatColumnProps> = ({
   // not-yet-hydrated session renders the onboarding chrome, not the bare chat.
   const isOnboardingSession = activeChatSession?.isOnboardingSession ?? true;
 
-  // standardized-viewer-control T6 — the chat's conversation-journey predicate
-  // is sourced from the ACTIVE VIEWER STEP's journey stage (via the single-source
-  // `VIEWER_STEP_TO_JOURNEY`), NOT a `session.currentFrame` read. The frame-typed
-  // `overrideFrame` prop (slide-out use case; no production caller today) is
-  // mapped to a stage so its contract is preserved without reading session frame
-  // state. `null` stage = the journey hasn't started (picker / pre-scenario).
+  // standardized-viewer-control — the chat's conversation-journey predicate is
+  // sourced from the ACTIVE VIEWER STEP's journey stage (via the single-source
+  // `VIEWER_STEP_TO_JOURNEY`). `null` stage = the journey hasn't started
+  // (picker / pre-scenario).
   const activeStep = selectActiveStep(activeChatSession);
-  const journeyStage: StepId | null =
-    (overrideFrame ? FRAME_TO_STAGE[overrideFrame] : undefined) ??
-    (activeStep ? VIEWER_STEP_TO_JOURNEY[activeStep.kind]?.step ?? null : null);
+  const journeyStage: StepId | null = activeStep
+    ? VIEWER_STEP_TO_JOURNEY[activeStep.kind]?.step ?? null
+    : null;
   const scenarioId =
     overrideScenarioId !== undefined
       ? overrideScenarioId

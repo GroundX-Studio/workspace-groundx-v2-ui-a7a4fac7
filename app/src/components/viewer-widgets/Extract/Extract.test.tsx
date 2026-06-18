@@ -232,7 +232,7 @@ describe("Extract — interact entry dispatches showInteract (T6)", () => {
       { initialFrame: "f3", initialScenario: "utility" },
     );
 
-    fireEvent.click(screen.getByTestId("advance-to-f5"));
+    fireEvent.click(screen.getByTestId("extract-ask-question"));
 
     await waitFor(() => {
       const store = storeRef.current;

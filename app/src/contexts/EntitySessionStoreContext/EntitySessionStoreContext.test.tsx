@@ -29,7 +29,8 @@ afterEach(() => {
  * have moved into ChatStoreContext.test.tsx. The tests here exercise
  * the **facade contract**: useEntitySessionStore returns the
  * EntitySessionStore API shape, mutations land in the active chat
- * session's entities map, the legacy-key migration loads old data.
+ * session's entities map, and a doubly-obsolete legacy payload is
+ * ignored (the frame→step migration was retired in standardized-viewer-control).
  */
 
 describe("EntitySessionStoreContext (facade over ChatStore)", () => {
@@ -50,9 +51,12 @@ describe("EntitySessionStoreContext (facade over ChatStore)", () => {
     expect(mod.EntitySessionStoreProvider).toBeTypeOf("function");
   });
 
-  it("migrates entities from the legacy registry key on first mount", () => {
-    // Seed the OLD storage key — ChatStore's bootstrap should pick it
-    // up, fold into a fresh onboarding session, and delete the key.
+  it("does NOT migrate the doubly-obsolete legacy registry key (frame-retirement / pre-launch)", () => {
+    // standardized-viewer-control (D2) — the one-shot frame→step migration that
+    // read the legacy `entity-registry.v1` (`lastFrame`/`completedFrames`) format
+    // is gone (the frame machine is retired and there is no real user data to
+    // preserve pre-launch). A legacy payload is now ignored: bootstrap seeds a
+    // FRESH empty session, with no entity migrated from the old key.
     const previousSession = {
       version: 1,
       activeKey: "sample:utility",
@@ -77,25 +81,18 @@ describe("EntitySessionStoreContext (facade over ChatStore)", () => {
 
     const { result } = renderHook(() => useEntitySessionStore(), { wrapper });
 
-    expect(result.current.state.activeKey).toBe("sample:utility");
-    const active = result.current.state.entities.get("sample:utility" as never);
-    expect(active).toBeDefined();
-    expect(active?.lastFrame).toBe("f3");
-    expect(active?.completedFrames instanceof Set).toBe(true);
-    expect(active?.completedFrames.has("f1")).toBe(true);
-    expect(active?.completedFrames.has("f2")).toBe(true);
-
-    // Legacy key should be deleted post-migration.
-    expect(window.localStorage.getItem("groundx-onboarding.entity-registry.v1")).toBeNull();
+    // Nothing migrated — the store starts empty (the legacy key is not read).
+    expect(result.current.state.activeKey).toBeNull();
+    expect(result.current.state.entities.size).toBe(0);
   });
 
   it("upsertAndActivate adds an entity to the active session", () => {
     const { result } = renderHook(() => useEntitySessionStore(), { wrapper });
     act(() => {
-      result.current.upsertAndActivate("sample", "loan", { lastFrame: "f2" });
+      result.current.upsertAndActivate("sample", "loan", { lastStep: { kind: "doc-viewer", documentId: "scenario:loan" } });
     });
     expect(result.current.state.activeKey).toBe("sample:loan");
-    expect(result.current.state.entities.get("sample:loan" as never)?.lastFrame).toBe("f2");
+    expect(result.current.state.entities.get("sample:loan" as never)?.lastStep).toEqual({ kind: "doc-viewer", documentId: "scenario:loan" });
   });
 
   it("ignores corrupt legacy localStorage payloads without throwing", () => {
@@ -130,8 +127,8 @@ describe("EntitySessionStoreContext (facade over ChatStore)", () => {
     seedMap.set("sample:loan", {
       kind: "sample",
       id: "loan",
-      lastFrame: "f2",
-      completedFrames: new Set(["f1"]),
+      lastStep: { kind: "doc-viewer", documentId: "scenario:loan" },
+      reachedStages: new Set(["ingest"]),
       createdAt: 1,
       lastVisitedAt: 1,
     });

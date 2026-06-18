@@ -18,8 +18,8 @@ function entity(partial: Partial<ChatSessionEntityRecord>): ChatSessionEntityRec
   return {
     chatSessionId: "cs-test",
     entityKey: "ent-test",
-    lastFrame: null,
-    completedFramesJson: "[]",
+    lastStepJson: null,
+    reachedStagesJson: "[]",
     scanProgressJson: null,
     extractedValuesJson: null,
     bucketId: null,

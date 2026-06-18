@@ -3,8 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useApi } from "@/contexts/ApiContext";
 import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntitySessionStoreContext";
 import { cryptoRandom } from "@/lib/cryptoRandom";
-import type { FFrame } from "@/types/onboarding";
-import { compileScopeFilter, parseCanvasIntent, type ContentScope, type NormalizedBbox } from "@groundx/shared";
+import { compileScopeFilter, parseCanvasIntent, type ContentScope, type JourneyStage, type NormalizedBbox, type PersistedViewerStep } from "@groundx/shared";
 
 import {
   parseChatStoreSnapshot,
@@ -19,6 +18,14 @@ import {
   EMPTY_PENDING_SCHEMA_OVERLAY,
   EMPTY_VIEWER_SESSION,
 } from "./types";
+
+/**
+ * standardized-viewer-control D13/R5 — the resume anchor for a freshly-created
+ * entity (before any navigation lands a real step). The ingest-picker step is
+ * the journey origin; `pickScenario`/the orchestrator overwrite `lastStep` with
+ * the real destination on first advance. Replaced the old `lastFrame: "f1"`.
+ */
+const DEFAULT_PERSISTED_STEP: PersistedViewerStep = { kind: "ingest-picker" };
 import type {
   CanvasIntent,
   ChatMessage,
@@ -162,13 +169,6 @@ const MAX_PERSISTED_MESSAGES_PER_SESSION = 500;
  * above the bundling slice for debugging without unbounded growth.
  */
 const MAX_VIEWER_HISTORY_PER_SESSION = 50;
-/**
- * Legacy key from the standalone EntityRegistry persistence (Phase 2
- * of the state-preservation work). On ChatStore first mount we read
- * this once, fold its entities into a fresh "onboarding" session,
- * then delete it.
- */
-const LEGACY_ENTITY_REGISTRY_KEY = "groundx-onboarding.entity-registry.v1";
 
 /**
  * Generate an anonymous owner key (`anon-<uuid>`). Stable across the
@@ -211,8 +211,10 @@ function serialize(state: ChatStoreState): string {
         {
           kind: entity.kind,
           id: entity.id,
-          lastFrame: entity.lastFrame,
-          completedFrames: [...entity.completedFrames],
+          // D13/R5 — the resume anchor is the active viewer step (restored
+          // verbatim) + the reached-stage SET (checkmarks). Frame-free.
+          lastStep: entity.lastStep,
+          reachedStages: [...entity.reachedStages],
           createdAt: entity.createdAt,
           lastVisitedAt: entity.lastVisitedAt,
         },
@@ -266,17 +268,18 @@ function deserialize(raw: string): ChatStoreState | null {
     for (const s of parsed.sessions) {
       const entities = new Map<EntityKey, EntitySession>();
       for (const [key, entity] of s.entities) {
-        // Restore lastFrame VERBATIM — resume lands on the frame the
-        // user was actually on, even when they navigated "backwards"
-        // (f7 → f5) before reloading. An earlier "highest frame ever
-        // reached" watermark here caused the stale-resume bug: once f7
-        // entered completedFrames, every reload resumed f7 no matter
-        // where the user had moved since.
+        // Restore `lastStep` VERBATIM — resume lands on the viewer step the
+        // user was actually on, even when they navigated "backwards" (e.g.
+        // Integrate → Interact) before reloading. The reached-stage SET is
+        // restored separately and is NEVER the resume anchor: an earlier
+        // "highest stage ever reached" watermark here would cause a stale-
+        // resume bug (once Integrate was reached, every reload would resume
+        // Integrate no matter where the user had moved since).
         entities.set(key, {
           kind: entity.kind,
           id: entity.id,
-          lastFrame: entity.lastFrame,
-          completedFrames: new Set<FFrame>(entity.completedFrames),
+          lastStep: entity.lastStep,
+          reachedStages: new Set<JourneyStage>(entity.reachedStages),
           createdAt: entity.createdAt,
           lastVisitedAt: entity.lastVisitedAt,
         });
@@ -307,74 +310,6 @@ function deserialize(raw: string): ChatStoreState | null {
   }
 }
 
-/**
- * One-shot migration from the standalone EntityRegistry localStorage
- * payload (the Phase-2 format that pre-dates this ChatStore). If the
- * legacy key is present and we DON'T already have a ChatStore
- * payload, we fold the legacy entities into a fresh onboarding
- * session. Then we delete the legacy key.
- */
-function migrateLegacyEntityRegistry(): ChatStoreState | null {
-  if (typeof window === "undefined") return null;
-  let legacyRaw: string | null;
-  try {
-    legacyRaw = window.localStorage.getItem(LEGACY_ENTITY_REGISTRY_KEY);
-  } catch {
-    return null;
-  }
-  if (!legacyRaw) return null;
-  try {
-    const legacy = JSON.parse(legacyRaw) as {
-      version: number;
-      activeKey: EntityKey | null;
-      entities: Array<[EntityKey, SerializedEntitySession]>;
-    };
-    if (legacy.version !== 1) {
-      window.localStorage.removeItem(LEGACY_ENTITY_REGISTRY_KEY);
-      return null;
-    }
-    const entities = new Map<EntityKey, EntitySession>();
-    for (const [key, e] of legacy.entities) {
-      entities.set(key, {
-        kind: e.kind,
-        id: e.id,
-        lastFrame: e.lastFrame,
-        completedFrames: new Set(e.completedFrames),
-        createdAt: e.createdAt,
-        lastVisitedAt: e.lastVisitedAt,
-      });
-    }
-    const now = Date.now();
-    const sessionId = mintSessionId();
-    const session: ChatSession = {
-      id: sessionId,
-      title: "Onboarding",
-      createdAt: now,
-      updatedAt: now,
-      messages: [],
-      summaries: [],
-      entities,
-      activeEntityKey: legacy.activeKey,
-      viewerHistory: [],
-      currentIntent: null,
-      pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
-      reportOverlay: EMPTY_PENDING_REPORT_OVERLAY,
-      viewer: EMPTY_VIEWER_SESSION,
-      gate: { status: "idle" },
-      signupOpen: false,
-      isOnboardingSession: true,
-    };
-    window.localStorage.removeItem(LEGACY_ENTITY_REGISTRY_KEY);
-    return {
-      ownerKey: mintAnonOwnerKey(),
-      sessions: new Map([[sessionId, session]]),
-      activeSessionId: sessionId,
-    };
-  } catch {
-    return null;
-  }
-}
-
 function rehydrate(): ChatStoreState | null {
   if (typeof window === "undefined") return null;
   let raw: string | null;
@@ -387,8 +322,10 @@ function rehydrate(): ChatStoreState | null {
     const fromCurrent = deserialize(raw);
     if (fromCurrent) return fromCurrent;
   }
-  // No ChatStore payload — try legacy EntityRegistry payload.
-  return migrateLegacyEntityRegistry();
+  // standardized-viewer-control (D2) — there is no legacy `entity-registry.v1`
+  // fallback any more: the frame-keyed migration is retired (pre-launch, no real
+  // user data) so an absent ChatStore payload yields a fresh seed.
+  return null;
 }
 
 function persist(state: ChatStoreState): void {
@@ -697,8 +634,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       type PutPayload = {
         chatSessionId: string;
         entityKey: EntityKey;
-        lastFrame: FFrame;
-        completedFramesJson: string;
+        lastStepJson: string;
+        reachedStagesJson: string;
       };
       // Use a 1-slot tuple so the closure-mutation assignment doesn't
       // confuse TS's flow-analysis narrowing (which otherwise sees the
@@ -721,8 +658,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
           committed = {
             kind,
             id,
-            lastFrame: "f1",
-            completedFrames: new Set(),
+            lastStep: DEFAULT_PERSISTED_STEP,
+            reachedStages: new Set(),
             createdAt: now,
             lastVisitedAt: now,
             ...defaults,
@@ -739,8 +676,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         putPayloadBox.current = {
           chatSessionId: prev.activeSessionId,
           entityKey: key,
-          lastFrame: committed.lastFrame,
-          completedFramesJson: JSON.stringify([...committed.completedFrames]),
+          lastStepJson: JSON.stringify(committed.lastStep),
+          reachedStagesJson: JSON.stringify([...committed.reachedStages]),
         };
         return { ...prev, sessions };
       });
@@ -873,8 +810,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     let putPayload: {
       chatSessionId: string;
       entityKey: EntityKey;
-      lastFrame: FFrame;
-      completedFramesJson: string;
+      lastStepJson: string;
+      reachedStagesJson: string;
     } | null = null;
 
     setState((prev) => {
@@ -893,8 +830,8 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       putPayload = {
         chatSessionId: prev.activeSessionId,
         entityKey: current.activeEntityKey,
-        lastFrame: committed.lastFrame,
-        completedFramesJson: JSON.stringify([...committed.completedFrames]),
+        lastStepJson: JSON.stringify(committed.lastStep),
+        reachedStagesJson: JSON.stringify([...committed.reachedStages]),
       };
       return { ...prev, sessions };
     });

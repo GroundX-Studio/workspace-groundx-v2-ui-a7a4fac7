@@ -419,12 +419,13 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
                   </Box>
                   {humanizeName(section.name)}
                 </Box>
-                {/* ✎ edit §N — opens the builder (f4a) with this section
-                    pre-selected, by dispatching the `editTemplate` intent
-                    through the orchestrator (the same intent
-                    `show_smart_report_edit` emits → advanceFrame("f4a", {
-                    selectedReportSectionId })). Rendered for every role; whether
-                    the edit *persists* is gated at the builder Save boundary. */}
+                {/* ✎ edit §N — opens the report builder surface with this
+                    section pre-selected, by dispatching the `editTemplate`
+                    intent through the orchestrator (the same intent
+                    `show_smart_report_edit` emits → a `report` step with
+                    `surface: "builder"` + `selectedSectionId`). Rendered for
+                    every role; whether the edit *persists* is gated at the
+                    builder Save boundary. */}
                 <Box
                   component="button"
                   type="button"

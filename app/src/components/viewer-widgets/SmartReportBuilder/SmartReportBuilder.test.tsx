@@ -279,15 +279,16 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     // builder with only `{ scope, role }`, so the render→builder hand-off can't
     // thread `selectedSectionId` as a prop. The builder must fall back to
     // `session.selectedReportSectionId` (set by the orchestrator's editTemplate
-    // routing → advanceFrame("f4a", { selectedReportSectionId })).
+    // routing → `markStageReached({kind:"report", surface:"builder",
+    // selectedSectionId})`).
     const SelectProbe: FC = () => {
-      const { advanceFrame } = useOnboardingSession();
+      const { markStageReached } = useOnboardingSession();
       const fired = useRef(false);
       useEffect(() => {
         if (fired.current) return;
         fired.current = true;
-        advanceFrame("f4a", { selectedReportSectionId: "anomalies" });
-      }, [advanceFrame]);
+        markStageReached({ kind: "report", surface: "builder", selectedSectionId: "anomalies" });
+      }, [markStageReached]);
       return null;
     };
     renderWithSeededRows(

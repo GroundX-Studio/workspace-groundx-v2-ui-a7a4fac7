@@ -227,7 +227,6 @@ export const Extract: FC<ExtractProps> = ({
   const { state: appMode } = useAppMode();
   const onboardingSession = useOnboardingSessionOptional();
   const session = onboardingSession?.state;
-  const advanceFrame = onboardingSession?.advanceFrame ?? (() => undefined);
   const openGate = onboardingSession?.openGate ?? (() => undefined);
   const {
     state: chatState,
@@ -476,26 +475,29 @@ export const Extract: FC<ExtractProps> = ({
         });
         setSaveStatus("saved");
         const schemaName = `${schema!.name} (custom)`;
-        // standardized-viewer-control T6 — this onboarding-only "save-and-return
-        // to the Ingest picker" choreography is the f1 entity-DEACTIVATE +
-        // gate-reset + "left" viewer-event side effects (a BACKWARD transition,
-        // R2). No `show*` intent models a return-to-ingest-picker today
-        // (`showSample` ACTIVATES a sample; there is no deactivate/picker intent),
-        // so per design.md §0 R2/R7 this stays on `advanceFrame("f1")` until the
-        // dedicated ingest/picker intent + the symbol-deletion phase land. The
-        // explicit `pushStep` below carries the freshly-attached schema onto the
-        // picker step (which `advanceFrame("f1")`'s generic picker step does not).
-        advanceFrame("f1");
-        pushStep({
-          kind: "ingest-picker",
-          attachedSchema: { schemaId: templateIdRef.current!, name: schemaName },
-        });
+        // standardized-viewer-control deletion-phase — the onboarding-only
+        // "save-and-return to the Ingest picker" choreography now dispatches the
+        // generic `presentExperienceBeat` `ingest-picker` beat through the STANDARD
+        // dispatch seam (was `advanceFrame("f1") + pushStep`). The beat handler
+        // does the f1 entity-DEACTIVATE + gate-reset + "left" viewer-event side
+        // effects (a BACKWARD transition, R2) AND pushes the picker step carrying
+        // the freshly-attached schema — one seam, no frame, no double-push.
+        orchestrator?.dispatch(
+          {
+            kind: "presentExperienceBeat",
+            beat: {
+              kind: "ingest-picker",
+              attachedSchema: { schemaId: templateIdRef.current!, name: schemaName },
+            },
+          },
+          "user",
+        );
         appendAgentMessage(`Schema attached: ${schemaName}`);
       } catch {
         setSaveStatus("error");
       }
     })();
-  }, [api.template, session?.gate, schema, overlay, advanceFrame, pushStep, appendAgentMessage]);
+  }, [api.template, session?.gate, schema, overlay, orchestrator, appendAgentMessage]);
 
   const valuesByFieldId = useMemo(() => {
     if (liveSchema) {
@@ -1365,7 +1367,7 @@ export const Extract: FC<ExtractProps> = ({
                 <Box
                   role="button"
                   tabIndex={0}
-                  data-testid="advance-to-f5"
+                  data-testid="extract-ask-question"
                   onClick={handleAskQuestion}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {

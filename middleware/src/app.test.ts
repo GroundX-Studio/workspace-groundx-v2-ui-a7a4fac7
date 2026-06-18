@@ -1258,8 +1258,8 @@ describe("middleware scaffold", () => {
       await repository.upsertChatSessionEntity({
         chatSessionId: "chat-1",
         entityKey: "sample:utility",
-        lastFrame: "f3",
-        completedFramesJson: JSON.stringify(["f1", "f2"]),
+        lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+        reachedStagesJson: JSON.stringify(["ingest", "understand"]),
         scanProgressJson: null,
         extractedValuesJson: null,
         bucketId: null,

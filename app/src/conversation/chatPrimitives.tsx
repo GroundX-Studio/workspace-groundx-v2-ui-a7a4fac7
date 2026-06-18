@@ -99,15 +99,10 @@ export const BotBubble: FC<BubbleProps> = ({ children, testid }) => (
 export interface PickViewPillProps {
   label: string;
   testid?: string;
-  /**
-   * Optional second testid for back-compat with pre-rebuild e2e specs.
-   * Rendered on a transparent wrapper so both names resolve via getByTestId.
-   */
-  legacyTestid?: string;
   onClick: () => void;
 }
 
-const PickViewPillInner: FC<PickViewPillProps> = ({ label, testid, onClick }) => (
+export const PickViewPill: FC<PickViewPillProps> = ({ label, testid, onClick }) => (
   <Box
     role="button"
     tabIndex={0}
@@ -136,17 +131,6 @@ const PickViewPillInner: FC<PickViewPillProps> = ({ label, testid, onClick }) =>
     {label}
   </Box>
 );
-
-export const PickViewPill: FC<PickViewPillProps> = (props) => {
-  if (props.legacyTestid) {
-    return (
-      <Box data-testid={props.legacyTestid} onClick={props.onClick} sx={{ display: "inline-block" }}>
-        <PickViewPillInner {...props} />
-      </Box>
-    );
-  }
-  return <PickViewPillInner {...props} />;
-};
 
 // ── Live turn list ──────────────────────────────────────────────────────────
 

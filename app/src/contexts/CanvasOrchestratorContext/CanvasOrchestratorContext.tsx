@@ -377,9 +377,10 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
           }
           // Onboarding-only side effects, layered on top of the one outcome.
           // (Focus is a sub-position carried on the pushed step above, not a
-          // journey-state input — `markFrameReached` only tracks the stage.)
+          // journey-state input — `markStageReached` only tracks the stage, which
+          // is `analyze` for any extract-workbench step.)
           if (routeThroughOnboarding && onboardingSession) {
-            onboardingSession.markFrameReached("f3");
+            onboardingSession.markStageReached({ kind: "extract-workbench", scenarioId: intent.schemaId });
             // R1 — `understand.completed` on the Extract first-reach (ref-gated).
             onboardingSession.notifyExtractReached();
           }
@@ -399,16 +400,21 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
               ...(docId ? { documentId: docId } : {}),
             });
           }
-          if (routeThroughOnboarding) onboardingSession?.markFrameReached("f5");
+          if (routeThroughOnboarding) {
+            onboardingSession?.markStageReached({
+              kind: "interact-chat",
+              scenarioId: onboardingSession.state.scenario ?? "utility",
+            });
+          }
           break;
         }
         // standardized-viewer-control T5 — `showIntegrate` MOVES the canvas to the
         // Integrate connectors surface. ONE outcome (both experiences): push the
-        // `integrate` step. Onboarding layers the Integrate journey stage (f7,
-        // which also pops a stale sign-up overlay) on top.
+        // `integrate` step. Onboarding layers the Integrate journey stage on top
+        // (which also pops a stale sign-up overlay).
         case "showIntegrate":
           if (chatStore) chatStore.pushStep({ kind: "integrate" });
-          if (routeThroughOnboarding) onboardingSession?.markFrameReached("f7");
+          if (routeThroughOnboarding) onboardingSession?.markStageReached({ kind: "integrate" });
           break;
         // 2026-05-29-smart-report-screen Phase 5 / standardized-viewer-control T5
         // — the canvas-dispatch `show_*` report tools MOVE the canvas. ONE outcome
@@ -418,7 +424,9 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         // journey stage (f4 render / f4a builder) on top.
         case "showReport":
           if (chatStore) chatStore.pushStep({ kind: "report", surface: "render" });
-          if (routeThroughOnboarding) onboardingSession?.markFrameReached("f4");
+          if (routeThroughOnboarding) {
+            onboardingSession?.markStageReached({ kind: "report", surface: "render" });
+          }
           break;
         case "editTemplate":
           if (chatStore) {
@@ -429,12 +437,13 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
             });
           }
           if (routeThroughOnboarding) {
-            onboardingSession?.markFrameReached(
-              "f4a",
-              intent.selectedSectionId !== undefined
-                ? { selectedReportSectionId: intent.selectedSectionId }
-                : undefined,
-            );
+            // markStageReached reads the report-builder's pre-selected section
+            // off the step itself (frame-free) — thread it on.
+            onboardingSession?.markStageReached({
+              kind: "report",
+              surface: "builder",
+              ...(intent.selectedSectionId !== undefined ? { selectedSectionId: intent.selectedSectionId } : {}),
+            });
           }
           break;
         // 2026-05-31-shared-canvas-affordance-restoration — route the
@@ -479,6 +488,48 @@ export const CanvasOrchestratorProvider: FC<CanvasOrchestratorProviderProps> = (
         case "showSample":
           if (onboardingSession) onboardingSession.pickScenario(intent.scenario);
           // else: steady — no sample journey; intentionally nothing to do.
+          break;
+        // standardized-viewer-control deletion-phase — the generic experience/
+        // overlay-internal SCRIPTED viewer beat. ONBOARDING-SCOPED choreography
+        // (the three residual `advanceFrame` sites: Extract save-and-return,
+        // OnboardingShell URL-return, the experience intro-snap) routed through
+        // the ONE standard dispatch seam instead of onboarding-specific
+        // destination intents. The typed `beat` discriminator is the VALUES; this
+        // single kind is the MECHANISM. Soft-fails in the steady tree (no
+        // provider) like the other onboarding cases — steady has no scripted
+        // onboarding choreography.
+        case "presentExperienceBeat":
+          if (onboardingSession) {
+            switch (intent.beat.kind) {
+              case "ingest-picker":
+                // Return to the picker AND deactivate the active entity (the f1
+                // BACKWARD transition: gate reset + "left" event + picker step).
+                // The optional attachedSchema rides onto the picker step.
+                onboardingSession.returnToIngestPicker(intent.beat.attachedSchema);
+                break;
+              case "understand-scanning": {
+                // Snap to the Understand "GroundX is reading the doc" scanning
+                // beat AND set the Understand journey edge. Push the scanning
+                // doc-viewer step (the canvas outcome) then layer the journey
+                // advance (the f2 edge) via markStageReached — one seam, no fork.
+                const scenario = onboardingSession.state.scenario;
+                const scanStep = {
+                  kind: "doc-viewer" as const,
+                  documentId: scenario ? `scenario:${scenario}` : "scenario:unknown",
+                  scanning: true,
+                };
+                if (chatStore) chatStore.pushStep(scanStep);
+                onboardingSession.markStageReached(scanStep);
+                break;
+              }
+              default:
+                // Exhaustiveness over the beat discriminator — a new beat without
+                // a case fails tsc here.
+                intent.beat satisfies never;
+            }
+          }
+          // else: steady — no scripted onboarding choreography; intentionally
+          // nothing to do.
           break;
         // standardized-viewer-control T5 (R7) — the schema DESIGN surface is an
         // EXPERIENCE-AGNOSTIC sub-position on the `extract-workbench` step

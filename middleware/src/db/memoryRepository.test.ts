@@ -128,8 +128,8 @@ describe("MemoryAppRepository — chat-session methods", () => {
     const make = (sessionId: string, entityKey: string): ChatSessionEntityRecord => ({
       chatSessionId: sessionId,
       entityKey,
-      lastFrame: "f2",
-      completedFramesJson: "[]",
+      lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:utility" }),
+      reachedStagesJson: "[]",
       scanProgressJson: null,
       extractedValuesJson: null,
       createdAt: new Date(),
@@ -139,10 +139,10 @@ describe("MemoryAppRepository — chat-session methods", () => {
     await repo.upsertChatSessionEntity(make("chat-1", "sample:loan"));
     await repo.upsertChatSessionEntity(make("chat-2", "sample:utility"));
     // Upsert with same composite key replaces the row.
-    await repo.upsertChatSessionEntity({ ...make("chat-1", "sample:utility"), lastFrame: "f3" });
+    await repo.upsertChatSessionEntity({ ...make("chat-1", "sample:utility"), lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }) });
     const list = await repo.listChatSessionEntities("chat-1");
     expect(list).toHaveLength(2);
-    expect(list.find((e) => e.entityKey === "sample:utility")?.lastFrame).toBe("f3");
+    expect(list.find((e) => e.entityKey === "sample:utility")?.lastStepJson).toBe(JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }));
   });
 
   // CF-15 — EntitySession carries optional scope refs that downstream
@@ -152,8 +152,8 @@ describe("MemoryAppRepository — chat-session methods", () => {
     await repo.upsertChatSessionEntity({
       chatSessionId: "chat-1",
       entityKey: "project:abc",
-      lastFrame: "f5",
-      completedFramesJson: "[]",
+      lastStepJson: JSON.stringify({ kind: "interact-chat", scenarioId: "x" }),
+      reachedStagesJson: "[]",
       scanProgressJson: null,
       extractedValuesJson: null,
       bucketId: 7,
@@ -166,8 +166,8 @@ describe("MemoryAppRepository — chat-session methods", () => {
     await repo.upsertChatSessionEntity({
       chatSessionId: "chat-1",
       entityKey: "report:r-1",
-      lastFrame: "f7",
-      completedFramesJson: "[]",
+      lastStepJson: JSON.stringify({ kind: "integrate" }),
+      reachedStagesJson: "[]",
       scanProgressJson: null,
       extractedValuesJson: null,
       bucketId: null,
@@ -266,8 +266,8 @@ describe("MemoryAppRepository — chat-session methods", () => {
     await repo.upsertChatSessionEntity({
       chatSessionId: "chat-A",
       entityKey: "sample:utility",
-      lastFrame: "f2",
-      completedFramesJson: "[]",
+      lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:utility" }),
+      reachedStagesJson: "[]",
       scanProgressJson: null,
       extractedValuesJson: null,
       createdAt: new Date(),

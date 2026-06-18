@@ -92,8 +92,8 @@ describe("runStructuredQuery", () => {
     await repo.upsertChatSessionEntity({
       chatSessionId: "chat-1",
       entityKey: "sample:utility",
-      lastFrame: "f3",
-      completedFramesJson: JSON.stringify(["f1", "f2", "f3"]),
+      lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+      reachedStagesJson: JSON.stringify(["ingest", "understand", "analyze"]),
       scanProgressJson: null,
       extractedValuesJson: null,
       createdAt: now,
@@ -420,8 +420,8 @@ describe("hybrid full-merge (grounded seam)", () => {
     await repo.upsertChatSessionEntity({
       chatSessionId: "chat-h",
       entityKey: "sample:utility",
-      lastFrame: "f2",
-      completedFramesJson: "[]",
+      lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:utility" }),
+      reachedStagesJson: "[]",
       scanProgressJson: null,
       extractedValuesJson: null,
       createdAt: now,

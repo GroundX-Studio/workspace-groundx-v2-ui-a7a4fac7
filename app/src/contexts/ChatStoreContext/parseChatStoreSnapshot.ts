@@ -1,8 +1,7 @@
-import { citationSchema } from "@groundx/shared";
+import { citationSchema, journeyStageSchema, persistedViewerStepSchema } from "@groundx/shared";
 import { z } from "zod";
 
 import type { EntityKey, EntityKind } from "@/contexts/EntitySessionStoreContext";
-import type { FFrame } from "@/types/onboarding";
 
 /**
  * 2026-05-31-session-auth-subshapes — the ChatStore localStorage rehydration
@@ -20,11 +19,16 @@ import type { FFrame } from "@/types/onboarding";
  * Bump `STORAGE_VERSION` when the serialized shape changes; the validator
  * rejects any other version (rehydration then falls back to legacy migration /
  * a fresh store), it does NOT migrate older shapes.
+ *
+ * v2 (standardized-viewer-control D13/R5) — the per-entity resume anchor moved
+ * off frames: `lastFrame`/`completedFrames` are replaced by a persisted ACTIVE
+ * VIEWER STEP (`lastStep`, restored verbatim — the resume anchor) and a SET of
+ * reached journey stages (`reachedStages`, checkmarks only; NOT a watermark —
+ * R3). The active step persists only its navigational payload (the shared
+ * `persistedViewerStepSchema`); ephemeral citation highlights / the scan beat
+ * are rebuilt on demand, never stored. Overlays are not persisted.
  */
-export const STORAGE_VERSION = 1;
-
-const FFRAME_VALUES = ["f1", "f2", "f3", "f3a", "f4", "f4a", "f5", "f6", "f7"] as const;
-const fFrameSchema: z.ZodType<FFrame> = z.enum(FFRAME_VALUES);
+export const STORAGE_VERSION = 2;
 
 const ENTITY_KIND_VALUES = ["sample"] as const;
 const entityKindSchema: z.ZodType<EntityKind> = z.enum(ENTITY_KIND_VALUES);
@@ -33,8 +37,11 @@ const serializedEntitySessionSchema = z
   .object({
     kind: entityKindSchema,
     id: z.string(),
-    lastFrame: fFrameSchema,
-    completedFrames: z.array(fFrameSchema),
+    // v2 — frame-free resume anchor (active step, restored verbatim) + the
+    // reached-stage set (checkmarks). Both single-sourced from `@groundx/shared`
+    // so the same untrusted-input shape is validated on the server-twin read.
+    lastStep: persistedViewerStepSchema,
+    reachedStages: z.array(journeyStageSchema),
     createdAt: z.number(),
     lastVisitedAt: z.number(),
   })

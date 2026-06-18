@@ -178,8 +178,13 @@ export class MySqlAppRepository implements AppRepository {
       CREATE TABLE IF NOT EXISTS chat_session_entities (
         chat_session_id VARCHAR(64) NOT NULL,
         entity_key VARCHAR(64) NOT NULL,
-        last_frame VARCHAR(16) NULL,
-        completed_frames_json JSON NOT NULL,
+        -- standardized-viewer-control D13/R5 — the resume anchor moved off
+        -- frames: last_step_json (JSON-encoded PersistedViewerStep, the active
+        -- viewer step restored verbatim) + reached_stages_json (JSON array of
+        -- reached JourneyStage values, checkmarks only) replace the frame-keyed
+        -- last_frame / completed_frames_json. Pre-launch: no data migration.
+        last_step_json JSON NULL,
+        reached_stages_json JSON NOT NULL,
         scan_progress_json JSON NULL,
         extracted_values_json JSON NULL,
         -- CF-15: RAG scope refs. All nullable so existing rows + the
@@ -562,14 +567,14 @@ export class MySqlAppRepository implements AppRepository {
   async upsertChatSessionEntity(record: ChatSessionEntityRecord): Promise<void> {
     await this.pool.execute(
       `INSERT INTO chat_session_entities (
-        chat_session_id, entity_key, last_frame, completed_frames_json,
+        chat_session_id, entity_key, last_step_json, reached_stages_json,
         scan_progress_json, extracted_values_json,
         bucket_id, project_ids_json, group_id, document_ids_json,
         created_at, last_visited_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        last_frame = VALUES(last_frame),
-        completed_frames_json = VALUES(completed_frames_json),
+        last_step_json = VALUES(last_step_json),
+        reached_stages_json = VALUES(reached_stages_json),
         scan_progress_json = VALUES(scan_progress_json),
         extracted_values_json = VALUES(extracted_values_json),
         bucket_id = VALUES(bucket_id),
@@ -580,8 +585,8 @@ export class MySqlAppRepository implements AppRepository {
       [
         record.chatSessionId,
         record.entityKey,
-        record.lastFrame,
-        record.completedFramesJson,
+        record.lastStepJson,
+        record.reachedStagesJson,
         record.scanProgressJson,
         record.extractedValuesJson,
         record.bucketId,
@@ -596,7 +601,7 @@ export class MySqlAppRepository implements AppRepository {
 
   async listChatSessionEntities(chatSessionId: string): Promise<ChatSessionEntityRecord[]> {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
-      `SELECT chat_session_id, entity_key, last_frame, completed_frames_json,
+      `SELECT chat_session_id, entity_key, last_step_json, reached_stages_json,
         scan_progress_json, extracted_values_json,
         bucket_id, project_ids_json, group_id, document_ids_json,
         created_at, last_visited_at
@@ -923,8 +928,8 @@ function rowToChatSessionEntity(row: mysql.RowDataPacket): ChatSessionEntityReco
   return {
     chatSessionId: row.chat_session_id,
     entityKey: row.entity_key,
-    lastFrame: row.last_frame,
-    completedFramesJson: row.completed_frames_json,
+    lastStepJson: row.last_step_json,
+    reachedStagesJson: row.reached_stages_json,
     scanProgressJson: row.scan_progress_json,
     extractedValuesJson: row.extracted_values_json,
     bucketId: row.bucket_id == null ? null : Number(row.bucket_id),

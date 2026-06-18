@@ -60,6 +60,26 @@ describe("parseCanvasIntent (shared §1)", () => {
     expect(parseCanvasIntent({ kind: "showInteract" })).toBeNull();
   });
 
+  it("round-trips presentExperienceBeat (the generic, llm:false overlay-internal viewer beat)", () => {
+    // standardized-viewer-control deletion-phase — ONE generic, NOT-LLM-emittable
+    // intent for experience/overlay-internal scripted viewer beats (the MECHANISM);
+    // the typed, extensible `beat` discriminator is the VALUES, so future overlay
+    // scenarios add a beat variant rather than a new intent kind.
+    const ingestPickerBeat = { kind: "presentExperienceBeat", beat: { kind: "ingest-picker" } };
+    expect(parseCanvasIntent(ingestPickerBeat)).toEqual(ingestPickerBeat);
+    const ingestPickerWithSchema = {
+      kind: "presentExperienceBeat",
+      beat: { kind: "ingest-picker", attachedSchema: { schemaId: "tmpl-1", name: "Utility (custom)" } },
+    };
+    expect(parseCanvasIntent(ingestPickerWithSchema)).toEqual(ingestPickerWithSchema);
+    const scanningBeat = { kind: "presentExperienceBeat", beat: { kind: "understand-scanning" } };
+    expect(parseCanvasIntent(scanningBeat)).toEqual(scanningBeat);
+    // A bogus beat variant must coerce to null (the beat is a closed discriminated set).
+    expect(parseCanvasIntent({ kind: "presentExperienceBeat", beat: { kind: "not-a-beat" } })).toBeNull();
+    // The `beat` field is required.
+    expect(parseCanvasIntent({ kind: "presentExperienceBeat" })).toBeNull();
+  });
+
   it("the schema is the intent discriminator — distinct from the surface-kind enum", () => {
     // `canvasIntentSchema` discriminates on `kind` across intent variants.
     expect(canvasIntentSchema.safeParse({ kind: "wizardNext" }).success).toBe(true);

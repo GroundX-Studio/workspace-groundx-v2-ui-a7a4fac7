@@ -12,6 +12,9 @@
  * Eyebrow values are stored MIXED-CASE; the `Label` eyebrow variant renders them
  * uppercase via CSS `text-transform`, so the DOM text stays mixed-case.
  */
+import type { ViewerStep } from "@/contexts/ChatStoreContext";
+import type { PersistedViewerStep } from "@groundx/shared";
+
 import type { AnalyzeSubstep, StepId } from "./types";
 
 export interface JourneyStepEntry {
@@ -62,3 +65,25 @@ export const VIEWER_STEP_TO_JOURNEY: Readonly<
   report: { step: "analyze", substep: "report" },
   integrate: { step: "integrate" },
 };
+
+/**
+ * standardized-viewer-control (D2) — the FRAME-FREE diagnostic identifier for an
+ * active viewer step. It is the successor to the retired `onboarding-frame-fN`
+ * data-testid (and the `currentFrame` reverse-projection it read): it conveys the
+ * SAME two facts the frame did — the active viewer step kind AND its sub-position
+ * — straight off the step, no frame vocabulary. Rendered as
+ * `data-testid={`onboarding-step-${viewerStepDiagnosticId(step)}`}` and read by
+ * the onboarding shell tests. The sub-position suffix mirrors the step's own
+ * `surface` field (Extract fields/design, Report render/builder); a step without
+ * a surface returns its bare kind.
+ */
+export function viewerStepDiagnosticId(step: ViewerStep | PersistedViewerStep): string {
+  switch (step.kind) {
+    case "extract-workbench":
+      return step.surface === "design" ? "extract-workbench-design" : "extract-workbench";
+    case "report":
+      return step.surface === "builder" ? "report-builder" : "report-render";
+    default:
+      return step.kind;
+  }
+}

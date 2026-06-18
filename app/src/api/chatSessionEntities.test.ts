@@ -39,8 +39,8 @@ describe("upsertChatSessionEntity (RT-03 client)", () => {
     await upsertChatSessionEntity({
       chatSessionId: "chat-1",
       entityKey: "sample:utility",
-      lastFrame: "f3",
-      completedFramesJson: JSON.stringify(["f1", "f2"]),
+      lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+      reachedStagesJson: JSON.stringify(["ingest", "understand"]),
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [path, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -49,8 +49,8 @@ describe("upsertChatSessionEntity (RT-03 client)", () => {
     expect((init as RequestInit).credentials).toBe("include");
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body).toEqual({
-      lastFrame: "f3",
-      completedFramesJson: JSON.stringify(["f1", "f2"]),
+      lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+      reachedStagesJson: JSON.stringify(["ingest", "understand"]),
       scanProgressJson: null,
       extractedValuesJson: null,
     });
@@ -65,8 +65,8 @@ describe("upsertChatSessionEntity (RT-03 client)", () => {
     await upsertChatSessionEntity({
       chatSessionId: "c-abc/def",
       entityKey: "sample:loan",
-      lastFrame: "f2",
-      completedFramesJson: "[]",
+      lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:loan" }),
+      reachedStagesJson: "[]",
     });
     const [path] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     // / encoded → %2F, : encoded → %3A — both reach the route as
@@ -84,8 +84,8 @@ describe("upsertChatSessionEntity (RT-03 client)", () => {
       upsertChatSessionEntity({
         chatSessionId: "chat-1",
         entityKey: "sample:utility",
-        lastFrame: "f3",
-        completedFramesJson: "[]",
+        lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+        reachedStagesJson: "[]",
       }),
     ).resolves.toBeUndefined();
     expect(captureException).toHaveBeenCalledTimes(1);
@@ -104,8 +104,8 @@ describe("upsertChatSessionEntity (RT-03 client)", () => {
       upsertChatSessionEntity({
         chatSessionId: "chat-1",
         entityKey: "sample:utility",
-        lastFrame: "f3",
-        completedFramesJson: "[]",
+        lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+        reachedStagesJson: "[]",
       }),
     ).resolves.toBeUndefined();
     expect(captureException).toHaveBeenCalledTimes(1);

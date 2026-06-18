@@ -32,7 +32,7 @@ import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 const showSmartReportEdit: WidgetTool = {
   name: "show_smart_report_edit",
   description:
-    "Open the Report builder (frame f4a) with a section pre-selected. Use when the " +
+    "Open the Report builder with a section pre-selected. Use when the " +
     "user asks to edit the report, change a section's question, or you want to surface " +
     "the section editor for a specific section.",
   category: "read",

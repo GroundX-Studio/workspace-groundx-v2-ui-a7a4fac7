@@ -25,7 +25,7 @@ import { defineScopedViewerWidget } from "@/widgets/scopedViewerWidget";
 const showExtraction: WidgetTool = {
   name: "show_extraction",
   description:
-    "Move the canvas to the extraction workbench (frame f3) for a scope. Use when " +
+    "Move the canvas to the extraction workbench for a scope. Use when " +
     "the user asks to see the extracted fields, says \"show the extraction\", or you've " +
     "reasoned the structured-field view is the natural next surface for what they're analyzing.",
   category: "read",

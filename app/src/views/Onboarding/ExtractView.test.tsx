@@ -13,6 +13,7 @@ import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useWidgetRole } from "@/lib/widgetRole";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
+import { useResumeAnchorDiagnostic } from "@/test/activeStepDiagnostic";
 import { utilityTestScenario } from "@/test/scenarioFixtures";
 import type { ScenarioConfig } from "@/types/scenarios";
 
@@ -87,16 +88,19 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
-const FrameProbe = ({ onFrame }: { onFrame: (frame: string) => void }) => {
-  const session = useOnboardingSession();
-  onFrame(session.state.currentFrame);
+// standardized-viewer-control (D2) — the FRAME-FREE successor to the retired
+// `currentFrame`: the journey position = the active entity's resume anchor
+// (`lastStep`). A design-surface mutation (`editSchema`) does NOT move the anchor,
+// so it stays at the extract-workbench step — proving the journey didn't advance.
+const StepProbe = ({ onStep }: { onStep: (step: string | null) => void }) => {
+  onStep(useResumeAnchorDiagnostic());
   return null;
 };
 
 // standardized-viewer-control T5 (R7) — the schema DESIGN surface is now a
 // sub-position on the active extract-workbench STEP (`surface: "design"`), not a
-// frame (`currentFrame === "f3a"`). This probe reads the active step's surface so
-// tests assert the real, frame-free contract.
+// frame. This probe reads the active step's surface so tests assert the real,
+// frame-free contract.
 const SurfaceProbe = ({ onSurface }: { onSurface: (surface: string | undefined) => void }) => {
   const { state } = useChatStore();
   const active = state.activeSessionId ? state.sessions.get(state.activeSessionId) : null;
@@ -274,7 +278,7 @@ describe("ExtractView (F3/F4)", () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "solar" });
 
     expect(screen.getByText(/This sample skips extract/)).toBeInTheDocument();
-    expect(screen.queryByTestId("advance-to-f5")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("extract-ask-question")).not.toBeInTheDocument();
   });
 
   it("shows a loading beat (NOT the skips-extract copy) when an extract scenario's schema hasn't resolved yet", () => {
@@ -301,19 +305,19 @@ describe("ExtractView (F3/F4)", () => {
 
   it("advances from Extract to Interact", async () => {
     const user = userEvent.setup();
-    let frame = "";
+    let step: string | null = null;
 
     renderWithOnboardingProviders(
       <>
         <ExtractView />
-        <FrameProbe onFrame={(next) => (frame = next)} />
+        <StepProbe onStep={(next) => (step = next)} />
       </>,
       { initialFrame: "f3", initialScenario: "utility" },
     );
 
-    await user.click(screen.getByTestId("advance-to-f5"));
+    await user.click(screen.getByTestId("extract-ask-question"));
 
-    await waitFor(() => expect(frame).toBe("f5"));
+    await waitFor(() => expect(step).toBe("interact-chat"));
   });
 
   // ── Workbench-shell topbar (spec: project_dev_contracts.md) ─────────
@@ -367,12 +371,12 @@ describe("ExtractView (F3/F4)", () => {
   // surface is now a STEP sub-position, not the f3a frame — `currentFrame` stays f3.
   it("picking a category in the design-surface focus dropdown re-scopes the workbench live (via the dispatch seam)", async () => {
     const user = userEvent.setup();
-    let frame = "";
+    let step: string | null = null;
     let surface: string | undefined;
     renderWithOnboardingProviders(
       <>
         <ExtractView />
-        <FrameProbe onFrame={(next) => (frame = next)} />
+        <StepProbe onStep={(next) => (step = next)} />
         <SurfaceProbe onSurface={(next) => (surface = next)} />
       </>,
       { initialFrame: "f3", initialScenario: "utility" },
@@ -380,7 +384,7 @@ describe("ExtractView (F3/F4)", () => {
     await enterDesignSurface(user);
     await waitFor(() => expect(surface).toBe("design"));
     // The journey frame does NOT advance — design is a sub-position of Extract.
-    expect(frame).toBe("f3");
+    expect(step).toBe("extract-workbench");
     // Default focus is the first category (statement) — Statement fields show.
     await waitFor(() =>
       expect(screen.getByTestId("extract-pinned-category-badge")).toHaveTextContent(/category:\s*statement/),
@@ -396,7 +400,7 @@ describe("ExtractView (F3/F4)", () => {
       expect(screen.getByTestId("extract-pinned-category-badge")).toHaveTextContent(/category:\s*meters/),
     );
     expect(surface).toBe("design");
-    expect(frame).toBe("f3");
+    expect(step).toBe("extract-workbench");
     expect(screen.getByTestId("extract-topbar-title")).toHaveTextContent(/·\s*meters/);
     expect(screen.getByTestId("schema-field-meter_kwh")).toBeInTheDocument();
     expect(screen.queryByTestId("schema-field-account_number")).not.toBeInTheDocument();
@@ -466,12 +470,12 @@ describe("ExtractView (F3/F4)", () => {
 
   it("opens the schema design surface from the fields-panel hamburger menu (step surface → design)", async () => {
     const user = userEvent.setup();
-    let frame = "";
+    let step: string | null = null;
     let surface: string | undefined;
     renderWithOnboardingProviders(
       <>
         <ExtractView />
-        <FrameProbe onFrame={(next) => (frame = next)} />
+        <StepProbe onStep={(next) => (step = next)} />
         <SurfaceProbe onSurface={(next) => (surface = next)} />
       </>,
       { initialFrame: "f3", initialScenario: "utility" },
@@ -494,6 +498,6 @@ describe("ExtractView (F3/F4)", () => {
     // frame — the journey stage stays on Extract/f3).
     await user.click(screen.getByTestId("extract-fields-panel-menu-edit-schema"));
     await waitFor(() => expect(surface).toBe("design"));
-    expect(frame).toBe("f3");
+    expect(step).toBe("extract-workbench");
   });
 });

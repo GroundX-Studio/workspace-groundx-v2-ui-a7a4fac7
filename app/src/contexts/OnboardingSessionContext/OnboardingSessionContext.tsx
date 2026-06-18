@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 
-import { journeyStageForStepKind } from "@groundx/shared";
+import { journeyStageForStepKind, type JourneyStage } from "@groundx/shared";
 
-import { useChatStore, type ViewerStep } from "@/contexts/ChatStoreContext";
+import { toPersistedViewerStep, useChatStore, type ViewerStep } from "@/contexts/ChatStoreContext";
 import { track } from "@/lib/analytics";
 import { gaSetDefaults } from "@/lib/ga";
 import {
@@ -12,67 +12,39 @@ import {
   type EntityKey,
   type EntitySession,
 } from "@/contexts/EntitySessionStoreContext";
-import type { FFrame, GateTrigger, Scenario } from "@/types/onboarding";
+import type { GateTrigger, Scenario } from "@/types/onboarding";
 
 import type { GateCause, GateStatus, OnboardingSessionApi, OnboardingSessionState } from "./types";
 
 const OnboardingSessionContext = createContext<OnboardingSessionApi | null>(null);
 
 /**
- * `master-viewer-session` Phase 3 / post-mvs-cleanup Phase B — map an
- * F-series frame to its canonical `ViewerStep` projection. Hoisted out
- * of the hook so it can be called from `pickScenario` and `advanceFrame`
- * regardless of declaration order. The scenario id rides along on step
- * kinds that need it.
+ * The "GroundX is reading the doc" beat for a freshly-opened sample — the
+ * doc-viewer step that is active exactly while the chat ThinkingStream plays
+ * (its onDone auto-advances to Extract). `scanning: true` makes <ScopedCanvas>
+ * mount the PdfViewer with the reading scan-line. Citation-jump doc-viewer
+ * steps are pushed by the cite-click sink, NOT this seed, so they never scan.
+ *
+ * standardized-viewer-control (D2) — `pickScenario` is the sole live caller; the
+ * Understand reading beat is the journey origin for a freshly-opened sample.
  */
-export function frameToStepStandalone(
-  frame: FFrame,
-  scenario: Scenario | null,
-  focusedCategoryId?: string,
-): import("@/contexts/ChatStoreContext").ViewerStep {
-  switch (frame) {
-    case "f1":
-      return { kind: "ingest-picker" };
-    case "f2":
-      // WF-01 C5 — F2 is the "GroundX is reading the doc" beat: the
-      // doc-viewer step is active exactly while the chat ThinkingStream
-      // plays (its onDone auto-advances to F3). Flag `scanning: true` so
-      // <ScopedCanvas> mounts the PdfViewer with the reading scan-line.
-      // Citation-jump doc-viewer steps are pushed by the cite-click sink,
-      // NOT this projection, so they never carry the flag.
-      return {
-        kind: "doc-viewer",
-        documentId: scenario ? `scenario:${scenario}` : "scenario:unknown",
-        scanning: true,
-      };
-    case "f3":
-    case "f3a":
-      return {
-        kind: "extract-workbench",
-        scenarioId: scenario ?? "unknown",
-        ...(focusedCategoryId ? { focusedCategoryId } : {}),
-      };
-    // 2026-05-29-smart-report-screen Phase 1 — f4 = Report render (S3),
-    // f4a = Report builder (S3a). Both project to the `report` ViewerStep
-    // kind (the render surface reads the active scenario's scope); f4 used
-    // to mis-route to `extract-workbench` (the bug this change fixes).
-    case "f4":
-      return { kind: "report", surface: "render" };
-    case "f4a":
-      return { kind: "report", surface: "builder" };
-    case "f5":
-    case "f6":
-      return { kind: "interact-chat", scenarioId: scenario ?? "unknown" };
-    case "f7":
-      return { kind: "integrate" };
-    default:
-      return { kind: "ingest-picker" };
-  }
+function scanningDocViewerStep(scenario: Scenario | null): ViewerStep {
+  return {
+    kind: "doc-viewer",
+    documentId: scenario ? `scenario:${scenario}` : "scenario:unknown",
+    scanning: true,
+  };
 }
 
 interface OnboardingSessionProviderProps {
   children: ReactNode;
-  initialFrame?: FFrame;
+  /**
+   * standardized-viewer-control (D2) — the ViewerStep the seeded active entity
+   * is positioned on (FRAME-FREE). Replaces the retired `initialFrame` prop:
+   * tests express position as a step directly (or via the test-only
+   * `testFrameToStep` helper at the harness boundary).
+   */
+  initialStep?: ViewerStep | null;
   initialScenario?: Scenario | null;
 }
 
@@ -125,7 +97,11 @@ function useSessionFacade(): OnboardingSessionApi {
   // gate in chat + BYO placeholder in canvas. BYO is intentionally
   // NOT an entity — it has no per-instance state, just a session
   // boolean + the session-level gate.
-  const [signupOpen, setSignupOpen] = useState<boolean>(false);
+  // standardized-viewer-control (D2) — the shell now detects the signup surface
+  // from the sign-up overlay / route (`signupSurfaceActive`), not this flag; the
+  // value binding fed only the retired `currentFrame` projection, so only the
+  // setter (which other paths still toggle as part of the gate lifecycle) remains.
+  const [, setSignupOpen] = useState<boolean>(false);
   // The report section the builder (f4a) should pre-open. Set by the
   // render→builder `✎ edit §N` hand-off via `advanceFrame`; cleared when the
   // user leaves the builder frame.
@@ -143,25 +119,20 @@ function useSessionFacade(): OnboardingSessionApi {
     ? registry.state.entities.get(registry.state.activeKey)
     : undefined;
 
-  // Derive the legacy state shape. Frame logic:
-  //   - active entity → entity.lastFrame
-  //   - signup surface → "f2" (shell renders the BYO placeholder
-  //     using UnderstandView's scenario=null path)
-  //   - picker → "f1"
+  // standardized-viewer-control (D2) — the legacy `currentFrame` reverse
+  // projection is GONE. The user's journey position lives entirely on the active
+  // viewer step (rendered via the `onboarding-step-*` testid + read by the
+  // frame-free StepStrip off `VIEWER_STEP_TO_JOURNEY`); the resume anchor is the
+  // entity's `lastStep`. This state record carries only the session-level fields
+  // that are not derivable from the active step.
   const state: OnboardingSessionState = useMemo(() => {
-    let currentFrame: FFrame;
-    if (active) currentFrame = active.lastFrame;
-    else if (signupOpen) currentFrame = "f2";
-    else currentFrame = "f1";
     return {
       sessionId,
-      currentFrame,
-      completedFrames: active?.completedFrames ?? new Set<FFrame>(),
       scenario: active?.kind === "sample" ? (active.id as Scenario) : null,
       gate,
       selectedReportSectionId,
     };
-  }, [sessionId, active, signupOpen, gate, selectedReportSectionId]);
+  }, [sessionId, active, gate, selectedReportSectionId]);
 
   const bootstrapSession = useCallback((id: string) => {
     setSessionId(id);
@@ -182,19 +153,25 @@ function useSessionFacade(): OnboardingSessionApi {
       // UnderstandView. `committed` (signed-in) and `dismissed` are
       // preserved — only the pending-open state resets.
       setGate((prev) => (prev.status === "open" ? { status: "idle" } : prev));
-      // post-mvs-cleanup Phase B fix — push the viewer step matching the
-      // entity's RESOLVED frame, not the assumed F2 default. Existing
-      // entities preserve their lastFrame across upsertAndActivate; if we
-      // unconditionally pushed `doc-viewer` we'd render UnderstandView
-      // when the entity was previously at F5/F6.
+      // standardized-viewer-control D13/R5 — RESUME VERBATIM. Re-opening a
+      // sample restores the entity's persisted active viewer step (`lastStep`)
+      // exactly, so a user who left at Interact/Report/Integrate lands back
+      // there, not at the F2 default. A first-time open seeds the Understand
+      // doc-viewer step (the journey origin for a sample). `reachedStages`
+      // seeds with the origin stages (ingest + understand) for the strip
+      // checkmarks; later advances add more.
       const targetKey = makeEntityKey("sample", scenario);
       const existingEntity = registry.state.entities.get(targetKey);
-      const resolvedFrame: FFrame = existingEntity?.lastFrame ?? "f2";
+      const freshStep: ViewerStep = scanningDocViewerStep(scenario);
+      // `PersistedViewerStep` is the navigational subset of `ViewerStep`, so the
+      // persisted resume anchor is itself a valid in-memory step (ephemeral
+      // citation/scan fields stay absent — rebuilt on demand). Push it verbatim.
+      const resumeStep: ViewerStep = existingEntity ? existingEntity.lastStep : freshStep;
       upsertAndActivate("sample", scenario, {
-        lastFrame: "f2",
-        completedFrames: new Set<FFrame>(["f1"]),
+        lastStep: toPersistedViewerStep(freshStep),
+        reachedStages: new Set<JourneyStage>(["ingest", "understand"]),
       });
-      pushStep(frameToStepStandalone(resolvedFrame, scenario));
+      pushStep(resumeStep);
       // Phase E: record the entity-open ViewerEvent. Last ~10
       // viewer events feed the LLM context bundling.
       appendViewerEvent({
@@ -213,31 +190,31 @@ function useSessionFacade(): OnboardingSessionApi {
     [upsertAndActivate, appendViewerEvent, pushStep],
   );
 
-  // post-mvs-cleanup Phase B — `frameToStepStandalone` is now a module-
-  // level function (hoisted above the hook); see top of file.
-
-  // standardized-viewer-control T5 — advance the onboarding JOURNEY STATE for a
-  // frame WITHOUT pushing a viewer step. This is the side-effect half of
-  // `advanceFrame` (lastFrame + completedFrames + the journey-advanced viewer
-  // event + the f7 gate-pop + the f4a section pre-select). The orchestrator's
-  // de-forked `show*`/`editTemplate` handlers push the viewer step THEMSELVES
-  // (the one canvas outcome, both experiences) and then call this to layer the
-  // onboarding journey-progress on top — no redundant step push, no fork.
-  // `advanceFrame` (still used by the 18 unmigrated in-widget sites) composes
-  // this with a step push so its existing callers are unchanged. Onboarding-only.
-  // NOTE: f1 (entity-deactivate, a BACKWARD transition — R2) is NOT handled
-  // here; it stays on `advanceFrame`'s explicit ingest path.
-  const markFrameReached = useCallback(
-    (frame: FFrame, options?: { selectedReportSectionId?: string }) => {
-      // Carry (or clear) the builder's pre-selected section. Only the builder
-      // frame (f4a) keeps a selection; reaching anywhere else clears it so a
+  // standardized-viewer-control — advance the onboarding JOURNEY STATE for a
+  // destination VIEWER STEP, WITHOUT pushing it (the orchestrator's de-forked
+  // `show*`/`editTemplate` handlers push the step themselves — the one canvas
+  // outcome, both experiences — then call this to layer onboarding
+  // journey-progress on top). FRAME-FREE: it takes the destination `ViewerStep`
+  // and writes the new resume anchor (`lastStep` — the persisted navigational
+  // projection) + adds the destination journey stage to the reached-set
+  // (`reachedStages` — checkmarks; a SET, not a watermark — R3). Also records
+  // the frame-free `journey-advanced` viewer event, pops the Integrate gate on
+  // arrival (D12), and carries/clears the report-builder section pre-select.
+  // Onboarding-only. NOTE: the ingest-picker return (entity-deactivate, a
+  // BACKWARD transition — R2) is NOT handled here; it is `returnToIngestPicker`.
+  const markStageReached = useCallback(
+    (step: import("@/contexts/ChatStoreContext").ViewerStep) => {
+      // Carry (or clear) the builder's pre-selected section. Only the report
+      // BUILDER step keeps a selection; reaching anywhere else clears it so a
       // stale section can't pre-open a later builder visit.
       setSelectedReportSectionId(
-        frame === "f4a" ? options?.selectedReportSectionId ?? null : null,
+        step.kind === "report" && step.surface === "builder"
+          ? step.selectedSectionId ?? null
+          : null,
       );
       if (!activeKeyRef.current) return;
-      if (frame === "f7") {
-        // f7 overlay pop fires on ARRIVAL at Integrate (D12) — a second arrival
+      if (step.kind === "integrate") {
+        // The Integrate overlay pop fires on ARRIVAL (D12) — a second arrival
         // with a live gate must still clear it (this runs every reach, not just
         // a first-reach).
         setSignupOpen(false);
@@ -247,83 +224,60 @@ function useSessionFacade(): OnboardingSessionApi {
         popOverlay("sign-up");
       }
       const entityKeyAtAdvance = activeKeyRef.current;
+      const stage = journeyStageForStepKind(step.kind);
+      const persisted = toPersistedViewerStep(step);
       updateActive((session) => {
-        if (session.lastFrame === frame) return session;
-        const completedFrames = new Set(session.completedFrames);
-        completedFrames.add(session.lastFrame);
-        return { ...session, lastFrame: frame, completedFrames };
+        const reachedStages = stage ? new Set(session.reachedStages) : session.reachedStages;
+        if (stage) (reachedStages as Set<JourneyStage>).add(stage);
+        return { ...session, lastStep: persisted, reachedStages };
       });
       // standardized-viewer-control T6b (D14) — the viewer-event action
       // vocabulary is FRAME-FREE. Record the journey-progress advance as
       // `journey-advanced` carrying the destination's journey stage + step
-      // kind (derived from the step projection), never a frame name.
-      const stepKind = frameToStepStandalone(frame, null).kind;
+      // kind (derived from the step itself), never a frame name.
       appendViewerEvent({
         action: "journey-advanced",
         entityKey: entityKeyAtAdvance,
         source: "user",
-        detail: { stage: journeyStageForStepKind(stepKind), step: stepKind },
+        detail: { stage, step: step.kind },
       });
     },
     [updateActive, appendViewerEvent, popOverlay],
   );
 
-  const advanceFrame = useCallback(
-    (frame: FFrame, options?: { selectedReportSectionId?: string; focusedCategoryId?: string }) => {
-      if (frame === "f1") {
-        // Carry (or clear) the builder's pre-selected section like the non-f1
-        // path does (advancing to f1 always clears it).
-        setSelectedReportSectionId(null);
-        // Capture the entity key BEFORE deactivating so the "left"
-        // event references the right entity.
-        const leavingKey = activeKeyRef.current;
-        // Diagnostic — dev-only console trace of frame transitions.
-        // eslint-disable-next-line no-console
-        console.log("[advanceFrame] →", frame, "(deactivating entity)");
-        activate(null);
-        setSignupOpen(false);
-        // Returning to the F1 picker means the user has bailed out of
-        // any in-flight gate (e.g. they clicked Sign Up from F1, then
-        // clicked the Ingest step or hit the browser back button).
-        // Leaving the gate `open` would keep `OnboardingShell.gateActive`
-        // true and the canvas swap would render `<SignUpWidget />` over
-        // the F1 picker — and then over F2 when the user picks a
-        // sample. `committed` (signed-in) and `dismissed` are
-        // preserved; only the pending-open state resets.
-        setGate((prev) => (prev.status === "open" ? { status: "idle" } : prev));
-        appendViewerEvent({
-          action: "left",
-          entityKey: leavingKey,
-          source: "user",
-        });
-        // `master-viewer-session` Phase 3 — accumulate the viewer step.
-        pushStep(frameToStepStandalone("f1", null));
-        return;
-      }
-      if (!activeKeyRef.current) {
-        return;
-      }
-      // Journey state (lastFrame/completedFrames/journey-advanced event/f7 pop).
-      markFrameReached(frame, options);
-      // `master-viewer-session` Phase 3 — accumulate the viewer step.
-      // Derive the scenario id from the entity key (`sample:utility` →
-      // `utility`); falls back to `unknown` if the key isn't a sample
-      // entity. The pushStep action is idempotent on structural
-      // equality, so a re-fire of the same frame transition won't
-      // pollute history.
-      const entityKeyAtAdvance = activeKeyRef.current;
-      const scenarioFromKey = entityKeyAtAdvance?.startsWith("sample:")
-        ? (entityKeyAtAdvance.slice("sample:".length) as Scenario)
-        : null;
-      pushStep(frameToStepStandalone(frame, scenarioFromKey, options?.focusedCategoryId));
-      // standardized-viewer-control T5 (R1) — the `understand.completed`
-      // analytic NO LONGER fires here. It re-homed onto the Extract first-reach
-      // signal (`notifyExtractReached`, fired by the orchestrator's `showExtract`
-      // handler), because f3/f3a/f5 all map to the single `analyze` stage so a
-      // bare frame edge mis-fired it (R1).
+  // standardized-viewer-control deletion-phase — return to the Ingest picker AND
+  // deactivate the active entity (the f1 BACKWARD-transition side effects: gate
+  // reset, the "left" viewer event, the ingest-picker step push). The
+  // `presentExperienceBeat` `ingest-picker` beat handler calls this; the optional
+  // `attachedSchema` rides onto the picker step so the F3a Save → sign-in →
+  // persist → picker hand-off lands the freshly-saved schema. Onboarding-only.
+  const returnToIngestPicker = useCallback(
+    (attachedSchema?: { schemaId: string; name: string }) => {
+      setSelectedReportSectionId(null);
+      // Capture the entity key BEFORE deactivating so the "left" event
+      // references the right entity.
+      const leavingKey = activeKeyRef.current;
+      activate(null);
+      setSignupOpen(false);
+      // Returning to the picker means the user bailed out of any in-flight gate.
+      // `committed` (signed-in) and `dismissed` are preserved; only the pending-
+      // open state resets.
+      setGate((prev) => (prev.status === "open" ? { status: "idle" } : prev));
+      appendViewerEvent({
+        action: "left",
+        entityKey: leavingKey,
+        source: "user",
+      });
+      pushStep({ kind: "ingest-picker", ...(attachedSchema ? { attachedSchema } : {}) });
     },
-    [activate, updateActive, appendViewerEvent, pushStep, popOverlay, markFrameReached],
+    [activate, appendViewerEvent, pushStep],
   );
+
+  // standardized-viewer-control deletion-phase — `advanceFrame` is GONE. All
+  // canvas navigation now dispatches a CanvasIntent through the orchestrator
+  // (the de-forked `show*`/`editTemplate` handlers push the step + call
+  // `markStageReached`); the f1 backward return is `returnToIngestPicker`; the
+  // three residual onboarding-overlay beats route through `presentExperienceBeat`.
 
   // standardized-viewer-control T5 (R1/R6) — the Extract first-reach signal.
   // The orchestrator's `showExtract` handler calls this; it fires
@@ -442,8 +396,8 @@ function useSessionFacade(): OnboardingSessionApi {
       state,
       bootstrapSession,
       pickScenario,
-      advanceFrame,
-      markFrameReached,
+      markStageReached,
+      returnToIngestPicker,
       notifyExtractReached,
       openGate,
       dismissGate,
@@ -453,8 +407,8 @@ function useSessionFacade(): OnboardingSessionApi {
       state,
       bootstrapSession,
       pickScenario,
-      advanceFrame,
-      markFrameReached,
+      markStageReached,
+      returnToIngestPicker,
       notifyExtractReached,
       openGate,
       dismissGate,
@@ -479,16 +433,16 @@ const InnerSessionProvider: FC<{ children: ReactNode }> = ({ children }) => {
  * `<OnboardingSessionProvider>` and everything works as before, plus
  * sample state now persists across F1 round-trips.
  *
- * `initialFrame` + `initialScenario` are translated into seed
+ * `initialStep` + `initialScenario` are translated into seed
  * EntityRegistry state SYNCHRONOUSLY — they become the registry's
  * initialEntities/initialActiveKey on first render. This matters for
  * tests: a synchronous `render()` followed by a synchronous DOM
- * query must see the test's requested frame (F2, F3, …) instead of
- * F1, which it would if we seeded via useEffect.
+ * query must see the test's requested viewer step (doc-viewer, extract,
+ * …) instead of the picker, which it would if we seeded via useEffect.
  */
 export const OnboardingSessionProvider: FC<OnboardingSessionProviderProps> = ({
   children,
-  initialFrame = "f1",
+  initialStep = null,
   initialScenario = null,
 }) => {
   const { initialEntities, initialActiveKey, initialViewerStep } = useMemo(() => {
@@ -501,25 +455,27 @@ export const OnboardingSessionProvider: FC<OnboardingSessionProviderProps> = ({
     }
     const key = makeEntityKey("sample", initialScenario);
     const now = Date.now();
+    // standardized-viewer-control T3/D2 — the viewer step the seeded entity
+    // sits on (frame-free). When the caller doesn't pass one, default to the
+    // picker. EntitySessionStoreProvider primes the ChatStore viewer with this
+    // step, making `selectActiveStep` non-null on first render — the frame-free
+    // StepStrip reads the active step kind.
+    const initialViewerStep: ViewerStep = initialStep ?? { kind: "ingest-picker" };
+    // Frame-free entity seed: the resume anchor is the persisted projection of
+    // the seeded step; the reached-set seeds with that step's journey stage.
+    const seedStage = journeyStageForStepKind(initialViewerStep.kind);
     const seed: EntitySession = {
       kind: "sample",
       id: initialScenario,
-      lastFrame: initialFrame,
-      completedFrames: new Set<FFrame>(),
+      lastStep: toPersistedViewerStep(initialViewerStep),
+      reachedStages: seedStage ? new Set<JourneyStage>([seedStage]) : new Set<JourneyStage>(),
       createdAt: now,
       lastVisitedAt: now,
     };
     const map = new Map<EntityKey, EntitySession>();
     map.set(key, seed);
-    // standardized-viewer-control T3 — the viewer step the seeded entity sits
-    // on. `frameToStepStandalone` is the single frame→step projection (also used
-    // by `advanceFrame`/`pickScenario`), so the seed matches what a live advance
-    // would push. EntitySessionStoreProvider primes the ChatStore viewer with
-    // it, making `selectActiveStep` non-null on first render — the frame-free
-    // StepStrip reads the active step kind, with no frame fallback.
-    const initialViewerStep = frameToStepStandalone(initialFrame, initialScenario);
     return { initialEntities: map, initialActiveKey: key, initialViewerStep };
-  }, [initialFrame, initialScenario]);
+  }, [initialStep, initialScenario]);
 
   return (
     <EntitySessionStoreProvider

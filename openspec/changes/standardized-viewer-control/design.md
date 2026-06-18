@@ -136,6 +136,21 @@ resolution is designed for the authenticated experience; onboarding overlays it.
 R3; standardize all "watermark" wording on "reached-set"); the persisted snapshot gains a
 versioned active-step + reached-set and drops `lastFrame`/`completedFrames`.
 
+- **R8 (deletion-phase, owner-decided 2026-06-17) — onboarding-overlay choreography is
+  ONE generic `llm:false` intent, not onboarding-specific destinations.** The three
+  residual `advanceFrame` transitions (Extract f1 save-return, OnboardingShell f1
+  URL-return, experience f2 intro-snap) are onboarding-OVERLAY choreography. Per the
+  owner: do NOT pollute the shared/LLM seam with onboarding-specific destination intents.
+  Resolution: a single generic **`presentExperienceBeat`** CanvasIntent (the MECHANISM),
+  `llm: false` (not offerable, not LLM-emittable — experience-internal), carrying a typed,
+  EXTENSIBLE `beat` discriminated union (the VALUES: `ingest-picker` = return-to-picker +
+  entity-deactivate; `understand-scanning` = snap to the scanning beat + journey edge).
+  Future overlay scenarios add `beat` values, not new kinds. It goes through the one seam
+  (no exception, no hack), is one composable axis, and is dispatched ONLY by the
+  experience layer. `markFrameReached(frame)` → frame-free `markStageReached(step)`;
+  `advanceFrame`/`lastFrame`/`completedFrames` deleted; persistence is the versioned
+  `lastStep` (PersistedViewerStep, verbatim resume) + `reachedStages` SET.
+
 ## 1. Current architecture (what exists today)
 
 ### 1.1 The seam

@@ -148,23 +148,23 @@ describe("ChatStoreContext", () => {
     });
     act(() => {
       result.current.upsertEntityAndActivate("sample", "utility", {
-        lastFrame: "f3",
-        completedFrames: new Set(["f1", "f2"]),
+        lastStep: { kind: "extract-workbench", scenarioId: "utility" },
+        reachedStages: new Set(["ingest", "understand"]),
       });
     });
     const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
     expect(session.entities.size).toBe(1);
     expect(session.activeEntityKey).toBe("sample:utility");
     const entity = session.entities.get("sample:utility" as never)!;
-    expect(entity.lastFrame).toBe("f3");
+    expect(entity.lastStep).toEqual({ kind: "extract-workbench", scenarioId: "utility" });
   });
 
   it("activateEntity flips the active key on the active session", () => {
     const { result } = renderHook(() => useChatStore(), { wrapper });
     act(() => {
       result.current.newSession();
-      result.current.upsertEntityAndActivate("sample", "utility", { lastFrame: "f2" });
-      result.current.upsertEntityAndActivate("sample", "loan", { lastFrame: "f2" });
+      result.current.upsertEntityAndActivate("sample", "utility", { lastStep: { kind: "doc-viewer", documentId: "scenario:utility" } });
+      result.current.upsertEntityAndActivate("sample", "loan", { lastStep: { kind: "doc-viewer", documentId: "scenario:loan" } });
     });
     expect(
       result.current.state.sessions.get(result.current.state.activeSessionId!)!.activeEntityKey,
@@ -181,14 +181,14 @@ describe("ChatStoreContext", () => {
     const { result } = renderHook(() => useChatStore(), { wrapper });
     act(() => {
       result.current.newSession();
-      result.current.upsertEntityAndActivate("sample", "utility", { lastFrame: "f2" });
+      result.current.upsertEntityAndActivate("sample", "utility", { lastStep: { kind: "doc-viewer", documentId: "scenario:utility" } });
     });
     act(() => {
-      result.current.updateActiveEntity((entity) => ({ ...entity, lastFrame: "f5" }));
+      result.current.updateActiveEntity((entity) => ({ ...entity, lastStep: { kind: "interact-chat", scenarioId: "utility" } }));
     });
     const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
     const entity = session.entities.get("sample:utility" as never)!;
-    expect(entity.lastFrame).toBe("f5");
+    expect(entity.lastStep).toEqual({ kind: "interact-chat", scenarioId: "utility" });
   });
 
   // -----------------------------------------------------------------
@@ -265,7 +265,7 @@ describe("ChatStoreContext", () => {
       // should rehydrate it instead of auto-seeding a fresh one.
       const persistedSessionId = "c-existing-onboarding";
       const snapshot = {
-        version: 1,
+        version: 2,
         ownerKey: "anon-test",
         activeSessionId: persistedSessionId,
         sessions: [
@@ -281,8 +281,8 @@ describe("ChatStoreContext", () => {
                 {
                   kind: "sample",
                   id: "utility",
-                  lastFrame: "f3",
-                  completedFrames: ["f1", "f2"],
+                  lastStep: { kind: "extract-workbench", scenarioId: "utility" },
+                  reachedStages: ["ingest", "understand"],
                   createdAt: 1000,
                   lastVisitedAt: 1500,
                 },
@@ -306,17 +306,22 @@ describe("ChatStoreContext", () => {
       expect(result.current.state.activeSessionId).toBe(persistedSessionId);
       const active = result.current.state.sessions.get(persistedSessionId)!;
       expect(active.activeEntityKey).toBe("sample:utility");
-      expect(active.entities.get("sample:utility" as never)?.lastFrame).toBe("f3");
+      expect(active.entities.get("sample:utility" as never)?.lastStep).toEqual({
+        kind: "extract-workbench",
+        scenarioId: "utility",
+      });
     });
 
-    it("rehydrates lastFrame VERBATIM — a frame visited after a later one must resume, not the watermark", () => {
-      // Repro of the stale-resume bug (2026-06-11): the user reached f7
-      // hours ago (so f7 ∈ completedFrames), then moved the canvas back
-      // to f5. Reload must resume f5 — the frame the user was actually
-      // on — not the highest frame ever reached.
+    it("rehydrates lastStep VERBATIM — a step visited after a later stage must resume, not the reached-set watermark", () => {
+      // standardized-viewer-control D13/R5 repro of the stale-resume bug
+      // (2026-06-11): the user reached Integrate hours ago (so `integrate` ∈
+      // reachedStages), then moved the canvas back to Interact. Reload must
+      // resume the Interact step — the step the user was actually on — NOT the
+      // highest stage ever reached. The reached-set is for checkmarks only and
+      // must never be the resume anchor.
       const persistedSessionId = "c-resume-verbatim";
       const snapshot = {
-        version: 1,
+        version: 2,
         ownerKey: "anon-test",
         activeSessionId: persistedSessionId,
         sessions: [
@@ -332,8 +337,8 @@ describe("ChatStoreContext", () => {
                 {
                   kind: "sample",
                   id: "utility",
-                  lastFrame: "f5",
-                  completedFrames: ["f1", "f2", "f3", "f7"],
+                  lastStep: { kind: "interact-chat", scenarioId: "utility" },
+                  reachedStages: ["ingest", "understand", "analyze", "integrate"],
                   createdAt: 1000,
                   lastVisitedAt: 1500,
                 },
@@ -352,11 +357,69 @@ describe("ChatStoreContext", () => {
       );
       const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
 
-      const active = result.current.state.sessions.get(persistedSessionId)!;
-      expect(active.entities.get("sample:utility" as never)?.lastFrame).toBe("f5");
+      const entity = result.current.state.sessions.get(persistedSessionId)!.entities.get("sample:utility" as never)!;
+      // Resume anchor = the step the user was last on (Interact), NOT Integrate.
+      expect(entity.lastStep).toEqual({ kind: "interact-chat", scenarioId: "utility" });
+      // The reached-set is restored independently (drives checkmarks only) and
+      // is genuinely non-contiguous — it still carries `integrate`.
+      expect([...entity.reachedStages].sort()).toEqual(["analyze", "ingest", "integrate", "understand"]);
     });
 
-    it("migrates the legacy entity-registry.v1 payload into a new onboarding session", () => {
+    it("rehydrates a report-builder step verbatim (the surface survives reload)", () => {
+      // R4/B2 — the persisted `report` step carries `surface` so render vs
+      // builder (old f4 vs f4a) survives a reload without a frame.
+      const persistedSessionId = "c-resume-report";
+      const snapshot = {
+        version: 2,
+        ownerKey: "anon-test",
+        activeSessionId: persistedSessionId,
+        sessions: [
+          {
+            id: persistedSessionId,
+            title: "Onboarding",
+            createdAt: 1000,
+            updatedAt: 2000,
+            messages: [],
+            entities: [
+              [
+                "sample:utility",
+                {
+                  kind: "sample",
+                  id: "utility",
+                  lastStep: { kind: "report", surface: "builder", selectedSectionId: "sec-3" },
+                  reachedStages: ["ingest", "understand", "analyze"],
+                  createdAt: 1000,
+                  lastVisitedAt: 1500,
+                },
+              ],
+            ],
+            activeEntityKey: "sample:utility",
+            isOnboardingSession: true,
+            signupOpen: false,
+          },
+        ],
+      };
+      window.localStorage.setItem("groundx-onboarding.chat-store.v1", JSON.stringify(snapshot));
+
+      const wrap = ({ children }: { children: React.ReactNode }) => (
+        withChatStoreApi(<ChatStoreProvider autoSeedDefaultSession>{children}</ChatStoreProvider>)
+      );
+      const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
+
+      expect(result.current.state.sessions.get(persistedSessionId)!.entities.get("sample:utility" as never)?.lastStep).toEqual({
+        kind: "report",
+        surface: "builder",
+        selectedSectionId: "sec-3",
+      });
+    });
+
+    it("does NOT migrate the doubly-obsolete legacy entity-registry.v1 payload (frame-retirement / pre-launch)", () => {
+      // standardized-viewer-control (D2) — the frame machine is gone and so is the
+      // one-shot frame→step migration that read the legacy `entity-registry.v1`
+      // (`lastFrame`/`completedFrames`) format. Pre-launch there is no real user
+      // data to preserve, so a legacy payload is simply ignored: bootstrap seeds a
+      // FRESH empty onboarding session, and the legacy key is left untouched (no
+      // migration code reads or deletes it).
       window.localStorage.setItem(
         "groundx-onboarding.entity-registry.v1",
         JSON.stringify({
@@ -383,13 +446,12 @@ describe("ChatStoreContext", () => {
       );
       const { result } = renderHook(() => useChatStore(), { wrapper: wrap });
 
+      // A fresh empty onboarding session — nothing migrated from the legacy key.
       expect(result.current.state.sessions.size).toBe(1);
       const active = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
       expect(active.isOnboardingSession).toBe(true);
-      expect(active.activeEntityKey).toBe("sample:loan");
-      expect(active.entities.get("sample:loan" as never)?.lastFrame).toBe("f4");
-      // Legacy key is removed post-migration.
-      expect(window.localStorage.getItem("groundx-onboarding.entity-registry.v1")).toBeNull();
+      expect(active.activeEntityKey).toBeNull();
+      expect(active.entities.size).toBe(0);
     });
   });
 
@@ -496,14 +558,14 @@ describe("ChatStoreContext", () => {
     let idB = "";
     act(() => {
       idA = result.current.newSession();
-      result.current.upsertEntityAndActivate("sample", "utility", { lastFrame: "f3" });
+      result.current.upsertEntityAndActivate("sample", "utility", { lastStep: { kind: "extract-workbench", scenarioId: "utility" } });
       idB = result.current.newSession();
-      result.current.upsertEntityAndActivate("sample", "utility", { lastFrame: "f2" });
+      result.current.upsertEntityAndActivate("sample", "utility", { lastStep: { kind: "doc-viewer", documentId: "scenario:utility" } });
     });
     const sessA = result.current.state.sessions.get(idA)!;
     const sessB = result.current.state.sessions.get(idB)!;
-    expect(sessA.entities.get("sample:utility" as never)!.lastFrame).toBe("f3");
-    expect(sessB.entities.get("sample:utility" as never)!.lastFrame).toBe("f2");
+    expect(sessA.entities.get("sample:utility" as never)!.lastStep).toEqual({ kind: "extract-workbench", scenarioId: "utility" });
+    expect(sessB.entities.get("sample:utility" as never)!.lastStep).toEqual({ kind: "doc-viewer", documentId: "scenario:utility" });
   });
 
   describe("persistence failure modes (TS-03)", () => {
@@ -579,7 +641,7 @@ describe("ChatStoreContext", () => {
 
       // Simulate another tab writing a completely different snapshot.
       const otherTabPayload = JSON.stringify({
-        version: 1,
+        version: 2,
         ownerKey: "anon-other",
         activeSessionId: "c-other",
         sessions: [],

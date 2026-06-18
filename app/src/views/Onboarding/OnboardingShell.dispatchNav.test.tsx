@@ -161,7 +161,7 @@ describe("OnboardingShell — step navigation dispatches intents (T6)", () => {
 
     await waitFor(() => {
       expect(dispatchedKinds(events)).toContain("showIntegrate");
-      expect(screen.getByTestId("onboarding-frame-f7")).toBeInTheDocument();
+      expect(screen.getByTestId("onboarding-step-integrate")).toBeInTheDocument();
     });
   });
 });
