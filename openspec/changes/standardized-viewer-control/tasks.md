@@ -686,4 +686,20 @@ each tested but the SEAM between them was not.
 > preserves the resumed viewer (it now matches its own comment — client-only state survives the
 > server merge). Added an end-to-end canvas-level resume test (`selectActiveStep` after
 > rehydrate) that was RED before the fix. Both hydrate paths covered; full app suite + seam
-> guard + validate + archive dry-run green.
+> guard + validate + archive dry-run green. Follow-up test (commit `8c279df`) covers the
+> `hydrateFromServer` local-merge branch directly (the previously-untested half of the seam).
+>
+> **E2E DRIFT (surfaced 2026-06-18 adversarial review; RESOLVED commit `c4a41967`):** the
+> frame→step test-id migration (T3/D2) retired the `onboarding-frame-f*` / `advance-to-f*`
+> test-ids from production (the seam guard now bans them; production emits
+> `onboarding-step-<kind>`), but the e2e suite was never updated and the plan never tracked
+> e2e at all. `onboarding-utility.spec.ts` (NOT skipped) is run by `ci.yml`'s e2e step
+> against live GroundX, so that step was selecting elements that no longer exist. Migrated all
+> 4 specs (`onboarding-frame-f{2,3,5}`→`onboarding-step-{doc-viewer,extract-workbench,interact-chat}`;
+> `advance-to-f5`→the `onboarding-chat-pick-view-interact` pill; `advance-to-f3`→the
+> auto-advance wait). Statically verified: every new selector exists in production;
+> `playwright test --list` compiles all 5 specs. NOT runtime-verified (the live suite needs the
+> GroundX stack + Partner key, unavailable locally) — a CI run is the final gate.
+> `onboarding-loan.spec.ts` stays `describe.skip` (Loan unseeded); its dead test-ids are
+> migrated, with a header note that its MOCK_MODE fixture assertions still need de-mocking on
+> the tracked Loan/Solar reseed.
