@@ -15,6 +15,7 @@
  * of starting a duplicate generation; the key includes `sessionId`, so one session
  * can never reach another's runner (cross-session resume is structurally impossible).
  */
+import { logger } from "../lib/logger.js";
 import { ChatHandlerError, type HandleChatMessageResponse } from "./chatHandler.js";
 import { TurnEventBuffer } from "./turnEventBuffer.js";
 import { turnStreamContext, type TurnStreamSink } from "./streamSink.js";
@@ -114,6 +115,21 @@ export class TurnRunner {
         : err instanceof ChatHandlerError
           ? err.message
           : "internal_error";
+      // `internal_error` is an UNEXPECTED throw that escaped chatHandler's own
+      // try/catch (which logs + persists its router failures). Outside that try —
+      // e.g. an upstream LLM 401/timeout, a misconfigured base URL, an error during
+      // session/compression/bundle setup — the throw would otherwise become a bare
+      // `internal_error` SSE frame with ZERO server-side diagnostics. That blind spot
+      // hid a prod chat outage. The runner is the universal catch-all, so it logs the
+      // real error (message + stack) here. Expected outcomes are already logged where
+      // they arise (ChatHandlerError → chatHandler; supersede → debug), so we don't
+      // double-log those.
+      if (code === "internal_error") {
+        logger.error(
+          { err, sessionId: this.sessionId, turnKey: this.turnKey },
+          "turn generation failed with an unexpected error",
+        );
+      }
       this.buffer.append("error", { code });
       this.buffer.markDone();
       return null;

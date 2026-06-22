@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { logger } from "../lib/logger.js";
+import { ChatHandlerError } from "./chatHandler.js";
 import { turnStreamContext } from "./streamSink.js";
 import { TurnRegistry, TurnRunner } from "./turnRunner.js";
 
@@ -75,6 +77,50 @@ describe("TurnRunner", () => {
     for await (const f of runner.buffer.read(0)) frames.push(f);
     expect(frames.map((f) => f.type)).toEqual(["meta", "error"]);
     expect(runner.buffer.done).toBe(true);
+  });
+
+  it("LOGS the underlying error when an UNEXPECTED (non-ChatHandlerError) throw escapes generation", async () => {
+    // Regression guard: a generic throw that escapes chatHandler's own try/catch
+    // (e.g. an upstream LLM 401/timeout, or any error outside the router try) becomes
+    // a bare `internal_error` SSE frame. Without logging here the server has ZERO
+    // diagnostics — the exact blind spot that hid a prod chat outage. The runner is
+    // the universal catch-all, so it MUST log the real error (message + stack).
+    const spy = vi.spyOn(logger, "error").mockImplementation(() => logger as never);
+    const boom = new Error("grounded llm call failed: 401 Unauthorized");
+    const runner = new TurnRunner({
+      sessionId: "s-log",
+      turnKey: "k-unexpected",
+      generate: async () => {
+        throw boom;
+      },
+    });
+    await runner.completion;
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ err: boom, sessionId: "s-log", turnKey: "k-unexpected" }),
+      expect.stringContaining("turn generation failed"),
+    );
+    spy.mockRestore();
+  });
+
+  it("does NOT error-log an EXPECTED failure (ChatHandlerError is already logged upstream)", async () => {
+    // ChatHandlerError carries a meaningful code and is logged where it is raised
+    // (chatHandler) — error-logging it again here would be double noise. Only the
+    // unexpected `internal_error` path is the runner's to surface.
+    const spy = vi.spyOn(logger, "error").mockImplementation(() => logger as never);
+    const runner = new TurnRunner({
+      sessionId: "s-quiet",
+      turnKey: "k-expected",
+      generate: async () => {
+        throw new ChatHandlerError("router_failed:upstream_502", 502);
+      },
+    });
+    await runner.completion;
+    expect(spy).not.toHaveBeenCalled();
+    const frames = [];
+    for await (const f of runner.buffer.read(0)) frames.push(f);
+    // The frame still carries the ChatHandlerError's code (not `internal_error`).
+    expect(frames.at(-1)?.data).toMatchObject({ code: "router_failed:upstream_502" });
+    spy.mockRestore();
   });
 });
 
