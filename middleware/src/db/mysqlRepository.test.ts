@@ -28,11 +28,15 @@ describe("MySqlAppRepository", () => {
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
     // 12 CREATE TABLE statements + the DROP TABLE for the superseded
-    // extraction_schemas (2026-05-31-extraction-schemas-table-drop) = 13. The
-    // table + its boot copy-INSERT…SELECT were removed once `templates` soaked
-    // one full prod release; the DROP sheds the table on the next boot. The 12th
-    // CREATE is chat_turn_index (chat-response-streaming P2.2 from-DB resume).
-    expect(statements).toHaveLength(13);
+    // extraction_schemas (2026-05-31-extraction-schemas-table-drop) + the 1
+    // information_schema reconciliation probe that detects the pre-rename
+    // chat_session_entities table (standardized-viewer-control) = 14. The
+    // extraction_schemas table + its boot copy-INSERT…SELECT were removed once
+    // `templates` soaked one full prod release; the DROP sheds the table on the next
+    // boot. The 12th CREATE is chat_turn_index (chat-response-streaming P2.2 from-DB
+    // resume). On a fresh DB the probe returns no rows, so NO conditional
+    // chat_session_entities DROP is issued (that path is covered by its own tests).
+    expect(statements).toHaveLength(14);
     const joined = statements.join("\n");
     // chat-response-streaming P2.2 — the streaming-turn → message index (CREATE-only,
     // no ALTER, so it lands on fresh AND already-provisioned DBs identically).
@@ -187,8 +191,14 @@ describe("MySqlAppRepository", () => {
       await repository.createSchema();
 
       const joined = statements().join("\n");
-      // The dropped migration's probe + ALTER must be gone entirely.
-      expect(joined).not.toContain("information_schema.COLUMNS");
+      // The dropped VIEWER migration's probe + ALTER must be gone. Scoped to the
+      // viewer columns: a DIFFERENT, legitimate information_schema probe now detects
+      // the pre-rename chat_session_entities table — that one is intended and is
+      // covered by the stale-rename reconciliation tests above.
+      const probesViewerColumn = statements().some(
+        (s) => /information_schema/i.test(s) && /viewer_\w+_json/i.test(s),
+      );
+      expect(probesViewerColumn, "the dropped viewer-column information_schema probe must not return").toBe(false);
       expect(joined).not.toMatch(/ALTER TABLE chat_sessions.*viewer_/i);
     });
 
@@ -203,8 +213,70 @@ describe("MySqlAppRepository", () => {
       await expect(repository.createSchema()).resolves.toBeUndefined();
 
       const joined = statements().join("\n");
-      expect(joined).not.toContain("information_schema.COLUMNS");
+      // Scoped to the viewer columns — see the note in the fresh-boot test above.
+      const probesViewerColumn = statements().some(
+        (s) => /information_schema/i.test(s) && /viewer_\w+_json/i.test(s),
+      );
+      expect(probesViewerColumn, "the dropped viewer-column information_schema probe must not return").toBe(false);
       expect(joined).not.toMatch(/ALTER TABLE chat_sessions.*viewer_/i);
+    });
+  });
+
+  // ── standardized-viewer-control column rename — stale-table reconciliation ──
+  //
+  // dce9e87 renamed chat_session_entities's resume-anchor columns
+  // (last_frame/completed_frames_json → last_step_json/reached_stages_json) and
+  // chose "no data migration" (pre-launch). But the boot is otherwise CREATE-only,
+  // and CREATE TABLE IF NOT EXISTS cannot add/rename columns on an ALREADY-
+  // PROVISIONED table — so a dev DB kept the pre-rename columns and EVERY chat
+  // turn's first SELECT died with ER_BAD_FIELD_ERROR (Unknown column
+  // 'last_step_json'), surfacing as a bare `internal_error` and a dead-looking
+  // chat. createSchema() now probes information_schema and, ONLY when the table
+  // exists WITHOUT the new column, DROPs it so the CREATE recreates it with the new
+  // schema — a no-op on a fresh OR already-current DB, so live session state
+  // survives a normal boot.
+  //
+  // CAVEAT (same as the viewer block): the mocked pool verifies the probe/branch
+  // SQL + ordering, NOT that the DROP+CREATE actually applies on a real MySQL.
+  describe("chat_session_entities stale-rename reconciliation", () => {
+    const PROBE = /information_schema[\s\S]*chat_session_entities[\s\S]*last_step_json/i;
+
+    function withEntitySchema(tableN: number, newColN: number) {
+      mysqlMock.execute.mockImplementation(async (sql: string) => {
+        if (PROBE.test(String(sql))) return [[{ table_n: tableN, new_col_n: newColN }], []];
+        return [[], []];
+      });
+    }
+
+    it("DROPs the stale pre-rename table (exists, missing last_step_json) BEFORE recreating it", async () => {
+      withEntitySchema(1, 0);
+      const repository = new MySqlAppRepository(testEnv);
+      await repository.createSchema();
+
+      const statements = mysqlMock.execute.mock.calls.map(([s]) => String(s));
+      const dropIdx = statements.findIndex((s) => /DROP\s+TABLE\s+IF\s+EXISTS\s+chat_session_entities/i.test(s));
+      const createIdx = statements.findIndex((s) => /CREATE TABLE IF NOT EXISTS chat_session_entities/i.test(s));
+      expect(dropIdx, "the stale table must be dropped").toBeGreaterThanOrEqual(0);
+      expect(createIdx).toBeGreaterThanOrEqual(0);
+      expect(dropIdx, "the DROP must precede the recreate").toBeLessThan(createIdx);
+    });
+
+    it("does NOT drop the table when the new column already exists (current DB)", async () => {
+      withEntitySchema(1, 1);
+      const repository = new MySqlAppRepository(testEnv);
+      await repository.createSchema();
+
+      const joined = mysqlMock.execute.mock.calls.map(([s]) => String(s)).join("\n");
+      expect(joined).not.toMatch(/DROP\s+TABLE\s+IF\s+EXISTS\s+chat_session_entities/i);
+    });
+
+    it("does NOT drop the table on a fresh DB (table absent)", async () => {
+      withEntitySchema(0, 0);
+      const repository = new MySqlAppRepository(testEnv);
+      await repository.createSchema();
+
+      const joined = mysqlMock.execute.mock.calls.map(([s]) => String(s)).join("\n");
+      expect(joined).not.toMatch(/DROP\s+TABLE\s+IF\s+EXISTS\s+chat_session_entities/i);
     });
   });
 

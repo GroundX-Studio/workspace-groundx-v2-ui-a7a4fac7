@@ -27,6 +27,7 @@ import {
 } from "../types.js";
 import { parseCanvasIntent, templateKindSchema, type TemplateKind } from "@groundx/shared";
 import type { z } from "zod";
+import { logger } from "../lib/logger.js";
 
 /**
  * 2026-05-31-core-data-followups §4c — narrow an untrusted union-typed DB
@@ -173,6 +174,43 @@ export class MySqlAppRepository implements AppRepository {
         FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
       )
     `);
+
+    // standardized-viewer-control (dce9e87) RENAMED chat_session_entities's resume-
+    // anchor columns: last_frame + completed_frames_json (frame machine) →
+    // last_step_json + reached_stages_json (JourneyStage), choosing "no data
+    // migration" (pre-launch; entity/resume state is disposable). The boot is
+    // otherwise CREATE-only (see the chat_turn_index note above) on the premise that
+    // a fresh AND an already-provisioned DB converge via CREATE IF NOT EXISTS — but
+    // that premise only holds for ADDITIVE NEW TABLES. A breaking *column* rename
+    // cannot reach an already-provisioned table that way: the table keeps its old
+    // columns, so the very first SELECT of every chat turn fails with
+    // ER_BAD_FIELD_ERROR ("Unknown column 'last_step_json'") and the chat appears
+    // dead (it surfaces only as a bare `internal_error`). We reconcile with the
+    // sanctioned extraction_schemas pattern (DROP + recreate) made CONDITIONAL: probe
+    // information_schema and drop ONLY when the table exists WITHOUT the new column,
+    // so this fires exactly once on a stale pre-rename DB and is a no-op on a fresh
+    // OR already-current one — live session state is never wiped on a normal boot.
+    // The CREATE TABLE IF NOT EXISTS below then rebuilds the dropped table.
+    // TODO(#31): replace these boot-time reconciliations with versioned migrations
+    // before GA, once schema changes must preserve real data.
+    const [entitySchemaRows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT
+         (SELECT COUNT(*) FROM information_schema.TABLES
+            WHERE table_schema = DATABASE() AND table_name = 'chat_session_entities') AS table_n,
+         (SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE table_schema = DATABASE() AND table_name = 'chat_session_entities'
+              AND column_name = 'last_step_json') AS new_col_n`,
+    );
+    const entityTableExists = Number(entitySchemaRows[0]?.table_n ?? 0) > 0;
+    const entityHasNewColumn = Number(entitySchemaRows[0]?.new_col_n ?? 0) > 0;
+    if (entityTableExists && !entityHasNewColumn) {
+      logger.warn(
+        "chat_session_entities predates the standardized-viewer-control column rename; " +
+          "dropping the stale table (pre-launch, no data migration) so it is recreated " +
+          "with last_step_json/reached_stages_json",
+      );
+      await this.pool.execute(`DROP TABLE IF EXISTS chat_session_entities`);
+    }
 
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS chat_session_entities (
