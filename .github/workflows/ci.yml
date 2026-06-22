@@ -18,6 +18,24 @@ jobs:
     # the `dev` environment resolves the env-scoped GROUNDX_PARTNER_API_KEY
     # secret (it is set as BOTH an org secret AND a `dev`-environment secret).
     environment: dev
+    services:
+      # Disposable MySQL for the DB-schema integration test
+      # (mysqlRepository.integration.test.ts) — NOT the deployed dev DB, a throwaway
+      # per run. The Unit tests step points MYSQL_TEST_* at it; the test skips when
+      # those are unset (so it stays inert locally). This is the test that catches
+      # boot schema-reconciliation drift the mocked-pool unit tests structurally can't.
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -ptest --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -41,6 +59,14 @@ jobs:
         run: npm run build
 
       - name: Unit tests
+        env:
+          # Point the integration test at the disposable MySQL service (above) so it
+          # runs for real in CI. Absent these, the test self-skips.
+          MYSQL_TEST_HOST: 127.0.0.1
+          MYSQL_TEST_PORT: "3306"
+          MYSQL_TEST_USER: root
+          MYSQL_TEST_PASSWORD: test
+          MYSQL_TEST_DATABASE: test
         run: npm test
 
       # Local-dev-boot guard: builds @groundx/shared, boots middleware (tsx) +

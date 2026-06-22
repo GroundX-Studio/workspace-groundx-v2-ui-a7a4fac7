@@ -28,15 +28,17 @@ describe("MySqlAppRepository", () => {
 
     const statements = mysqlMock.execute.mock.calls.map(([statement]) => String(statement));
     // 12 CREATE TABLE statements + the DROP TABLE for the superseded
-    // extraction_schemas (2026-05-31-extraction-schemas-table-drop) + the 1
-    // information_schema reconciliation probe that detects the pre-rename
-    // chat_session_entities table (standardized-viewer-control) = 14. The
+    // extraction_schemas (2026-05-31-extraction-schemas-table-drop) + 2
+    // information_schema reconciliation probes (one detects the pre-rename
+    // chat_session_entities table; one detects lingering dead columns) = 15. The
     // extraction_schemas table + its boot copy-INSERT…SELECT were removed once
     // `templates` soaked one full prod release; the DROP sheds the table on the next
     // boot. The 12th CREATE is chat_turn_index (chat-response-streaming P2.2 from-DB
-    // resume). On a fresh DB the probe returns no rows, so NO conditional
-    // chat_session_entities DROP is issued (that path is covered by its own tests).
-    expect(statements).toHaveLength(14);
+    // resume). On a fresh DB both probes return no rows, so NO conditional DROP /
+    // DROP COLUMN is issued (those paths are covered by their own tests). Note: the
+    // probes pass table/column names as PARAMETERS, so the SQL strings here never
+    // contain the dead-column literals — the dead-column guards below still hold.
+    expect(statements).toHaveLength(15);
     const joined = statements.join("\n");
     // chat-response-streaming P2.2 — the streaming-turn → message index (CREATE-only,
     // no ALTER, so it lands on fresh AND already-provisioned DBs identically).
@@ -277,6 +279,53 @@ describe("MySqlAppRepository", () => {
 
       const joined = mysqlMock.execute.mock.calls.map(([s]) => String(s)).join("\n");
       expect(joined).not.toMatch(/DROP\s+TABLE\s+IF\s+EXISTS\s+chat_session_entities/i);
+    });
+  });
+
+  // ── dead-column cleanup ──
+  //
+  // Columns removed from the schema (tool_calls_json / attachments_json: §4 #17;
+  // viewer_*_json: viewer-history-column-drop) linger on already-provisioned DBs
+  // because the CREATE-only boot can't shed a column. createSchema() now probes
+  // information_schema once for all of them and DROPs each that is actually present
+  // — a no-op on a fresh/clean DB. (Column names are passed as PARAMETERS, so the
+  // probe SQL string carries no column literal — the string-based "don't reintroduce"
+  // guards above still hold.)
+  describe("dead-column cleanup", () => {
+    const DEAD: ReadonlyArray<[string, string]> = [
+      ["chat_messages", "tool_calls_json"],
+      ["chat_messages", "attachments_json"],
+      ["chat_sessions", "viewer_history_json"],
+      ["chat_sessions", "viewer_overlays_json"],
+      ["chat_sessions", "viewer_workspace_json"],
+    ];
+    const isDeadProbe = (sql: string) =>
+      /information_schema\.COLUMNS/i.test(sql) && /\(table_name, column_name\)\s+IN/i.test(sql);
+
+    it("DROPs each dead column the probe reports present on the DB", async () => {
+      mysqlMock.execute.mockImplementation(async (sql: string) => {
+        if (isDeadProbe(String(sql))) return [DEAD.map(([t, c]) => ({ t, c })), []];
+        return [[], []];
+      });
+      const repository = new MySqlAppRepository(testEnv);
+      await repository.createSchema();
+
+      const statements = mysqlMock.execute.mock.calls.map(([s]) => String(s));
+      for (const [table, column] of DEAD) {
+        const dropped = statements.some((s) =>
+          new RegExp(`ALTER TABLE \`?${table}\`? DROP COLUMN \`?${column}\`?`, "i").test(s),
+        );
+        expect(dropped, `${table}.${column} should be dropped when present`).toBe(true);
+      }
+    });
+
+    it("issues NO column DROP when the probe reports none present (fresh/clean DB)", async () => {
+      mysqlMock.execute.mockResolvedValue([[], []]); // probe returns empty
+      const repository = new MySqlAppRepository(testEnv);
+      await repository.createSchema();
+
+      const joined = mysqlMock.execute.mock.calls.map(([s]) => String(s)).join("\n");
+      expect(joined).not.toMatch(/DROP COLUMN/i);
     });
   });
 

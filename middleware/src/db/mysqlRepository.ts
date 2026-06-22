@@ -334,6 +334,36 @@ export class MySqlAppRepository implements AppRepository {
         FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
       )
     `);
+
+    // Dead-column cleanup. These columns were removed from the schema once their
+    // read/write chains were dropped (tool_calls_json / attachments_json:
+    // 80ab8ac §4 #17; viewer_*_json: 76d3d86), but the CREATE-only boot can't shed a
+    // column from an ALREADY-PROVISIONED table, so they linger as inert cruft on
+    // older DBs. One combined information_schema probe finds any that remain, then a
+    // guarded DROP removes each — a no-op on a fresh/clean DB (nothing to drop), and
+    // safe (these columns are unread and unwritten). Same conditional-reconciliation
+    // pattern as the chat_session_entities rename above. TODO(#31): fold into
+    // versioned migrations.
+    const DEAD_COLUMNS: ReadonlyArray<{ table: string; column: string }> = [
+      { table: "chat_messages", column: "tool_calls_json" },
+      { table: "chat_messages", column: "attachments_json" },
+      { table: "chat_sessions", column: "viewer_history_json" },
+      { table: "chat_sessions", column: "viewer_overlays_json" },
+      { table: "chat_sessions", column: "viewer_workspace_json" },
+    ];
+    const [deadColRows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT table_name AS t, column_name AS c FROM information_schema.COLUMNS
+        WHERE table_schema = DATABASE()
+          AND (table_name, column_name) IN (${DEAD_COLUMNS.map(() => "(?, ?)").join(", ")})`,
+      DEAD_COLUMNS.flatMap(({ table, column }) => [table, column]),
+    );
+    const present = new Set(deadColRows.map((r) => `${r.t}.${r.c}`));
+    for (const { table, column } of DEAD_COLUMNS) {
+      if (!present.has(`${table}.${column}`)) continue;
+      logger.warn(`dropping dead column ${table}.${column} (removed from schema; lingering on an already-provisioned DB)`);
+      // Identifiers are hard-coded constants above, never user input — safe to interpolate.
+      await this.pool.execute(`ALTER TABLE \`${table}\` DROP COLUMN \`${column}\``);
+    }
   }
 
   async createSession(session: SessionRecord): Promise<void> {
