@@ -227,12 +227,21 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
           password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
 
+      # no-cache: the single per-env image tag is reused every deploy, and BuildKit's
+      # implicit layer cache silently served a STALE `COPY <src>` layer once — the
+      # build compiled an OLD source tree, shipped a "fixed" commit that wasn't, and a
+      # chat-breaking schema migration never reached the running pod (the image looked
+      # current: same tag, matching commit SHA in env). A deploy that can ship stale
+      # code is unacceptable; correctness beats the ~1-2 min cache speedup here (small
+      # Node images). See #31 (a content-addressed cache-from/cache-to keyed on the
+      # commit would let us re-enable caching safely later).
       - name: Build and push frontend image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.frontend
           push: true
+          no-cache: true
           tags: ${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
           build-args: |
             VITE_CALENDLY_URL=${{ env.VITE_CALENDLY_URL_INPUT }}
@@ -243,6 +252,7 @@ jobs:
           context: .
           file: Dockerfile.middleware
           push: true
+          no-cache: true
           tags: ${{ steps.deploy-vars.outputs.middleware_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
 
       - name: Set up kubectl
