@@ -152,4 +152,4 @@ playwright-report/
 .DS_Store
 
 # Local agent / preview dev-server tooling (machine-specific paths)
-
+.claude/
