@@ -1,29 +1,46 @@
 name: Sync GroundX skill pack
 
-# Keeps the vendored groundx-agent-harness skill pack
-# (middleware/assets/groundx-skills/) current for ONLINE/SaaS deploys, without
-# breaking AIR-GAPPED ones:
-#   - This job refreshes from upstream and opens a PR when the pack changed, so
-#     the committed pack — what every build (online or air-gapped) bakes in —
-#     stays current and the update is reviewed.
-#   - Builds themselves never fetch GitHub: they use the committed pack, and the
-#     sync script is best-effort (falls back to the committed pack offline).
-#   - Runtime never fetches (groundxSkills.ts reads the committed pack only).
+# Refreshes the vendored groundx-agent-harness skill pack used by the GroundX
+# product-knowledge chat capability (middleware/src/services/groundxSkills.ts).
+#
+# Branch model: the sync runs on — and opens its PR against — the branch
+# resolved as: workflow_dispatch input -> SYNC_TARGET_BRANCH env -> repo default.
+# The scheduled run operates on SYNC_TARGET_BRANCH (the deployed branch).
+#
+# PLACEMENT: GitHub fires `schedule:` only from the workflow file on the repo's
+# DEFAULT branch. For the weekly cron to run, this file must exist on the default
+# branch; it then checks out and targets SYNC_TARGET_BRANCH below. Manual
+# `workflow_dispatch` runs work from any branch (the input is pre-filled with the
+# deployed branch and is editable).
 
 on:
   schedule:
     - cron: "0 7 * * 1" # weekly, Monday 07:00 UTC
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branch to sync on and PR against"
+        required: false
+        type: string
+        default: "workspace/groundx-v2-ui"
 
 permissions:
   contents: write
   pull-requests: write
+
+env:
+  # Branch the scheduled sync operates on (the deployed branch, not repo default),
+  # so the refreshed pack lands where it is actually built/deployed.
+  SYNC_TARGET_BRANCH: "workspace/groundx-v2-ui"
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # input → env → (blank ⇒ the event's default branch)
+          ref: ${{ github.event.inputs.target_branch || env.SYNC_TARGET_BRANCH }}
 
       - uses: actions/setup-node@v4
         with:
@@ -35,12 +52,15 @@ jobs:
       - name: Open a PR if the pack changed
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_BRANCH: ${{ github.event.inputs.target_branch }}
         run: |
           if [ -z "$(git status --porcelain middleware/assets/groundx-skills)" ]; then
             echo "Vendored skill pack already current — nothing to do."
             exit 0
           fi
-          default_branch="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"
+          # target branch: dispatch input → SYNC_TARGET_BRANCH env → repo default.
+          target="${INPUT_BRANCH:-${SYNC_TARGET_BRANCH}}"
+          [ -n "$target" ] || target="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"
           branch="chore/sync-groundx-skills-${GITHUB_RUN_ID}"
           git config user.name "groundx-skills-bot"
           git config user.email "noreply@groundx.ai"
@@ -50,7 +70,7 @@ jobs:
           git commit -m "chore: refresh vendored groundx-agent-harness skill pack to ${commit}"
           git push origin "$branch"
           gh pr create \
-            --base "$default_branch" \
+            --base "$target" \
             --head "$branch" \
             --title "chore: refresh vendored groundx skill pack" \
-            --body "Automated weekly refresh of the vendored \`groundx-agent-harness\` skill pack so the chat agent's GroundX product knowledge stays current. Builds (online or air-gapped) bake in the committed pack; air-gapped deploys keep using whatever pack is committed at their release. Pinned to upstream \`${commit}\`."
+            --body "Automated refresh of the vendored \`groundx-agent-harness\` skill pack. Target branch: \`${target}\`. Pinned to upstream \`${commit}\`."

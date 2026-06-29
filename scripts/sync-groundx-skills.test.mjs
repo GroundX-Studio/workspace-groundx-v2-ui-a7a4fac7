@@ -52,7 +52,25 @@ const manifestCommit = (dir) => JSON.parse(readFileSync(join(dir, "MANIFEST.json
   rmSync(dir, { recursive: true, force: true });
 }
 
-// 3) OFFLINE + NO committed pack → genuine error (cannot bootstrap with no network and no fallback).
+// 3) MID-REFRESH failure (upstream commit resolves, then the download fails) +
+//    committed pack present → no throw AND the committed pack is still intact.
+//    Proves the staged-swap never touches the live pack until the new one is
+//    fully built (no rm-before-copy window).
+{
+  const dir = makePack(true);
+  const flakyExec = (cmd) => {
+    if (/ls-remote/.test(String(cmd))) return "abc123def4567890\trefs/heads/main\n";
+    throw new Error("simulated download failure (post-resolve)");
+  };
+  let threw = false, r;
+  try { r = syncGroundxSkills({ destDir: dir, exec: flakyExec, log: quiet }); } catch { threw = true; }
+  assert(!threw, "mid-refresh download failure with a committed pack must not throw");
+  assert(r?.status === "vendored-fallback", `mid-refresh fail: expected vendored-fallback, got ${r?.status}`);
+  assert(existsSync(join(dir, "MANIFEST.json")) && manifestCommit(dir) === "SENTINEL", "mid-refresh failure must not destroy the committed pack");
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// 4) OFFLINE + NO committed pack → genuine error (cannot bootstrap with no network and no fallback).
 {
   const dir = makePack(false);
   let threw = false;
@@ -65,4 +83,4 @@ if (failures.length) {
   console.error("sync-groundx-skills dual-mode tests FAILED:\n" + failures.map((f) => "  - " + f).join("\n"));
   process.exit(1);
 }
-console.log("sync-groundx-skills dual-mode tests passed (3/3)");
+console.log("sync-groundx-skills dual-mode tests passed (4/4)");
