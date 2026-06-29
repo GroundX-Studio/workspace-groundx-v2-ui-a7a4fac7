@@ -1,0 +1,56 @@
+name: Sync GroundX skill pack
+
+# Keeps the vendored groundx-agent-harness skill pack
+# (middleware/assets/groundx-skills/) current for ONLINE/SaaS deploys, without
+# breaking AIR-GAPPED ones:
+#   - This job refreshes from upstream and opens a PR when the pack changed, so
+#     the committed pack — what every build (online or air-gapped) bakes in —
+#     stays current and the update is reviewed.
+#   - Builds themselves never fetch GitHub: they use the committed pack, and the
+#     sync script is best-effort (falls back to the committed pack offline).
+#   - Runtime never fetches (groundxSkills.ts reads the committed pack only).
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # weekly, Monday 07:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Refresh vendored skill pack from upstream
+        run: node scripts/sync-groundx-skills.mjs
+
+      - name: Open a PR if the pack changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$(git status --porcelain middleware/assets/groundx-skills)" ]; then
+            echo "Vendored skill pack already current — nothing to do."
+            exit 0
+          fi
+          default_branch="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"
+          branch="chore/sync-groundx-skills-${GITHUB_RUN_ID}"
+          git config user.name "groundx-skills-bot"
+          git config user.email "noreply@groundx.ai"
+          git checkout -b "$branch"
+          git add middleware/assets/groundx-skills
+          commit="$(jq -r .commit middleware/assets/groundx-skills/MANIFEST.json)"
+          git commit -m "chore: refresh vendored groundx-agent-harness skill pack to ${commit}"
+          git push origin "$branch"
+          gh pr create \
+            --base "$default_branch" \
+            --head "$branch" \
+            --title "chore: refresh vendored groundx skill pack" \
+            --body "Automated weekly refresh of the vendored \`groundx-agent-harness\` skill pack so the chat agent's GroundX product knowledge stays current. Builds (online or air-gapped) bake in the committed pack; air-gapped deploys keep using whatever pack is committed at their release. Pinned to upstream \`${commit}\`."
