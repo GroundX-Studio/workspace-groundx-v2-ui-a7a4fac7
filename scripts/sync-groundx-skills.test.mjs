@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { syncGroundxSkills } from "./sync-groundx-skills.mjs";
+import { redactSecretBlocks, syncGroundxSkills } from "./sync-groundx-skills.mjs";
 
 const failures = [];
 const assert = (cond, msg) => { if (!cond) failures.push(msg); };
@@ -79,8 +79,21 @@ const manifestCommit = (dir) => JSON.parse(readFileSync(join(dir, "MANIFEST.json
   rmSync(dir, { recursive: true, force: true });
 }
 
+// 5) vendored docs are scrubbed of placeholder key/cert blocks (secret-scanner safe).
+//    The sample marker is assembled at runtime so this test's own SOURCE never
+//    contains a literal PEM header (which would itself trip the secret scanner).
+{
+  const d = "-".repeat(5);
+  const kind = "PRIVATE " + "KEY";
+  const sample = `GITHUB_APP_PRIVATE_KEY_PEM: |\n    ${d}BEGIN ${kind}${d}\n    base64body\n    ${d}END ${kind}${d}\nnext: line\n`;
+  const out = redactSecretBlocks(sample);
+  assert(!out.includes(`${d}BEGIN`), "redactSecretBlocks must strip the BEGIN marker");
+  assert(/redacted/.test(out), "redactSecretBlocks must leave a redaction marker");
+  assert(/GITHUB_APP_PRIVATE_KEY_PEM/.test(out) && /next: line/.test(out), "redaction must keep surrounding context");
+}
+
 if (failures.length) {
   console.error("sync-groundx-skills dual-mode tests FAILED:\n" + failures.map((f) => "  - " + f).join("\n"));
   process.exit(1);
 }
-console.log("sync-groundx-skills dual-mode tests passed (4/4)");
+console.log("sync-groundx-skills dual-mode tests passed (5/5)");

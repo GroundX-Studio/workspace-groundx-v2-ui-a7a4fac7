@@ -11,6 +11,48 @@ This is methodology, not a platform-operation guide. Keep YAML the durable
 artifact; route workflow registration, ingest, polling, and extract retrieval to
 `groundx-api` (see `customer-onboarding.md` §API handoff).
 
+## Minimal schema-first request
+
+The user should not need to know the v1 YAML mechanics or the live-run
+checklist. If they provide source schema material, a sample document, and the
+report they want back, treat that as enough to start.
+
+Example user prompt:
+
+```text
+Create and test a GroundX extraction workflow from these files:
+- schema: path/to/schema.json
+- manifest: path/to/manifest.json
+- sample PDF: path/to/sample.pdf
+
+Preserve the schema's final JSON shape and report which top-level output groups
+or schema sections produced values.
+```
+
+The user may also provide an existing `prompt.yaml` to compare against, but they
+do not need to say `extraction_policy_version: v1`,
+`workflow.custom_steps`, group-level `workflow_step`, `_pseudo_groups`, or the
+compile/deploy/ingest/poll/retrieve steps.
+
+For that minimal request, infer the current harness path:
+
+- author v1 source YAML
+- preserve the final JSON shape from the source schema
+- choose `workflow.custom_steps`
+- use group-level `workflow_step`
+- split oversized workflow groups with `_pseudo_groups`
+- compile and validate before any live run
+- create or update the workflow
+- create or select a test bucket and attach the workflow
+- ingest the sample document through the supported runner or `groundx-api`
+  handoff
+- poll to completion and check `progress.errors`
+- retrieve X-Ray and raw extract when available
+- report whether each top-level output group or schema section produced at least
+  one populated field
+- compare against an existing YAML only when the user provides one as a
+  baseline
+
 ## 1. Ask for the right resources
 
 Request these before drafting anything. Note which are missing rather than
@@ -20,13 +62,14 @@ inventing substitutes.
 |---|---|---|
 | **Field catalog** (spreadsheet, schema, data dictionary, or PDF listing expected fields) | The authoritative set of output fields; drives the coverage gate in §5 | Reconstruct from sample docs + the owner's answers; flag that coverage cannot be verified |
 | **Sample documents** | Ground the field inventory in what actually appears on the page | Cannot ground identifiers/instructions; ask for at least one representative file |
-| **Answer keys** (ground truth, CSV or JSON) | Enables `score_extraction.py` scoring and the per-field accuracy bar | Defer accuracy claims; do shape-only proof |
-| **Naming constraints** | Required output key names, casing, downstream column names | Use the customer's catalog names verbatim where possible |
+| **Expected answers** (runner-shaped JSON, spreadsheet, document, text file, PDF, or human-review notes) | Enables source-backed discrepancy review and, after mapping to runner-shaped JSON, `score_extraction.py` scoring | Defer accuracy claims; do shape-only proof |
+| **Naming constraints** | Required output key names, casing, downstream column names | Keep the customer-facing YAML/JSON key when possible; choose a safe `workflow_output_key` for custom outputs |
 | **Null semantics** | Which fields are legitimately blank vs. always present; how "not applicable" is encoded | Treat all fields as possibly-null; confirm before scoring |
 
 Also confirm, per `customer-onboarding.md`: document type and business outcome,
 the field owner, whether files arrive in batches or over time (manual
-batch-readiness trigger), and storage permission for samples and answer keys.
+batch-readiness trigger), and storage permission for samples and expected-answer
+artifacts.
 
 ## 2. Field catalog → field inventory
 
@@ -34,13 +77,17 @@ Turn the catalog into a flat inventory the agent reasons over. For each field
 record:
 
 - **field name** — the customer's name; this becomes the YAML key and JSON output key
+  inside the final group when it is valid for the desired output contract
 - **scope** — `singleton` (appears once per document) or `repeating` (one value per
-  record in a list). Scope decides the group: singletons go in a `chunk-instruct`
-  group; repeating fields go in a `chunk-keys` / `chunk-summary` group
+  record in a list). Scope decides the custom step kind: singletons use
+  `kind: instruct`; repeating records use `kind: keys` or `kind: summary`
 - **null rule** — always present, sometimes null, or never null. Records the
   null-vs-miss expectation `score_extraction.py` uses (legitimate null = PASS, not a miss)
 - **required output name** — the exact key the downstream system expects, if it
-  differs from the catalog label
+  differs from the catalog label. This is separate from `workflow_output_key`,
+  which is an internal custom-output key and must match
+  `^[a-z][a-z0-9_]{0,63}$`. If the customer-facing key is not safe for custom
+  outputs, keep it as the YAML field key and choose a safe `workflow_output_key`.
 
 Cross-check the catalog against the sample documents: every catalog field should
 be locatable on a sample, and any field on the sample that the catalog omits is a
@@ -48,35 +95,36 @@ question for the owner, not a silent addition. A field whose scope is ambiguous
 from the catalog (e.g. "could be one or many") is resolved by looking at the
 samples — see `3_prompt_pipeline.md` §6.3 decision rules.
 
+If expected answers are not already in runner-shaped JSON, create a mapping
+record before scoring. Each mapped field records the JSON field path,
+expected-answer source location, normalized expected value, extracted value,
+source-support decision, scoreability decision, and rationale. Use
+`5_validation.md` §1.2 for the exact shape.
+
 ## 3. Inventory → draft `prompt.yaml`
 
-### 3.1 Choose domain or explicit slots
+### 3.1 Choose workflow steps
 
-Group the inventory by scope, then resolve each group's workflow slot — the
-compiler is domain-agnostic and needs one of two routes per `2_schema_design.md`:
-
-- **Known domain:** if the document fits a domain with a profile
-  (`templates/domains/<domain>.yaml`, e.g. `invoice`), declare a top-level
-  `domain:` and use the profile's group names; the profile maps each group to a
-  slot. For billing/invoice documents, `domain: invoice` gives
-  `statement`→`chunk-instruct`, `charges`→`chunk-keys`, `meters`→`chunk-summary`.
-- **No profile:** declare an explicit `slot:` on each group from the proven menu
-  (`chunk-instruct` singleton, `chunk-keys` / `chunk-summary` repeating arrays).
-  Group names are arbitrary; only the slot is constrained. One group per slot.
+Group the inventory by scope, then choose how each workflow group executes.
+Harness-authored YAML sets top-level `extraction_policy_version: v1`, defines
+top-level `workflow.custom_steps`, assigns groups with `workflow_step: <name>`,
+puts `workflow_output_key` on each directly routed field, and declares
+`workflow.agent_chain` with one branch per executable workflow group. Keep each
+executable custom step to 30 fields or fewer.
 
 Do not force an unrelated document into invoice-shaped group names. A claim form,
-contract, or schedule declares its own group names plus explicit slots, or earns
-a new domain profile (a data file, no compiler change — see `2_schema_design.md`
-§1).
+contract, or schedule should use group names that match the desired JSON output
+and custom steps that match the extraction shape; see `2_schema_design.md` §1.
 
 ### 3.2 Write field prompts
 
-For each inventory field, write the field anatomy from `2_schema_design.md` §2:
-`description`, `identifiers` (1–3 labels seen on the samples), `instructions`
-(one concrete rule per line, grounded in the samples), `type`, and `format` for
-dates/codes. For repeating groups, add the group-level `prompt.instructions`
-that distinguishes a real record from a subtotal/header (`2_schema_design.md`
-§3). Keep each group ≤ 20 fields (`2_schema_design.md` §1.5).
+For each inventory field, read `16_prompt_writing.md` and `prompt-quality.md`,
+then write the field anatomy from `2_schema_design.md` §2: `description`,
+`identifiers` (representative labels seen on the samples), `instructions` (one
+concrete source-grounded rule per line), `type`, and `format` for dates/codes.
+For repeating groups, add the group-level `prompt.instructions` that distinguishes
+a real record from a subtotal/header (`2_schema_design.md` §3). Keep each group
+≤ 30 fields (`2_schema_design.md` §1.5).
 
 ## 4. The chat step — capturing business logic
 
@@ -93,21 +141,37 @@ Ask, per repeating group and per cross-group relationship:
 | "When are two of these records actually the same record?" | dedup: collapse records sharing the identifying attrs | `unique_attrs: [..]` |
 | "Does a record in group A point at a record in group B? On what?" | cross-group link (foreign key) between groups | `match_attrs: [..]` |
 | "If the same field shows two different values, do you want both flagged?" | surface disagreeing values instead of silently picking one | `conflict_attrs: [..]` |
-| "Should a parent field be copied onto each child record?" | propagate parent fields across a relationship | `passthrough: [..]` |
+| "Should a parent field be copied onto each child record?" | propagate parent fields across a relationship | `passthrough: {from: <parent_group>, fields: [..]}` |
 
 These are declarative lists of attribute (field) names attached to the group in
 the YAML, alongside `fields:` and `prompt:`:
 
 ```yaml
+extraction_policy_version: v1
+
+workflow:
+  custom_steps:
+    - name: charge_lines
+      level: chunk
+      kind: keys
+  agent_chain:
+    - parallel:
+        - group: charges
+          chain: [reconcile_charges, save_charges]
+
 charges:
-  slot: chunk-keys
+  workflow_step: charge_lines
   unique_attrs: [charge_description_as_printed, charge_amount]   # dedup identical rows
   match_attrs: [meter_number]                                    # link to the meters group
   conflict_attrs: [charge_amount]                                # flag disagreeing amounts
-  passthrough: [account_number]                                  # copy from the statement group
+  passthrough: {from: statement, fields: [account_number]}        # copy from the statement group
   fields:
-    charge_description_as_printed: { prompt: { ... } }
-    charge_amount: { prompt: { ... } }
+    charge_description_as_printed:
+      workflow_output_key: charge_description_as_printed
+      prompt: { ... }
+    charge_amount:
+      workflow_output_key: charge_amount
+      prompt: { ... }
 ```
 
 Every attr name must be a field that exists in the inventory/YAML. Record only
@@ -145,5 +209,5 @@ field (`6_known_limitations.md` §1).
 - Add fields seen on a sample but absent from the catalog without asking the owner.
 - Bake business logic into field `instructions`; record it as group metadata.
 - Skip the coverage check; a silently uncovered catalog field is the common pilot miss.
-- Commit customer catalogs, samples, or answer keys to tracked paths without
+- Commit customer catalogs, samples, or expected-answer artifacts to tracked paths without
   explicit permission (`customer-onboarding.md` §Do not).

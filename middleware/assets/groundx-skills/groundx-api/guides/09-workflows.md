@@ -165,6 +165,10 @@ section-level context from bleeding across page boundaries.
 Workflow steps are configured using a hierarchy of SDK objects. Python names are
 used below; TypeScript equivalents use camelCase.
 
+Before writing custom prompt text, read `guides/10-prompt-writing.md`. Use that
+guide for full prompt overrides, `additionalContext`, search-query rewrites, and
+document-processing prompts.
+
 ### 6.1 WorkflowPrompt
 
 A single message in the LLM call:
@@ -172,8 +176,15 @@ A single message in the LLM call:
 | Field | Description |
 |---|---|
 | `prompt` | The full prompt text |
+| `additional_context` / wire `additionalContext` | Extra instructions appended to the default full request/task prompt. Use this to add workflow-specific context without replacing the default prompt. Limited to 4096 UTF-8 bytes. |
 | `abbreviated` | A short summary of the prompt — used in logging |
 | `role` | Message role: `"system"`, `"developer"`, `"user"`, or `"assistant"`. Use `"system"` or `"developer"` for the task instruction; `"user"` for the per-element query |
+
+`additionalContext` is additive. Workflow-level `template.CUSTOM_INSTRUCTIONS` stays
+the global fallback, and a prompt member's `additionalContext` overrides it only for
+that prompt render. It is supported on fixed GPT and EyeLevel default `request` and
+`task` prompt members. It is not supported under custom workflow steps, nested
+`useExtras` prompt objects, or prompt members that replace the full prompt.
 
 ### 6.2 WorkflowPromptGroup
 

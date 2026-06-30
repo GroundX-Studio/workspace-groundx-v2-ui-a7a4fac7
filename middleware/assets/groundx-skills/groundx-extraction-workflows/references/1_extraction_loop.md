@@ -27,7 +27,7 @@ applied to the same document — produces the same extraction.
 └────────────┘                      │
                                     ▼
                             ┌──────────────┐
-                            │ output.json  │
+                            │ output.json  │ raw get_extract when available
                             └──────┬───────┘
                                    │ python score_extraction.py
                                    ▼
@@ -62,7 +62,10 @@ Before the loop runs, the working directory must have:
 8. `requirements.txt` — copied from
    `skills/groundx-extraction-workflows/templates/requirements.txt`
 9. The input PDF (named anything; pass the path as needed)
-10. A ground truth file: CSV (preferred for v1) or JSON
+10. Expected answers for scoring. If they are already runner-shaped JSON, use
+    them directly as the expected-answer JSON file. If they arrive as a spreadsheet,
+    document, text file, PDF, or human-review notes, create a source-backed
+    mapping record before scoring.
 
 A throwaway working directory under `/tmp` is fine for one-shot
 extractions. A persistent directory (e.g.
@@ -76,28 +79,37 @@ pip install -r requirements.txt
 
 ### 3.1 Draft the YAML
 
-Read §2 in `2_schema_design.md` for group decomposition and field
-anatomy. Author the YAML based on:
+Read `16_prompt_writing.md`, `prompt-quality.md`, and §2 in
+`2_schema_design.md` for the full prompt-writing path, prompt quality checklist,
+group decomposition, and field anatomy. Author the YAML based on:
 
-- The fields the user wants to extract (or, if a ground truth is
-  provided, the keys in the ground truth)
+- The fields the user wants to extract (or, if expected answers are
+  provided, the fields in the expected answers)
 - One worked example to look at the document and identify each field's
   visual identifiers and edge cases
-- The two-group convention: `statement:` for per-document fields,
-  `charges:` for repeating records
+- Final groups that match the customer-facing JSON shape. Invoice-like
+  documents often use `statement`, `charges`, and optional `meters`; claim
+  forms, contracts, schedules, and other document types should use
+  domain-aligned names such as `claim` and `line_items`.
+- Matching `workflow.custom_steps` and either direct groups with group-level
+  `workflow_step` plus `workflow_output_key`, or `_pseudo_groups` with
+  `workflow_step` plus `path` routes.
 
-If the document type does not fit either shape, see "When you have
-neither" in `2_schema_design.md`.
+If the document shape does not fit singleton objects or repeating record
+lists, see `2_schema_design.md` §1.5.
 
 ### 3.2 Compile to workflow JSON
 
 ```bash
 python compile_workflow.py prompt.yaml > workflow.json
+python validate_workflow_json.py workflow.json
 ```
 
 `compile_workflow.py` is offline — it does not call any GroundX API.
 It loads the YAML, renders the field-spec text, and emits the
 workflow JSON in the exact shape the GroundX workflow API accepts.
+`validate_workflow_json.py` must pass before workflow create/update, MCP
+registration, or ingest.
 
 The resulting `workflow.json` is the durable artifact for this run.
 Diff it across iterations to see exactly what the prompts look like
@@ -132,7 +144,24 @@ Use `--dry-run` first when you want compile/validation and planned actions
 without a live API call.
 
 **Full local run:** when you need deploy + ingest + poll + X-Ray +
-extract output, use `run_extraction.py`.
+extract output, use `run_extraction.py`. It writes `output.json` only for the
+raw GroundX `get_extract` payload. If raw extract is unavailable, it writes
+`xray_diagnostic.json` and `final_output.json` instead. Add
+`--require-raw-extract` when missing `output.json` should fail the run. If local
+polling reaches `--max-polls`, the runner writes `timeout_summary.json` and a
+bounded `timeout_history.json` with the process ID, workflow ID, bucket ID,
+last status, scoreability, and a resume command. Resume the same process with:
+
+```bash
+python run_extraction.py --resume --out <run-dir>
+```
+
+Resume reads the run-local `workflow.json` and `business_logic_metadata.json`
+when present. It does not recompile or re-read source YAML.
+
+Do not redeploy, create a new bucket, attach a new workflow, or ingest the file
+again just because local polling timed out. A timeout means the local wait
+expired; the platform process may still complete.
 
 **Interactive agent path:** when an agent is operating inside Claude or
 Codex and GroundX MCP tools are visible, follow the `groundx-api`
@@ -165,38 +194,47 @@ The manual operation loop is:
    ingest produced. Save the JSON.
 
 ```bash
-# After running steps 1-5 via groundx-api, you have output.json
+# After running steps 1-5 via groundx-api, save raw get_extract as output.json.
 ```
 
-### 3.4 Compare to ground truth
+### 3.4 Compare to Expected Answers
 
 ```bash
-python score_extraction.py output.json ground_truth.csv
+python score_extraction.py output.json expected_answers.json
+# If you are intentionally scoring local diagnostic output:
+python score_extraction.py final_output.json expected_answers.json
 ```
 
-The comparator emits a structured report: PASS / FAIL / WARN per
-field, with the expected and extracted values for any non-PASS row.
+The comparator reads expected-answer JSON in the runner output shape and emits a
+structured report: PASS / FAIL / WARN per field, with the expected and
+extracted values for any non-PASS row.
 See §2 in `5_validation.md` for what each verdict means and how the
 comparison logic treats casing, dates, floats, and arrays.
 
+If expected answers arrive as a spreadsheet, document, text file, PDF, or
+human-review notes, map them to runner-shaped JSON first. Record, per mapped
+field: field path, expected-answer source location, normalized expected value,
+extracted value, source-support decision, scoreability decision, and rationale.
+Do not claim a final accuracy improvement unless the run produced a new raw
+`output.json`, or the report is explicitly labeled as diagnostic/local-final.
+
 ### 3.5 Iterate
 
-For every FAIL or WARN, identify the YAML field that produced it. The
-map is direct: each field's YAML key becomes the JSON key in the
-output. Tighten the field's `instructions` block, save the YAML, run
-§3.2 again to produce a new `workflow.json`, then re-run §3.3 (with
-`workflow_update` instead of `workflow_create`) and §3.4.
+For every FAIL or WARN, identify the YAML field or group rule that produced it.
+Use `prompt-improvement-loop.md`: source-adjudicate the disagreement, classify
+the miss, make one prompt or group-rule change, run §3.2 again to produce a new
+`workflow.json`, then re-run §3.3 (with `workflow_update` instead of
+`workflow_create`) and §3.4.
 
 The most common iteration patterns:
 
 - Field extracted as wrong value → tighten `identifiers` and add a
-  negative example in `instructions` ("do not confuse with X")
+  reusable exclusion in `instructions` ("do not confuse with X")
 - Field missing entirely → confirm the value is in the document at
   all via X-Ray (see §3 in `6_known_limitations.md`); if so, broaden
   `identifiers`
 - Repeating record over-extracts subtotals → tighten the group-level
-  `prompt.instructions` block on the `charges` group with explicit
-  IS-NOT examples
+  `prompt.instructions` block with explicit IS-NOT examples
 - Casing mismatch → add an explicit casing instruction to the field
   ("preserve original casing as printed")
 
@@ -221,7 +259,19 @@ with a note.
 
 - `prompt.yaml` — the durable artifact. Version it, share it, fork it
   as the starting point for related document types.
-- `output.json` — the extraction for this specific PDF.
+- `output.json` — the raw GroundX extraction for this specific PDF, when
+  `get_extract` is available.
+- `output_provenance.json` — confirms which process and document produced the
+  raw `output.json`.
+- `xray.json` — the raw X-Ray evidence captured by the runner.
+- `xray_diagnostic.json` — local reconstruction from X-Ray, written only when
+  raw extract is unavailable.
+- `final_output.json` — local diagnostic/business-logic output, written only
+  when produced.
+- `business_logic_metadata.json` — run-local final-group metadata used so
+  `--resume` applies the same local business logic as the original run.
+- `timeout_summary.json` and `timeout_history.json` — written only when local
+  polling times out; use the resume command before starting another live run.
 - The accuracy report — captures the field-by-field state at the time
   the YAML was finalized.
 

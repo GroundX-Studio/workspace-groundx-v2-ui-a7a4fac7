@@ -131,7 +131,8 @@ forward-compatibility.
 
 For configuring **custom prompts** using GroundX's built-in LLM, use the
 `WorkflowStepConfig` / `WorkflowPromptGroup` SDK objects described in
-`guides/09-workflows.md` §6.
+`guides/09-workflows.md` §6. For prompt wording, use
+`guides/10-prompt-writing.md`.
 
 All `steps` and `extract` fields are optional — omit them to use GroundX defaults.
 
@@ -154,6 +155,15 @@ should remain in effect, include those custom settings again in the update body.
 | `prompt: null` | Use no prompt group for that step config. |
 | `prompt.request: null` or `prompt.task: null` | Clear only that prompt member and default omitted members. |
 | `prompt.request` or `prompt.task` object | Use the supplied custom prompt member and default omitted members. |
+
+`prompt.request.additionalContext` and `prompt.task.additionalContext` are additive
+workflow prompt supplements. They append extra instructions to the default full
+request or task prompt without replacing that prompt. Each value is limited to
+4096 UTF-8 bytes. Workflow-level `template.CUSTOM_INSTRUCTIONS` remains a global
+fallback, but prompt-member `additionalContext` takes precedence for that one prompt
+render. Use it only on fixed GPT or EyeLevel workflow default request/task prompts.
+Do not put `additionalContext` under `customSteps`, nested `useExtras` prompt objects,
+or prompt members that replace the full prompt with `prompt`, `role`, `long`, or `val`.
 
 If you are working against a backend that predates default-overlay workflow
 updates, send explicit prompt objects for any step that must not become empty.
@@ -224,6 +234,14 @@ X-API-Key: YOUR_API_KEY
 ```
 
 **Response:** `{ "workflow": { ... } }` — workflow object.
+
+Workflow readback may preserve `null` for optional relationship and step fields,
+including `workflow.relationships.documents`,
+`workflow.steps.chunk-instruct.figure`, and
+`workflow.steps.chunk-instruct.table-figure`. Those shapes are REST- and Python
+SDK-valid. If hosted MCP `workflow_get` fails output validation on those paths,
+classify it as MCP output-schema drift and use REST or the Python SDK with an
+`X-API-Key` from env/session secret storage while the hosted schema is fixed.
 
 ## 5. workflow_update / PUT /v1/workflow/{id}
 

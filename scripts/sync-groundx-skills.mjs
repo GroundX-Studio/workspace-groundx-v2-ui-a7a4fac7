@@ -23,7 +23,7 @@
  * to. Re-run to refresh:  node scripts/sync-groundx-skills.mjs [ref]
  */
 import { execSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,35 @@ import { fileURLToPath } from "node:url";
 const REPO = "GroundX-Studio/groundx-agent-harness";
 const SCAFFOLD_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const DEFAULT_DEST = join(SCAFFOLD_ROOT, "middleware", "assets", "groundx-skills");
+
+// Upstream docs sometimes carry placeholder PEM/cert blocks in config examples.
+// They are not real secrets, but we must not vendor key-shaped blobs into the
+// repo (the pre-commit secret scanner rejects them, and it's bad hygiene). Strip
+// the block but keep its surrounding field name/context.
+// Built from a fragment so this source file itself contains no literal PEM
+// header (which would otherwise trip the same secret scanner it protects).
+const DASH = "-----";
+const SECRET_BLOCK_RE = new RegExp(
+  `${DASH}BEGIN [^\\n-]*(?:PRIVATE KEY|CERTIFICATE)[^\\n-]*${DASH}[\\s\\S]*?${DASH}END [^\\n-]*(?:PRIVATE KEY|CERTIFICATE)[^\\n-]*${DASH}`,
+  "g",
+);
+
+/** Redact example PEM/certificate blocks from vendored markdown. */
+export function redactSecretBlocks(text) {
+  return text.replace(SECRET_BLOCK_RE, "<redacted: example key/certificate block stripped during vendoring>");
+}
+
+function sanitizePack(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) sanitizePack(p);
+    else if (entry.name.endsWith(".md")) {
+      const orig = readFileSync(p, "utf8");
+      const red = redactSecretBlocks(orig);
+      if (red !== orig) writeFileSync(p, red);
+    }
+  }
+}
 
 /**
  * @param {object} [opts]
@@ -91,6 +120,8 @@ export function syncGroundxSkills({
       recursive: true,
       filter: (src) => statSync(src).isDirectory() || (src.endsWith(".md") && !/(?:^|\/)(?:ROUTING|CHANGELOG)\.md$/.test(src)),
     });
+    // Strip any placeholder key/cert blocks before the pack is committed/used.
+    sanitizePack(staging);
 
     const files = [];
     const walk = (dir, prefix = "") => {

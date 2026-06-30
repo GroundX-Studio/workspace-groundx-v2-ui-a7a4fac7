@@ -122,7 +122,8 @@ data:
   MYSQL_PASSWORD: <app-password>
   WORKSPACE_RUNNER_TOKEN: <git-token>
   GITLAB_TOKEN: <gitlab-api-token>       # only when gitProvider is gitlab
-  GITHUB_APP_PRIVATE_KEY_PEM: <multiline-github-app-private-key-pem>
+  GITHUB_APP_PRIVATE_KEY_PEM: |
+    <redacted: example key/certificate block stripped during vendoring>
 ```
 
 Install once, before the main chart:

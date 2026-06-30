@@ -99,9 +99,7 @@ db:
     rw: groundx-rdo.cluster.us-east-1.rds.amazonaws.com       # writer endpoint
     port: 3306                                                  # default 3306
     rootCerts: |                                               # optional TLS root certs
-      -----BEGIN CERTIFICATE-----
-      ...
-      -----END CERTIFICATE-----
+      <redacted: example key/certificate block stripped during vendoring>
 ```
 
 The dual-discriminator pattern (ro AND rw) is the only one in the chart. It exists because GroundX's data-access pattern splits read traffic to a replica for scalability. A deployer wanting to run a single-host MySQL can point both fields at the same address — the chart doesn't enforce that they differ.

@@ -144,9 +144,7 @@ db:
     rw: <rds-endpoint>.<region>.rds.amazonaws.com
     port: 3306
     rootCerts: |
-      -----BEGIN CERTIFICATE-----
-      <root CA PEM bundle>
-      -----END CERTIFICATE-----
+      <redacted: example key/certificate block stripped during vendoring>
 ```
 
 **When required:** AWS RDS / Azure Database for MySQL with `require_secure_transport=ON`. Without `rootCerts`, the connection fails at TLS handshake.

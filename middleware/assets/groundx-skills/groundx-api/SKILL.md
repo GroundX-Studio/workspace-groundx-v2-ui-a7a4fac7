@@ -1,14 +1,14 @@
 ---
 name: groundx-api
 description: >
-  Customer-facing GroundX API reference for document ingest, search, RAG,
+  Installed-agent GroundX API reference for document ingest, search, RAG,
   source attribution, document understanding, buckets, groups, workflows,
   account health, API keys, SDK usage, and REST fallback. Try the hosted
-  GroundX API MCP connector before direct REST. If tools are not visible,
-  instruct the user to connect the GroundX API connector and retry tool
-  discovery; use REST only when connector attachment fails or a needed tool is
-  missing. REST fallback uses the `X-API-Key` header and keeps raw keys out of
-  tool arguments, browser code, logs, transcripts, examples, and generated files.
+  GroundX MCP server before direct REST; use REST only when MCP is unavailable
+  or a needed tool is missing. REST fallback uses the `X-API-Key` header and
+  keeps raw keys out of tool arguments, browser code, logs, transcripts,
+  examples, and generated files. For MCP client setup, connection, and auth,
+  see the `groundx-mcp` skill.
 ---
 
 # GroundX API Skill
@@ -17,7 +17,7 @@ Use this skill for customer-scoped GroundX platform operations: ingest,
 processing status, search, document lookup, source retrieval, buckets, groups,
 workflows, extraction retrieval, SDK integration, and REST fallback.
 
-When writing public Python docs or customer-facing Python examples, use
+When writing public Python docs or agent-facing Python examples, use
 `client.ingest()` with `Document(...)`. Do not use
 `client.documents.ingest_remote()` or `client.documents.ingest_local()` in public
 Python docs; those lower-level generated names are for SDK-internals or
@@ -44,8 +44,8 @@ operation-level references.
 2. Read `references/01-auth.md`.
 3. Try GroundX MCP tools first. If visible, call `groundx_account_context`, prefer
    the matching MCP tool, and use REST only when the required tool is not exposed.
-4. If GroundX MCP tools are not visible, instruct the user to connect the GroundX
-   API connector and retry discovery before REST fallback.
+4. If GroundX MCP tools are not visible, use REST fallback. For MCP client setup
+   and connection guidance, see the `groundx-mcp` skill.
 5. Read the smallest operation reference and guide that matches the work.
 6. Keep secrets server-side and encode async operations, pagination, errors, and URL
    versioning into code defaults and tests.
@@ -61,6 +61,7 @@ operation-level references.
 | Source viewer or page-level citation UI | `guides/08-source-view-ui.md`, then `references/03-search.md` |
 | Content organized by tenant, project, folder, or access policy | `guides/06-content-organization.md`, `guides/07-filter-field.md`, then bucket/group references |
 | Workflow CRUD or workflow-backed document processing | `references/06-workflows.md`, `guides/09-workflows.md`, then `references/02-documents.md` |
+| Workflow prompt writing, prompt overrides, or `additionalContext` wording | `guides/10-prompt-writing.md`, then `guides/09-workflows.md` and `references/06-workflows.md` |
 | Python SDK code | `references/12-python-sdk-objects.md` before writing objects or attributes |
 
 ## Reference Map
@@ -74,8 +75,8 @@ reference and guide the task needs. For response-shape questions, check
 ## Pre-return Checklist
 
 - [ ] REST calls use `X-API-Key`, never `Authorization: Bearer`.
-- [ ] GroundX MCP is attempted before REST; if tools are missing, the user was told
-      to connect the GroundX API connector before REST fallback.
+- [ ] GroundX MCP is attempted before REST; if tools are missing, REST fallback is
+      used and the `groundx-mcp` skill is referenced for client setup and connection.
 - [ ] Raw API keys do not appear in MCP tool arguments, logs, transcripts, browser
       code, examples, or generated files.
 - [ ] REST URLs avoid double-version paths such as `/api/v1/v1/...`.

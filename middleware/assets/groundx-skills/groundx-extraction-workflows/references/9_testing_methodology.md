@@ -41,7 +41,7 @@ Spawn a fresh general-purpose sub-agent with explicit constraints:
 
 - The Linear ticket for the customer (e.g. AGE-1)
 - The skill at HEAD
-- The customer's PDF + answer key
+- The customer's PDF + expected answers
 - `GROUNDX_API_KEY` available in env or a `.env` file in the
   work directory
 
@@ -76,7 +76,7 @@ trivially fixable. Without clean-room testing both would have shipped.
 
 For routine maintainer changes:
 
-1. **`node scripts/validate.mjs`** from repo root — all 13 must pass.
+1. **`node scripts/validate.mjs`** from repo root — every check must pass.
 2. **Smoke the iteration aids** if any was touched:
    - `compile_workflow.py` → `validate_workflow_json.py` on output
    - `run_extraction.py` → end-to-end against a known fixture
@@ -90,7 +90,7 @@ A skill-change PR should include, in the top-level body or comment:
 
 - **Audience A test recipe** — how a customer would validate the
   change. Reference the relevant Linear ticket + fixture (e.g. AGE-1
-  + an invoice + answer key).
+  + an invoice + expected answers).
 - **Audience B test recipe** — concrete validate + smoke commands the
   reviewer can run locally.
 - **What was verified** — a snapshot of accuracy numbers achieved,
