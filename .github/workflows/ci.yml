@@ -13,11 +13,11 @@ jobs:
   scaffold:
     name: Scaffold build and test
     runs-on: ubuntu-latest
-    # The e2e step boots the middleware in REAL mode against the live GroundX
-    # backend (there is no MOCK_MODE — 2026-06-01-retire-mock-mode). Targeting
-    # the `dev` environment resolves the env-scoped GROUNDX_PARTNER_API_KEY
-    # secret (it is set as BOTH an org secret AND a `dev`-environment secret).
-    environment: dev
+    # Deterministic per-PR CI: boots the stack and exercises the boot/proxy path
+    # against a throwaway MySQL — NO live GroundX. The dev-smoke runs boot-only;
+    # the live-GroundX integration (login + project/bucket/search + browser e2e)
+    # runs in integration.yml (schedule + manual) so a GroundX outage or a missing
+    # test customer never gates merges.
     services:
       # Disposable MySQL for the DB-schema integration test
       # (mysqlRepository.integration.test.ts) — NOT the deployed dev DB, a throwaway
@@ -79,49 +79,21 @@ jobs:
       # app (Vite), and drives the /api flow (onboarding session, login, the
       # authed read endpoints + a CSRF-protected POST). Catches dev-runtime
       # resolution + auth/CSRF regressions the unit suite can't see.
-      - name: Dev smoke (boot servers + /api flow)
+      - name: Dev smoke (boot servers + /api flow, boot-only)
         env:
-          # MySQL is the only runtime repository (memory mode retired), so the
-          # middleware must boot against a real MySQL. Use the disposable service
-          # container above (127.0.0.1) — the deployed `dev` RDS lives in a private
-          # VPC and is NOT reachable from a GitHub-hosted runner (connecting to it
-          # times out and the middleware never boots). Same target the Unit tests
-          # use; createSchema runs fresh against the throwaway DB.
+          # MySQL is the only runtime repository; boot against the throwaway
+          # service container (127.0.0.1) — the deployed `dev` RDS is in a private
+          # VPC and unreachable from GitHub-hosted runners.
           MYSQL_HOST: 127.0.0.1
           MYSQL_PORT: "3306"
           MYSQL_USER: root
           MYSQL_PASSWORD: test
           MYSQL_DATABASE: test
-          # The /api flow exercises authed read endpoints, which reach GroundX.
-          GROUNDX_PARTNER_API_KEY: ${{ secrets.GROUNDX_PARTNER_API_KEY }}
-          GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
+          # NO real GroundX key here. smoke-dev.mjs defaults to the
+          # `smoke-partner-key` placeholder and SKIPS the live-upstream flow, so
+          # this step is deterministic. The live login/project/bucket/search flow
+          # and the browser e2e run in integration.yml (schedule + manual).
         run: npm run verify:preview
-
-      # The e2e suite boots the middleware in REAL mode against the live GroundX
-      # backend (no MOCK_MODE). Fail LOUDLY if the Partner key secret is absent —
-      # never let the suite pass "quietly green" because it ran without GroundX.
-      # The deterministic e2e data is the seeded sample doc c3bfff49 in bucket
-      # 28454. The secret is referenced from the `dev` environment (job-level
-      # `environment: dev` above resolves the env-scoped secret).
-      - name: Browser smoke tests
-        env:
-          GROUNDX_PARTNER_API_KEY: ${{ secrets.GROUNDX_PARTNER_API_KEY }}
-          GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
-          GROUNDX_SAMPLES_BUCKET_ID: "28454"
-          # The e2e suite boots the middleware too — same MySQL requirement as the
-          # dev-smoke step. Use the disposable service container (the deployed dev
-          # RDS is unreachable from GitHub-hosted runners).
-          MYSQL_HOST: 127.0.0.1
-          MYSQL_PORT: "3306"
-          MYSQL_USER: root
-          MYSQL_PASSWORD: test
-          MYSQL_DATABASE: test
-        run: |
-          if [ -z "${GROUNDX_PARTNER_API_KEY}" ]; then
-            echo "::error::GROUNDX_PARTNER_API_KEY is not set. The e2e suite runs against REAL GroundX and must not pass without it. Configure the secret on the 'dev' environment (and org)."
-            exit 1
-          fi
-          npm run test:e2e
 
   container-images:
     name: Build container images
