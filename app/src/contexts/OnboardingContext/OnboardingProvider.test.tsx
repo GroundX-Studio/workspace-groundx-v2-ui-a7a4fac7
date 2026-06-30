@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { Auth, AuthContext, AuthContextI } from "@/contexts/AuthContext/AuthContext";
+import { sdkSuccess } from "@/contexts/sdkContextTypes";
 import { GxThemeProvider } from "@/ThemeProvider";
 
 import { OnboardingProvider } from "./OnboardingProvider";
@@ -24,7 +25,7 @@ const baseUser = {
 
 const renderProvider = ({
   onboardingState,
-  updateAppMetadata = vi.fn().mockResolvedValue({ isSuccess: true, error: false }),
+  updateAppMetadata = vi.fn().mockResolvedValue(sdkSuccess(undefined)),
 }: {
   onboardingState?: string | null;
   updateAppMetadata?: AuthContextI["updateAppMetadata"];
@@ -33,7 +34,9 @@ const renderProvider = ({
     const [auth, setAuth] = useState<Auth>(loggedInAuth);
     const [user, setUser] = useState<AuthContextI["user"]>({
       ...baseUser,
-      appMetadata: onboardingState === undefined ? null : { onboardingState },
+      // chat-wire-types-shared — `AppUserMetadata.groundxUsername` is now the
+      // one required field (the app narrows the rest). Fixture carries it.
+      appMetadata: onboardingState === undefined ? null : { groundxUsername: "acct-1", onboardingState },
     });
 
     const contextValue: AuthContextI = {
@@ -52,6 +55,10 @@ const renderProvider = ({
               ? {
                 ...currentUser,
                 appMetadata: {
+                    // chat-wire-types-shared — `groundxUsername` is required on
+                    // the shared `AppUserMetadata`; carry the existing one (or
+                    // the user's username) so the merged metadata stays typed.
+                    groundxUsername: currentUser.appMetadata?.groundxUsername ?? currentUser.username,
                     ...(currentUser.appMetadata ?? {}),
                     ...metadata,
                   },
@@ -86,7 +93,13 @@ describe("OnboardingProvider", () => {
     renderProvider();
 
     expect(await screen.findByRole("dialog", { name: /welcome to groundx studio/i })).toBeInTheDocument();
-    expect(screen.getByText("Start with the app shell")).toBeInTheDocument();
+    expect(screen.getByText("Pick up where the proof left off")).toBeInTheDocument();
+    expect(screen.getByText(/current conversations and saved chat sessions/i)).toBeInTheDocument();
+    expect(screen.getByText("Saved sessions")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open onboarding sandbox/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Start with the app shell")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Replace the starter Home page/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Name your workspace/i)).not.toBeInTheDocument();
   });
 
   it("does not open after onboarding is complete", () => {
@@ -112,7 +125,7 @@ describe("OnboardingProvider", () => {
     const { updateAppMetadata } = renderProvider();
 
     await screen.findByRole("dialog", { name: /welcome to groundx studio/i });
-    for (const label of ["Explore navigation", "Next", "Next", "Next"]) {
+    for (const label of ["Next: Workspaces", "Next: Sandbox", "Next: Outputs", "Next: Integrate"]) {
       await act(async () => {
         await user.click(screen.getByRole("button", { name: label }));
       });

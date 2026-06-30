@@ -15,6 +15,14 @@
  */
 
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap");
+/*
+ * Thicccboi — the marketing / Webflow typeface from the brand standards
+ * (eyelevel-design-standards/tokens.json typography.fontFamilyMarketing).
+ * We use it for hero headlines on the customer-facing onboarding surface so
+ * the F-series flow reads with the same brand voice as the wireframes'
+ * .wf-h tier. Body, UI labels, and chrome stay on Inter.
+ */
+@import url("https://api.fontshare.com/v2/css?f[]=thicccboi@400,600,700,800&display=swap");
 
 :root {
   /*
@@ -25,6 +33,7 @@
    * the other is the JS surface of the same token.
    */
   --gx-font:                 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --gx-font-marketing:       "Thicccboi", "Inter", system-ui, sans-serif;
   --gx-font-features:        "ss01", "cv11", "cv01";
 
   /* Alias kept for backward compat with any older component that used the

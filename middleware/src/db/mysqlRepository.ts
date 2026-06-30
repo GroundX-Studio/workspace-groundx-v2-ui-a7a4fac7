@@ -1,7 +1,50 @@
 import mysql from "mysql2/promise";
 
 import type { AppEnv } from "../config/env.js";
-import type { AppRepository, AppUserMetadata, SessionRecord } from "../types.js";
+import type {
+  AppRepository,
+  AppUserMetadata,
+  ChatMessageRecord,
+  ChatSessionEntityRecord,
+  ChatSessionRecord,
+  ConversationSummaryRecord,
+  IntentLogRecord,
+  ProjectGrantRecord,
+  ProjectRecord,
+  SessionRecord,
+  TemplateRecord,
+  ViewerEventRecord,
+} from "../types.js";
+import {
+  CHAT_MESSAGE_ROLE_FALLBACK,
+  chatMessageRoleSchema,
+  INTENT_LOG_SOURCE_FALLBACK,
+  intentLogSourceSchema,
+  VIEWER_EVENT_ACTION_FALLBACK,
+  viewerEventActionSchema,
+  VIEWER_EVENT_SOURCE_FALLBACK,
+  viewerEventSourceSchema,
+} from "../types.js";
+import { parseCanvasIntent, templateKindSchema, type TemplateKind } from "@groundx/shared";
+import type { z } from "zod";
+import { logger } from "../lib/logger.js";
+
+/**
+ * 2026-05-31-core-data-followups §4c — narrow an untrusted union-typed DB
+ * column into its enum, COERCING an out-of-union value to a documented safe
+ * default rather than blind-casting it straight into LLM context. Parallels the
+ * `rowToTemplate` kind-guard precedent (which drops the whole row); here a
+ * single bad telemetry/message field is coerced so turn ordering and the row's
+ * other fields survive. A VALID value passes through unchanged.
+ */
+function coerceEnum<T extends string>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  fallback: T,
+): T {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : fallback;
+}
 
 export class MySqlAppRepository implements AppRepository {
   private pool: mysql.Pool;
@@ -43,6 +86,284 @@ export class MySqlAppRepository implements AppRepository {
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     `);
+
+    // Chat-session tables (per project_database.md). Anonymous content
+    // lives in localStorage; these tables only see rows after the
+    // login-claim BFF endpoint ingests an anon payload, and for
+    // signed-in writes thereafter. viewer_events is the exception —
+    // it's telemetry-class and writes for both anon and signed-in users.
+    //
+    // Width note (2026-05-26): all ID columns are VARCHAR(64), not 36.
+    // The frontend mints session ids of the form `c-<uuid>` (38 chars),
+    // not bare UUIDs. The original VARCHAR(36) silently truncated on
+    // insert, then read-by-id missed the truncated row → 404 on every
+    // chat/messages POST after the first chat-session create.
+    // VARCHAR(64) leaves headroom for future prefix changes.
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS chat_sessions (
+        id VARCHAR(64) PRIMARY KEY,
+        onboarding_session_id VARCHAR(64) NOT NULL,
+        owner_user_id VARCHAR(128) NULL,
+        owner_anon_id VARCHAR(64) NULL,
+        title VARCHAR(255) NOT NULL,
+        is_onboarding BOOLEAN NOT NULL DEFAULT FALSE,
+        active_entity_key VARCHAR(64) NULL,
+        current_intent_json JSON NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        archived_at DATETIME NULL,
+        INDEX chat_sessions_owner_user_idx (owner_user_id, updated_at),
+        INDEX chat_sessions_onboarding_idx (onboarding_session_id, updated_at),
+        CHECK (owner_user_id IS NOT NULL OR owner_anon_id IS NOT NULL)
+      )
+    `);
+
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id VARCHAR(64) PRIMARY KEY,
+        chat_session_id VARCHAR(64) NOT NULL,
+        turn_index INT NOT NULL,
+        role VARCHAR(16) NOT NULL,
+        content TEXT NOT NULL,
+        citations_json JSON NULL,
+        compressed_into_summary_id VARCHAR(64) NULL,
+        llm_provider VARCHAR(64) NULL,
+        llm_model_id VARCHAR(64) NULL,
+        latency_ms INT NULL,
+        prompt_tokens INT NULL,
+        completion_tokens INT NULL,
+        error_code VARCHAR(255) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX chat_messages_session_idx (chat_session_id, turn_index),
+        INDEX chat_messages_session_live_idx (chat_session_id, compressed_into_summary_id),
+        FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    // chat-response-streaming P2.2 — maps a streaming turn's client idempotency
+    // key to its persisted assistant message, so a reconnect after the in-memory
+    // runner is gone returns the saved answer instead of re-generating. A SEPARATE
+    // table (not a chat_messages column) so the boot stays CREATE-only — this repo
+    // deliberately issues NO `ALTER`/`information_schema` migrations (a fresh DB
+    // and an already-provisioned one both get the table via CREATE IF NOT EXISTS).
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS chat_turn_index (
+        chat_session_id VARCHAR(64) NOT NULL,
+        turn_key VARCHAR(64) NOT NULL,
+        message_id VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (chat_session_id, turn_key),
+        FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS conversation_summaries (
+        id VARCHAR(64) PRIMARY KEY,
+        chat_session_id VARCHAR(64) NOT NULL,
+        from_message_id VARCHAR(64) NOT NULL,
+        to_message_id VARCHAR(64) NOT NULL,
+        generation INT NOT NULL DEFAULT 0,
+        absorbed_summary_ids_json JSON NOT NULL,
+        content TEXT NOT NULL,
+        model VARCHAR(64) NOT NULL,
+        tokens_in INT NOT NULL,
+        tokens_out INT NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX conv_summaries_session_idx (chat_session_id, created_at),
+        FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    // standardized-viewer-control (dce9e87) RENAMED chat_session_entities's resume-
+    // anchor columns: last_frame + completed_frames_json (frame machine) →
+    // last_step_json + reached_stages_json (JourneyStage), choosing "no data
+    // migration" (pre-launch; entity/resume state is disposable). The boot is
+    // otherwise CREATE-only (see the chat_turn_index note above) on the premise that
+    // a fresh AND an already-provisioned DB converge via CREATE IF NOT EXISTS — but
+    // that premise only holds for ADDITIVE NEW TABLES. A breaking *column* rename
+    // cannot reach an already-provisioned table that way: the table keeps its old
+    // columns, so the very first SELECT of every chat turn fails with
+    // ER_BAD_FIELD_ERROR ("Unknown column 'last_step_json'") and the chat appears
+    // dead (it surfaces only as a bare `internal_error`). We reconcile with the
+    // sanctioned extraction_schemas pattern (DROP + recreate) made CONDITIONAL: probe
+    // information_schema and drop ONLY when the table exists WITHOUT the new column,
+    // so this fires exactly once on a stale pre-rename DB and is a no-op on a fresh
+    // OR already-current one — live session state is never wiped on a normal boot.
+    // The CREATE TABLE IF NOT EXISTS below then rebuilds the dropped table.
+    // TODO(#31): replace these boot-time reconciliations with versioned migrations
+    // before GA, once schema changes must preserve real data.
+    const [entitySchemaRows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT
+         (SELECT COUNT(*) FROM information_schema.TABLES
+            WHERE table_schema = DATABASE() AND table_name = 'chat_session_entities') AS table_n,
+         (SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE table_schema = DATABASE() AND table_name = 'chat_session_entities'
+              AND column_name = 'last_step_json') AS new_col_n`,
+    );
+    const entityTableExists = Number(entitySchemaRows[0]?.table_n ?? 0) > 0;
+    const entityHasNewColumn = Number(entitySchemaRows[0]?.new_col_n ?? 0) > 0;
+    if (entityTableExists && !entityHasNewColumn) {
+      logger.warn(
+        "chat_session_entities predates the standardized-viewer-control column rename; " +
+          "dropping the stale table (pre-launch, no data migration) so it is recreated " +
+          "with last_step_json/reached_stages_json",
+      );
+      await this.pool.execute(`DROP TABLE IF EXISTS chat_session_entities`);
+    }
+
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS chat_session_entities (
+        chat_session_id VARCHAR(64) NOT NULL,
+        entity_key VARCHAR(64) NOT NULL,
+        -- standardized-viewer-control D13/R5 — the resume anchor moved off
+        -- frames: last_step_json (JSON-encoded PersistedViewerStep, the active
+        -- viewer step restored verbatim) + reached_stages_json (JSON array of
+        -- reached JourneyStage values, checkmarks only) replace the frame-keyed
+        -- last_frame / completed_frames_json. Pre-launch: no data migration.
+        last_step_json JSON NULL,
+        reached_stages_json JSON NOT NULL,
+        scan_progress_json JSON NULL,
+        extracted_values_json JSON NULL,
+        -- CF-15: RAG scope refs. All nullable so existing rows + the
+        -- onboarding "no entity scope yet, just use the env samples
+        -- bucket" path keep working unchanged.
+        bucket_id INT NULL,
+        project_ids_json JSON NULL,
+        group_id INT NULL,
+        document_ids_json JSON NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_visited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (chat_session_id, entity_key),
+        FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS viewer_events (
+        id VARCHAR(64) PRIMARY KEY,
+        chat_session_id VARCHAR(64) NOT NULL,
+        ts_ms BIGINT NOT NULL,
+        entity_key VARCHAR(64) NULL,
+        action VARCHAR(32) NOT NULL,
+        source VARCHAR(16) NOT NULL,
+        detail_json JSON NULL,
+        INDEX viewer_events_session_idx (chat_session_id, ts_ms),
+        FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    // UI-10b — intent_log. Separate from viewer_events so the tour
+    // state machine (PLUG-05) can write `source: "tour"` rows without
+    // polluting the viewer trail. Cascades on chat_sessions.
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS intent_log (
+        id VARCHAR(64) PRIMARY KEY,
+        chat_session_id VARCHAR(64) NOT NULL,
+        ts_ms BIGINT NOT NULL,
+        source VARCHAR(16) NOT NULL,
+        intent_kind VARCHAR(64) NOT NULL,
+        intent_json JSON NOT NULL,
+        INDEX intent_log_session_idx (chat_session_id, ts_ms),
+        FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+      )
+    `);
+
+    // shared-template-lifecycle Phase 2 — the durable Template store (Extract
+    // schema + Report template). `kind` discriminates; `body_json` is the
+    // opaque JSON body. No `version` column (versioning deferred until a reader
+    // needs it). Per-user scoping by `groundx_username`, plus `kind`.
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS templates (
+        id VARCHAR(64) PRIMARY KEY,
+        kind VARCHAR(16) NOT NULL,
+        groundx_username VARCHAR(128) NOT NULL,
+        name VARCHAR(128) NOT NULL,
+        body_json JSON NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX templates_user_kind_idx (groundx_username, kind, updated_at)
+      )
+    `);
+
+    // 2026-05-31-extraction-schemas-table-drop — the legacy `extraction_schemas`
+    // table (and its boot copy-INSERT…SELECT into `templates`) are GONE: the
+    // `templates` migration soaked one full production release, so all rows have
+    // folded over and nothing reads `extraction_schemas`. Shed the superseded
+    // table from any already-provisioned DB. `IF EXISTS` keeps a never-
+    // provisioned (fresh) DB booting cleanly; sequenced after `templates` so no
+    // statement references a table it just dropped.
+    await this.pool.execute(`DROP TABLE IF EXISTS extraction_schemas`);
+
+    // 2026-06-01-projects-rbac-scope-filter — the app-owned data-organization
+    // layer. A `project` is the WF-07 grouping of documents within a bucket; its
+    // id is the value the GroundX search `filter` is keyed on. GroundX owns the
+    // customer/bucket/document — these tables hold ONLY the app's project row +
+    // the RBAC grant graph (never mirror a GroundX-owned concept).
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS projects (
+        project_id VARCHAR(64) PRIMARY KEY,
+        bucket_id INT NOT NULL,
+        name VARCHAR(128) NOT NULL,
+        owner_username VARCHAR(128) NULL,
+        is_sample BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX projects_bucket_idx (bucket_id),
+        INDEX projects_owner_idx (owner_username)
+      )
+    `);
+
+    // RBAC / sharing (ACL). principal_type ∈ public|user|account; principal_id
+    // is the GroundX customerId (or accountId), NULL for public. role ∈
+    // owner|editor|viewer (read = viewer+). The authorized read set the RAG
+    // filter is built from is "every project with a grant to the caller (or
+    // public)".
+    await this.pool.execute(`
+      CREATE TABLE IF NOT EXISTS project_grants (
+        project_id VARCHAR(64) NOT NULL,
+        principal_type VARCHAR(16) NOT NULL,
+        -- GroundX customer username. NOT NULL DEFAULT '' (not NULL) so it can
+        -- sit in the composite PK; '' is the sentinel for
+        -- principal_type='public'. Mapped null<->'' at the repo boundary.
+        principal_username VARCHAR(128) NOT NULL DEFAULT '',
+        role VARCHAR(16) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (project_id, principal_type, principal_username),
+        INDEX project_grants_principal_idx (principal_type, principal_username),
+        FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+      )
+    `);
+
+    // Dead-column cleanup. These columns were removed from the schema once their
+    // read/write chains were dropped (tool_calls_json / attachments_json:
+    // 80ab8ac §4 #17; viewer_*_json: 76d3d86), but the CREATE-only boot can't shed a
+    // column from an ALREADY-PROVISIONED table, so they linger as inert cruft on
+    // older DBs. One combined information_schema probe finds any that remain, then a
+    // guarded DROP removes each — a no-op on a fresh/clean DB (nothing to drop), and
+    // safe (these columns are unread and unwritten). Same conditional-reconciliation
+    // pattern as the chat_session_entities rename above. TODO(#31): fold into
+    // versioned migrations.
+    const DEAD_COLUMNS: ReadonlyArray<{ table: string; column: string }> = [
+      { table: "chat_messages", column: "tool_calls_json" },
+      { table: "chat_messages", column: "attachments_json" },
+      { table: "chat_sessions", column: "viewer_history_json" },
+      { table: "chat_sessions", column: "viewer_overlays_json" },
+      { table: "chat_sessions", column: "viewer_workspace_json" },
+    ];
+    const [deadColRows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT table_name AS t, column_name AS c FROM information_schema.COLUMNS
+        WHERE table_schema = DATABASE()
+          AND (table_name, column_name) IN (${DEAD_COLUMNS.map(() => "(?, ?)").join(", ")})`,
+      DEAD_COLUMNS.flatMap(({ table, column }) => [table, column]),
+    );
+    const present = new Set(deadColRows.map((r) => `${r.t}.${r.c}`));
+    for (const { table, column } of DEAD_COLUMNS) {
+      if (!present.has(`${table}.${column}`)) continue;
+      logger.warn(`dropping dead column ${table}.${column} (removed from schema; lingering on an already-provisioned DB)`);
+      // Identifiers are hard-coded constants above, never user input — safe to interpolate.
+      await this.pool.execute(`ALTER TABLE \`${table}\` DROP COLUMN \`${column}\``);
+    }
   }
 
   async createSession(session: SessionRecord): Promise<void> {
@@ -126,4 +447,630 @@ export class MySqlAppRepository implements AppRepository {
       appRole: row.app_role,
     };
   }
+
+  // ── Chat sessions ───────────────────────────────────────────────
+
+  async upsertChatSession(record: ChatSessionRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO chat_sessions (
+        id, onboarding_session_id, owner_user_id, owner_anon_id, title,
+        is_onboarding, active_entity_key, current_intent_json,
+        created_at, updated_at, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        owner_user_id = VALUES(owner_user_id),
+        owner_anon_id = VALUES(owner_anon_id),
+        title = VALUES(title),
+        is_onboarding = VALUES(is_onboarding),
+        active_entity_key = VALUES(active_entity_key),
+        current_intent_json = VALUES(current_intent_json),
+        updated_at = VALUES(updated_at),
+        archived_at = VALUES(archived_at)`,
+      [
+        record.id,
+        record.onboardingSessionId,
+        record.ownerUserId,
+        record.ownerAnonId,
+        record.title,
+        record.isOnboarding ? 1 : 0,
+        record.activeEntityKey,
+        record.currentIntent != null ? JSON.stringify(record.currentIntent) : null,
+        record.createdAt,
+        record.updatedAt,
+        record.archivedAt,
+      ],
+    );
+  }
+
+  async getChatSession(id: string): Promise<ChatSessionRecord | null> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, onboarding_session_id, owner_user_id, owner_anon_id, title,
+        is_onboarding, active_entity_key, current_intent_json,
+        created_at, updated_at, archived_at
+       FROM chat_sessions WHERE id = ? LIMIT 1`,
+      [id],
+    );
+    const row = rows[0];
+    return row ? rowToChatSession(row) : null;
+  }
+
+  async listChatSessionsForUser(ownerUserId: string): Promise<ChatSessionRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, onboarding_session_id, owner_user_id, owner_anon_id, title,
+        is_onboarding, active_entity_key, current_intent_json,
+        created_at, updated_at, archived_at
+       FROM chat_sessions
+       WHERE owner_user_id = ?
+       ORDER BY updated_at DESC`,
+      [ownerUserId],
+    );
+    return rows.map(rowToChatSession);
+  }
+
+  // ── Messages ────────────────────────────────────────────────────
+
+  async appendChatMessage(record: ChatMessageRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO chat_messages (
+        id, chat_session_id, turn_index, role, content,
+        citations_json,
+        compressed_into_summary_id, llm_provider, llm_model_id,
+        latency_ms, prompt_tokens, completion_tokens, error_code, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.chatSessionId,
+        record.turnIndex,
+        record.role,
+        record.content,
+        record.citationsJson,
+        record.compressedIntoSummaryId,
+        record.llmProvider,
+        record.llmModelId,
+        record.latencyMs,
+        record.promptTokens,
+        record.completionTokens,
+        record.errorCode,
+        record.createdAt,
+      ],
+    );
+    // chat-response-streaming P2.2 — index a streaming turn's assistant message by
+    // its client idempotency key for from-DB reconnect (REPLACE so a rare re-run
+    // for the same key points at the latest row).
+    if (record.turnKey) {
+      await this.pool.execute(
+        `REPLACE INTO chat_turn_index (chat_session_id, turn_key, message_id) VALUES (?, ?, ?)`,
+        [record.chatSessionId, record.turnKey, record.id],
+      );
+    }
+  }
+
+  async listChatMessages(chatSessionId: string): Promise<ChatMessageRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, chat_session_id, turn_index, role, content,
+        citations_json,
+        compressed_into_summary_id, llm_provider, llm_model_id,
+        latency_ms, prompt_tokens, completion_tokens, error_code, created_at
+       FROM chat_messages
+       WHERE chat_session_id = ?
+       ORDER BY turn_index ASC`,
+      [chatSessionId],
+    );
+    return rows.map(rowToChatMessage);
+  }
+
+  async getAssistantMessageByTurnKey(
+    chatSessionId: string,
+    turnKey: string,
+  ): Promise<ChatMessageRecord | null> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT m.id, m.chat_session_id, m.turn_index, m.role, m.content,
+        m.citations_json,
+        m.compressed_into_summary_id, m.llm_provider, m.llm_model_id,
+        m.latency_ms, m.prompt_tokens, m.completion_tokens, m.error_code, m.created_at
+       FROM chat_messages m
+       JOIN chat_turn_index t ON t.message_id = m.id
+       WHERE t.chat_session_id = ? AND t.turn_key = ? AND m.role = 'assistant'
+       LIMIT 1`,
+      [chatSessionId, turnKey],
+    );
+    // Populate `turnKey` on the returned record (it's the known query key) so this
+    // repo matches the memory repo's contract — `turn_key` lives in chat_turn_index,
+    // not chat_messages, so the shared row mapper can't set it.
+    return rows.length > 0 ? { ...rowToChatMessage(rows[0]), turnKey } : null;
+  }
+
+  async markChatMessagesCompressed(messageIds: string[], summaryId: string): Promise<void> {
+    if (messageIds.length === 0) return;
+    // mysql2 expands the bound array into the ?-placeholder list, e.g.
+    // [["m1","m2","m3"]] → IN (?, ?, ?). Bounded by the compression
+    // planner so this is never a million-id array.
+    const placeholders = messageIds.map(() => "?").join(", ");
+    await this.pool.execute(
+      `UPDATE chat_messages
+         SET compressed_into_summary_id = ?
+       WHERE id IN (${placeholders})`,
+      [summaryId, ...messageIds],
+    );
+  }
+
+  // ── Summaries ───────────────────────────────────────────────────
+
+  async appendConversationSummary(record: ConversationSummaryRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO conversation_summaries (
+        id, chat_session_id, from_message_id, to_message_id, generation,
+        absorbed_summary_ids_json, content, model, tokens_in, tokens_out, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.chatSessionId,
+        record.fromMessageId,
+        record.toMessageId,
+        record.generation,
+        record.absorbedSummaryIdsJson,
+        record.content,
+        record.model,
+        record.tokensIn,
+        record.tokensOut,
+        record.createdAt,
+      ],
+    );
+  }
+
+  async listConversationSummaries(chatSessionId: string): Promise<ConversationSummaryRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, chat_session_id, from_message_id, to_message_id, generation,
+        absorbed_summary_ids_json, content, model, tokens_in, tokens_out, created_at
+       FROM conversation_summaries
+       WHERE chat_session_id = ?
+       ORDER BY created_at DESC`,
+      [chatSessionId],
+    );
+    return rows.map(rowToConversationSummary);
+  }
+
+  // ── Per-session entities ────────────────────────────────────────
+
+  async upsertChatSessionEntity(record: ChatSessionEntityRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO chat_session_entities (
+        chat_session_id, entity_key, last_step_json, reached_stages_json,
+        scan_progress_json, extracted_values_json,
+        bucket_id, project_ids_json, group_id, document_ids_json,
+        created_at, last_visited_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        last_step_json = VALUES(last_step_json),
+        reached_stages_json = VALUES(reached_stages_json),
+        scan_progress_json = VALUES(scan_progress_json),
+        extracted_values_json = VALUES(extracted_values_json),
+        bucket_id = VALUES(bucket_id),
+        project_ids_json = VALUES(project_ids_json),
+        group_id = VALUES(group_id),
+        document_ids_json = VALUES(document_ids_json),
+        last_visited_at = VALUES(last_visited_at)`,
+      [
+        record.chatSessionId,
+        record.entityKey,
+        record.lastStepJson,
+        record.reachedStagesJson,
+        record.scanProgressJson,
+        record.extractedValuesJson,
+        record.bucketId,
+        record.projectIdsJson,
+        record.groupId,
+        record.documentIdsJson,
+        record.createdAt,
+        record.lastVisitedAt,
+      ],
+    );
+  }
+
+  async listChatSessionEntities(chatSessionId: string): Promise<ChatSessionEntityRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT chat_session_id, entity_key, last_step_json, reached_stages_json,
+        scan_progress_json, extracted_values_json,
+        bucket_id, project_ids_json, group_id, document_ids_json,
+        created_at, last_visited_at
+       FROM chat_session_entities
+       WHERE chat_session_id = ?`,
+      [chatSessionId],
+    );
+    return rows.map(rowToChatSessionEntity);
+  }
+
+  // ── Viewer events ───────────────────────────────────────────────
+
+  async appendViewerEvent(record: ViewerEventRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO viewer_events (
+        id, chat_session_id, ts_ms, entity_key, action, source, detail_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.chatSessionId,
+        record.timestamp,
+        record.entityKey,
+        record.action,
+        record.source,
+        record.detailJson,
+      ],
+    );
+  }
+
+  async listViewerEvents(chatSessionId: string, sinceTimestamp?: number): Promise<ViewerEventRecord[]> {
+    if (sinceTimestamp != null) {
+      const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+        `SELECT id, chat_session_id, ts_ms, entity_key, action, source, detail_json
+         FROM viewer_events
+         WHERE chat_session_id = ? AND ts_ms >= ?
+         ORDER BY ts_ms DESC`,
+        [chatSessionId, sinceTimestamp],
+      );
+      return rows.map(rowToViewerEvent);
+    }
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, chat_session_id, ts_ms, entity_key, action, source, detail_json
+       FROM viewer_events
+       WHERE chat_session_id = ?
+       ORDER BY ts_ms DESC`,
+      [chatSessionId],
+    );
+    return rows.map(rowToViewerEvent);
+  }
+
+  // ── Intent log (UI-10b) ─────────────────────────────────────────
+
+  async appendIntentLog(record: IntentLogRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO intent_log (
+        id, chat_session_id, ts_ms, source, intent_kind, intent_json
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.chatSessionId,
+        record.timestamp,
+        record.source,
+        record.intentKind,
+        record.intentJson,
+      ],
+    );
+  }
+
+  async listIntentLog(chatSessionId: string, sinceTimestamp?: number): Promise<IntentLogRecord[]> {
+    if (sinceTimestamp != null) {
+      const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+        `SELECT id, chat_session_id, ts_ms, source, intent_kind, intent_json
+         FROM intent_log
+         WHERE chat_session_id = ? AND ts_ms >= ?
+         ORDER BY ts_ms DESC`,
+        [chatSessionId, sinceTimestamp],
+      );
+      return rows.map(rowToIntentLog);
+    }
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, chat_session_id, ts_ms, source, intent_kind, intent_json
+       FROM intent_log
+       WHERE chat_session_id = ?
+       ORDER BY ts_ms DESC`,
+      [chatSessionId],
+    );
+    return rows.map(rowToIntentLog);
+  }
+
+  // (Legacy `extraction_schemas` repo methods removed at the Phase-3 cutover;
+  // the table + its boot copy-migration were dropped in
+  // 2026-05-31-extraction-schemas-table-drop after `templates` soaked one prod
+  // release — see the `DROP TABLE IF EXISTS extraction_schemas` step above.)
+
+  // ── Templates (shared-template-lifecycle) ───────────────────────
+
+  async saveTemplate(record: TemplateRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO templates (id, kind, groundx_username, name, body_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+        kind = VALUES(kind),
+        groundx_username = VALUES(groundx_username),
+        name = VALUES(name),
+        body_json = VALUES(body_json),
+        updated_at = VALUES(updated_at)`,
+      [
+        record.id,
+        record.kind,
+        record.groundxUsername,
+        record.name,
+        record.bodyJson,
+        record.createdAt,
+        record.updatedAt,
+      ],
+    );
+  }
+
+  async getTemplate(id: string): Promise<TemplateRecord | null> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, kind, groundx_username, name, body_json, created_at, updated_at
+       FROM templates WHERE id = ?`,
+      [id],
+    );
+    const row = rows[0];
+    return row ? rowToTemplate(row) : null;
+  }
+
+  async listTemplates(groundxUsername: string, kind: TemplateKind): Promise<TemplateRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT id, kind, groundx_username, name, body_json, created_at, updated_at
+       FROM templates WHERE groundx_username = ? AND kind = ?
+       ORDER BY updated_at DESC`,
+      [groundxUsername, kind],
+    );
+    return rows.map(rowToTemplate).filter((t): t is TemplateRecord => t !== null);
+  }
+
+  // ── Projects + RBAC grants (2026-06-01-projects-rbac-scope-filter) ──
+
+  async insertProject(record: ProjectRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO projects (project_id, bucket_id, name, owner_username, is_sample, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+        bucket_id = VALUES(bucket_id),
+        name = VALUES(name),
+        owner_username = VALUES(owner_username),
+        is_sample = VALUES(is_sample),
+        updated_at = VALUES(updated_at)`,
+      [
+        record.projectId,
+        record.bucketId,
+        record.name,
+        record.ownerUsername,
+        record.isSample,
+        record.createdAt,
+        record.updatedAt,
+      ],
+    );
+  }
+
+  async getProject(projectId: string): Promise<ProjectRecord | null> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT project_id, bucket_id, name, owner_username, is_sample, created_at, updated_at
+       FROM projects WHERE project_id = ?`,
+      [projectId],
+    );
+    const row = rows[0];
+    return row ? rowToProject(row) : null;
+  }
+
+  async listProjectsForBucket(bucketId: number): Promise<ProjectRecord[]> {
+    const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT project_id, bucket_id, name, owner_username, is_sample, created_at, updated_at
+       FROM projects WHERE bucket_id = ? ORDER BY created_at ASC`,
+      [bucketId],
+    );
+    return rows.map(rowToProject);
+  }
+
+  async insertProjectGrant(record: ProjectGrantRecord): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO project_grants (project_id, principal_type, principal_username, role, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE role = VALUES(role)`,
+      [
+        record.projectId,
+        record.principalType,
+        record.principalUsername ?? "", // null (public) -> '' sentinel for the composite PK
+        record.role,
+        record.createdAt,
+      ],
+    );
+  }
+
+  async listGrantsForPrincipal(username: string | null): Promise<ProjectGrantRecord[]> {
+    // Public grants ALWAYS apply; a signed-in customer additionally gets their
+    // own user grants. (Account grants compose here when team accounts land.)
+    const [rows] = username
+      ? await this.pool.execute<mysql.RowDataPacket[]>(
+          `SELECT project_id, principal_type, principal_username, role, created_at
+           FROM project_grants
+           WHERE principal_type = 'public'
+              OR (principal_type = 'user' AND principal_username = ?)`,
+          [username],
+        )
+      : await this.pool.execute<mysql.RowDataPacket[]>(
+          `SELECT project_id, principal_type, principal_username, role, created_at
+           FROM project_grants WHERE principal_type = 'public'`,
+        );
+    return rows.map(rowToProjectGrant);
+  }
+
+  // ── Login-claim (re-key, not bulk-upload) ───────────────────────
+
+  async rekeyAnonymousChatSessions(anonId: string, ownerUserId: string): Promise<{ rekeyedSessions: number }> {
+    // One statement, atomic at the row level. Child rows (messages,
+    // summaries, entities, viewer_events) reference chat_sessions.id
+    // and inherit the new owner transitively — no need to touch them.
+    const [result] = await this.pool.execute(
+      `UPDATE chat_sessions
+         SET owner_user_id = ?,
+             owner_anon_id = NULL,
+             updated_at = NOW()
+       WHERE owner_anon_id = ?`,
+      [ownerUserId, anonId],
+    );
+    const affected = (result as mysql.ResultSetHeader).affectedRows ?? 0;
+    return { rekeyedSessions: affected };
+  }
+}
+
+// ── Row mappers ──────────────────────────────────────────────────────
+
+/**
+ * mysql2 auto-parses MySQL `JSON` columns into objects by default,
+ * but a column declared as TEXT/VARCHAR that *contains* JSON stays a
+ * string. The `chat_sessions.*_json` columns are typed `JSON` in
+ * MySQL but were `TEXT` in earlier installs — both shapes coexist in
+ * the wild. Calling `JSON.parse` on an already-parsed object stringifies
+ * it to `"[object Object]"` first, which throws. Handle both shapes
+ * defensively.
+ */
+function parseJsonColumn(value: unknown): unknown {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    if (value.length === 0) return null;
+    return JSON.parse(value);
+  }
+  // mysql2 already deserialized a native JSON column for us.
+  return value;
+}
+
+function rowToChatSession(row: mysql.RowDataPacket): ChatSessionRecord {
+  return {
+    id: row.id,
+    onboardingSessionId: row.onboarding_session_id,
+    ownerUserId: row.owner_user_id,
+    ownerAnonId: row.owner_anon_id,
+    title: row.title,
+    isOnboarding: Boolean(row.is_onboarding),
+    activeEntityKey: row.active_entity_key,
+    currentIntent: parseCanvasIntent(parseJsonColumn(row.current_intent_json)),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+    archivedAt: row.archived_at ? new Date(row.archived_at) : null,
+  };
+}
+
+/**
+ * WF-16 — a MySQL `JSON` column is returned ALREADY parsed by the
+ * driver (object/array), but `ChatMessageRecord` types these slots as
+ * `string | null`. Normalize back to a string so the record honors its
+ * type and downstream `JSON.parse` consumers (e.g. the messages-GET
+ * projection) don't choke on an already-parsed value.
+ */
+function jsonColumnToString(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return null;
+  }
+}
+
+function rowToChatMessage(row: mysql.RowDataPacket): ChatMessageRecord {
+  return {
+    id: row.id,
+    chatSessionId: row.chat_session_id,
+    turnIndex: row.turn_index,
+    role: coerceEnum(chatMessageRoleSchema, row.role, CHAT_MESSAGE_ROLE_FALLBACK),
+    content: row.content,
+    citationsJson: jsonColumnToString(row.citations_json),
+    compressedIntoSummaryId: row.compressed_into_summary_id,
+    llmProvider: row.llm_provider,
+    llmModelId: row.llm_model_id,
+    latencyMs: row.latency_ms,
+    promptTokens: row.prompt_tokens,
+    completionTokens: row.completion_tokens,
+    errorCode: row.error_code,
+    createdAt: new Date(row.created_at),
+  };
+}
+
+function rowToConversationSummary(row: mysql.RowDataPacket): ConversationSummaryRecord {
+  return {
+    id: row.id,
+    chatSessionId: row.chat_session_id,
+    fromMessageId: row.from_message_id,
+    toMessageId: row.to_message_id,
+    generation: row.generation,
+    absorbedSummaryIdsJson: row.absorbed_summary_ids_json,
+    content: row.content,
+    model: row.model,
+    tokensIn: row.tokens_in,
+    tokensOut: row.tokens_out,
+    createdAt: new Date(row.created_at),
+  };
+}
+
+function rowToChatSessionEntity(row: mysql.RowDataPacket): ChatSessionEntityRecord {
+  return {
+    chatSessionId: row.chat_session_id,
+    entityKey: row.entity_key,
+    lastStepJson: row.last_step_json,
+    reachedStagesJson: row.reached_stages_json,
+    scanProgressJson: row.scan_progress_json,
+    extractedValuesJson: row.extracted_values_json,
+    bucketId: row.bucket_id == null ? null : Number(row.bucket_id),
+    projectIdsJson: row.project_ids_json,
+    groupId: row.group_id == null ? null : Number(row.group_id),
+    documentIdsJson: row.document_ids_json,
+    createdAt: new Date(row.created_at),
+    lastVisitedAt: new Date(row.last_visited_at),
+  };
+}
+
+function rowToViewerEvent(row: mysql.RowDataPacket): ViewerEventRecord {
+  return {
+    id: row.id,
+    chatSessionId: row.chat_session_id,
+    timestamp: Number(row.ts_ms),
+    entityKey: row.entity_key,
+    action: coerceEnum(viewerEventActionSchema, row.action, VIEWER_EVENT_ACTION_FALLBACK),
+    source: coerceEnum(viewerEventSourceSchema, row.source, VIEWER_EVENT_SOURCE_FALLBACK),
+    detailJson: row.detail_json,
+  };
+}
+
+function rowToIntentLog(row: mysql.RowDataPacket): IntentLogRecord {
+  return {
+    id: row.id,
+    chatSessionId: row.chat_session_id,
+    timestamp: Number(row.ts_ms),
+    source: coerceEnum(intentLogSourceSchema, row.source, INTENT_LOG_SOURCE_FALLBACK),
+    intentKind: row.intent_kind,
+    intentJson: row.intent_json,
+  };
+}
+
+/**
+ * Map a `templates` row → `TemplateRecord`, GUARDING the `kind` VARCHAR
+ * against the shared enum (don't blindly cast a union column — a corrupt row
+ * reads back as `null`, treated as absent, rather than masquerading as a
+ * valid kind). `body_json` is passed through as an opaque string.
+ */
+function rowToTemplate(row: mysql.RowDataPacket): TemplateRecord | null {
+  const kind = templateKindSchema.safeParse(row.kind);
+  if (!kind.success) return null;
+  return {
+    id: row.id,
+    kind: kind.data,
+    groundxUsername: row.groundx_username,
+    name: row.name,
+    bodyJson: typeof row.body_json === "string" ? row.body_json : JSON.stringify(row.body_json),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function rowToProject(row: mysql.RowDataPacket): ProjectRecord {
+  return {
+    projectId: row.project_id,
+    bucketId: Number(row.bucket_id),
+    name: row.name,
+    ownerUsername: row.owner_username ?? null,
+    isSample: Boolean(row.is_sample),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function rowToProjectGrant(row: mysql.RowDataPacket): ProjectGrantRecord {
+  return {
+    projectId: row.project_id,
+    principalType: row.principal_type,
+    // '' sentinel (public) <-> null at the boundary.
+    principalUsername: row.principal_username === "" ? null : row.principal_username,
+    role: row.role,
+    createdAt: new Date(row.created_at),
+  };
 }

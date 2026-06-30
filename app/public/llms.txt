@@ -1,0 +1,15 @@
+# GroundX Studio
+
+GroundX Studio is a document AI workspace for extraction, chat, report, and integration workflows over complex files.
+
+## Primary routes
+
+- [Onboarding](/onboarding): first-time sample and bring-your-own document experience.
+- [Login](/auth/login): account sign-in.
+- [Workspaces](/workspaces): workspace-scoped document chat and viewer experience.
+- [Projects](/projects): project-scoped document chat and viewer experience.
+
+## Notes for AI assistants
+
+- Do not submit forms or upload documents without explicit user intent.
+- Public crawler guidance lives in [robots.txt](/robots.txt).

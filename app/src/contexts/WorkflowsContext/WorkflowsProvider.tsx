@@ -1,133 +1,112 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { GroundXRequestOptions } from "@/api/common";
-import { WorkflowInput, WorkflowRelationshipInput } from "@/api/entities/groundxWorkflowsEntity";
-import { Workflow } from "@/api/entities/sdkTypes";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import type { RequestOptions } from "@/api/common";
+import type { WorkflowInput, WorkflowRelationshipInput } from "@/api/entities/groundxWorkflowsEntity";
+import type { Workflow } from "@/api/entities/sdkTypes";
+import { useApi } from "@/contexts/ApiContext";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { WorkflowsContext } from "./WorkflowsContext";
 
 export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage, setSuccessMessage } = useMessageContext();
+  const api = useApi();
+  const run = useSdkRunner("Workflow operation failed.");
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
   const [accountWorkflow, setAccountWorkflow] = useState<Workflow | null>(null);
 
-  const run = useCallback(
-    async <T,>(work: () => Promise<T>, successMessage?: string) => {
-      const result = createSdkResult<T>();
-      setIsLoading(true);
-      try {
-        result.response = await work();
-        result.isSuccess = true;
-        if (successMessage) setSuccessMessage(successMessage);
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("Workflow operation failed.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading, setSuccessMessage]
-  );
-
   const listWorkflows = useCallback(
-    (options?: GroundXRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.listGroundXWorkflows(options);
         setWorkflows(response.workflows);
         return response.workflows;
       }),
-    [run]
+    [api, run]
   );
 
   const createWorkflow = useCallback(
-    (input: WorkflowInput, options?: GroundXRequestOptions) =>
+    (input: WorkflowInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.createGroundXWorkflow(input, options);
         setWorkflows((items) => [response.workflow, ...items]);
         return response.workflow;
       }, "Workflow created."),
-    [run]
+    [api, run]
   );
 
   const getWorkflow = useCallback(
-    (id: string | number, options?: GroundXRequestOptions) =>
+    (id: string | number, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.getGroundXWorkflow(id, options);
         setSelectedWorkflow(response.workflow);
         return response.workflow;
       }),
-    [run]
+    [api, run]
   );
 
   const updateWorkflow = useCallback(
-    (id: string | number, input: WorkflowInput, options?: GroundXRequestOptions) =>
+    (id: string | number, input: WorkflowInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.updateGroundXWorkflow(id, input, options);
         setWorkflows((items) => items.map((item) => (item.workflowId === String(id) ? response.workflow : item)));
         setSelectedWorkflow(response.workflow);
         return response.workflow;
       }, "Workflow updated."),
-    [run]
+    [api, run]
   );
 
   const deleteWorkflow = useCallback(
-    (id: string | number, options?: GroundXRequestOptions) =>
+    (id: string | number, options?: RequestOptions) =>
       run(async () => {
         await api.groundxWorkflows.deleteGroundXWorkflow(id, options);
         setWorkflows((items) => items.filter((item) => item.workflowId !== String(id)));
         setSelectedWorkflow((workflow) => (workflow?.workflowId === String(id) ? null : workflow));
       }, "Workflow deleted."),
-    [run]
+    [api, run]
   );
 
   const getAccountWorkflow = useCallback(
-    (options?: GroundXRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.getGroundXAccountWorkflow(options);
         setAccountWorkflow(response.workflow);
         return response.workflow;
       }),
-    [run]
+    [api, run]
   );
 
   const assignAccountWorkflow = useCallback(
-    (input: WorkflowRelationshipInput, options?: GroundXRequestOptions) =>
+    (input: WorkflowRelationshipInput, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxWorkflows.assignGroundXAccountWorkflow(input, options);
         setAccountWorkflow(response.workflow);
         return response.workflow;
       }, "Workflow assigned."),
-    [run]
+    [api, run]
   );
 
   const removeAccountWorkflow = useCallback(
-    (options?: GroundXRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         await api.groundxWorkflows.removeGroundXAccountWorkflow(options);
         setAccountWorkflow(null);
       }, "Workflow removed."),
-    [run]
+    [api, run]
   );
 
   const assignWorkflowToResource = useCallback(
-    (id: string | number, input: WorkflowRelationshipInput, options?: GroundXRequestOptions) =>
+    (id: string | number, input: WorkflowRelationshipInput, options?: RequestOptions) =>
       run(async () => (await api.groundxWorkflows.assignGroundXWorkflowToResource(id, input, options)).workflow, "Workflow assigned."),
-    [run]
+    [api, run]
   );
 
   const removeWorkflowFromResource = useCallback(
-    (id: string | number, options?: GroundXRequestOptions) =>
+    (id: string | number, options?: RequestOptions) =>
       run(async () => {
         await api.groundxWorkflows.removeGroundXWorkflowFromResource(id, options);
       }, "Workflow removed."),
-    [run]
+    [api, run]
   );
 
   return (
@@ -152,4 +131,3 @@ export const WorkflowsProvider: FC<{ children: ReactNode }> = ({ children }) => 
     </WorkflowsContext.Provider>
   );
 };
-

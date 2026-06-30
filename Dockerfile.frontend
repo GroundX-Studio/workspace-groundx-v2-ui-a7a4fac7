@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine AS deps
+WORKDIR /workspace
+COPY package*.json ./
+COPY shared/package*.json shared/
+COPY app/package*.json app/
+COPY middleware/package*.json middleware/
+COPY scripts/check-node-version.mjs scripts/check-node-version.mjs
+RUN npm ci
+
+FROM deps AS build
+# Build the shared wire-contract package first — the app bundles
+# @groundx/shared (resolved via the workspace symlink → its built dist).
+COPY shared shared
+RUN npm --workspace @groundx/shared run build
+COPY middleware middleware
+COPY app app
+ARG VITE_CALENDLY_URL=""
+ENV VITE_CALENDLY_URL=$VITE_CALENDLY_URL
+RUN npm --workspace app run build
+# OB-05 — drop sourcemaps from the runtime image. `vite build` emits
+# `.map` files alongside the bundles (mode "hidden" — no
+# sourceMappingURL comment in the JS, so browsers don't auto-fetch),
+# but nginx would still serve them at the .map URL if requested. The
+# CI deploy flow uploads them to Sentry FIRST (docs/agents/observability.md
+# § Source-map upload) and then deletes from `app/dist` before the
+# image build. This RUN is the defense-in-depth: if the CI upload
+# step isn't wired yet (no Sentry secret), maps still never reach
+# the client. If CI runs upload + delete first, this is a no-op.
+RUN find /workspace/app/dist -name "*.map" -delete
+
+FROM nginx:1.27-alpine
+ENV MIDDLEWARE_SERVICE_URL=http://groundx-web-ui-middleware:3001
+COPY deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /workspace/app/dist /usr/share/nginx/html
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1

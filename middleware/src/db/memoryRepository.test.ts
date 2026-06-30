@@ -1,0 +1,357 @@
+import { describe, expect, it } from "vitest";
+
+import type {
+  ChatMessageRecord,
+  ChatSessionEntityRecord,
+  ChatSessionRecord,
+  ConversationSummaryRecord,
+  IntentLogRecord,
+  TemplateRecord,
+  ViewerEventRecord,
+} from "../types.js";
+
+import { MemoryAppRepository } from "./memoryRepository.js";
+
+const baseSession: ChatSessionRecord = {
+  id: "chat-1",
+  onboardingSessionId: "onb-1",
+  ownerUserId: null,
+  ownerAnonId: "anon-1",
+  title: "Onboarding",
+  isOnboarding: true,
+  activeEntityKey: "sample:utility",
+  currentIntent: null,
+  createdAt: new Date("2026-05-24T12:00:00Z"),
+  updatedAt: new Date("2026-05-24T12:00:00Z"),
+  archivedAt: null,
+};
+
+function makeMessage(id: string, sessionId: string, turn: number, role: ChatMessageRecord["role"], content: string): ChatMessageRecord {
+  return {
+    id,
+    chatSessionId: sessionId,
+    turnIndex: turn,
+    role,
+    content,
+    citationsJson: null,
+    compressedIntoSummaryId: null,
+    llmProvider: null,
+    llmModelId: null,
+    latencyMs: null,
+    promptTokens: null,
+    completionTokens: null,
+    errorCode: null,
+    createdAt: new Date(),
+  };
+}
+
+describe("MemoryAppRepository — chat-session methods", () => {
+  it("upserts and reads chat sessions, listing in updated-at-desc order per user", async () => {
+    const repo = new MemoryAppRepository();
+    const a: ChatSessionRecord = { ...baseSession, id: "a", ownerUserId: "u1", ownerAnonId: null, updatedAt: new Date("2026-05-24T10:00:00Z") };
+    const b: ChatSessionRecord = { ...baseSession, id: "b", ownerUserId: "u1", ownerAnonId: null, updatedAt: new Date("2026-05-24T12:00:00Z") };
+    const c: ChatSessionRecord = { ...baseSession, id: "c", ownerUserId: "u2", ownerAnonId: null };
+    await repo.upsertChatSession(a);
+    await repo.upsertChatSession(b);
+    await repo.upsertChatSession(c);
+    expect(await repo.getChatSession("b")).toEqual(b);
+    const list = await repo.listChatSessionsForUser("u1");
+    expect(list.map((s) => s.id)).toEqual(["b", "a"]);
+  });
+
+  it("appends and lists messages in turn order regardless of insertion order", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.appendChatMessage(makeMessage("m2", "chat-1", 2, "assistant", "hi"));
+    await repo.appendChatMessage(makeMessage("m1", "chat-1", 1, "user", "hello"));
+    await repo.appendChatMessage(makeMessage("m3", "chat-1", 3, "user", "ok"));
+    const list = await repo.listChatMessages("chat-1");
+    expect(list.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("finds the assistant message by turnKey (P2.2 from-DB resume), session-scoped", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.appendChatMessage({ ...makeMessage("m-a", "chat-1", 2, "assistant", "the answer"), turnKey: "tk-1" });
+    await repo.appendChatMessage(makeMessage("m-u", "chat-1", 1, "user", "q")); // no turnKey
+
+    const found = await repo.getAssistantMessageByTurnKey("chat-1", "tk-1");
+    expect(found?.id).toBe("m-a");
+    expect(found?.content).toBe("the answer");
+    // Unknown key, and a key not in this session, both return null.
+    expect(await repo.getAssistantMessageByTurnKey("chat-1", "tk-nope")).toBeNull();
+    expect(await repo.getAssistantMessageByTurnKey("chat-other", "tk-1")).toBeNull();
+  });
+
+  it("marks chat messages as compressed into a summary id (compression chain Phase J)", async () => {
+    // When the compression runner writes a new ConversationSummary it
+    // must also update the absorbed messages' compressedIntoSummaryId
+    // field so subsequent live-tail reads skip them. The repo exposes
+    // a batch update keyed by message ids.
+    const repo = new MemoryAppRepository();
+    await repo.appendChatMessage(makeMessage("m1", "chat-1", 1, "user", "hello"));
+    await repo.appendChatMessage(makeMessage("m2", "chat-1", 2, "assistant", "hi"));
+    await repo.appendChatMessage(makeMessage("m3", "chat-1", 3, "user", "follow-up"));
+
+    await repo.markChatMessagesCompressed(["m1", "m2"], "summary-1");
+
+    const all = await repo.listChatMessages("chat-1");
+    const byId = new Map(all.map((m) => [m.id, m]));
+    expect(byId.get("m1")?.compressedIntoSummaryId).toBe("summary-1");
+    expect(byId.get("m2")?.compressedIntoSummaryId).toBe("summary-1");
+    // m3 must remain in the live tail (compressedIntoSummaryId stays null).
+    expect(byId.get("m3")?.compressedIntoSummaryId).toBeNull();
+  });
+
+  it("appends conversation summaries and lists newest first", async () => {
+    const repo = new MemoryAppRepository();
+    const older: ConversationSummaryRecord = {
+      id: "s1",
+      chatSessionId: "chat-1",
+      fromMessageId: "m1",
+      toMessageId: "m5",
+      generation: 0,
+      absorbedSummaryIdsJson: "[]",
+      content: "older",
+      model: "test",
+      tokensIn: 100,
+      tokensOut: 50,
+      createdAt: new Date("2026-05-24T10:00:00Z"),
+    };
+    const newer: ConversationSummaryRecord = { ...older, id: "s2", content: "newer", createdAt: new Date("2026-05-24T12:00:00Z") };
+    await repo.appendConversationSummary(older);
+    await repo.appendConversationSummary(newer);
+    const list = await repo.listConversationSummaries("chat-1");
+    expect(list.map((s) => s.id)).toEqual(["s2", "s1"]);
+  });
+
+  it("upserts session entities keyed by (sessionId, entityKey) and lists per session", async () => {
+    const repo = new MemoryAppRepository();
+    const make = (sessionId: string, entityKey: string): ChatSessionEntityRecord => ({
+      chatSessionId: sessionId,
+      entityKey,
+      lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:utility" }),
+      reachedStagesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+    await repo.upsertChatSessionEntity(make("chat-1", "sample:utility"));
+    await repo.upsertChatSessionEntity(make("chat-1", "sample:loan"));
+    await repo.upsertChatSessionEntity(make("chat-2", "sample:utility"));
+    // Upsert with same composite key replaces the row.
+    await repo.upsertChatSessionEntity({ ...make("chat-1", "sample:utility"), lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }) });
+    const list = await repo.listChatSessionEntities("chat-1");
+    expect(list).toHaveLength(2);
+    expect(list.find((e) => e.entityKey === "sample:utility")?.lastStepJson).toBe(JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }));
+  });
+
+  // CF-15 — EntitySession carries optional scope refs that downstream
+  // RAG search reads to build the ContentScope.
+  it("upserts session entities with scope refs (bucketId / projectIdsJson / groupId / documentIdsJson) and round-trips them", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-1",
+      entityKey: "project:abc",
+      lastStepJson: JSON.stringify({ kind: "interact-chat" }),
+      reachedStagesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: 7,
+      projectIdsJson: JSON.stringify(["P1", "P2"]),
+      groupId: null,
+      documentIdsJson: null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-1",
+      entityKey: "report:r-1",
+      lastStepJson: JSON.stringify({ kind: "integrate" }),
+      reachedStagesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      bucketId: null,
+      projectIdsJson: null,
+      groupId: 99,
+      documentIdsJson: JSON.stringify(["d1"]),
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+    const list = await repo.listChatSessionEntities("chat-1");
+    const byKey = Object.fromEntries(list.map((e) => [e.entityKey, e]));
+    expect(byKey["project:abc"].bucketId).toBe(7);
+    expect(byKey["project:abc"].projectIdsJson).toBe(JSON.stringify(["P1", "P2"]));
+    expect(byKey["project:abc"].groupId).toBeNull();
+    expect(byKey["project:abc"].documentIdsJson).toBeNull();
+    expect(byKey["report:r-1"].groupId).toBe(99);
+    expect(byKey["report:r-1"].documentIdsJson).toBe(JSON.stringify(["d1"]));
+  });
+
+  // UI-10b — intent_log table. Mirrors viewer_events shape but
+  // captures the canvas-orchestrator dispatch trail separately so the
+  // tour state machine (PLUG-05) can write source="tour" rows without
+  // mixing into the viewer trail.
+  it("appends intent log entries, round-trips them, and lists newest first", async () => {
+    const repo = new MemoryAppRepository();
+    const make = (
+      id: string,
+      ts: number,
+      source: IntentLogRecord["source"],
+    ): IntentLogRecord => ({
+      id,
+      chatSessionId: "chat-1",
+      timestamp: ts,
+      source,
+      intentKind: "openDocument",
+      intentJson: JSON.stringify({ kind: "openDocument", documentId: "d-1" }),
+    });
+    await repo.appendIntentLog(make("i1", 1000, "user"));
+    await repo.appendIntentLog(make("i2", 2000, "agent"));
+    await repo.appendIntentLog(make("i3", 3000, "tour"));
+    const all = await repo.listIntentLog("chat-1");
+    expect(all.map((e) => e.id)).toEqual(["i3", "i2", "i1"]);
+    expect(all[0].source).toBe("tour");
+    expect(all[0].intentKind).toBe("openDocument");
+  });
+
+  it("listIntentLog filters by sinceTimestamp", async () => {
+    const repo = new MemoryAppRepository();
+    const make = (id: string, ts: number): IntentLogRecord => ({
+      id,
+      chatSessionId: "chat-1",
+      timestamp: ts,
+      source: "user",
+      intentKind: "openDocument",
+      intentJson: "{}",
+    });
+    await repo.appendIntentLog(make("i1", 1000));
+    await repo.appendIntentLog(make("i2", 2000));
+    await repo.appendIntentLog(make("i3", 3000));
+    const recent = await repo.listIntentLog("chat-1", 2000);
+    expect(recent.map((e) => e.id)).toEqual(["i3", "i2"]);
+  });
+
+  it("appends viewer events, filters by sinceTimestamp, and lists newest first", async () => {
+    const repo = new MemoryAppRepository();
+    const make = (id: string, ts: number, action: ViewerEventRecord["action"]): ViewerEventRecord => ({
+      id,
+      chatSessionId: "chat-1",
+      timestamp: ts,
+      entityKey: "sample:utility",
+      action,
+      source: "user",
+      detailJson: null,
+    });
+    await repo.appendViewerEvent(make("e1", 1000, "opened"));
+    await repo.appendViewerEvent(make("e2", 2000, "journey-advanced"));
+    await repo.appendViewerEvent(make("e3", 3000, "citation-clicked"));
+    const all = await repo.listViewerEvents("chat-1");
+    expect(all.map((e) => e.id)).toEqual(["e3", "e2", "e1"]);
+    const recent = await repo.listViewerEvents("chat-1", 2000);
+    expect(recent.map((e) => e.id)).toEqual(["e3", "e2"]);
+  });
+
+  it("rekeyAnonymousChatSessions transfers ownership from an anon id to a user id (in-place)", async () => {
+    const repo = new MemoryAppRepository();
+    // Pre-seed two chat_sessions for the same anon id — POST /api/chat-sessions
+    // would have created these on the fly when the anon user first hit F5.
+    await repo.upsertChatSession({ ...baseSession, id: "chat-A", ownerUserId: null, ownerAnonId: "anon-1" });
+    await repo.upsertChatSession({ ...baseSession, id: "chat-B", ownerUserId: null, ownerAnonId: "anon-1" });
+    // Plus an unrelated row owned by a different anon — must not be touched.
+    await repo.upsertChatSession({ ...baseSession, id: "chat-C", ownerUserId: null, ownerAnonId: "anon-other" });
+    // Existing message + entity + viewer event rows on chat-A — must
+    // survive the re-key untouched (the re-key only flips ownership on
+    // the parent chat_sessions row).
+    await repo.appendChatMessage(makeMessage("m1", "chat-A", 1, "user", "hi"));
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "chat-A",
+      entityKey: "sample:utility",
+      lastStepJson: JSON.stringify({ kind: "doc-viewer", documentId: "scenario:utility" }),
+      reachedStagesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      createdAt: new Date(),
+      lastVisitedAt: new Date(),
+    });
+    await repo.appendViewerEvent({
+      id: "e1",
+      chatSessionId: "chat-A",
+      timestamp: 1000,
+      entityKey: "sample:utility",
+      action: "opened",
+      source: "user",
+      detailJson: null,
+    });
+
+    const result = await repo.rekeyAnonymousChatSessions("anon-1", "u-claimed");
+
+    expect(result.rekeyedSessions).toBe(2);
+    const a = await repo.getChatSession("chat-A");
+    const b = await repo.getChatSession("chat-B");
+    const c = await repo.getChatSession("chat-C");
+    expect(a?.ownerUserId).toBe("u-claimed");
+    expect(a?.ownerAnonId).toBeNull();
+    expect(b?.ownerUserId).toBe("u-claimed");
+    expect(b?.ownerAnonId).toBeNull();
+    // Unrelated row untouched.
+    expect(c?.ownerUserId).toBeNull();
+    expect(c?.ownerAnonId).toBe("anon-other");
+    // Child rows untouched.
+    expect((await repo.listChatMessages("chat-A")).map((m) => m.id)).toEqual(["m1"]);
+    expect((await repo.listChatSessionEntities("chat-A"))).toHaveLength(1);
+    expect((await repo.listViewerEvents("chat-A"))).toHaveLength(1);
+  });
+
+  it("rekeyAnonymousChatSessions returns 0 when the anon id matches nothing", async () => {
+    const repo = new MemoryAppRepository();
+    const result = await repo.rekeyAnonymousChatSessions("anon-nothing", "u-claimed");
+    expect(result.rekeyedSessions).toBe(0);
+  });
+});
+
+// shared-template-lifecycle Phase 2 — the templates repo methods.
+describe("MemoryAppRepository — templates (Phase 2)", () => {
+  function tpl(over: Partial<TemplateRecord> & { id: string }): TemplateRecord {
+    return {
+      kind: "extract",
+      groundxUsername: "user-a",
+      name: "T",
+      bodyJson: JSON.stringify({ categories: [] }),
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+      ...over,
+    };
+  }
+
+  it("saveTemplate → getTemplate round-trips; unknown id → null", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.saveTemplate(tpl({ id: "t1", name: "Utility", bodyJson: '{"categories":[{"id":"s"}]}' }));
+    const got = await repo.getTemplate("t1");
+    expect(got).not.toBeNull();
+    expect(got?.name).toBe("Utility");
+    expect(got?.bodyJson).toBe('{"categories":[{"id":"s"}]}');
+    expect(await repo.getTemplate("nope")).toBeNull();
+  });
+
+  it("listTemplates filters by user AND kind, newest first", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.saveTemplate(tpl({ id: "e1", kind: "extract", groundxUsername: "user-a", updatedAt: new Date(10) }));
+    await repo.saveTemplate(tpl({ id: "e2", kind: "extract", groundxUsername: "user-a", updatedAt: new Date(20) }));
+    await repo.saveTemplate(tpl({ id: "r1", kind: "report", groundxUsername: "user-a" }));
+    await repo.saveTemplate(tpl({ id: "e3", kind: "extract", groundxUsername: "user-b" }));
+
+    const extracts = await repo.listTemplates("user-a", "extract");
+    expect(extracts.map((t) => t.id)).toEqual(["e2", "e1"]); // user-a extracts only, newest first
+    const reports = await repo.listTemplates("user-a", "report");
+    expect(reports.map((t) => t.id)).toEqual(["r1"]);
+  });
+
+  it("saveTemplate upserts on id (re-save replaces)", async () => {
+    const repo = new MemoryAppRepository();
+    await repo.saveTemplate(tpl({ id: "t1", name: "v1" }));
+    await repo.saveTemplate(tpl({ id: "t1", name: "v2" }));
+    const list = await repo.listTemplates("user-a", "extract");
+    expect(list).toHaveLength(1);
+    expect(list[0].name).toBe("v2");
+  });
+});

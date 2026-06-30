@@ -1,6 +1,6 @@
 import axios from "@/api/axios";
 import {
-  GroundXRequestOptions,
+  RequestOptions,
   MessageResponse,
   Metadata,
   PaginationParams,
@@ -15,9 +15,17 @@ export interface IngestResponse {
   ingest: IngestProcess;
 }
 
-export interface IngestProcessesResponse {
-  ingests?: IngestProcess[];
+/**
+ * Raw `GET /v1/ingest` body. Probe-verified 2026-06-01 (see
+ * `docs/agents/groundx-real-api-shapes.md`): the API returns the top-level
+ * `processes` key. `ingests` is tolerated as a defensive legacy fallback at the
+ * reader boundary only — it is never re-exposed. `listGroundXProcesses` collapses
+ * both into a single normalized `IngestProcess[]`, so callers never see the
+ * mutually-exclusive ambiguity. Internal to the reader; not exported.
+ */
+interface RawIngestProcessesResponse {
   processes?: IngestProcess[];
+  ingests?: IngestProcess[];
 }
 
 export interface DocumentsResponse {
@@ -32,13 +40,28 @@ export interface DocumentResponse {
   document: GroundXDocument;
 }
 
-export interface DocumentExtractResponse {
-  extract: Metadata;
-}
 
-export interface DocumentXrayResponse {
-  xray: Metadata;
-}
+/**
+ * The xray endpoint returns this shape at top level (verified
+ * 2026-05-25 against `/v1/ingest/document/xray/{id}`). Documented
+ * in `docs/agents/groundx-real-api-shapes.md`.
+ *
+ * 2026-06-01-data-model-tail item 4 — single-sourced on `@groundx/shared`
+ * (the canonical strict X-Ray type family). Re-exported here so existing app
+ * imports (`import { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity"`)
+ * keep resolving. The app↔shared pin + the middleware-side assignability tie are
+ * enforced by `app/src/api/entities/xrayTypes.drift.test.ts` and
+ * `middleware/src/services/citationGeometry.ts`.
+ */
+export type {
+  XrayBoundingBox,
+  XrayChunk,
+  XrayDocumentPage,
+  DocumentXrayResponse,
+} from "@groundx/shared";
+// Local import for the in-file `getGroundXDocumentXray` annotation (a type-only
+// re-export above does not bring the name into this module's own scope).
+import type { DocumentXrayResponse } from "@groundx/shared";
 
 export interface IngestDocumentsInput {
   documents: DocumentSource[];
@@ -73,7 +96,7 @@ export interface DeleteDocumentsInput {
 
 export const copyGroundXDocuments = async (
   input: CopyDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.post<IngestResponse>(groundxUrl("/v1/ingest/copy"), input, groundxRequestConfig(options));
   return response.data;
@@ -81,7 +104,7 @@ export const copyGroundXDocuments = async (
 
 export const ingestGroundXRemoteDocuments = async (
   input: IngestDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.post<IngestResponse>(
     groundxUrl("/v1/ingest/documents/remote"),
@@ -93,7 +116,7 @@ export const ingestGroundXRemoteDocuments = async (
 
 export const ingestGroundXLocalDocument = async (
   formData: FormData,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.post<IngestResponse>(
     groundxUrl("/v1/ingest/documents/local"),
@@ -105,7 +128,7 @@ export const ingestGroundXLocalDocument = async (
 
 export const crawlGroundXWebsite = async (
   input: CrawlWebsiteInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.post<IngestResponse>(
     groundxUrl("/v1/ingest/documents/website"),
@@ -117,7 +140,7 @@ export const crawlGroundXWebsite = async (
 
 export const listGroundXDocuments = async (
   params?: PaginationParams,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<DocumentsResponse> => {
   const response = await axios.get<DocumentsResponse>(groundxUrl("/v1/ingest/documents"), {
     ...groundxRequestConfig(options),
@@ -128,7 +151,7 @@ export const listGroundXDocuments = async (
 
 export const updateGroundXDocuments = async (
   input: UpdateDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.put<IngestResponse>(
     groundxUrl("/v1/ingest/documents"),
@@ -140,7 +163,7 @@ export const updateGroundXDocuments = async (
 
 export const deleteGroundXDocuments = async (
   input: DeleteDocumentsInput,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(groundxUrl("/v1/ingest/documents"), {
     ...groundxRequestConfig(options),
@@ -151,7 +174,7 @@ export const deleteGroundXDocuments = async (
 
 export const lookupGroundXDocument = async (
   id: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<DocumentResponse> => {
   const response = await axios.get<DocumentResponse>(
     groundxUrl(`/v1/ingest/documents/${encodeURIComponent(id)}`),
@@ -162,7 +185,7 @@ export const lookupGroundXDocument = async (
 
 export const getGroundXDocument = async (
   documentId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<DocumentResponse> => {
   const response = await axios.get<DocumentResponse>(
     groundxUrl(`/v1/ingest/document/${encodeURIComponent(documentId)}`),
@@ -173,7 +196,7 @@ export const getGroundXDocument = async (
 
 export const deleteGroundXDocument = async (
   documentId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(
     groundxUrl(`/v1/ingest/document/${encodeURIComponent(documentId)}`),
@@ -182,11 +205,19 @@ export const deleteGroundXDocument = async (
   return response.data;
 };
 
+/**
+ * The extract endpoint returns the raw extracted JSON at top level (verified
+ * 2026-05-25 against `/v1/ingest/document/extract/{id}`): snake_case field-id
+ * keys → scalars / nested objects / arrays; currency fields pair with a
+ * `<id>_currency` sibling; schema metadata lives in the workflow, not here. So
+ * the return is the generic `Metadata` — strict typing would commit to one
+ * scenario's shape. (No `DocumentExtractResponse` alias.)
+ */
 export const getGroundXDocumentExtract = async (
   documentId: string,
-  options?: GroundXRequestOptions
-): Promise<DocumentExtractResponse> => {
-  const response = await axios.get<DocumentExtractResponse>(
+  options?: RequestOptions
+): Promise<Metadata> => {
+  const response = await axios.get<Metadata>(
     groundxUrl(`/v1/ingest/document/extract/${encodeURIComponent(documentId)}`),
     groundxRequestConfig(options)
   );
@@ -195,7 +226,7 @@ export const getGroundXDocumentExtract = async (
 
 export const getGroundXDocumentXray = async (
   documentId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<DocumentXrayResponse> => {
   const response = await axios.get<DocumentXrayResponse>(
     groundxUrl(`/v1/ingest/document/xray/${encodeURIComponent(documentId)}`),
@@ -206,7 +237,7 @@ export const getGroundXDocumentXray = async (
 
 export const getGroundXProcessingStatus = async (
   processId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<IngestResponse> => {
   const response = await axios.get<IngestResponse>(
     groundxUrl(`/v1/ingest/${encodeURIComponent(processId)}`),
@@ -217,7 +248,7 @@ export const getGroundXProcessingStatus = async (
 
 export const cancelGroundXProcess = async (
   processId: string,
-  options?: GroundXRequestOptions
+  options?: RequestOptions
 ): Promise<MessageResponse> => {
   const response = await axios.delete<MessageResponse>(
     groundxUrl(`/v1/ingest/${encodeURIComponent(processId)}`),
@@ -226,8 +257,11 @@ export const cancelGroundXProcess = async (
   return response.data;
 };
 
-export const listGroundXProcesses = async (options?: GroundXRequestOptions): Promise<IngestProcessesResponse> => {
-  const response = await axios.get<IngestProcessesResponse>(groundxUrl("/v1/ingest"), groundxRequestConfig(options));
-  return response.data;
+export const listGroundXProcesses = async (options?: RequestOptions): Promise<IngestProcess[]> => {
+  const response = await axios.get<RawIngestProcessesResponse>(groundxUrl("/v1/ingest"), groundxRequestConfig(options));
+  // Collapse the API's `processes` key (probe-verified 2026-06-01) — tolerating
+  // a legacy `ingests` key — into one normalized array. Callers never branch on
+  // which key the API used.
+  return response.data.processes ?? response.data.ingests ?? [];
 };
 

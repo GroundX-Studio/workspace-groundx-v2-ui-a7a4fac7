@@ -110,7 +110,164 @@ describe("upstream fetch clients", () => {
     const response = await client.forward("/chat/completions", { method: "POST" });
 
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({ error: "LLM provider is not configured" });
+    // CF-16: 503 body now names which profile is unconfigured.
+    await expect(response.json()).resolves.toEqual({
+      error: "LLM provider (chat) is not configured",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // CF-16: light profile reads LLM_LIGHT_* and falls back to LLM_AUTH_*
+  // for header name / scheme when the light-side values aren't set.
+  describe("FetchLlmClient with light profile (CF-16)", () => {
+    it("hits LLM_LIGHT_BASE_URL with LLM_LIGHT_API_KEY when wired", async () => {
+      fetchMock.mockResolvedValueOnce(Response.json({ answer: "summary" }));
+      const client = new FetchLlmClient(
+        {
+          ...testEnv,
+          LLM_LIGHT_BASE_URL: "https://light.test/v1",
+          LLM_LIGHT_API_KEY: "light-key",
+          LLM_LIGHT_MODEL_ID: "haiku",
+        },
+        "light",
+      );
+      await client.forward("/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "haiku" }),
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://light.test/v1/chat/completions",
+        expect.objectContaining({ method: "POST" }),
+      );
+      // Auth header falls back to LLM_AUTH_HEADER_NAME ("Authorization")
+      // since LLM_LIGHT_AUTH_HEADER_NAME is unset in this env.
+      expect(headersForCall().get("Authorization")).toBe("Bearer light-key");
+    });
+
+    it("honors LLM_LIGHT_AUTH_HEADER_NAME and LLM_LIGHT_AUTH_SCHEME overrides", async () => {
+      fetchMock.mockResolvedValueOnce(Response.json({ answer: "ok" }));
+      const client = new FetchLlmClient(
+        {
+          ...testEnv,
+          LLM_LIGHT_BASE_URL: "https://light.test/v1",
+          LLM_LIGHT_API_KEY: "light-key",
+          LLM_LIGHT_MODEL_ID: "haiku",
+          LLM_LIGHT_AUTH_HEADER_NAME: "X-Provider-Key",
+          LLM_LIGHT_AUTH_SCHEME: "",
+        },
+        "light",
+      );
+      await client.forward("/chat/completions", { method: "POST" });
+      expect(headersForCall().get("X-Provider-Key")).toBe("light-key");
+      // Make sure the chat-side header isn't also set.
+      expect(headersForCall().get("Authorization")).toBeNull();
+    });
+
+    it("returns 503 (light) when light env is unconfigured", async () => {
+      const client = new FetchLlmClient(testEnv, "light");
+      const response = await client.forward("/chat/completions", { method: "POST" });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: "LLM provider (light) is not configured",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("isLightLlmConfigured reflects all three required vars (base_url + api_key + model_id)", async () => {
+      const { isLightLlmConfigured } = await import("./llmClient.js");
+      expect(isLightLlmConfigured(testEnv)).toBe(false);
+      expect(
+        isLightLlmConfigured({
+          ...testEnv,
+          LLM_LIGHT_BASE_URL: "https://light.test/v1",
+          LLM_LIGHT_API_KEY: "k",
+        }),
+      ).toBe(false); // missing model id
+      expect(
+        isLightLlmConfigured({
+          ...testEnv,
+          LLM_LIGHT_BASE_URL: "https://light.test/v1",
+          LLM_LIGHT_API_KEY: "k",
+          LLM_LIGHT_MODEL_ID: "m",
+        }),
+      ).toBe(true);
+    });
+  });
+});
+
+describe("fetchWithTimeout", () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+    vi.useRealTimers();
+  });
+
+  it("returns the response when fetch resolves before the timeout fires", async () => {
+    const { fetchWithTimeout } = await import("./http.js");
+    global.fetch = vi.fn(async () => new Response("ok", { status: 200 }));
+    const res = await fetchWithTimeout("https://x.test/", { method: "GET" }, { timeoutMs: 1_000 });
+    expect(res.status).toBe(200);
+  });
+
+  it("throws UpstreamTimeoutError when fetch never resolves within the timeout", async () => {
+    const { fetchWithTimeout, UpstreamTimeoutError } = await import("./http.js");
+    // Simulate a hung upstream — fetch resolves only when signal aborts.
+    global.fetch = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+    await expect(
+      fetchWithTimeout("https://hang.test/", { method: "GET" }, { timeoutMs: 50, label: "llm" }),
+    ).rejects.toBeInstanceOf(UpstreamTimeoutError);
+  });
+
+  it("propagates an external AbortError (does not relabel as timeout)", async () => {
+    const { fetchWithTimeout } = await import("./http.js");
+    global.fetch = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+    const controller = new AbortController();
+    const promise = fetchWithTimeout(
+      "https://hang.test/",
+      { method: "GET", signal: controller.signal },
+      { timeoutMs: 60_000 },
+    );
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("clients (groundx / llm / partner) propagate UpstreamTimeoutError up to the caller", async () => {
+    const { UpstreamTimeoutError } = await import("./http.js");
+    // Make fetch hang so the configured timeout fires.
+    global.fetch = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+    const tightEnv = { ...testEnv, UPSTREAM_TIMEOUT_MS: 30 };
+    await expect(
+      new FetchGroundXClient(tightEnv).forward("/search/x", { method: "POST", apiKey: "k" }),
+    ).rejects.toBeInstanceOf(UpstreamTimeoutError);
+    await expect(
+      new FetchLlmClient(tightEnv).forward("/chat/completions", { method: "POST" }),
+    ).rejects.toBeInstanceOf(UpstreamTimeoutError);
   });
 });

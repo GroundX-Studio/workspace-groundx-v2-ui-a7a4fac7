@@ -1,0 +1,983 @@
+/**
+ * widget-llm-integration Phase 5 — middleware-side tool catalog.
+ *
+ * Hand-mirrors the app-side `<Name>.tools.ts` declarations (per user
+ * pick 2026-05-27). The server doesn't run the app-side handlers —
+ * it validates the LLM's emitted arguments, constructs the equivalent
+ * `CanvasIntent`, and ships it on the chat reply for the app to
+ * dispatch via the canvas orchestrator.
+ *
+ * Drift mitigation:
+ *   • `toolCatalog.test.ts` asserts the name set matches the expected
+ *     authoritative list. Adding a new tool on the app side without
+ *     mirroring here turns the test red.
+ *   • Phase 7 backfill will hand-mirror every tool it touches and
+ *     extend the expected set.
+ *   • Drift gate: the FULL-SHAPE cross-package parity guard in
+ *     `app/src/tools/catalog-parity.test.ts` (names, descriptions, roles,
+ *     category, availableSteps, input JSON-Schema via `zodToJsonSchema`,
+ *     rendersWidget reachability). NO committed manifest — gate-answered
+ *     2026-05-31, reaffirmed by chat-architecture-hardening Task 7: the app
+ *     catalog only resolves under Vite (`import.meta.glob`), so the in-suite
+ *     guard is the one loader that can see both sides.
+ */
+import { z } from "zod";
+
+import { contentScopeSchema, offerAsField, viewerStepKindSchema, type ViewerStepKind, type WidgetRole } from "@groundx/shared";
+
+export type { ViewerStepKind, WidgetRole };
+
+/**
+ * Context handed to a `serverExecute` executor (agentic-tool-loop). Carries
+ * the injectable deps an executor needs — built by the grounded loop from the
+ * seam's deps (`deps.skillsRetrieve ?? retrieveGroundxKnowledge`), so an
+ * executor NEVER closes over a module-level live dependency (that would defeat
+ * test injection). Future executor deps are added as members here.
+ */
+export interface ServerExecuteContext {
+  /** Vendored GroundX skill-pack retrieval (same type as `GroundedAnswerDeps.skillsRetrieve`). */
+  skillsRetrieve: (question: string, options?: { bypassEntryBar?: boolean }) => string | null;
+  /**
+   * loop-tool-refined-research — re-run the TURN'S scoped GroundX search with a
+   * refined query and return the formatted snippets (or a "no matches" line).
+   * Bound by the grounded loop to the SAME `scope` + server-derived RBAC filter
+   * as the turn's primary search, so an executor can NEVER widen scope.
+   */
+  researchDocuments: (refinedQuery: string) => Promise<string>;
+  /**
+   * loop-tool-secondary-extraction — fetch a NAMED document's full
+   * workflow-extraction (the same payload the prompt's primary EXTRACTED FIELDS
+   * block uses), for cross-document answers. Bound by the grounded loop to the
+   * turn's AUTHORIZED document set (the RBAC-filtered snippets + explicit scope):
+   * a documentId outside that set is REFUSED with no fetch, so an executor can
+   * never reach content the turn's authorized retrieval did not surface.
+   */
+  fetchExtraction: (documentId: string) => Promise<string>;
+}
+
+/**
+ * Server-side tool descriptor. A tool is EITHER intent-routed (declares
+ * `intentBuilder` → the app dispatches the `CanvasIntent`) OR server-executed
+ * (declares `serverExecute` → the middleware runs it inside the grounded
+ * tool-result loop and feeds the string result back to the model). Exactly one
+ * of the two is present (catalog-invariant test). The `inputSchema` validates
+ * LLM-emitted args at the middleware boundary (design.md §G).
+ */
+export interface ServerTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
+  name: string;
+  description: string;
+  category: "read" | "mutate";
+  inputSchema: TSchema;
+  /**
+   * Task 6 (chat-architecture-hardening) — extra usage guidance rendered
+   * into the grounded prompt's generated TOOL NOTES section, for tools whose
+   * `description` (already in the function spec) isn't enough. Declared WITH
+   * the tool; hand-written per-tool prompt paragraphs are forbidden.
+   */
+  promptGuidance?: string;
+  /**
+   * ViewerStep kinds where this tool is exposed to the LLM. Empty /
+   * undefined → exposed in every step.
+   */
+  availableSteps?: ViewerStepKind[];
+  /**
+   * 2026-05-31-tool-system-completion — the AUTHORIZATION roles this tool is
+   * exposed to in the LLM-facing catalog. `WidgetRole` (`@groundx/shared`) is
+   * the ONE role enum (`anonymous` | `member`). Rule (composed with
+   * `availableSteps`): a tool is exposed IFF (`availableIn` undefined/empty →
+   * ALL roles) OR the caller's role ∈ `availableIn`. `category`
+   * (read/mutate) drives the confirmation model, NOT visibility. The caller's
+   * role is derived SERVER-side from the chat session (never client-trusted) —
+   * see `chatHandler.ts` → `ChatRouterRequest.callerRole`.
+   *
+   * The SERVER catalog is the SOLE role-bearing surface (the app-side
+   * `WidgetTool.availableIn` orphan is not migrated — gate-answered decision
+   * (b)). Today no SHIPPED tool is role-restricted; the matrix's lone
+   * `edit_template = ["member"]` is the `_template` stub, not shipped. Set this
+   * deliberately per `docs/agents/widget-access-matrix.md` §3 when a real
+   * role-restricted tool ships.
+   */
+  availableIn?: WidgetRole[];
+  /**
+   * 2026-05-31-core-data-followups §5 — chat-widget reachability binding,
+   * mirroring the app-side `WidgetTool.rendersWidget`. For a TOOL-triggered CHAT
+   * card, names the chat widget this tool's result renders as, in
+   * `"<slot>/<WidgetName>"` form. The app-side reachability coverage test (which
+   * imports BOTH catalogs) asserts the server binding matches the app binding AND
+   * resolves to a real mounted chat widget dir. Optional; only the enumerated
+   * card-triggering tools carry it.
+   */
+  rendersWidget?: string;
+  /**
+   * Builds the CanvasIntent shape from validated input. OPTIONAL since
+   * agentic-tool-loop: a SERVER-EXECUTED tool (`serverExecute` present) has no
+   * intent — exactly one of `intentBuilder` / `serverExecute` is present
+   * (catalog-invariant test).
+   */
+  intentBuilder?: (input: z.infer<TSchema>) => Record<string, unknown>;
+  /**
+   * agentic-tool-loop — present ⇒ the middleware EXECUTES this tool inside the
+   * grounded tool-result loop and feeds the string result back to the model
+   * as a `role:"tool"` message. Mutually exclusive with `intentBuilder`: a
+   * server-executed tool never produces a `CanvasIntent`, never reaches the
+   * app, and MUST be `category: "read"`. Deps arrive via `ServerExecuteContext`
+   * (never a module-level closure).
+   */
+  serverExecute?: (input: z.infer<TSchema>, ctx: ServerExecuteContext) => Promise<string> | string;
+  /**
+   * agentic-tool-loop — the user-facing annotation text surfaced on the chat
+   * reply's `toolActivity[]` when this tool executes (e.g. "Checked GroundX
+   * docs"). REQUIRED when `serverExecute` is present (catalog-invariant test).
+   */
+  activityLabel?: string;
+}
+
+/**
+ * True iff the tool is exposed to `role`. `availableIn` undefined/empty → all
+ * roles; otherwise role must be listed. The single role-visibility predicate
+ * — `toolsForStep` composes it with the step filter, and the parity guard
+ * uses the same rule. `category` does NOT participate.
+ */
+export function roleExposes(tool: ServerTool, role: WidgetRole): boolean {
+  if (!tool.availableIn || tool.availableIn.length === 0) return true;
+  return tool.availableIn.includes(role);
+}
+
+// `ViewerStepKind` is now the ONE shared definition (`@groundx/shared`,
+// re-exported above) — app `ViewerStep["kind"]` and this catalog share it, with
+// the app-side `ViewerStepKind.contract.test` guarding exact equality. (Was a
+// hand-typed cross-workspace mirror, possible to dedupe now that the shared
+// package exists.)
+
+// ── Tool declarations (hand-mirrored from app side) ──────────────────
+
+/**
+ * Mirror of `viewer-widgets/PdfViewer/PdfViewerWidget.tools.ts` →
+ * `open_document`. Produces a `highlightCitation` intent.
+ */
+const openDocument: ServerTool = {
+  name: "open_document",
+  description:
+    "Open a document in the viewer pane. Use when the user references a document " +
+    "by name, asks to see a source, or you are about to cite the document and want " +
+    "the source visible while the user reads your answer.",
+  category: "read",
+  inputSchema: z.object({
+    documentId: z
+      .string()
+      .min(1)
+      .describe("GroundX document UUID — the canonical identifier returned by ingestion"),
+    page: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Optional 1-indexed page to open at; defaults to page 1 when omitted"),
+  }),
+  availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "highlightCitation",
+    documentId: input.documentId,
+    page: input.page ?? 1,
+  }),
+};
+
+/**
+ * Mirror of `viewer-widgets/PdfViewer/PdfViewerWidget.tools.ts` →
+ * `jump_to_page`. Produces a `jumpToPage` intent (lighter-weight
+ * cousin of highlightCitation, no bbox).
+ */
+const jumpToPage: ServerTool = {
+  name: "jump_to_page",
+  description:
+    "Jump the active viewer to a specific page of the currently-open document. " +
+    "Use when the user references a page number directly (\"go to page 7\") or " +
+    "when you've reasoned about a span and want to surface the exact page without " +
+    "a region highlight.",
+  category: "read",
+  inputSchema: z.object({
+    documentId: z
+      .string()
+      .min(1)
+      .describe("GroundX document UUID — must match the currently-open viewer document"),
+    page: z
+      .number()
+      .int()
+      .positive()
+      .describe("1-indexed page to scroll to; the viewer renders this page as active"),
+  }),
+  availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "jumpToPage",
+    documentId: input.documentId,
+    page: input.page,
+  }),
+};
+
+/**
+ * widget-llm-integration follow-up B.1 — ProposeSchemaFieldCard
+ * mirrors. Three mutate-category tools that replace the fenced-JSON
+ * `proposedSchemaField` envelope.
+ */
+const fieldTypeEnum = z
+  .enum(["STRING", "NUMBER", "DATE", "BOOLEAN"])
+  .describe("Primitive type. Must be one of STRING, NUMBER, DATE, BOOLEAN.");
+
+const proposeSchemaField: ServerTool = {
+  name: "propose_schema_field",
+  description:
+    "Propose adding a new extraction-schema field. Use when the user asks to capture an additional value from the documents (add a field for total tax, track due date too). The card surfaces inline with the assistant bubble for the user to Accept or Reject.",
+  promptGuidance:
+    "When the user explicitly asks to add a schema field (\"add a field for X\", " +
+    "\"track Y too\", \"capture Z\"), call it with `{categoryId, name, type, " +
+    "description}`. Pick the best-fit existing category id from the user's " +
+    "surrounding context if one is visible; otherwise use a plausible " +
+    "snake_case id. Type must be one of STRING, NUMBER, DATE, BOOLEAN. The " +
+    "frontend renders an Accept/Reject card; write the conversational answer " +
+    "naturally (\"I can add a 'total tax' field…\") and let the tool call " +
+    "carry the structured payload.",
+  category: "mutate",
+  inputSchema: z.object({
+    categoryId: z
+      .string()
+      .min(1)
+      .describe("Existing category id from the active scenario extraction schema (statement, meters)."),
+    name: z.string().min(1).max(80).describe("Snake_case field id, lowercase (total_tax, due_date)."),
+    type: fieldTypeEnum,
+    description: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe("One-sentence description of what the field captures, in plain English."),
+  }),
+  availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
+  // §5 reachability — mirror of the app-side ProposeSchemaFieldCard binding.
+  rendersWidget: "chat-widgets/ProposeSchemaFieldCard",
+  intentBuilder: (input) => ({
+    kind: "proposeSchemaField",
+    categoryId: input.categoryId,
+    name: input.name,
+    type: input.type,
+    description: input.description,
+  }),
+};
+
+const acceptProposal: ServerTool = {
+  name: "accept_proposal",
+  description:
+    "Accept a previously-proposed schema field on behalf of the user. Use when an agentic flow has high confidence the user wants the proposal applied (auto-accept above a confidence threshold). The user can always Reject the chip if they disagree.",
+  category: "mutate",
+  inputSchema: z.object({
+    proposalId: z.string().min(1).describe("Proposal id (from the pending overlay queue) to accept."),
+  }),
+  availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "acceptSchemaField",
+    proposalId: input.proposalId,
+  }),
+};
+
+const rejectProposal: ServerTool = {
+  name: "reject_proposal",
+  description:
+    "Reject (dismiss) a previously-proposed schema field on behalf of the user. Use when an agentic flow determines the proposal does not fit the active scenario (the field duplicates an existing column).",
+  category: "mutate",
+  inputSchema: z.object({
+    proposalId: z.string().min(1).describe("Proposal id (from the pending overlay queue) to reject."),
+  }),
+  availableSteps: ["doc-viewer", "interact-chat", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "rejectSchemaField",
+    proposalId: input.proposalId,
+  }),
+};
+
+/**
+ * widget-llm-integration follow-up B.2 — GateChatRail mirrors.
+ */
+const commitGate: ServerTool = {
+  name: "commit_gate",
+  description:
+    "Commit the active sign-up gate via a specific identity method. Use when the user has explicitly chosen the path forward (\"sign up now\", \"book a call instead\") and you want to surface a one-click chip for the chosen method.",
+  category: "mutate",
+  inputSchema: z.object({
+    method: z
+      .enum(["register", "sso", "engineer-call"])
+      .describe(
+        "Which gate-commit path: \"register\" for email sign-up, \"sso\" for SAML / Google / Microsoft, \"engineer-call\" for the Calendly booking path.",
+      ),
+  }),
+  intentBuilder: (input) => ({ kind: "commitGate", method: input.method }),
+};
+
+const dismissGate: ServerTool = {
+  name: "dismiss_gate",
+  description:
+    "Dismiss the active sign-up gate without committing. Use when the user has indicated they want to keep exploring without signing up (\"not now\", \"let me see the rest first\").",
+  category: "mutate",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "dismissGate" }),
+};
+
+/**
+ * 2026-05-31-shared-canvas-affordance-restoration — mirror of the app-side
+ * `GateChatRail.tools.ts` → `save_to_account`. The chat-driven successor to the
+ * retired F5 Interact "Save" button: opens the sign-in gate (the `openGate`
+ * intent the orchestrator routes to `OnboardingSession.openGate("save")`).
+ * Exposed on the analysis surfaces a user saves from (doc-viewer / interact).
+ */
+const saveToAccount: ServerTool = {
+  name: "save_to_account",
+  description:
+    "Open the sign-in offer so the user can save their current analysis to an " +
+    "account. Use when the user says \"save\", \"keep this\", or asks to save " +
+    "their progress but has NOT yet entered sign-up details (use submit_signup " +
+    "once they have). Surfaces the gate; it does not create the account.",
+  category: "mutate",
+  inputSchema: z.object({}),
+  availableSteps: ["doc-viewer", "interact-chat"],
+  // §5 reachability — mirror of the app-side GateChatRail save_to_account binding.
+  rendersWidget: "chat-widgets/SuggestedActionChips",
+  intentBuilder: () => ({ kind: "openGate", trigger: "save" }),
+};
+
+/**
+ * widget-llm-integration follow-up B.3 — book-call suggested action mirror.
+ */
+const bookCall: ServerTool = {
+  name: "book_call",
+  description:
+    "Open the Calendly booking surface for a 30-minute engineer call. Use when the user asks to speak with a team member or wants a human-assisted path forward: uncertainty about fit, complex documents, evaluation questions a sales engineer can answer. The user confirms by clicking the chip; the scheduler is not opened automatically.",
+  category: "mutate",
+  inputSchema: z.object({}),
+  // §5 reachability — mirror of the app-side suggested-action chip binding.
+  rendersWidget: "chat-widgets/SuggestedActionChips",
+  intentBuilder: () => ({ kind: "openBookCall" }),
+};
+
+// ── 2026-05-29-smart-report-screen Phase 5 — report tool surface ─────
+//
+// Hand-mirrors the app-side `SmartReportRender.tools.ts` /
+// `SmartReportBuilder.tools.ts` / `PinToReportAction.tools.ts`. The `show_`
+// canvas-dispatch verb is the canonical verb for ScopedViewerWidgets
+// (allowlisted once in the app's `check-tool-quality` this phase). The report
+// + Extract template-mutation tools are a SHARED family (same Template+Scope+
+// Results lifecycle). `scope` is the shared `ContentScope` —
+// validated with the shared `contentScopeSchema` (Task 7: the full-shape
+// parity guard pins input schemas, so both sides declare the real union and
+// the LLM sees + is validated against it).
+
+const reportRenderAsEnum = z
+  .enum(["PARAGRAPH", "BULLETS", "TABLE"])
+  .describe("How the section body renders: PARAGRAPH paragraph, BULLETS bullet list, TABLE table.");
+
+const showExtraction: ServerTool = {
+  name: "show_extraction",
+  description:
+    "Move the canvas to the extraction workbench for a scope. Use when " +
+    "the user asks to see the extracted fields, says \"show the extraction\", or you've " +
+    "reasoned the structured-field view is the natural next surface for what they're analyzing.",
+  category: "read",
+  inputSchema: z.object({
+    scope: contentScopeSchema.describe(
+      "The ContentScope (documents / bucket+filter / group) the workbench extracts over — inherited from the surface the user transitioned from.",
+    ),
+    schema_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional extraction template id; defaults to the active draft template when omitted."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
+  // Navigation tools move the user BETWEEN steps; gating them by the step the
+  // user is already on defeats their purpose ("go back to extractions" typed
+  // on the Integrate step used to get a RAG search because this tool was not
+  // offered there). Step-gating remains for step-LOCAL tools only.
+  // The intentBuilder IGNORES `offerAs` (presentation, not a domain arg — it
+  // must never enter the intent).
+  intentBuilder: (input) => ({
+    kind: "showExtract",
+    scope: (input as { scope: unknown }).scope,
+    schemaId: (input as { schema_id?: string }).schema_id ?? "draft",
+  }),
+};
+
+// standardized-viewer-control T7 — the `_edit` sibling of `show_extraction`,
+// EXACTLY mirroring `show_smart_report_edit` (the `_edit` sibling of
+// `show_smart_report_render`). Opens the schema DESIGN surface (a sub-position
+// on the extract-workbench step) by emitting `editSchema{schemaId}` — the same
+// CanvasIntent the in-widget "Edit schema" control dispatches. `read`-category
+// navigation, LLM-emittable, so the agent can navigate to OR offer "→ edit this
+// schema" (via `offerAs`). Mirror of the app-side Extract widget tool.
+const showExtractionEdit: ServerTool = {
+  name: "show_extraction_edit",
+  description:
+    "Open the schema editor (the extraction design surface) for a template. Use when the " +
+    "user asks to edit the schema, change which fields are extracted, or you want to surface " +
+    "the field designer for the active extraction.",
+  category: "read",
+  inputSchema: z.object({
+    schema_id: z
+      .string()
+      .min(1)
+      .describe("The extraction template id to open in the schema editor (the active draft when in onboarding)."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (mirrors the other
+  // navigation tools). The intentBuilder IGNORES `offerAs`.
+  intentBuilder: (input) => ({
+    kind: "editSchema",
+    schemaId: (input as { schema_id: string }).schema_id,
+  }),
+};
+
+// standardized-viewer-control T7 — mirror of the app-side Interact navigation
+// tool. Moves the canvas to the Interact (chat-with-sources) surface for a
+// scope; the orchestrator resolves a document from the scope so the
+// interact-chat canvas (the shared PdfViewer) isn't doc-less.
+const showInteractTool: ServerTool = {
+  name: "show_interact",
+  description:
+    "Move the canvas to the Interact surface — the chat-with-sources view over the scope " +
+    "documents. Use when the user asks to chat with or ask questions of the sources, asks to " +
+    "open interact, or you have reasoned a conversational pass over the documents is the natural next surface.",
+  category: "read",
+  inputSchema: z.object({
+    scope: contentScopeSchema.describe(
+      "The ContentScope (documents / bucket+filter / group) the Interact surface chats over — inherited from the surface the user transitioned from.",
+    ),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (mirrors the other
+  // navigation tools). The intentBuilder IGNORES `offerAs`.
+  intentBuilder: (input) => ({
+    kind: "showInteract",
+    scope: (input as { scope: unknown }).scope,
+  }),
+};
+
+// onboarding-shell-shared-view Phase 3b — mirror of the app-side Integrate
+// widget's show_integrate canvas-dispatch tool. Moves the canvas to the
+// Integrate connectors surface. Returns the `showIntegrate` CanvasIntent the
+// orchestrator routes to a push of the `integrate` step.
+const showIntegrate: ServerTool = {
+  name: "show_integrate",
+  description:
+    "Move the canvas to the Integrate surface — the connectors / agent " +
+    "plugins + API snippets for shipping this sample into a stack. Use when " +
+    "the user asks to integrate, ship, connect an agent (Claude / OpenAI / Gemini / " +
+    "Cursor), or get the API / SDK snippet for the content being analyzed.",
+  category: "read",
+  inputSchema: z.object({
+    scope: contentScopeSchema.describe(
+      "The ContentScope (documents / bucket+filter / group) the user is shipping — inherited from the surface the user transitioned from. The connectors list is scope-independent today, but the scope threads through for context.",
+    ),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
+  // Navigation tools move the user BETWEEN steps; gating them by the step the
+  // user is already on defeats their purpose ("go back to extractions" typed
+  // on the Integrate step used to get a RAG search because this tool was not
+  // offered there). Step-gating remains for step-LOCAL tools only.
+  // The intentBuilder IGNORES `offerAs` (presentation, not a domain arg).
+  intentBuilder: (input) => ({
+    kind: "showIntegrate",
+    scope: (input as { scope: unknown }).scope,
+  }),
+};
+
+const showSmartReportRender: ServerTool = {
+  name: "show_smart_report_render",
+  description:
+    "Move the canvas to the Report render surface for a scope. Use when " +
+    "the user asks to see the report, says \"make me a report\", or you've reasoned a " +
+    "rendered IC-brief is the natural next surface for what they're analyzing.",
+  category: "read",
+  inputSchema: z.object({
+    scope: contentScopeSchema.describe(
+      "The render-time ContentScope (bucket+filter / documents / group) the report renders over — inherited from the surface the user transitioned from.",
+    ),
+    template_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional report template id; defaults to the active draft template when omitted."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
+  // Navigation tools move the user BETWEEN steps; gating them by the step the
+  // user is already on defeats their purpose ("go back to extractions" typed
+  // on the Integrate step used to get a RAG search because this tool was not
+  // offered there). Step-gating remains for step-LOCAL tools only.
+  // The intentBuilder IGNORES `offerAs` (presentation, not a domain arg).
+  intentBuilder: (input) => ({
+    kind: "showReport",
+    templateId: (input as { template_id?: string }).template_id ?? "draft",
+    scope: (input as { scope: unknown }).scope,
+  }),
+};
+
+const showSmartReportEdit: ServerTool = {
+  name: "show_smart_report_edit",
+  description:
+    "Open the Report builder with a section pre-selected. Use when the " +
+    "user asks to edit the report, change a section's question, or you want to surface " +
+    "the section editor for a specific section.",
+  category: "read",
+  inputSchema: z.object({
+    template_id: z
+      .string()
+      .min(1)
+      .describe("The report template id to open in the builder (the active draft when in onboarding)."),
+    selected_section_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional section id to pre-select / expand in the builder's row list."),
+    // standardized-viewer-control T7 — the offer disposition (one shared node).
+    offerAs: offerAsField,
+  }),
+  // Canvas-NAVIGATION tool — universal, NO availableSteps (2026-06-11).
+  // Navigation tools move the user BETWEEN steps; gating them by the step the
+  // user is already on defeats their purpose ("go back to extractions" typed
+  // on the Integrate step used to get a RAG search because this tool was not
+  // offered there). Step-gating remains for step-LOCAL tools only.
+  // The intentBuilder IGNORES `offerAs` (presentation, not a domain arg).
+  intentBuilder: (input) => ({
+    kind: "editTemplate",
+    templateId: input.template_id,
+    ...(input.selected_section_id !== undefined
+      ? { selectedSectionId: input.selected_section_id }
+      : {}),
+  }),
+};
+
+const pinToReport: ServerTool = {
+  name: "pin_to_report",
+  description:
+    "Pin an assistant answer into the report as a section. Use when the user says " +
+    "\"pin that\", \"add this to the report\", or you've reasoned a turn's answer belongs " +
+    "in the IC brief. The turn's literal text becomes the section's question.",
+  category: "mutate",
+  inputSchema: z.object({
+    turn_id: z
+      .string()
+      .min(1)
+      .describe("The assistant turn id being pinned (recorded as the section's source provenance)."),
+    text: z
+      .string()
+      .min(1)
+      .describe("The turn's literal text — becomes the pinned section's question (#12, no variable inference)."),
+    template_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Explicit target template id; omit to prompt the user existing-or-new (no auto-create)."),
+  }),
+  availableSteps: ["interact-chat", "doc-viewer", "extract-workbench", "report"],
+  intentBuilder: (input) => ({
+    kind: "pinToReport",
+    turnId: input.turn_id,
+    text: input.text,
+    ...(input.template_id !== undefined ? { templateId: input.template_id } : {}),
+  }),
+};
+
+const proposeReportSection: ServerTool = {
+  name: "propose_report_section",
+  description:
+    "Propose adding a new report section. Use when the user asks to add a section to " +
+    "the report (\"add an anomalies section\", \"include a recommendation\"). A " +
+    "ProposalCard surfaces in the builder for the user to Accept or Reject.",
+  category: "mutate",
+  inputSchema: z.object({
+    name: z.string().min(1).max(80).describe("Snake_case section id, lowercase (anomalies, charge_breakdown)."),
+    render_as: reportRenderAsEnum,
+    question: z
+      .string()
+      .min(1)
+      .max(400)
+      .describe("The question this section answers at render time (the literal prompt)."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "proposeReportSection",
+    name: input.name,
+    renderAs: input.render_as,
+    question: input.question,
+  }),
+};
+
+const acceptReportSection: ServerTool = {
+  name: "accept_report_section",
+  description:
+    "Accept a previously-proposed report section on behalf of the user. Use when an agentic flow has high confidence the proposed section should be added.",
+  category: "mutate",
+  inputSchema: z.object({
+    proposal_id: z.string().min(1).describe("Proposal id (from the builder's pending proposal queue) to accept."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({ kind: "acceptReportSection", proposalId: input.proposal_id }),
+};
+
+const rejectReportSection: ServerTool = {
+  name: "reject_report_section",
+  description:
+    "Reject (dismiss) a previously-proposed report section on behalf of the user. Use when an agentic flow determines the proposed section does not fit the report.",
+  category: "mutate",
+  inputSchema: z.object({
+    proposal_id: z.string().min(1).describe("Proposal id (from the builder's pending proposal queue) to reject."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({ kind: "rejectReportSection", proposalId: input.proposal_id }),
+};
+
+const editReportSection: ServerTool = {
+  name: "edit_report_section",
+  description:
+    "Edit an existing report section name, renderAs, question, or instructions. Use when the user asks to tweak a section, such as making the summary a bulleted list or rephrasing the question. Mirrors the builder inline editor.",
+  category: "mutate",
+  inputSchema: z.object({
+    section_id: z.string().min(1).describe("The section id to edit (a draft or saved section)."),
+    name: z.string().min(1).max(80).optional().describe("New snake_case section name (optional)."),
+    render_as: reportRenderAsEnum.optional(),
+    question: z.string().min(1).max(400).optional().describe("New render-time question (optional)."),
+    instructions: z.array(z.string()).optional().describe("New instruction rules, one per array entry (optional)."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({
+    kind: "editReportSection",
+    sectionId: input.section_id,
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    ...(input.render_as !== undefined ? { renderAs: input.render_as } : {}),
+    ...(input.question !== undefined ? { question: input.question } : {}),
+    ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+  }),
+};
+
+const deleteReportSection: ServerTool = {
+  name: "delete_report_section",
+  description:
+    "Delete (remove) a report section from the template. Use when the user asks to drop " +
+    "a section (\"remove the recommendation\"). Mirrors the builder's ⋮ → Remove section.",
+  category: "mutate",
+  inputSchema: z.object({
+    section_id: z.string().min(1).describe("The section id to remove (a draft or saved section)."),
+  }),
+  availableSteps: ["report", "extract-workbench"],
+  intentBuilder: (input) => ({ kind: "deleteReportSection", sectionId: input.section_id }),
+};
+
+// ── 2026-05-31-tool-system-completion — wf04 §1/§2/§4 deferred tools ──
+//
+// Hand-mirror of the app-side SignUpWidget / OnboardingWizard / DialogTitle
+// tool files. All are all-roles (no `availableIn`) per the access matrix §3.
+// Each routes to a REAL app action via the widget/view/primitive's registered
+// CanvasOrchestrator adapter (no dormant plumbing): the app `handler` and this
+// `intentBuilder` produce the SAME CanvasIntent the on-screen control dispatches.
+
+/** Mirror of `SignUpWidget.tools.ts` → `submit_signup` (mutate). */
+const submitSignup: ServerTool = {
+  name: "submit_signup",
+  description:
+    "Submit the sign-up form to create the account and save the sample work. " +
+    "Use when the user has supplied their name, email, and password and explicitly " +
+    "asked to sign up, create an account, or save their work. The user confirms via " +
+    "the chip before the account is created — it is not submitted automatically.",
+  category: "mutate",
+  inputSchema: z.object({
+    first: z.string().min(1).describe("The first name."),
+    last: z.string().min(1).describe("The last name."),
+    email: z.string().min(1).email().describe("The email address (the account login)."),
+    password: z.string().min(8).describe("The chosen password — at least 8 characters."),
+    confirmPassword: z
+      .string()
+      .min(1)
+      .describe("Password confirmation — must match `password` (the widget re-checks)."),
+  }),
+  intentBuilder: (input) => ({
+    kind: "submitSignup",
+    first: input.first,
+    last: input.last,
+    email: input.email,
+    password: input.password,
+    confirmPassword: input.confirmPassword,
+  }),
+};
+
+/** Mirror of `OnboardingWizard.tools.ts` → `wizard_next` (read nav). */
+const wizardNext: ServerTool = {
+  name: "wizard_next",
+  description:
+    "Advance the onboarding wizard to the next step. Use when the active surface is the " +
+    "onboarding wizard and the user asks to continue, go on, or move to the next step.",
+  category: "read",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "wizardNext" }),
+};
+
+/** Mirror of `OnboardingWizard.tools.ts` → `wizard_back` (read nav). */
+const wizardBack: ServerTool = {
+  name: "wizard_back",
+  description:
+    "Move the onboarding wizard back to the previous step. Use when the user asks to go " +
+    "back or review the previous onboarding step.",
+  category: "read",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "wizardBack" }),
+};
+
+/** Mirror of `OnboardingWizard.tools.ts` → `wizard_finish` (read nav). */
+const wizardFinish: ServerTool = {
+  name: "wizard_finish",
+  description:
+    "Finish the onboarding wizard, recording completion. Use when the user is on the last " +
+    "onboarding step and asks to finish, complete, or close the walkthrough as done.",
+  category: "read",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "wizardFinish" }),
+};
+
+/** Mirror of `OnboardingWizard.tools.ts` → `dismiss_wizard` (read nav). */
+const dismissWizard: ServerTool = {
+  name: "dismiss_wizard",
+  description:
+    "Dismiss the onboarding wizard without completing it. Use when the user asks to skip, " +
+    "close, or come back later to the onboarding walkthrough.",
+  category: "read",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "dismissWizard" }),
+};
+
+/** Mirror of `DialogTitle.tools.ts` → `close_dialog` (mutate). */
+const closeDialog: ServerTool = {
+  name: "close_dialog",
+  description:
+    "Close the currently-open dialog via its title-bar close control. Use when the user " +
+    "asks to close, dismiss, or cancel the open modal / dialog.",
+  category: "mutate",
+  inputSchema: z.object({}),
+  intentBuilder: () => ({ kind: "closeDialog" }),
+};
+
+/**
+ * agentic-tool-loop — the first SERVER-EXECUTED tool. Unlike every other entry
+ * (which mirrors an app `*.tools.ts` and builds a `CanvasIntent`), this tool is
+ * run by the middleware inside the grounded tool-result loop: its executor
+ * retrieves the relevant sections of the vendored GroundX skill pack on demand
+ * and the result is fed back to the model as a `role:"tool"` message. It has NO
+ * `intentBuilder` (never reaches the app), NO app mirror (server-only —
+ * allowlisted in the parity guard), and declares `activityLabel` for the
+ * reply's `toolActivity[]`. Deps arrive via `ServerExecuteContext` — the
+ * executor never closes over the module-level retriever (test-injectable).
+ */
+const lookupGroundxDocs: ServerTool = {
+  name: "lookup_groundx_docs",
+  description:
+    "Look up GroundX product documentation (architecture, ingestion, search, X-Ray, " +
+    "buckets, workflows). Use when the user asks how GroundX works or about a product " +
+    "capability and the GROUNDX KNOWLEDGE section is absent or doesn't cover it.",
+  category: "read",
+  inputSchema: z.object({
+    query: z
+      .string()
+      .min(3)
+      .describe("What to look up, e.g. 'how does X-Ray chunking work'"),
+  }),
+  promptGuidance:
+    "Call only when this prompt has no GroundX product-knowledge background and the " +
+    "user asks how GroundX works. Never mention the tool or cite its result — speak " +
+    "from it as background.",
+  activityLabel: "Checked GroundX docs",
+  serverExecute: ({ query }, ctx) =>
+    ctx.skillsRetrieve(query, { bypassEntryBar: true }) ?? "No matching documentation sections.",
+};
+
+/**
+ * loop-tool-refined-research — the SECOND server-executed read tool. Re-runs the
+ * turn's scoped GroundX search with a model-supplied refined query and feeds the
+ * resulting snippets back into the grounded loop. Like `lookup_groundx_docs` it
+ * is server-only (no app mirror; allowlisted in the parity guard), has NO
+ * `intentBuilder`, and declares `activityLabel`. The executor delegates to
+ * `ctx.researchDocuments`, which the grounded loop binds to the SAME content
+ * scope + RBAC filter as the primary search — so this tool searches the CURRENT
+ * documents only and can never widen scope.
+ */
+const searchDocuments: ServerTool = {
+  name: "search_documents",
+  description:
+    "Search the CURRENT documents again with a refined query. Use when the document " +
+    "passages already provided don't contain what you need and a differently-worded or " +
+    "more specific search of the SAME documents might surface it. It searches only the " +
+    "documents already in scope — it cannot reach other documents.",
+  category: "read",
+  inputSchema: z.object({
+    query: z
+      .string()
+      .min(3)
+      .describe("A refined search query over the current documents, e.g. 'late-payment penalty terms'"),
+  }),
+  promptGuidance:
+    "Call ONLY when the document passages already in this prompt don't answer the question " +
+    "and a reworded search of the SAME documents might surface it. Don't repeat the query " +
+    "that already missed. Never mention the tool — answer from the new passages.",
+  activityLabel: "Searched the documents again",
+  serverExecute: ({ query }, ctx) => ctx.researchDocuments(query),
+};
+
+/**
+ * loop-tool-secondary-extraction — the THIRD server-executed read tool. Fetches
+ * a NAMED document's full workflow-extraction (the same payload the grounded
+ * prompt's primary-document EXTRACTED FIELDS block uses) on demand, so a
+ * cross-document answer can reach a SECOND document's structured fields. Like
+ * the other two it is server-only (no app mirror; allowlisted in the parity
+ * guard), has NO `intentBuilder`, and declares `activityLabel`. The executor
+ * delegates to `ctx.fetchExtraction`, which the grounded loop gates to the
+ * turn's AUTHORIZED document set — a documentId the turn did not surface is
+ * refused with NO fetch (no cross-tenant/out-of-scope read).
+ */
+const fetchDocumentFields: ServerTool = {
+  name: "fetch_document_fields",
+  description:
+    "Fetch another document's extracted structured fields by id. Use when your answer " +
+    "spans more than one document and you need a SECOND document's fields — the prompt " +
+    "only includes the primary document's fields. Only documents already surfaced in " +
+    "this conversation (a citation or search result) can be fetched.",
+  category: "read",
+  inputSchema: z.object({
+    documentId: z
+      .string()
+      .min(1)
+      .describe("Id of a document already surfaced in this conversation (from a citation or search result)."),
+  }),
+  promptGuidance:
+    "Call ONLY for a cross-document answer that needs a SECOND document's structured " +
+    "fields (the prompt already has the primary document's). Use a documentId you've seen " +
+    "in a citation or search result this turn. Never mention the tool — answer from the fields.",
+  activityLabel: "Fetched another document's fields",
+  serverExecute: ({ documentId }, ctx) => ctx.fetchExtraction(documentId),
+};
+
+/**
+ * The authoritative server catalog. Phase 7 backfill extends this
+ * array as widgets are mirrored. The order here is stable (matches
+ * the LLM's tool listing); duplicates fail the drift test.
+ */
+export const SERVER_TOOL_CATALOG: ServerTool[] = [
+  openDocument,
+  jumpToPage,
+  proposeSchemaField,
+  acceptProposal,
+  rejectProposal,
+  commitGate,
+  dismissGate,
+  // 2026-05-31-shared-canvas-affordance-restoration — gate-open tool (mirror of
+  // the app-side GateChatRail.tools.ts save_to_account).
+  saveToAccount,
+  bookCall,
+  // onboarding-shell-shared-view Phase 3a — extract canvas-dispatch tool
+  // (mirror of the app-side Extract widget's show_extraction).
+  showExtraction,
+  // standardized-viewer-control T7 — the `_edit` sibling opening the schema
+  // design surface (mirror of the app-side Extract widget's show_extraction_edit).
+  showExtractionEdit,
+  // standardized-viewer-control T7 — interact canvas-dispatch tool (mirror of
+  // the app-side Interact navigation tool's show_interact).
+  showInteractTool,
+  // onboarding-shell-shared-view Phase 3b — integrate canvas-dispatch tool
+  // (mirror of the app-side Integrate widget's show_integrate).
+  showIntegrate,
+  // smart-report Phase 5 — report tool surface (mirror of the app-side
+  // SmartReportRender / SmartReportBuilder / PinToReportAction tools).
+  showSmartReportRender,
+  showSmartReportEdit,
+  pinToReport,
+  proposeReportSection,
+  acceptReportSection,
+  rejectReportSection,
+  editReportSection,
+  deleteReportSection,
+  // 2026-05-31-tool-system-completion — wf04 §1/§2/§4 deferred tools
+  // (mirror of SignUpWidget / OnboardingWizard / DialogTitle). All all-roles.
+  submitSignup,
+  wizardNext,
+  wizardBack,
+  wizardFinish,
+  dismissWizard,
+  closeDialog,
+  // agentic-tool-loop — server-executed read tool (no app mirror; allowlisted
+  // server-only in the parity guard).
+  lookupGroundxDocs,
+  // loop-tool-refined-research — second server-executed read tool (scoped
+  // document re-search; server-only, allowlisted in the parity guard).
+  searchDocuments,
+  // loop-tool-secondary-extraction — third server-executed read tool (named
+  // document's extraction, gated to the turn's authorized docs; server-only).
+  fetchDocumentFields,
+];
+
+/**
+ * Explicit "the step is present on the wire but is NOT a recognized
+ * `ViewerStepKind`" sentinel. Passing this to `toolsForStep` resolves to the
+ * SAFE MINIMUM (universal/unrestricted tools only) — strictly a subset of every
+ * valid step's set — NOT the full catalog.
+ *
+ * SECURITY (2026-06-01-data-model-tail item 2a): `request.activeStepKind` is an
+ * untrusted wire string. The naive `safeParse → undefined` fallback maps an
+ * invalid kind to `undefined`, which `toolsForStep` treats as the LEGACY caller
+ * and answers with the FULL catalog — WIDENING the tool surface exposed to the
+ * LLM for bogus input. Callers MUST distinguish the three cases explicitly:
+ *   - `undefined`            → legacy caller (no step context) → full catalog
+ *   - a valid `ViewerStepKind` → that step's filtered set
+ *   - `UNKNOWN_VIEWER_STEP`  → unrecognized/untrusted kind → safe minimum
+ * It is a unique sentinel object so it can never collide with a real kind
+ * string and the union below cannot be satisfied by an arbitrary string.
+ */
+export const UNKNOWN_VIEWER_STEP = Symbol("unknown-viewer-step");
+export type UnknownViewerStep = typeof UNKNOWN_VIEWER_STEP;
+
+/**
+ * Tools exposed for the given ViewerStep + caller role. `SERVER_TOOL_CATALOG`
+ * is the production source of truth; app tool metadata mirrors name/description
+ * for parity only. The two filters COMPOSE: a tool is exposed IFF its
+ * `availableSteps` admits `stepKind` (absent/empty → every step) AND
+ * `roleExposes(tool, role)` (absent/empty `availableIn` → every role). When
+ * `role` is omitted the role filter is a no-op (back-compat — full per-step
+ * catalog). The caller's role is derived SERVER-side (`chatHandler.ts`), never
+ * trusted from the client.
+ *
+ * `stepKind` is one of three EXPLICIT cases (see `UNKNOWN_VIEWER_STEP`):
+ * `undefined` → full catalog (legacy); a valid kind → its filtered set;
+ * `UNKNOWN_VIEWER_STEP` → safe minimum (universal tools only). An untrusted
+ * wire value must be coerced to exactly one of these by the caller (never
+ * blind-cast to `ViewerStepKind`).
+ */
+export function toolsForStep(
+  stepKind: ViewerStepKind | UnknownViewerStep | undefined,
+  role?: WidgetRole,
+): ServerTool[] {
+  // SAFE MINIMUM: an explicitly-unknown step exposes ONLY universal tools
+  // (no `availableSteps`). This is strictly a subset of every valid step's set
+  // and never the full catalog — so a bogus wire value can never widen the
+  // surface past a legitimate restricted step.
+  const isUnknown = stepKind === UNKNOWN_VIEWER_STEP;
+  return SERVER_TOOL_CATALOG.filter((t) => {
+    const unrestrictedStep = !t.availableSteps || t.availableSteps.length === 0;
+    const stepOk = isUnknown
+      ? unrestrictedStep
+      : !stepKind || unrestrictedStep || t.availableSteps!.includes(stepKind);
+    const roleOk = role === undefined || roleExposes(t, role);
+    return stepOk && roleOk;
+  });
+}
+
+/** Lookup by name. Returns undefined for unknown names. */
+export function getServerTool(name: string): ServerTool | undefined {
+  return SERVER_TOOL_CATALOG.find((t) => t.name === name);
+}

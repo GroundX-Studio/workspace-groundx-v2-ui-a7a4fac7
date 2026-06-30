@@ -1,0 +1,98 @@
+name: Integration (live GroundX)
+
+# Live integration against the REAL GroundX backend. Intentionally NOT a per-PR
+# gate (that lives in ci.yml, which runs a deterministic boot-only smoke): this
+# depends on live GroundX, real keys, and a provisioned customer, so a GroundX
+# outage or missing test data must never block code merges. Runs daily + on
+# demand instead, where flakiness is monitored separately from the merge path.
+#
+# Configure on the `dev` environment (and/or org):
+#   - secret GROUNDX_PARTNER_API_KEY — a real Partner key.
+#   - SMOKE_EMAIL (var or secret) + SMOKE_PASSWORD (secret) — a registered
+#     GroundX customer for the login flow. Without it the live login 404s
+#     ("customer does not exist"); provision one once and set these.
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # daily, 08:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Live GroundX integration
+    runs-on: ubuntu-latest
+    environment: dev # resolves the env-scoped GROUNDX_PARTNER_API_KEY secret
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -ptest --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npm --workspace app exec -- playwright install --with-deps chromium
+
+      # Boot against the throwaway MySQL service container + the REAL GroundX key,
+      # exercising the authenticated upstream flow (login / project / bucket /
+      # search / xray / llm). Needs a registered customer via SMOKE_EMAIL.
+      - name: Dev smoke — live GroundX flow
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_USER: root
+          MYSQL_PASSWORD: test
+          MYSQL_DATABASE: test
+          GROUNDX_PARTNER_API_KEY: ${{ secrets.GROUNDX_PARTNER_API_KEY }}
+          GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
+          GROUNDX_SAMPLES_BUCKET_ID: "28454"
+          SMOKE_EMAIL: ${{ vars.SMOKE_EMAIL || secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          if [ -z "${GROUNDX_PARTNER_API_KEY}" ]; then
+            echo "::error::GROUNDX_PARTNER_API_KEY is not set on the dev environment — the live integration must run against real GroundX."
+            exit 1
+          fi
+          npm run verify:preview
+
+      # Browser e2e against the seeded sample doc c3bfff49 in bucket 28454.
+      - name: Browser e2e (live GroundX)
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_USER: root
+          MYSQL_PASSWORD: test
+          MYSQL_DATABASE: test
+          GROUNDX_PARTNER_API_KEY: ${{ secrets.GROUNDX_PARTNER_API_KEY }}
+          GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
+          GROUNDX_SAMPLES_BUCKET_ID: "28454"
+        run: |
+          if [ -z "${GROUNDX_PARTNER_API_KEY}" ]; then
+            echo "::error::GROUNDX_PARTNER_API_KEY is not set on the dev environment."
+            exit 1
+          fi
+          npm run test:e2e

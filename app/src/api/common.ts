@@ -11,15 +11,6 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-export interface GroundXRequestOptions extends RequestOptions {
-}
-
-export interface PartnerRequestOptions extends RequestOptions {
-}
-
-export interface LlmRequestOptions extends RequestOptions {
-}
-
 export interface MessageResponse {
   message: string;
 }
@@ -31,11 +22,17 @@ export const customerLoginUrl = `${customerUrl}/login`;
 export const customerRegisterUrl = `${customerUrl}/register`;
 export const customerDataUrl = (_accountId: string) => `${customerUrl}/me`;
 export const customerLogoutUrl = `${customerUrl}/logout`;
+// DBG-01: debug-overlay session reset — clears the httpOnly session + csrf
+// cookies for any caller (anon or authed). See middleware POST /api/auth/reset.
+export const customerResetUrl = `${customerUrl}/reset`;
 export const appMetadataUrl = `${middlewareUrl}/me/metadata`;
 
 export const resetPasswordUrl = `${customerUrl}/password`;
 export const resetPasswordCodeUrl = `${resetPasswordUrl}/reset`;
 export const resetPasswordConfirmUrl = `${resetPasswordUrl}/confirm`;
+
+export const onboardingSessionUrl = `${middlewareUrl}/onboarding/session`;
+export const scenariosUrl = `${middlewareUrl}/scenarios`;
 
 export const groundxUrl = (path: string): string => `${middlewareUrl}${path}`;
 export const partnerUrl = (path: string): string => `${middlewareUrl}${path}`;
@@ -48,15 +45,15 @@ export const paramsWithPagination = (params?: PaginationParams): Record<string, 
   return output;
 };
 
-export const groundxRequestConfig = (options: GroundXRequestOptions = {}) => ({
+export const groundxRequestConfig = (options: RequestOptions = {}) => ({
   signal: options.signal,
 });
 
-export const partnerRequestConfig = (options: PartnerRequestOptions = {}) => ({
+export const partnerRequestConfig = (options: RequestOptions = {}) => ({
   signal: options.signal,
 });
 
-export const llmRequestConfig = (options: LlmRequestOptions = {}) => {
+export const llmRequestConfig = (options: RequestOptions = {}) => {
   return {
     signal: options.signal,
   };

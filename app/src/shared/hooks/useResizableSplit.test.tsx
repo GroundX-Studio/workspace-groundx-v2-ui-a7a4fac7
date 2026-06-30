@@ -1,0 +1,182 @@
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { clampToLiveBand, snapZoneFor, useResizableSplit } from "./useResizableSplit";
+
+describe("snapZoneFor (W5 thresholds)", () => {
+  it("returns workspace-focus when width < 200", () => {
+    expect(snapZoneFor(0)).toBe("workspace-focus");
+    expect(snapZoneFor(199)).toBe("workspace-focus");
+  });
+
+  it("returns split-live in the 280–720 live band", () => {
+    expect(snapZoneFor(280)).toBe("split-live");
+    expect(snapZoneFor(400)).toBe("split-live");
+    expect(snapZoneFor(720)).toBe("split-live");
+  });
+
+  it("returns chat-focus when width > 720", () => {
+    expect(snapZoneFor(721)).toBe("chat-focus");
+    expect(snapZoneFor(1100)).toBe("chat-focus");
+  });
+
+  it("transitional 200–280 band still reports split-live for animation continuity", () => {
+    expect(snapZoneFor(220)).toBe("split-live");
+    expect(snapZoneFor(279)).toBe("split-live");
+  });
+});
+
+describe("clampToLiveBand", () => {
+  it("clamps to default 280–640", () => {
+    expect(clampToLiveBand(100)).toBe(280);
+    expect(clampToLiveBand(500)).toBe(500);
+    expect(clampToLiveBand(900)).toBe(640);
+  });
+
+  it("clamps to ultrawide 280–720 when ultrawide=true", () => {
+    expect(clampToLiveBand(900, true)).toBe(720);
+    expect(clampToLiveBand(700, true)).toBe(700);
+  });
+});
+
+describe("useResizableSplit", () => {
+  it("uses provided initial width and reports live zone", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 360 }));
+    expect(result.current.width).toBe(360);
+    expect(result.current.zone).toBe("split-live");
+  });
+
+  it("setWidth clamps to [min, max]", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 400, min: 200, max: 800 }));
+    act(() => result.current.setWidth(100));
+    expect(result.current.width).toBe(200);
+    act(() => result.current.setWidth(1000));
+    expect(result.current.width).toBe(800);
+  });
+
+  it("setWidth past 720 reports chat-focus zone", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 400, max: 1000 }));
+    act(() => result.current.setWidth(800));
+    expect(result.current.zone).toBe("chat-focus");
+  });
+
+  it("setWidth below 200 reports workspace-focus zone", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 400, min: 0 }));
+    act(() => result.current.setWidth(120));
+    expect(result.current.zone).toBe("workspace-focus");
+  });
+
+  it("bump increments width and clamps", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 400, min: 200, max: 800 }));
+    let next!: number;
+    act(() => {
+      next = result.current.bump(50);
+    });
+    expect(next).toBe(450);
+    expect(result.current.width).toBe(450);
+    act(() => {
+      next = result.current.bump(500);
+    });
+    expect(next).toBe(800);
+  });
+});
+
+// UR-02 closure scope: surviving a reload. The hook is the only place
+// chat-pane width lives, so persistence belongs here (not in AppShell).
+describe("useResizableSplit storageKey persistence (UR-02)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("reads initial width from localStorage when storageKey provided", () => {
+    localStorage.setItem("appshell.chatWidth.v1", "455");
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "appshell.chatWidth.v1", initial: 360 })
+    );
+    expect(result.current.width).toBe(455);
+  });
+
+  it("falls back to initial when storageKey present but no stored value", () => {
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "missing-key", initial: 360 })
+    );
+    expect(result.current.width).toBe(360);
+  });
+
+  it("falls back to initial when stored value is non-numeric", () => {
+    localStorage.setItem("bad-key", "not-a-number");
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "bad-key", initial: 360 })
+    );
+    expect(result.current.width).toBe(360);
+  });
+
+  it("clamps stored value to [min, max] (defends against bad reloads)", () => {
+    localStorage.setItem("oversize", "9999");
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "oversize", initial: 360, min: 0, max: 1200 })
+    );
+    expect(result.current.width).toBe(1200);
+  });
+
+  it("setWidth persists to localStorage", () => {
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "persist-key", initial: 360 })
+    );
+    act(() => result.current.setWidth(500));
+    expect(localStorage.getItem("persist-key")).toBe("500");
+  });
+
+  it("bump persists the new width to localStorage", () => {
+    const { result } = renderHook(() =>
+      useResizableSplit({ storageKey: "bump-key", initial: 360 })
+    );
+    act(() => {
+      result.current.bump(40);
+    });
+    expect(localStorage.getItem("bump-key")).toBe("400");
+  });
+
+  it("does NOT touch localStorage when storageKey is unset", () => {
+    const spy = vi.spyOn(Storage.prototype, "setItem");
+    const { result } = renderHook(() => useResizableSplit({ initial: 360 }));
+    act(() => result.current.setWidth(500));
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+// Regression guard (slider-regression-audit): the existing tests above cover the
+// hook's MATH (snap zones, clamp, persistence) but historically NOTHING exercised
+// the actual drag wiring — startDrag + the window `pointermove` listener that
+// makes the pane follow the cursor. A divider that "barely moves" passes every
+// math test, so the drag path itself must be pinned.
+describe("useResizableSplit — drag wiring (the part users actually feel)", () => {
+  it("startDrag + window pointermove moves the width by the cursor delta", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 360, min: 0, max: 1000 }));
+    act(() => result.current.startDrag(100));
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 250 }));
+    });
+    // Dragged the pointer from x=100 → x=250 (+150) ⇒ width 360 + 150 = 510.
+    expect(result.current.width).toBe(510);
+  });
+
+  it("a drag clamps to [min, max] (no runaway / no stuck pane)", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 360, min: 300, max: 400 }));
+    act(() => result.current.startDrag(0));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 5000 })));
+    expect(result.current.width).toBe(400);
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: -5000 })));
+    expect(result.current.width).toBe(300);
+  });
+
+  it("pointermove is a no-op until startDrag arms it (no phantom resize)", () => {
+    const { result } = renderHook(() => useResizableSplit({ initial: 360, min: 0, max: 1000 }));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 900 })));
+    expect(result.current.width).toBe(360);
+  });
+});

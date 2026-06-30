@@ -1,0 +1,271 @@
+/**
+ * Regression guard for token discipline.
+ *
+ * Every file under `components/` + `views/` must resolve visible
+ * styles through theme tokens — no inline `fontSize: 13`, no hex
+ * literals, no raw `borderRadius: 6`, no numeric `fontWeight: 700`.
+ *
+ * Per TDD discipline: if a test cannot be written for "no hardcoded
+ * styles," there is no forcing function and the rule decays into
+ * vibes. This is the forcing function.
+ *
+ * Coverage history:
+ *   - Original (2026-05-25): 6 F1-only files explicit in `FILES`.
+ *   - ARCH-17 (2026-05-26): auto-discover every `.tsx` under
+ *     `components/` + `views/`. Use `EXEMPT` for the 16 files with
+ *     historical offenders pending ARCH-19/20 cleanup; use
+ *     `ASSET_ALLOWLIST` for files where third-party brand colors
+ *     are legitimately literal (e.g. ConnectorGlyph renders Box,
+ *     Microsoft, Google logos at their actual brand hex values).
+ *
+ * Failure mode the test prevents: a new component lands with
+ * `<Typography sx={{ fontSize: 13, color: "#29335c" }}>` instead of
+ * `<BodyText>` or `<Heading level="h4">`. CI blocks the merge until
+ * the contributor uses a primitive or extracts a token.
+ *
+ * Cleanup ladder for the EXEMPT list (run during ARCH-19/20 view
+ * migrations): pick a file, replace inline literals with theme
+ * tokens / primitives, remove from EXEMPT, watch the test still
+ * pass. Repeat. When EXEMPT is empty, the rule is fully enforced.
+ */
+
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SRC = resolve(HERE, "..");
+
+/**
+ * Files where third-party brand hex literals are legitimate.
+ * Reviewed manually 2026-05-26. Anything added here needs a comment
+ * explaining what third-party brand the literals belong to.
+ */
+const ASSET_ALLOWLIST = new Set<string>([
+  // Renders real third-party connector logos (Box, Microsoft, Google,
+  // Dropbox, etc.) at their actual brand hex values. Those colors are
+  // externally owned and can't be tokenized into the GroundX brand
+  // palette.
+  "components/brand/ConnectorGlyph/ConnectorGlyph.tsx",
+  // Dev-only diagnostic overlay (gated on `?navdebug=1`). Uses bright
+  // debug-vibrant colors (#fff / #90ee90 / #ffd700 / #ff7070) that are
+  // intentionally NOT brand tokens — they're the "this is a debug
+  // panel" visual identity. Same logic for the small 9-11px font
+  // sizes (terminal-feel monospace text). ARCH-20 (2026-05-26): keep
+  // allowlisted rather than tokenizing — debug colors aren't brand.
+  "views/Onboarding/NavDebugOverlay.tsx",
+  // DBG-01 (2026-05-28): dev-only debug overlay (gated on `?debug=true`).
+  // Same rationale as NavDebugOverlay — intentionally off-brand
+  // debug-vibrant hex (#1b1b1b / #ffd700 / #90ee90) + monospace so it
+  // reads as a dev tool, never product UI. Not brand tokens by design.
+  "components/layout/DebugOverlay/DebugOverlay.tsx",
+  // intent-coverage: the intent-firing panel inside the single dev menu
+  // (DebugOverlay, shown via the "Fire intent" toggle on canvas screens).
+  // Same rationale as DebugOverlay — intentionally off-brand debug hex
+  // (#1b1f24 / #d29922 / #30363d) + monospace so it reads as a dev tool,
+  // never product UI. Not brand tokens by design.
+  "components/layout/DebugOverlay/IntentDebugPanel.tsx",
+  // Framework-independent fallback UI — renders BEFORE the theme
+  // provider has a chance to load (it's the safety net for when the
+  // app tree throws during initial render). Uses inline `style={...}`
+  // with hardcoded hex + sizes so the error UI shows correctly even
+  // if `@/constants` fails to resolve or the MUI theme isn't mounted.
+  // Tokenizing would defeat the "always renders" guarantee.
+  // ARCH-20 (2026-05-26): allowlisted by design.
+  "components/layout/AppErrorBoundary/AppErrorBoundary.tsx",
+]);
+
+/**
+ * Files with historical inline literals from the ARCH-17 drift-guard
+ * expansion. Each row carried the offender count at that point.
+ * ARCH-20 (2026-05-26) burned this list to ZERO — every component
+ * + view file now resolves its visible styles through theme tokens
+ * (or sits in `ASSET_ALLOWLIST` for legitimate non-brand cases like
+ * the ConnectorGlyph third-party logos, the NavDebugOverlay debug
+ * panel, and the AppErrorBoundary framework-independent fallback).
+ *
+ * INVARIANT: the list stays empty. Adding a new entry requires a
+ * named cleanup ticket; the preferred path is always to use a token
+ * (existing or new chrome token).
+ */
+const EXEMPT_OFFENDER_COUNTS: Record<string, number> = {};
+const EXEMPT = new Set(Object.keys(EXEMPT_OFFENDER_COUNTS));
+
+interface ForbiddenPattern {
+  name: string;
+  regex: RegExp;
+  hint: string;
+}
+
+const FORBIDDEN: ForbiddenPattern[] = [
+  {
+    name: "numeric fontSize",
+    regex: /fontSize:\s*[0-9]+(\.[0-9]+)?\s*[,}]/g,
+    hint: "use a FONT_SIZE_* token, an ONBOARDING_*_FONT_SIZE token, or a typography primitive (Heading / BodyText / Label / Caption)",
+  },
+  {
+    name: "numeric fontWeight",
+    regex: /fontWeight:\s*[0-9]+\s*[,}]/g,
+    hint: "use FONT_WEIGHT_HEADLINE / LABEL / MEDIUM / BODY from @/constants",
+  },
+  {
+    name: "numeric borderRadius",
+    regex: /borderRadius:\s*[0-9]+(\.[0-9]+)?\s*[,}]/g,
+    hint: "use a BORDER_RADIUS_* token or a chrome STEP_*_RADIUS token",
+  },
+  {
+    name: "viewport-unit maxHeight/minHeight string literal",
+    regex: /(maxHeight|minHeight):\s*["'][0-9]+(vh|vw)["']/g,
+    hint: "extract to a chrome token (e.g. GATE_DRAWER_MAX_HEIGHT)",
+  },
+  {
+    name: "hex color literal",
+    regex: /["']#[0-9a-fA-F]{3,8}["']/g,
+    hint: "use a brand color token from @/constants",
+  },
+];
+
+function walkTsx(dir: string, out: string[] = []): string[] {
+  if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return out;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const abs = resolve(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkTsx(abs, out);
+    } else if (
+      entry.isFile() &&
+      entry.name.endsWith(".tsx") &&
+      !entry.name.endsWith(".test.tsx")
+    ) {
+      out.push(abs);
+    }
+  }
+  return out;
+}
+
+function countOffenders(content: string): number {
+  let total = 0;
+  for (const { regex } of FORBIDDEN) {
+    regex.lastIndex = 0;
+    const matches = content.match(regex);
+    if (matches) total += matches.length;
+  }
+  return total;
+}
+
+function violationsFor(content: string): string[] {
+  const violations: string[] = [];
+  for (const { name, regex, hint } of FORBIDDEN) {
+    regex.lastIndex = 0;
+    const matches = content.match(regex);
+    if (matches) {
+      for (const m of matches) {
+        violations.push(`  ${name}: \`${m.trim()}\` — ${hint}`);
+      }
+    }
+  }
+  return violations;
+}
+
+describe("no hardcoded styles across components/ + views/", () => {
+  // Meta: prove the regexes catch known-bad samples.
+  it("FORBIDDEN regexes catch known-bad samples (self-test)", () => {
+    const samples: Array<{ name: string; sample: string; expectMatch: number }> = [
+      { name: "numeric fontSize", sample: "{ fontSize: 12, color: 'red' }", expectMatch: 1 },
+      { name: "numeric fontWeight", sample: "{ fontWeight: 700 }", expectMatch: 1 },
+      { name: "numeric borderRadius", sample: "{ borderRadius: 14 }", expectMatch: 1 },
+      {
+        name: "viewport-unit maxHeight/minHeight string literal",
+        sample: "{ maxHeight: '90vh' }",
+        expectMatch: 1,
+      },
+      { name: "hex color literal", sample: "{ color: '#ff0000' }", expectMatch: 1 },
+    ];
+    for (const { name, sample, expectMatch } of samples) {
+      const rule = FORBIDDEN.find((p) => p.name === name);
+      expect(rule, `no rule named ${name}`).toBeDefined();
+      rule!.regex.lastIndex = 0;
+      const matches = sample.match(rule!.regex) ?? [];
+      expect(matches.length, `regex for ${name} should match ${expectMatch}× in ${sample}`).toBe(
+        expectMatch,
+      );
+    }
+  });
+
+  const scope = [
+    resolve(SRC, "components"),
+    resolve(SRC, "views"),
+  ];
+
+  const allFiles = scope.flatMap((dir) => walkTsx(dir)).sort();
+  expect(allFiles.length).toBeGreaterThan(0); // sanity
+
+  // Sanity: every entry in EXEMPT_OFFENDER_COUNTS still exists in
+  // the file tree. If a file is renamed / deleted, the exemption is
+  // stale and must be removed.
+  it("EXEMPT entries all reference real files (sanity)", () => {
+    const found = new Set(
+      allFiles.map((abs) => relative(SRC, abs)),
+    );
+    for (const exempt of EXEMPT) {
+      expect(
+        found.has(exempt),
+        `EXEMPT entry "${exempt}" doesn't match any file in scope — has it been moved or deleted? Update the exemption list.`,
+      ).toBe(true);
+    }
+  });
+
+  // Sanity: every entry in ASSET_ALLOWLIST still exists too.
+  it("ASSET_ALLOWLIST entries all reference real files (sanity)", () => {
+    const found = new Set(
+      allFiles.map((abs) => relative(SRC, abs)),
+    );
+    for (const asset of ASSET_ALLOWLIST) {
+      expect(
+        found.has(asset),
+        `ASSET_ALLOWLIST entry "${asset}" doesn't match any file in scope — has it been moved or deleted? Update the allowlist.`,
+      ).toBe(true);
+    }
+  });
+
+  // Sanity: the EXEMPT_OFFENDER_COUNTS entries should monotonically
+  // shrink. If an exempted file now has FEWER offenders than the
+  // recorded count, the count needs to be updated downward. If MORE,
+  // someone added drift to an exempt file (still bad — they should
+  // have fixed instead of grown).
+  it("EXEMPT offender counts are accurate (drift sentry)", () => {
+    const drift: string[] = [];
+    for (const [rel, expected] of Object.entries(EXEMPT_OFFENDER_COUNTS)) {
+      const abs = resolve(SRC, rel);
+      const content = readFileSync(abs, "utf8");
+      const actual = countOffenders(content);
+      if (actual !== expected) {
+        drift.push(`  ${rel}: expected ${expected}, found ${actual}`);
+      }
+    }
+    if (drift.length > 0) {
+      throw new Error(
+        `EXEMPT counts out of sync. Update EXEMPT_OFFENDER_COUNTS in this file to reflect the new totals, OR (preferably) clean up the inline literals and remove the entry. Drift:\n${drift.join("\n")}`,
+      );
+    }
+  });
+
+  for (const abs of allFiles) {
+    const rel = relative(SRC, abs);
+    if (ASSET_ALLOWLIST.has(rel)) continue;
+    if (EXEMPT.has(rel)) continue;
+
+    it(`${rel} contains no forbidden style literals`, () => {
+      const content = readFileSync(abs, "utf8");
+      const violations = violationsFor(content);
+      if (violations.length > 0) {
+        throw new Error(
+          `Found ${violations.length} hardcoded style literal(s) in ${rel}:\n${violations.join("\n")}\n\n` +
+            `If this file is mid-migration to primitives, you may add it to EXEMPT_OFFENDER_COUNTS in ` +
+            `app/src/test/no-hardcoded-styles.test.ts with its offender count and a TODO(ARCH-19) or TODO(ARCH-20) ` +
+            `reference. Prefer fixing over exempting.`,
+        );
+      }
+    });
+  }
+});

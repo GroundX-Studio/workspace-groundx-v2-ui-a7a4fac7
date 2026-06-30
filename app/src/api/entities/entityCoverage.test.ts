@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import * as customer from "./customerEntity";
+import * as onboardingSession from "./onboardingSessionEntity";
 import * as groundxApiKeys from "./groundxApiKeysEntity";
 import * as groundxBuckets from "./groundxBucketsEntity";
 import * as groundxCustomer from "./groundxCustomerEntity";
@@ -24,9 +25,14 @@ const expectedExports: Record<string, { module: Record<string, unknown>; exports
       "login",
       "logout",
       "register",
+      "resetSession",
       "resetUserPassword",
       "updateAppMetadata",
     ],
+  },
+  onboardingSession: {
+    module: onboardingSession,
+    exports: ["issueOnboardingSession"],
   },
   groundxApiKeys: {
     module: groundxApiKeys,

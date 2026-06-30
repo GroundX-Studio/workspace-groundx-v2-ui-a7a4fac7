@@ -31,6 +31,23 @@
 /** Width of the left sidebar drawer when fully expanded. */
 export const drawerWidth = 270;
 
+/**
+ * Onboarding-shell nav (MiniNav) widths. Per spec-primitives.jsx ·
+ * MiniNav full=180, minimal=48. (Earlier slim experiments at 156 / 132
+ * / 112 were reverted 2026-05-26 once the StepStrip moved into a
+ * header slot spanning both chat + canvas — the cramped-canvas-pane
+ * pressure that motivated the shrinks no longer exists.)
+ */
+export const ONBOARDING_NAV_WIDTH_FULL = 180;
+export const ONBOARDING_NAV_WIDTH_COLLAPSED = 48;
+
+/**
+ * Warm off-white nav background. Matches the wireframe MiniNav `#f8f7f2`.
+ * Distinct from TINT (cyan-tinted) — the nav surface is intentionally
+ * separate from the content surface so it reads as chrome.
+ */
+export const WARM_OFFWHITE = "#f8f7f2";
+
 /** Main content-pane background — the fill behind all cards in the authenticated shell. */
 export const MAIN_BACKGROUND = "#eef7f9";
 
@@ -62,3 +79,105 @@ export const PROGRESS_TRACK_ON_DARK = "rgba(255, 255, 255, 0.15)";
 
 export const PREMIUM_GRADIENT_FROM = "#fe6b8b";
 export const PREMIUM_GRADIENT_TO = "#ff8e53";
+
+// ──────────────────────────────────────────────────────────────────────────
+// Onboarding F-series tokens (project-specific; not in tokens.json because
+// the F-series flow is unique to this product UI)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** F1 hero headline — Thicccboi, 34px. */
+export const ONBOARDING_HERO_FONT_SIZE = "2.125rem";
+
+/** Tile titles in BYO row (Upload files / Connect a source / Email it in). */
+export const ONBOARDING_TILE_TITLE_FONT_SIZE = "1.0625rem";
+
+/** F-series small body copy — coral demonstrates line, privacy footer, capability legend, BYO sub. */
+export const ONBOARDING_SMALL_TEXT_FONT_SIZE = "0.71875rem";
+
+/** Sample / BYO card chrome dimensions. */
+export const SAMPLE_CARD_MIN_HEIGHT = 140;
+export const BYO_TILE_HEIGHT = 134;
+
+/** Step strip number badge size. */
+export const STEP_BADGE_SIZE = 20;
+
+/**
+ * Slim variants for the step strip. Were applied to the F2+ embedded
+ * surface to fight cramped canvas-pane widths; retained as tokens for
+ * future use even though the active layout (post-2026-05-26) hosts
+ * the strip in a header slot that spans both chat + canvas, where the
+ * regular full-size sizing is the right call.
+ */
+export const STEP_STRIP_BADGE_SIZE_SLIM = 15;
+export const STEP_STRIP_BADGE_FONT_SIZE_SLIM = 9;
+export const STEP_STRIP_PILL_FONT_SIZE_SLIM = 10;
+export const STEP_STRIP_ANALYZE_EYEBROW_FONT_SIZE_SLIM = 8;
+
+/**
+ * OnboardingNav small-text sizes. The nav item eyebrow (9px coral
+ * "NEW") and sub-label (11px muted gloss) are deliberately smaller
+ * than the typography primitive scale because the nav rail is the
+ * narrowest UI surface — labels need to fit a 180px column without
+ * truncation. Added as chrome tokens in ARCH-20 (2026-05-26) so the
+ * no-hardcoded-styles drift guard can lock the values without forcing
+ * a one-size-fits-all typography token.
+ */
+export const ONBOARDING_NAV_EYEBROW_FONT_SIZE = 9;
+export const ONBOARDING_NAV_SUBLABEL_FONT_SIZE = 11;
+
+/**
+ * Full-viewport minHeight — the "this surface owns the whole window"
+ * pattern used by full-bleed page-level layouts (AuthLayout, Banned,
+ * etc.). Added as a chrome token in ARCH-20 (2026-05-26) so the
+ * no-hardcoded-styles drift guard accepts the value without
+ * special-casing each consumer in ASSET_ALLOWLIST.
+ */
+export const FULL_VIEWPORT_MIN_HEIGHT = "100vh";
+
+/**
+ * PdfViewer thumbnail page-number overlay font size. Same 9px as
+ * the OnboardingNav eyebrow, but the meaning is unrelated — this is
+ * the tiny "1 / 2 / 3" page-index text that sits on top of each
+ * thumbnail in the PDF reel. Kept as its own token so changes to the
+ * viewer typography stay scoped to the viewer.
+ */
+export const PDF_THUMB_PAGE_NUMBER_FONT_SIZE = 9;
+
+/** Capability badge (E / I / R) — default size used inside sample cards. */
+export const CAPABILITY_BADGE_SIZE = 20;
+
+/** Capability badge — smaller variant used in the legend row. */
+export const CAPABILITY_BADGE_SIZE_SM = 16;
+
+/** Picker container — desktop and ultrawide max widths. */
+export const PICKER_MAX_WIDTH = 1200;
+export const PICKER_MAX_WIDTH_ULTRAWIDE = 1320;
+
+/** F1 sample/BYO max width on bottom-sheet gate drawer body. */
+export const GATE_MAX_WIDTH = 460;
+
+/** Bottom-sheet gate drawer — max height as a viewport ratio. */
+export const GATE_DRAWER_MAX_HEIGHT = "90vh";
+
+/**
+ * Step strip ANALYZE bracket — radius is between BORDER_RADIUS (6px) and
+ * BORDER_RADIUS_2X (12px); the spec wants something rounder than the
+ * step pills it contains but not as soft as a card.
+ */
+export const STEP_ANALYZE_BRACKET_RADIUS = 14;
+
+/** F-series micro chrome — for tiny inline labels (Analyze label, doc-count badge). */
+export const ONBOARDING_MICRO_FONT_SIZE = 10;
+
+/** F-series badge text — for the step-strip number badge + compact-strip done count. */
+export const ONBOARDING_BADGE_FONT_SIZE = 11;
+
+/** Inline icon size — LockOutlinedIcon and similar chrome icons paired with text. */
+export const ICON_SIZE_INLINE = 14;
+
+/**
+ * MUI's brand tokens cover 400 / 600 / 700 / 800 weights. 500 is a useful
+ * "medium" between body and label; the step strip's reachable-todo + disabled
+ * states use it for a slightly softer feel than full label weight.
+ */
+export const FONT_WEIGHT_MEDIUM = 500;

@@ -1,115 +1,94 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { GroundXRequestOptions, PartnerRequestOptions } from "@/api/common";
-import { GroundXApiKey } from "@/api/entities/sdkTypes";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import type { RequestOptions } from "@/api/common";
+import type { GroundXApiKey } from "@/api/entities/sdkTypes";
+import { useApi } from "@/contexts/ApiContext";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { ApiKeysContext } from "./ApiKeysContext";
 
 export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage, setSuccessMessage } = useMessageContext();
+  const api = useApi();
+  const run = useSdkRunner("API key operation failed.");
   const [groundxApiKeys, setGroundXApiKeys] = useState<GroundXApiKey[]>([]);
   const [partnerApiKeys, setPartnerApiKeys] = useState<GroundXApiKey[]>([]);
 
-  const run = useCallback(
-    async <T,>(work: () => Promise<T>, successMessage?: string) => {
-      const result = createSdkResult<T>();
-      setIsLoading(true);
-      try {
-        result.response = await work();
-        result.isSuccess = true;
-        if (successMessage) setSuccessMessage(successMessage);
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("API key operation failed.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading, setSuccessMessage]
-  );
-
   const listGroundXApiKeys = useCallback(
-    (options?: GroundXRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxApiKeys.listGroundXApiKeys(options);
         setGroundXApiKeys(response.apiKeys);
         return response.apiKeys;
       }),
-    [run]
+    [api, run]
   );
 
   const createGroundXApiKey = useCallback(
-    (name: string, options?: GroundXRequestOptions) =>
+    (name: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxApiKeys.createGroundXApiKey(name, options);
         setGroundXApiKeys(response.apiKeys);
         return response.apiKeys;
       }, "API key created."),
-    [run]
+    [api, run]
   );
 
   const renameGroundXApiKey = useCallback(
-    (apiKey: string, name: string, options?: GroundXRequestOptions) =>
+    (apiKey: string, name: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.groundxApiKeys.renameGroundXApiKey(apiKey, name, options);
         setGroundXApiKeys(response.apiKeys);
         return response.apiKeys;
       }, "API key renamed."),
-    [run]
+    [api, run]
   );
 
   const deleteGroundXApiKey = useCallback(
-    (apiKey: string, options?: GroundXRequestOptions) =>
+    (apiKey: string, options?: RequestOptions) =>
       run(async () => {
         await api.groundxApiKeys.deleteGroundXApiKey(apiKey, options);
         setGroundXApiKeys((keys) => keys.filter((key) => key.apiKey !== apiKey));
       }, "API key deleted."),
-    [run]
+    [api, run]
   );
 
   const listPartnerApiKeys = useCallback(
-    (options?: PartnerRequestOptions) =>
+    (options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerApiKeys.listPartnerApiKeys(options);
         setPartnerApiKeys(response.apiKeys);
         return response.apiKeys;
       }),
-    [run]
+    [api, run]
   );
 
   const createPartnerApiKey = useCallback(
-    (name: string, options?: PartnerRequestOptions) =>
+    (name: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerApiKeys.createPartnerApiKey(name, options);
         setPartnerApiKeys(response.apiKeys);
         return response.apiKeys;
       }, "API key created."),
-    [run]
+    [api, run]
   );
 
   const renamePartnerApiKey = useCallback(
-    (apiKey: string, name: string, options?: PartnerRequestOptions) =>
+    (apiKey: string, name: string, options?: RequestOptions) =>
       run(async () => {
         const response = await api.partnerApiKeys.renamePartnerApiKey(apiKey, name, options);
         setPartnerApiKeys(response.apiKeys);
         return response.apiKeys;
       }, "API key renamed."),
-    [run]
+    [api, run]
   );
 
   const deletePartnerApiKey = useCallback(
-    (apiKey: string, options?: PartnerRequestOptions) =>
+    (apiKey: string, options?: RequestOptions) =>
       run(async () => {
         await api.partnerApiKeys.deletePartnerApiKey(apiKey, options);
         setPartnerApiKeys((keys) => keys.filter((key) => key.apiKey !== apiKey));
       }, "API key deleted."),
-    [run]
+    [api, run]
   );
 
   return (
@@ -131,4 +110,3 @@ export const ApiKeysProvider: FC<{ children: ReactNode }> = ({ children }) => {
     </ApiKeysContext.Provider>
   );
 };
-

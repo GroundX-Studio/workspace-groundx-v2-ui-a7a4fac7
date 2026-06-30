@@ -61,6 +61,10 @@ export interface AppLegalConfig {
   termsUrl: string;
 }
 
+export interface AppCalendlyConfig {
+  url: string;
+}
+
 export interface AppOnboardingStepConfig {
   id: string;
   title: string;
@@ -68,6 +72,9 @@ export interface AppOnboardingStepConfig {
   primaryActionLabel?: string;
   routeHint?: string;
   educationLabel?: string;
+  sourceFrame?: string;
+  launchHref?: string;
+  launchLabel?: string;
 }
 
 export interface AppOnboardingConfig {
@@ -83,6 +90,7 @@ export interface AppConfig {
     passwordReset: AppLogoConfig;
   };
   legal: AppLegalConfig;
+  calendly: AppCalendlyConfig;
   api: AppApiConfig;
   onboarding: AppOnboardingConfig;
   design: DeepPartial<AppDesignOverrides>;
@@ -95,6 +103,7 @@ export type AppConfigOverrides = Partial<
     };
     api: Partial<AppApiConfig>;
     legal: Partial<AppLegalConfig>;
+    calendly: Partial<AppCalendlyConfig>;
     onboarding: Partial<AppOnboardingConfig>;
     design: DeepPartial<AppDesignOverrides>;
   }
@@ -109,6 +118,9 @@ const numberFromEnv = (value: string | undefined, fallback: number): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+
+const stringFromEnv = (value: string | undefined, fallback = ""): string =>
+  value?.trim() || fallback;
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
   appName: "GroundX Studio",
@@ -133,41 +145,59 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   legal: {
     termsUrl: "https://www.eyelevel.ai/product/terms-conditions",
   },
+  calendly: {
+    url: stringFromEnv(import.meta.env.VITE_CALENDLY_URL),
+  },
   onboarding: {
     enabled: true,
     steps: [
       {
-        id: "app-shell",
-        title: "Start with the app shell",
-        body: "The header, side rail, page title, and protected content area give every product workflow the same foundation.",
-        primaryActionLabel: "Explore navigation",
-        educationLabel: "About the app shell",
+        id: "sessions",
+        title: "Pick up where the proof left off",
+        body: "Signed-in Studio keeps your current conversations and saved chat sessions available, so refreshes and follow-up work bring you back to the same grounded context.",
+        primaryActionLabel: "Next: Workspaces",
+        routeHint: "Home opens your last chat session when one exists; otherwise it starts from the onboarding sandbox.",
+        educationLabel: "Authenticated surface",
+        sourceFrame: "Saved sessions",
       },
       {
-        id: "navigation",
-        title: "Use navigation from any screen",
-        body: "Desktop users get a side rail. Tablet and phone users get the same menu through the hamburger button.",
-        routeHint: "Home is the first protected route.",
-        educationLabel: "About responsive navigation",
+        id: "scopes",
+        title: "Work in Workspaces and Projects",
+        body: "Use Workspaces for bucket-wide conversations and Projects for focused document sets with the current project filter already applied.",
+        primaryActionLabel: "Next: Sandbox",
+        routeHint: "The left rail opens /workspaces and /projects as scoped conversations.",
+        educationLabel: "Authenticated surfaces",
+        sourceFrame: "Workspaces / Projects",
+        launchHref: "/workspaces",
+        launchLabel: "Open Workspaces",
       },
       {
-        id: "account-menu",
-        title: "Manage the account from the header",
-        body: "The profile menu shows account details and keeps logout in one predictable place.",
-        educationLabel: "About the account menu",
+        id: "sandbox",
+        title: "Use the sandbox for the guided walkthrough",
+        body: "The onboarding sandbox remains the canonical F-series journey for trying a sample, reading citations, extracting fields, asking grounded questions, and reaching Integrate.",
+        primaryActionLabel: "Next: Outputs",
+        routeHint: "Open /onboarding when you want the guided product proof again.",
+        educationLabel: "Canonical walkthrough",
+        sourceFrame: "F1-F7 Sandbox",
+        launchHref: "/onboarding",
+        launchLabel: "Open onboarding sandbox",
       },
       {
-        id: "education",
-        title: "Look for info bubbles",
-        body: "Educational tooltips explain widgets, metrics, empty states, and unfamiliar actions without turning the page into documentation.",
-        educationLabel: "About info bubbles",
+        id: "outputs",
+        title: "Turn grounded work into outputs",
+        body: "Ask grounded questions, inspect citations, extract structured fields, and build reports from the active workspace or project scope.",
+        primaryActionLabel: "Next: Integrate",
+        routeHint: "Extract, Interact, and Report all work from the selected content scope.",
+        educationLabel: "Authenticated capabilities",
+        sourceFrame: "Extract / Interact / Report",
       },
       {
-        id: "first-widget",
-        title: "Add the first product widget",
-        body: "Replace the starter Home page with the first dashboard, workflow, or product widget for this app.",
-        routeHint: "Agents should add new product routes through the scaffold router and navigation config.",
-        educationLabel: "About the starter page",
+        id: "integrate",
+        title: "Wire GroundX into your stack",
+        body: "Use Integrate for API snippets, SDK handoff, and agent plugin paths once the proof is ready to become production work.",
+        routeHint: "Integrate keeps developer handoff visible for technical users.",
+        educationLabel: "Authenticated handoff",
+        sourceFrame: "F7 Integrate / API / Plugins",
       },
     ],
   },
@@ -198,6 +228,11 @@ export const createAppConfig = (overrides: AppConfigOverrides = {}): AppConfig =
   legal: {
     ...DEFAULT_APP_CONFIG.legal,
     ...overrides.legal,
+  },
+  calendly: {
+    ...DEFAULT_APP_CONFIG.calendly,
+    ...overrides.calendly,
+    url: stringFromEnv(overrides.calendly?.url, DEFAULT_APP_CONFIG.calendly.url),
   },
   onboarding: {
     ...DEFAULT_APP_CONFIG.onboarding,

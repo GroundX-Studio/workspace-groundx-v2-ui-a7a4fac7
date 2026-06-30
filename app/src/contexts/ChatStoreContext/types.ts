@@ -1,0 +1,966 @@
+import type { EntityKey, EntityKind, EntitySession } from "@/contexts/EntitySessionStoreContext";
+import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
+// The ONE CanvasIntent union. Imported from the orchestrator's leaf `/types`
+// module (type-only → erased → cycle-free with the orchestrator's runtime
+// dependency on ChatStore). Re-exported below for back-compat consumers.
+import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
+import type { Citation, ContentScope, NormalizedBbox, PersistedViewerStep, SchemaFieldExtractionResult, Source, TemplateFieldType } from "@groundx/shared";
+
+/**
+ * Chat session foundation — see /memory/project_chat_session_model.md.
+ *
+ * A chat session is the parent container of the app's state. Each
+ * session is a self-contained workspace: its own conversation
+ * (messages + compression summaries), its own entity registry
+ * (samples/projects/docs the user has touched here), its own
+ * viewer-event trail (intent transitions for LLM context).
+ *
+ * Onboarding restricts to exactly one session for the duration of
+ * onboarding. Steady mode (post-signin) unlocks N sessions + the
+ * switcher UI.
+ */
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant" | "tool" | "system";
+  content: string;
+  timestamp: number;
+  /**
+   * NULL = message is still in the active LLM context. Non-null =
+   * folded into a `ConversationSummary`; raw text kept for audit/
+   * replay but excluded from LLM requests.
+   */
+  compressedIntoSummaryId?: string | null;
+  /**
+   * Source citations attached to an assistant turn. The server already
+   * persists these (`chatHandler.ts`) and projects them on hydrate
+   * (`app.ts`); this is the in-memory declaration so consumers
+   * (InteractView litRegions / `CiteChip` / report-pin) read them off
+   * the ChatStore instead of re-fetching the thread. Empty/absent on
+   * non-assistant turns.
+   */
+  citations?: Citation[];
+  // Future expansions:
+  // toolCalls?: ToolCall[];
+  // attachments?: Attachment[];
+}
+
+/**
+ * Compressed chunk of conversation. Replaces a contiguous range of
+ * older `ChatMessage`s in active context, freeing tokens. May be
+ * chained — a newer summary can absorb prior summaries
+ * (`absorbedSummaryIds`).
+ */
+export interface ConversationSummary {
+  id: string;
+  fromMessageId: string;
+  toMessageId: string;
+  generation: number;
+  absorbedSummaryIds: string[];
+  content: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  createdAt: number;
+}
+
+/**
+ * One row of the user's activity trail inside a session — projected
+ * from `intent_log` once the BFF is live; in-memory cache for now.
+ * Last ~10 bundled into LLM requests as the "viewer trail" axis.
+ */
+export interface ViewerEvent {
+  id: string;
+  timestamp: number;
+  entityKey: EntityKey | null;
+  action:
+    | "opened"
+    // standardized-viewer-control T6b (D14) — journey-progress advance fired
+    // when a journey stage is first reached. The action names no viewer
+    // surface, only the journey stage transition.
+    | "journey-advanced"
+    | "extracted-value-viewed"
+    | "citation-clicked"
+    | "scan-completed"
+    | "intent-dispatched"
+    // `left` is intentionally kept — it records leaving the active
+    // entity/journey (e.g. a return to the ingest picker); it names no
+    // viewer surface.
+    | "left";
+  // 2026-05-31-chat-wire-types-shared — single-sourced off the shared `Source`.
+  source: Source;
+  /**
+   * Event-specific payload. For `intent-dispatched` events this is the
+   * structured `CanvasIntent` itself (see `CanvasOrchestratorContext.dispatch`);
+   * for other actions it's a generic JSON bag. Serialized to `viewer_events.detail_json`.
+   */
+  detail?: CanvasIntent | Record<string, unknown>;
+}
+
+/**
+ * Canvas Orchestrator intent — what view is currently mounted. This is the
+ * ONE canonical discriminated union, re-exported from `CanvasOrchestratorContext`
+ * (the orchestrator owns it; ChatStore mirrors `currentIntent` for the LLM
+ * conversation axis). Imported from the leaf `/types` module — type-only, so
+ * it's erased at runtime and can't form a cycle with the orchestrator's
+ * runtime dependency on ChatStore (`useChatStoreOptional`).
+ *
+ * Was a `Record<string,unknown> | null` placeholder (a deferred-foundation
+ * marker); collapsed in B1 "One CanvasIntent".
+ */
+export type { CanvasIntent };
+
+/**
+ * UI-01 Phase 1 — per-session, in-memory overlay over the active
+ * scenario's `extractionSchema`. Lets the user edit the schema in
+ * SchemaView without mutating the immutable scenario manifest.
+ *
+ * The type + an empty default + the `addedFields` / `removedFieldIds`
+ * slots are read by SchemaView/Extract to render. The schema-overlay
+ * mutations ARE wired: `addSchemaField` (+ its propose-card / `editSchemaField`
+ * / `removeSchemaField` siblings) have real callers (the chat propose-cards
+ * and the Extract editing surface), and persistence flows through the shared
+ * `saveTemplate` repo API (Template lifecycle).
+ *
+ * The overlay's semantics are layered over the manifest at render
+ * time — see `SchemaView.applyOverlay` for the merge rule.
+ */
+/**
+ * UI-01 Phase 2c — per-field extraction result the chat propose-card
+ * fires for after `addSchemaField` lands the addition. Until the
+ * focused LLM call returns, status sits at "pending" so SchemaView
+ * can show an "Extracting…" badge instead of a "—" placeholder.
+ * Failures land at "error"; happy path lands at "done" with a value.
+ */
+// 2026-05-31-chat-wire-types-shared — `SchemaFieldExtractionResult` is now a
+// re-export of the ONE `@groundx/shared` schema so a future middleware producer
+// shares the source. The `Eq<>` guard lives in
+// `SchemaFieldExtractionResult.contract.test.ts`. `ChatStoreContext.tsx` +
+// `SchemaView.tsx` consume the re-export unchanged.
+export type { SchemaFieldExtractionResult };
+
+export interface SchemaFieldAddition {
+  categoryId: string;
+  /** Generated client-side; survives until template save. */
+  id: string;
+  name: string;
+  type: TemplateFieldType;
+  description: string;
+  /**
+   * UI-01 Phase 2c — populated by `setSchemaFieldExtraction` after the
+   * propose-card Accept fires the focused extraction. Absent on
+   * additions that haven't yet been re-extracted (e.g. additions
+   * hydrated from a saved template).
+   */
+  extraction?: SchemaFieldExtractionResult;
+}
+
+/**
+ * Per-field edit that the user committed via the F3a inline editor.
+ * The overlay merges these on top of the manifest's field definition
+ * when SchemaView renders the effective schema. Partial because the
+ * user may have edited a subset of the available fields (e.g.
+ * tweaked just the extraction prompt, not the type).
+ */
+export type SchemaFieldEdit = Partial<{
+  name: string;
+  type: TemplateFieldType;
+  description: string;
+  required: boolean;
+  instructions: string[];
+  /** F3a "format (opt)" free-text hint, per `expand-inline-editor-fields`. */
+  format: string;
+  /** F3a editable "identifiers" chip array (labels nearby the field). */
+  identifiers: string[];
+}>;
+
+/**
+ * The GENERIC editing-overlay shell — the per-session, in-memory draft over a
+ * shared `Template` (`Template + Scope + Results`). Generalized from the
+ * Extract-only `PendingSchemaOverlay` in 2026-05-29-smart-report-screen Phase 4,
+ * driven by its **real second consumer**, the Report builder
+ * (`SmartReportBuilder`, the report builder surface).
+ *
+ * The shell is the MECHANISM (added items · removed ids · per-item edits ·
+ * proposal queue · pinned samples); the item shape is the DATA that varies by
+ * template kind:
+ *   • Extract → `PendingSchemaOverlay` = shell of `SchemaField*` (fields).
+ *   • Report  → `PendingReportOverlay` = shell of `ReportSection*` (sections).
+ *
+ * The member names are kept generic-but-Extract-compatible (`addedFields`,
+ * `editedFields`, …) so the Extract arm aliases the shell with ZERO churn — its
+ * live code reads the exact same members. For the report arm, read `addedFields`
+ * as "added sections", etc. (standardized-viewer-control: the focused
+ * sub-position — Extract schema category — moved OFF the overlay and ONTO the
+ * active `ViewerStep` (`extract-workbench.focusedCategoryId`), so the canvas is a
+ * pure function of the step. The overlay no longer carries a `focusedCategoryId`.)
+ */
+export interface PendingTemplateOverlay<TItem, TEdit, TProposal> {
+  /** Items (fields / sections) added by the user via the editor / LLM propose-card. */
+  addedFields: TItem[];
+  /** Item ids the user removed (covers both manifest + added items). */
+  removedFieldIds: ReadonlySet<string>;
+  /**
+   * Per-item overrides committed via the inline editor. Keyed by item id.
+   * Empty until the user saves a row. The view merges these onto the base
+   * item at render time.
+   */
+  editedFields: ReadonlyMap<string, TEdit>;
+  /**
+   * Propose-cards the user hasn't acted on yet, surfaced ABOVE the row list.
+   * Accept moves the proposal into `addedFields` + clears it from the queue;
+   * Dismiss just clears it.
+   */
+  pendingFieldProposals: TProposal[];
+  /**
+   * Sample document ids the user has pinned for the Designer / Stress Test
+   * surfaces. Maximum of 3.
+   */
+  pinnedSamples: string[];
+}
+
+/**
+ * UI-01 — the Extract schema overlay. Now an INSTANCE of the generic
+ * `PendingTemplateOverlay` shell (the rename in Phase 4 is non-breaking: the
+ * member names + types are identical to the pre-generalization interface, so
+ * SchemaView / ExtractView read it unchanged).
+ */
+export type PendingSchemaOverlay = PendingTemplateOverlay<
+  SchemaFieldAddition,
+  SchemaFieldEdit,
+  SchemaFieldProposal
+>;
+
+/**
+ * UI-01 — proposal queue entry. Each proposal carries the same
+ * payload as `ProposedSchemaField` on the chat reply, plus a
+ * client-minted id that makes Dismiss idempotent (so two chat turns
+ * proposing the same field don't collapse into one queue row).
+ */
+export interface SchemaFieldProposal {
+  id: string;
+  categoryId: string;
+  name: string;
+  type: TemplateFieldType;
+  description: string;
+  /**
+   * `proposal-envelope-provenance`: forwarded from the middleware's
+   * Zod-validated envelope. Renderers gate the
+   * `proposal_v<version> · envelope verified` label on
+   * `provenance?.verified === true`.
+   */
+  provenance?: { version: "v1"; verified: true };
+}
+
+/** Shared default — every new ChatSession starts with no overlay. */
+export const EMPTY_PENDING_SCHEMA_OVERLAY: PendingSchemaOverlay = {
+  addedFields: [],
+  removedFieldIds: new Set<string>(),
+  editedFields: new Map<string, SchemaFieldEdit>(),
+  pendingFieldProposals: [],
+  pinnedSamples: [],
+};
+
+// ── Report builder overlay (2026-05-29-smart-report-screen Phase 4) ──────
+//
+// The Report builder's draft over a `report`-kind Template. The item is a
+// SECTION (name + renderAs + question + instructions + manual literal-only
+// variables — #12), NOT a field; there is deliberately NO per-section scope
+// (the template is scope-independent; render scope is supplied at render time).
+
+/** How a report section's generated body renders (¶ / • / ▦). Mirrors `ReportSectionRenderAs`. */
+export type ReportSectionRenderAs = "PARAGRAPH" | "BULLETS" | "TABLE";
+
+/** A report section added by the user via the builder / LLM propose-card. */
+export interface ReportSectionItem {
+  /** Generated client-side; survives until template save. */
+  id: string;
+  /** snake_case section name, e.g. "charge_breakdown". */
+  name: string;
+  renderAs: ReportSectionRenderAs;
+  /** The prompt run at render time. */
+  question: string;
+  /** One rule per line. */
+  instructions: string[];
+  /** Manual literal-only variables (#12 — no auto-inference). */
+  variables: string[];
+  /** Set when the section was pinned from an assistant turn (Phase 5). */
+  pinnedFromTurnId?: string;
+}
+
+/** A committed per-section override from the inline editor (partial). */
+export type ReportSectionEdit = Partial<{
+  name: string;
+  renderAs: ReportSectionRenderAs;
+  question: string;
+  instructions: string[];
+  variables: string[];
+}>;
+
+/** An LLM-proposed section addition (the report sibling of `SchemaFieldProposal`). */
+export interface ReportSectionProposal {
+  id: string;
+  name: string;
+  renderAs: ReportSectionRenderAs;
+  question: string;
+  provenance?: { version: "v1"; verified: true };
+}
+
+/** The Report builder overlay — an INSTANCE of the generic shell. */
+export type PendingReportOverlay = PendingTemplateOverlay<
+  ReportSectionItem,
+  ReportSectionEdit,
+  ReportSectionProposal
+> & {
+  /**
+   * The id of the saved/default report template this overlay renders against.
+   * The render surface reads it to pick the template for the LIVE render — never
+   * a client-side scope→fixture map. `undefined` is the new-customer norm
+   * (`Pin→template = NO auto`) → the empty state with NO network round-trip. Set
+   * by the pin path (an explicit target) or the onboarding bootstrap (the seeded
+   * default, `report-default-template`); report-specific, not on the generic
+   * shell (Extract has no analogous render).
+   */
+  templateId?: string;
+};
+
+/**
+ * smart-report Phase 5 — input to `ChatStore.pinToReport`. The pinned section's
+ * `question` is the turn's LITERAL text (#12 — no auto-variable inference); the
+ * citations come from the source turn's `ChatMessage.citations`.
+ */
+export interface PinToReportInput {
+  /** The assistant turn being pinned (recorded as `pinnedFromTurnId`). */
+  turnId: string;
+  /** The literal turn text → the pinned section's `question`. */
+  text: string;
+  /** Source-turn citations carried onto the section (provenance). */
+  citations?: Citation[];
+  /** Explicit target template id, when the user already chose one. */
+  templateId?: string;
+  /**
+   * When true, ONLY resolve the existing-or-new target (return the
+   * `PinResolution`) — do NOT land a section. The affordance uses this to
+   * render the prompt before the user confirms.
+   */
+  resolveOnly?: boolean;
+}
+
+/** Shared default — every new ChatSession starts with an empty report overlay. */
+export const EMPTY_PENDING_REPORT_OVERLAY: PendingReportOverlay = {
+  addedFields: [],
+  removedFieldIds: new Set<string>(),
+  editedFields: new Map<string, ReportSectionEdit>(),
+  pendingFieldProposals: [],
+  pinnedSamples: [],
+};
+
+// ── master-viewer-session Phase 1 ─────────────────────────────────────
+//
+// The viewer mirrors the chat: one ViewerSession per ChatSession,
+// accumulating `ViewerStep[]` as the user moves, with transient
+// `ViewerOverlay[]` z-stacked on top. The bug class where stored
+// "gate is open" mode flags strand the canvas-swap goes away because
+// overlays' lifetimes belong to the overlays themselves.
+//
+// Phase 1 ships TYPES + STORAGE only. No surface reads from these
+// yet; Phase 2 lights up the gate-as-overlay path that closes the
+// user-reported regression class.
+
+/**
+ * One "place the user is looking at." Frame surfaces (F1 Ingest,
+ * F2 Understand, F3/F3a Extract, F5 Interact, F7 Integrate) are
+ * projections of `step.kind`. Each step's payload carries the
+ * cross-navigation state the surface needs (scenario, focused
+ * category, current document, etc.).
+ */
+export type ViewerStep =
+  | { kind: "ingest-picker"; attachedSchema?: { schemaId: string; name: string } }
+  | {
+      kind: "doc-viewer";
+      documentId: string;
+      page?: number;
+      /**
+       * WF-01 C5 — the Understand "GroundX is reading the doc" beat. When true,
+       * <ScopedCanvas> mounts the PdfViewer with `showScanAnimation` so the
+       * page renders under the sweeping scan-line while the chat
+       * ThinkingStream plays. Set ONLY by the Understand scanning beat (the
+       * `presentExperienceBeat` `understand-scanning` handler); citation-jump
+       * doc-viewer steps (pushed by the cite-click sink) omit it, so a
+       * cite-click never replays the reading sweep. Optional/absent → no scan
+       * (the default).
+       */
+      scanning?: boolean;
+      /**
+       * clickable-citations Phase 3 — region annotation produced by a
+       * citation click. The viewer pane reads `highlight.page` for the
+       * page to surface and renders a bbox overlay when
+       * `highlight.bbox` is present. Optional `sourceCitationIndex`
+       * is the 1-based chip index that produced the highlight, used
+       * for `cite.peeked` correlation telemetry.
+       */
+      highlight?: {
+        page: number;
+        bbox?: NormalizedBbox;
+        sourceCitationIndex?: number;
+        /**
+         * WF-06b — attribution tier of the citation that produced this
+         * highlight. The viewer pane renders the overlay at the tier's
+         * precision (solid word-level for `exact`, translucent chunk-region
+         * for `paraphrase`, whole-page "unconfirmed" marker for `ambient`).
+         */
+        tier?: import("@/types/onboarding").CitationTier;
+        /**
+         * multi-region-citations P2.1 — ALL of the citation's proof regions,
+         * each with its own tier; the viewer lights every one on the matching
+         * page. `page`/`bbox`/`tier` above stay the first-region alias.
+         */
+        regions?: ReadonlyArray<import("@groundx/shared").CitationSourceRegion>;
+      };
+      /**
+       * "Show all sources" — every citation region of an answer, drawn at once
+       * (color-coded per `[N]`). Set by the `showCitations` intent sink; the
+       * viewer pane renders the regions whose `page` matches the active page.
+       * Independent of the single-region `highlight` above.
+       */
+      litRegions?: ReadonlyArray<import("@groundx/shared").CitationRegion>;
+    }
+  | {
+      kind: "extract-workbench";
+      scenarioId: string;
+      focusedCategoryId?: string;
+      /**
+       * standardized-viewer-control T2 (R7, steady-first) — the Extract
+       * sub-position, MIRRORING `report.surface` ("render" | "builder"):
+       *   • "fields"  — the extracted-fields workbench (the default).
+       *   • "design"  — the schema DESIGN surface (the `SchemaView` design
+       *                 pane). Reachable for AUTHENTICATED users via the
+       *                 `editSchema` outcome (T5).
+       * Absent ⇒ "fields". NOT a new `mode` field — `mode` is the widget-
+       * contract "onboarding | steady" prop, and Extract/Report share this
+       * surface meta-pattern.
+       */
+      surface?: "fields" | "design";
+    }
+  | {
+      kind: "interact-chat";
+      /**
+       * standardized-viewer-control T5 — the resolved GroundX document the
+       * Interact (chat-with-sources) canvas mounts. The `showInteract` handler
+       * resolves it from the intent `scope` so the shared PdfViewer canvas isn't
+       * doc-less in STEADY (where the shell narrows the canvas scope to a single
+       * document only for steps that carry one). Absent ⇒ the shell falls back to
+       * the session/scenario scope (onboarding's existing behavior).
+       */
+      documentId?: string;
+    }
+  | { kind: "report"; surface?: "render" | "builder"; selectedSectionId?: string }
+  | { kind: "integrate" };
+
+/**
+ * Project an in-memory `ViewerStep` down to the `PersistedViewerStep` the
+ * resume anchor stores (standardized-viewer-control D13/R5). Drops the
+ * EPHEMERAL fields — `doc-viewer.scanning` (a one-shot animation beat) and
+ * `doc-viewer.highlight` / `doc-viewer.litRegions` (citation overlays rebuilt
+ * on re-click). The persisted shape is single-sourced in `@groundx/shared`
+ * (`persistedViewerStepSchema`); this helper is the write-side pruner, and the
+ * persisted value reconstructs an in-memory step (ephemeral fields absent) on
+ * read. Total over the `ViewerStep` union.
+ */
+export function toPersistedViewerStep(step: ViewerStep): PersistedViewerStep {
+  switch (step.kind) {
+    case "ingest-picker":
+      return step.attachedSchema
+        ? { kind: "ingest-picker", attachedSchema: step.attachedSchema }
+        : { kind: "ingest-picker" };
+    case "doc-viewer":
+      return {
+        kind: "doc-viewer",
+        documentId: step.documentId,
+        ...(step.page !== undefined ? { page: step.page } : {}),
+      };
+    case "extract-workbench":
+      return {
+        kind: "extract-workbench",
+        scenarioId: step.scenarioId,
+        ...(step.focusedCategoryId !== undefined ? { focusedCategoryId: step.focusedCategoryId } : {}),
+        ...(step.surface !== undefined ? { surface: step.surface } : {}),
+      };
+    case "interact-chat":
+      return {
+        kind: "interact-chat",
+        ...(step.documentId !== undefined ? { documentId: step.documentId } : {}),
+      };
+    case "report":
+      return {
+        kind: "report",
+        ...(step.surface !== undefined ? { surface: step.surface } : {}),
+        ...(step.selectedSectionId !== undefined ? { selectedSectionId: step.selectedSectionId } : {}),
+      };
+    case "integrate":
+      return { kind: "integrate" };
+  }
+}
+
+/**
+ * Transient surfaces that sit on top of the current step in a z-stack.
+ * Overlays push, mutate, and pop; they NEVER replace the underlying
+ * step. `committed`-state sign-up is not an overlay — identity-level
+ * "signed-in" is a durable AppMode flip.
+ */
+export type ViewerOverlay =
+  | { kind: "sign-up"; state: "pending" | "done" | "dismissed"; cause?: "save-schema" }
+  | { kind: "citation-peek"; documentId: string; page: number; bbox?: NormalizedBbox }
+  | { kind: "book-call" };
+
+/**
+ * Workspace state that's neither step nor overlay — sticky across
+ * navigations, but not part of the step history. Schema overlay
+ * (Phase 4) and future workspace state (pinned docs, draft reports,
+ * etc.) land here.
+ */
+export interface ViewerWorkspace {
+  schemaOverlay: PendingSchemaOverlay;
+}
+
+/**
+ * Master viewer record, paired 1:1 with the enclosing `ChatSession`.
+ * (No `id` slot — the pairing is implicit via the parent ChatSession.id.)
+ * `history` accumulates — never erased. `currentStep.stepIndex` points
+ * into history (or -1 when the session has no steps yet, e.g.
+ * immediately after creation before any frame is mounted).
+ */
+export interface ViewerSession {
+  history: ViewerStep[];
+  currentStep: { stepIndex: number };
+  overlays: ViewerOverlay[];
+  workspace: ViewerWorkspace;
+}
+
+/** Shared default — every new ChatSession's viewer starts empty. */
+export const EMPTY_VIEWER_SESSION: ViewerSession = {
+  history: [],
+  currentStep: { stepIndex: -1 },
+  overlays: [],
+  workspace: { schemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY },
+};
+
+export interface ChatSession {
+  id: string; // c-<uuid>
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+
+  // Conversation axis
+  messages: ChatMessage[];
+  summaries: ConversationSummary[];
+
+  // Entity axis (the per-session entity registry)
+  entities: ReadonlyMap<EntityKey, EntitySession>;
+  activeEntityKey: EntityKey | null;
+
+  // Viewer axis (intent + nav trail; used for LLM context)
+  viewerHistory: ViewerEvent[];
+  currentIntent: CanvasIntent | null;
+
+  // Schema-editor overlay (UI-01). Empty by default; the mutations are
+  // wired — `addSchemaField` (+ edit/remove/propose siblings) have real
+  // callers (chat propose-cards + the Extract editing surface).
+  // Phase 4 of `master-viewer-session` will migrate this slot onto
+  // `viewer.workspace.schemaOverlay`; for one release cycle a
+  // deprecated getter here can proxy to the viewer slot.
+  pendingSchemaOverlay: PendingSchemaOverlay;
+
+  // Report-builder overlay (2026-05-29-smart-report-screen Phase 4). The
+  // `report`-kind sibling of `pendingSchemaOverlay`, instantiated on the same
+  // generic shell. Empty by default; the builder's add/edit/remove section
+  // actions mutate it. Save bridge to the `report`-kind Template + render
+  // endpoint is Phase 6.
+  reportOverlay: PendingReportOverlay;
+
+  // `master-viewer-session` Phase 1 — paired ViewerSession. The active
+  // `ViewerStep` is the single source of truth for the canvas surface; the
+  // gate is a z-stacked overlay on top.
+  viewer: ViewerSession;
+
+  // Onboarding-only special-case state (always present on the type
+  // but only meaningful on the single onboarding session)
+  gate: GateStatus;
+  signupOpen: boolean;
+  isOnboardingSession: boolean;
+
+  // 2026-05-31-onboarding-experiences — the deterministic `ContentScope`
+  // key (see `scopeSessionKey`) this session was ensure-created for, when it
+  // is a Workspace / Project scoped conversation. Absent for onboarding +
+  // ad-hoc steady sessions. Used by `resolveSessionForScope` to return the
+  // SAME session row on re-open rather than collide on one shared session;
+  // serialized so the mapping is stable across reload.
+  scopeKey?: string;
+}
+
+export interface ChatStoreState {
+  ownerKey: string;
+  sessions: ReadonlyMap<string, ChatSession>;
+  activeSessionId: string | null;
+}
+
+export interface NewMessageInput {
+  role: ChatMessage["role"];
+  content: string;
+  /** Source citations for an assistant turn (optional). */
+  citations?: Citation[];
+}
+
+export interface ChatStoreApi {
+  state: ChatStoreState;
+  /**
+   * Create a new session and activate it. Returns the new session id.
+   * `isOnboardingSession` defaults to false — the onboarding
+   * bootstrap (Phase D) explicitly opts in.
+   */
+  newSession: (options?: { isOnboardingSession?: boolean; title?: string; scopeKey?: string }) => string;
+  /** Activate an existing session. No-op if id is unknown. */
+  switchTo: (id: string) => void;
+  /**
+   * 2026-05-31-onboarding-experiences — resolve the stable chat session for a
+   * `ContentScope` (a Workspace / Project nav entry's scope), ensure-creating
+   * it if absent, and activate it. Idempotent: re-resolving the same scope
+   * returns the same session row rather than colliding on one shared session.
+   * Reuses `newSession` for the ensure-create path (no forked creation). The
+   * session is keyed off a deterministic scope label persisted as its title,
+   * so it survives reload + the existing reset (which clears all sessions).
+   * Returns the resolved session id.
+   */
+  resolveSessionForScope: (
+    scope: ContentScope,
+    options?: { title?: string },
+  ) => string;
+  /** Append a message to the active session. No-op if no session is active. */
+  appendMessage: (input: NewMessageInput) => void;
+
+  // --- Entity actions (formerly on EntityRegistryContext) ----------
+  // These mutate the active chat session's `entities` map.
+  // `useEntitySessionStore()` is now a thin facade over these.
+
+  /**
+   * Set the active entity within the active session. Pass null to
+   * deactivate (return to picker). No-op when no session is active.
+   */
+  activateEntity: (key: EntityKey | null) => void;
+  /**
+   * Create or activate an entity inside the active session. If the
+   * entity already exists in this session, just activates it
+   * (preserves state). If new, creates it with the given defaults.
+   * Returns the entity key. No-op (returns the key anyway) when no
+   * session is active.
+   */
+  upsertEntityAndActivate: (kind: EntityKind, id: string, defaults: Partial<EntitySession>) => EntityKey;
+  /** Mutate the active entity inside the active session. No-op if either is missing. */
+  updateActiveEntity: (updater: (session: EntitySession) => EntitySession) => void;
+
+  /**
+   * Append a ViewerEvent to the active session's `viewerHistory`.
+   * No-op when no session is active. Last N events feed the LLM
+   * context bundling (see [[project-chat-session-model]] § three
+   * context axes). For now this is in-memory only; once the BFF is
+   * wired (Phase H), each append will also write a row to the
+   * `viewer_events` table.
+   */
+  appendViewerEvent: (input: NewViewerEventInput) => void;
+
+  /**
+   * UI-10 — flip the active ChatSession's `currentIntent`. Wired by
+   * `CanvasOrchestratorContext.dispatch` on every dispatch so the
+   * LLM-context bundler can see "the user/agent just dispatched X"
+   * on the conversation axis. Pass `null` to clear. No-op when no
+   * session is active.
+   */
+  setCurrentIntent: (intent: CanvasIntent | null) => void;
+
+  /**
+   * RT-05 — merge a server-provided list of persisted chat sessions
+   * into local state. Used on auth-resolved to hydrate from the DB
+   * (so a signed-in user on a fresh browser sees their full session
+   * history). Per the storage rule in memory `project_chat_session_model.md`,
+   * the DB is source of truth: for sessions present on both sides,
+   * server wins on the fields it carries (title, activeEntityKey,
+   * currentIntent, updatedAt). Client-only fields (messages,
+   * summaries, entities, viewerHistory) are preserved from the
+   * localStorage cache on each existing session. Server-only sessions
+   * get added with empty client-only state.
+   */
+  hydrateFromServer: (
+    sessions: ReadonlyArray<{
+      id: string;
+      title: string;
+      isOnboarding: boolean;
+      activeEntityKey: string | null;
+      currentIntent: Record<string, unknown> | null;
+      createdAt: string;
+      updatedAt: string;
+    }>,
+  ) => void;
+
+  /**
+   * UI-01 Phase 2 — append a field to the active session's
+   * `pendingSchemaOverlay.addedFields`. Called by the propose-card
+   * Accept handler in chat AND by future direct-add UI. No-op when
+   * no session is active.
+   */
+  addSchemaField: (input: SchemaFieldAddition) => void;
+
+  /**
+   * UI-01 Phase 2 — mark a field id as removed in the active
+   * session's `pendingSchemaOverlay.removedFieldIds`. Covers both
+   * manifest fields and previously-added overlay fields. No-op when
+   * no session is active.
+   */
+  removeSchemaField: (fieldId: string) => void;
+
+  /**
+   * UI-01 Phase 2c — set / update the extraction result on a
+   * previously-added overlay field. Called twice per Accept: once
+   * with status="pending" to flip the field card to its loading
+   * state, once with status="done"/"error" after the focused
+   * extraction call returns. No-op when no active session OR when
+   * the field id isn't present in `addedFields`.
+   */
+  setSchemaFieldExtraction: (fieldId: string, result: SchemaFieldExtractionResult) => void;
+
+  /**
+   * F3a inline editor — commit (or update) per-field overrides into
+   * `pendingSchemaOverlay.editedFields`. Pass a partial patch; the
+   * action shallow-merges onto any existing entry. The next render
+   * of SchemaView sees the manifest field with the patch applied.
+   * No-op when no active session.
+   */
+  editSchemaField: (fieldId: string, edit: SchemaFieldEdit) => void;
+
+  /**
+   * F3a inline editor — discard the per-field edit (revert to manifest
+   * shape). Removes the entry from `editedFields`. No-op when no
+   * active session OR when no edit exists for the id.
+   */
+  resetSchemaFieldEdit: (fieldId: string) => void;
+
+  /**
+   * F3a propose-cards above the list — enqueue an LLM-proposed
+   * schema-field addition so SchemaView can surface a ProposalCard on
+   * the canvas (not just inline in chat). Idempotent on (categoryId,
+   * name) so chat turns that repeat the same proposal don't pile up.
+   */
+  enqueueFieldProposal: (proposal: Omit<SchemaFieldProposal, "id">) => void;
+
+  /**
+   * F3a propose-cards — accept a queued proposal. Moves it into
+   * `addedFields` (via `addSchemaField` semantics) AND removes it
+   * from the queue in a single state transition. Callers that need
+   * the new field id back can read it from the queue entry before
+   * accepting.
+   */
+  acceptFieldProposal: (proposalId: string) => string | null;
+
+  /**
+   * F3a propose-cards — drop a queued proposal without adding the
+   * field. The chat scroll's matching propose-card animates to a
+   * dismissed state as a mirror.
+   */
+  dismissFieldProposal: (proposalId: string) => void;
+
+  /**
+   * `add-pinned-samples-row` — pin a sample document for use by the
+   * Designer + Stress Test surfaces. Idempotent (re-pinning is a
+   * no-op); enforces the 3-sample maximum. No-op when no active session.
+   */
+  pinSample: (sampleId: string) => void;
+
+  /**
+   * `add-pinned-samples-row` — unpin a previously-pinned sample.
+   * No-op when the id isn't pinned OR when no active session.
+   */
+  unpinSample: (sampleId: string) => void;
+
+  // ── Report-builder section actions (smart-report Phase 4) ──────────
+  // The `report`-kind siblings of `addSchemaField` / `editSchemaField` /
+  // `removeSchemaField`, mutating `reportOverlay` on the active session. The
+  // builder's UI controls call these directly; the matching `*.tools.ts`
+  // (chat-driven) land in Phase 5 calling the same actions.
+
+  /**
+   * Append a section to the active session's `reportOverlay.addedFields`.
+   * Idempotent on id. No-op when no session is active.
+   */
+  addReportSection: (input: ReportSectionItem) => void;
+
+  /**
+   * Commit (or update) a per-section override into
+   * `reportOverlay.editedFields`. Shallow-merges onto any existing patch.
+   * No-op when no active session.
+   */
+  editReportSection: (sectionId: string, edit: ReportSectionEdit) => void;
+
+  /**
+   * Mark a section id removed in `reportOverlay.removedFieldIds` (covers both
+   * base + added sections). No-op when no active session.
+   */
+  removeReportSection: (sectionId: string) => void;
+
+  /**
+   * smart-report Phase 5 — pin an assistant turn into the report as a section.
+   * The real caller of `resolvePinTarget`: it resolves the existing-or-new
+   * target (NEVER silently auto-creating a SAVED template) and, unless
+   * `resolveOnly` is set, lands a section into the active session's
+   * `reportOverlay.addedFields` carrying the turn's LITERAL text as the
+   * `question` (#12 — no auto-variable inference) + the turn id as
+   * `pinnedFromTurnId` + the turn's `citations`. Returns the `PinResolution`
+   * so the affordance can render the existing-or-new prompt. No-op (returns
+   * `prompt-new-only`) when no session is active.
+   */
+  pinToReport: (input: PinToReportInput) => import("./resolvePinTarget").PinResolution;
+
+  /**
+   * report-default-template — set the active session's `reportOverlay.templateId`
+   * (the template the render surface renders). A standalone setter (the
+   * onboarding experience supplies the seeded default for the utility scenario;
+   * onboarding isn't pinning). `undefined` clears it (no-template / empty state).
+   * No-op when no session is active.
+   */
+  setReportTemplateId: (templateId: string | undefined) => void;
+
+  /**
+   * smart-report Phase 5 — enqueue an LLM-proposed section into the active
+   * session's `reportOverlay.pendingFieldProposals` (the report sibling of
+   * `enqueueFieldProposal`). Idempotent on `name`. The builder surfaces a
+   * ProposalCard above the row list. No-op when no session is active.
+   */
+  enqueueReportProposal: (
+    proposal: Omit<ReportSectionProposal, "id">,
+  ) => void;
+
+  /**
+   * smart-report Phase 5 — accept a queued section proposal: move it into
+   * `reportOverlay.addedFields` + clear it from the queue in one transition
+   * (the report sibling of `acceptFieldProposal`). Returns the minted section
+   * id, or `null` when no session / no such proposal.
+   */
+  acceptReportProposal: (proposalId: string) => string | null;
+
+  /**
+   * smart-report Phase 5 — drop a queued section proposal without adding it
+   * (the report sibling of `dismissFieldProposal`). No-op when no session /
+   * no such proposal.
+   */
+  dismissReportProposal: (proposalId: string) => void;
+
+  /**
+   * `schema-agent-chat-affordances` — append an assistant-role
+   * `ChatMessage` to the active session's `messages` list. Returns
+   * the minted message id (or `null` when no session is active).
+   * Distinct from `appendMessage` (which takes a `NewMessageInput`)
+   * by being purpose-built for agent-emitted bubbles like the
+   * confidence-delta narration; messages land with an `agent-<rand>`
+   * id prefix so ChatColumn can project them into the rendered
+   * stream separately from user-driven `appendMessage` writes.
+   */
+  appendAgentMessage: (content: string) => string | null;
+
+  /**
+   * `master-viewer-session` Phase 2 — append an overlay onto the
+   * active session's `viewer.overlays`. Used by URL-driven sign-up
+   * (OnboardingShell pushes on `/onboarding/signup`) AND intent-
+   * driven flows (F3a Save 401 pushes a `cause: "save-schema"`
+   * overlay). No-op when no active session.
+   */
+  pushOverlay: (overlay: ViewerOverlay) => void;
+
+  /**
+   * `master-viewer-session` Phase 2 — mutate the topmost overlay of
+   * the given kind. Used to flip `sign-up` from `pending → done`
+   * after `commitGate` or `pending → dismissed` after `dismissGate`.
+   * No-op when no active session or when no overlay of the kind is
+   * present.
+   */
+  mutateOverlay: (kind: ViewerOverlay["kind"], patch: Partial<ViewerOverlay>) => void;
+
+  /**
+   * `master-viewer-session` Phase 2 — pop the topmost overlay of the
+   * given kind (or the topmost overlay regardless when called without
+   * a kind). Used to clean up the sign-up surface on URL navigation
+   * away. No-op when no active session or no overlay matches.
+   */
+  popOverlay: (kind?: ViewerOverlay["kind"]) => void;
+
+  /**
+   * `master-viewer-session` Phase 3 — append a `ViewerStep` onto the
+   * active session's `viewer.history` AND advance `currentStep.stepIndex`
+   * to point at the new entry. Idempotent: pushing a step structurally
+   * equal to the current step is a no-op (avoids history pollution
+   * from re-renders that re-fire the same navigation). No-op when no
+   * active session.
+   */
+  pushStep: (step: ViewerStep) => void;
+
+  /**
+   * standardized-viewer-control T4 — replace the ACTIVE viewer step in place
+   * (history length + `currentStep.stepIndex` unchanged). The in-place sibling
+   * of `pushStep`, used by sub-position changes (e.g. re-focusing the Extract
+   * workbench on a different schema category) so the canvas re-renders with the
+   * new payload without growing history. Idempotent on full structural
+   * equality; no-op when there is no active step.
+   */
+  mutateActiveStep: (step: ViewerStep) => void;
+
+  /**
+   * clickable-citations Phase 3 — citation-click target. Push-or-mutate
+   * a `doc-viewer` step:
+   *   - If the active step is `doc-viewer` for the SAME documentId,
+   *     mutate its `highlight` slot in place (no new history entry).
+   *   - Otherwise push a new `doc-viewer` step with the given
+   *     documentId + page + highlight.
+   *
+   * This is the canonical sink for `CanvasIntent.highlightCitation`
+   * — the orchestrator wires it directly. No-op when no active
+   * session.
+   */
+  gotoDocViewer: (input: {
+    documentId: string;
+    page: number;
+    bbox?: NormalizedBbox;
+    sourceCitationIndex?: number;
+    /** WF-06b — attribution tier threaded into the step's highlight slot. */
+    tier?: import("@/types/onboarding").CitationTier;
+    /** multi-region-citations P2.1 — all proof regions, each its own tier. */
+    regions?: ReadonlyArray<import("@groundx/shared").CitationSourceRegion>;
+  }) => void;
+  /**
+   * "Show all sources" sink for `CanvasIntent.showCitations`: open the cited
+   * document at `page` and draw EVERY citation region at once (color-coded).
+   * Mirrors `gotoDocViewer`'s mutate-in-place / push behavior but writes the
+   * step's `litRegions` (and clears the single-region `highlight`). No-op when
+   * no active session.
+   */
+  showCitationRegions: (input: {
+    documentId: string;
+    page: number;
+    regions: ReadonlyArray<import("@groundx/shared").CitationRegion>;
+  }) => void;
+  /**
+   * Toggle-off sink for `CanvasIntent.highlightCitation` (add-citation-toggle):
+   * clear the active `doc-viewer` step's highlight overlay, leaving the page
+   * shown. No-op when there's no active highlight.
+   */
+  clearCitationHighlight: () => void;
+  /**
+   * show-all-sources toggle (2026-06-11) — clear the active doc-viewer
+   * step's `litRegions` (the multi-region "Show all sources" overlay).
+   * The page stays shown; only the regions are removed.
+   */
+  clearCitationRegions: () => void;
+}
+
+export interface NewViewerEventInput {
+  action: ViewerEvent["action"];
+  entityKey: ViewerEvent["entityKey"];
+  source: ViewerEvent["source"];
+  detail?: ViewerEvent["detail"];
+}

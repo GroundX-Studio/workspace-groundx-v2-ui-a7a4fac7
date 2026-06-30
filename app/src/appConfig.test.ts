@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { APP_LOGOS, APP_NAME, createAppConfig, DEFAULT_APP_CONFIG, getPageTitle } from "@/appConfig";
 
+const CONFIGURED_CALENDLY_URL = import.meta.env.VITE_CALENDLY_URL?.trim() || "";
+
 describe("appConfig", () => {
-  it("uses the default scaffold identity when no config overrides are supplied", () => {
+  it("uses the default GroundX identity when no config overrides are supplied", () => {
     expect(createAppConfig()).toEqual(DEFAULT_APP_CONFIG);
     expect(APP_NAME).toBe(DEFAULT_APP_CONFIG.appName);
     expect(APP_LOGOS).toEqual(DEFAULT_APP_CONFIG.logos);
@@ -24,14 +26,34 @@ describe("appConfig", () => {
     expect(DEFAULT_APP_CONFIG.legal).toEqual({
       termsUrl: "https://www.eyelevel.ai/product/terms-conditions",
     });
+    expect(DEFAULT_APP_CONFIG.calendly).toEqual({
+      url: CONFIGURED_CALENDLY_URL,
+    });
     expect(DEFAULT_APP_CONFIG.onboarding.enabled).toBe(true);
     expect(DEFAULT_APP_CONFIG.onboarding.steps.map((step) => step.id)).toEqual([
-      "app-shell",
-      "navigation",
-      "account-menu",
-      "education",
-      "first-widget",
+      "sessions",
+      "scopes",
+      "sandbox",
+      "outputs",
+      "integrate",
     ]);
+    expect(DEFAULT_APP_CONFIG.onboarding.steps[0]).toMatchObject({
+      title: "Pick up where the proof left off",
+      sourceFrame: "Saved sessions",
+    });
+    expect(DEFAULT_APP_CONFIG.onboarding.steps[1]).toMatchObject({
+      title: "Work in Workspaces and Projects",
+      launchHref: "/workspaces",
+      launchLabel: "Open Workspaces",
+    });
+    expect(DEFAULT_APP_CONFIG.onboarding.steps[2]).toMatchObject({
+      title: "Use the sandbox for the guided walkthrough",
+      launchHref: "/onboarding",
+      launchLabel: "Open onboarding sandbox",
+    });
+    expect(DEFAULT_APP_CONFIG.onboarding.steps.map((step) => `${step.title} ${step.body}`).join(" ")).not.toMatch(
+      /starter home page|workspace setup|name your workspace/i
+    );
     expect(DEFAULT_APP_CONFIG.design).toEqual({});
   });
 
@@ -105,7 +127,7 @@ describe("appConfig", () => {
     expect(config.logos.passwordReset.src).toBe("/assets/acme-reset.svg");
   });
 
-  it("uses one appConfig surface for app identity, same-origin API path, legal links, and design overrides", () => {
+  it("uses one appConfig surface for app identity, same-origin API path, legal links, Calendly, and design overrides", () => {
     const config = createAppConfig({
       api: {
         basePath: "/internal-api/",
@@ -113,6 +135,9 @@ describe("appConfig", () => {
       },
       legal: {
         termsUrl: "https://example.com/legal/terms",
+      },
+      calendly: {
+        url: " https://calendly.com/acme/solutions-engineer ",
       },
       design: {
         colors: {
@@ -127,6 +152,9 @@ describe("appConfig", () => {
     });
     expect(config.legal).toEqual({
       termsUrl: "https://example.com/legal/terms",
+    });
+    expect(config.calendly).toEqual({
+      url: "https://calendly.com/acme/solutions-engineer",
     });
     expect(config.design).toEqual({
       colors: {

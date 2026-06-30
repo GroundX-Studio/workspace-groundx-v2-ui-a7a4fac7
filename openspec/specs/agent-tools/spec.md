@@ -1,0 +1,750 @@
+# agent-tools Specification
+
+## Purpose
+
+Define the durable contract for the agent-tool registry the LLM router
+exposes to grounded chat sessions — names, argument shapes, and the
+server-side execution that backs each tool. Covers the GroundX
+search / extract / ingest tools, schema-mutation tools, and any plugin-
+contributed tools the loader admits.
+## Requirements
+### Requirement: search_groundx tool SHALL perform a scoped GroundX search
+
+The agent-tool registry SHALL include `search_groundx({scope, query, n?, verbosity?})`.
+On invocation, the middleware SHALL execute a GroundX search constrained
+by the supplied `ContentScope` and return ranked results that the LLM
+folds into its answer inline.
+
+#### Scenario: LLM invokes search_groundx
+
+- **WHEN** the LLM emits a tool call `{"name": "search_groundx", "arguments": {"scope": {…}, "query": "…", "n": 6}}`
+- **THEN** middleware runs the GroundX search against the supplied scope
+- **AND** results appear inline in the assistant's answer
+
+### Requirement: show_understand tool SHALL dispatch the F2/Understand canvas surface
+
+The agent-tool registry SHALL include `show_understand({doc_id, progress})`.
+On invocation, the canvas dispatcher SHALL push the Understand (doc-viewer) viewer
+step with the named document active. "Understand" is the journey-stage name for this
+surface; the dispatcher SHALL NOT read or write a frame value.
+
+#### Scenario: Tool dispatches the Understand surface
+
+- **WHEN** the LLM emits `show_understand` with a valid `doc_id`
+- **THEN** the canvas shows the Understand (doc-viewer) surface
+- **AND** the supplied document is the active doc in the PDF viewer
+
+### Requirement: show_extraction tool SHALL dispatch the F3/Extract canvas surface
+
+The agent-tool registry SHALL include `show_extraction({schema_id, doc_id, category?, render?})`.
+On invocation, the canvas dispatcher SHALL push or mutate the Extract (extract-workbench)
+viewer step with the named schema + doc + (optional) category active. The dispatcher
+SHALL NOT read or write a frame value.
+
+#### Scenario: Tool dispatches the Extract surface
+
+- **WHEN** the LLM emits `show_extraction` with valid arguments
+- **THEN** the canvas shows the Extract (extract-workbench) surface
+- **AND** the named schema and category are the active selection
+
+### Requirement: show_field_citation tool SHALL open the F4 expanded-citation peek
+
+The agent-tool registry SHALL include `show_field_citation({field_id, doc_id, page})`.
+On invocation, the canvas dispatcher SHALL open the field citation peek
+on the named field + page. The dispatcher SHALL NOT read or write a frame value.
+
+#### Scenario: Tool opens the field citation peek
+
+- **WHEN** the LLM emits `show_field_citation`
+- **THEN** the field citation peek surface opens
+- **AND** the named field + doc + page are visible with the relevant region highlighted
+
+### Requirement: pin_to_report tool SHALL pin literal turn text to a report template
+
+The agent-tool registry SHALL include `pin_to_report({turn_id, template_id?})`. On invocation it
+SHALL pin the turn's literal text as a section into the target template; when no `template_id` is
+supplied the surface SHALL prompt the user to choose an **existing template or a new one** (NO silent
+auto-create) and land the section through the shared create/edit-template methods. Pins are
+**literal text** — automatic variable inference is parked (decision #12). The pinned-section surface
+contract (provenance, the existing-or-new UX, where the section lands) is owned by the `smart-report`
+capability.
+
+#### Scenario: Pin without a template_id prompts existing-or-new
+
+- **WHEN** the LLM emits `pin_to_report` without a `template_id`
+- **THEN** the surface prompts for an existing template or a new one (no silent auto-create)
+- **AND** on selection the turn's literal text lands as a section via the shared template method.
+
+### Requirement: propose_schema_field tool SHALL emit a ProposalCard in F3a
+
+The agent-tool registry SHALL include `propose_schema_field({field_def})`.
+On invocation, a ProposalCard SHALL surface in the schema-design surface's Fields tab
+(the `extract-workbench` step's `surface: "design"` sub-position, reached via the
+`editSchema` intent — NOT a frame); on Accept the field SHALL be added to the active
+schema. (See `onboarding-schema-editor` capability for the surface contract.)
+
+#### Scenario: Tool surfaces a propose-card
+
+- **WHEN** the LLM emits `propose_schema_field`
+- **THEN** a ProposalCard renders in the schema-design surface's Fields tab
+- **AND** Accept lands the field via the existing `addSchemaField` flow
+
+### Requirement: propose_report_section tool SHALL emit a ProposalCard in S3a
+
+The agent-tool registry SHALL include `propose_report_section({section_def})`. On invocation, a
+ProposalCard SHALL surface in the report builder (the `report` step's `surface: "builder"`
+sub-position — NOT a frame) section list; on Accept the
+section SHALL be added to the active template via the shared template-edit method. The ProposalCard
+surface contract is owned by the `smart-report` capability and mirrors `propose_schema_field`.
+
+#### Scenario: Tool surfaces a section propose-card
+
+- **WHEN** the LLM emits `propose_report_section`
+- **THEN** a ProposalCard renders in the report builder (the `report` `surface: "builder"`)
+- **AND** Accept lands the section via the shared template-edit method.
+
+### Requirement: Tool error recovery SHALL fall back after 3 consecutive failures
+
+The chat handler SHALL enter a session-scoped fallback mode after 3
+consecutive tool calls return errors. In fallback mode no further tool
+calls SHALL be emitted; the LLM is constrained to plain-text answers.
+Per `project_dev_contracts.md` error catalog.
+
+#### Scenario: 3 consecutive tool failures triggers fallback
+
+- **GIVEN** 3 consecutive tool calls return error in the same session
+- **WHEN** the next turn would otherwise invoke a tool
+- **THEN** no tool call is emitted
+- **AND** the assistant answers in plain text
+- **AND** the session-level fallback flag persists for the rest of the session
+
+### Requirement: AgentToolBus SHALL bridge Zod schemas to LLM-provider JSON Schema
+
+`AgentToolBusContext` SHALL convert each registered tool's Zod schema
+into the JSON Schema shape the LLM provider's tool API expects
+(provider-specific via the LLM adapter). The current scaffold exposes
+a placeholder Zod schema; the conversion MUST produce the correct
+provider-format JSON Schema before the tool registry can ship live.
+
+#### Scenario: Registered tool surfaces with correct JSON Schema parameters
+
+- **GIVEN** a tool registered via AgentToolBus with a Zod parameter schema
+- **WHEN** the chat handler builds the LLM tool array
+- **THEN** the tool's JSON Schema in the array matches the provider's
+  expected format (OpenAI function-calling format, Anthropic tool format, etc.)
+
+### Requirement: The LLM tool catalog SHALL be assembled from co-located widget tool declarations
+
+The production LLM-facing tool catalog SHALL be `SERVER_TOOL_CATALOG` in
+`middleware/src/services/toolCatalog.ts`. The middleware SHALL assemble the
+per-turn catalog from that server catalog, validate emitted arguments against
+each `ServerTool.inputSchema`, and build the returned `CanvasIntent` shape with
+`ServerTool.intentBuilder`.
+
+App-side co-located `*.tools.ts` files MAY still exist, but only as declarative
+widget-local metadata for app/server parity tests, tool-quality checks,
+tool-reference checks, and viewer widget descriptors. They SHALL NOT expose
+runtime `handler` functions and SHALL NOT be composed into a production app
+`toolRegistry` singleton. A pure test helper MAY collect app tool metadata for
+parity checks, but it SHALL NOT provide step filtering, mode filtering, or
+execution.
+
+#### Scenario: Middleware catalog builds the LLM tools for a chat turn
+
+- **GIVEN** a chat turn with an active viewer step and caller role
+- **WHEN** the middleware prepares provider tool definitions
+- **THEN** it filters `SERVER_TOOL_CATALOG` by the step and role
+- **AND** it converts the server tools' Zod schemas to provider JSON Schema
+- **AND** it does not call into an app-side registry or app-side handler.
+
+#### Scenario: App tool metadata has no executable handler
+
+- **GIVEN** an app `*.tools.ts` declaration
+- **WHEN** the app tool metadata guard runs
+- **THEN** the declaration has name, description, category, input schema,
+  optional availability metadata, and optional `rendersWidget`
+- **AND** it does not have a `handler` field.
+
+### Requirement: Tool catalog SHALL be scoped to the active ViewerStep on every chat turn
+
+The middleware SHALL assemble the LLM-facing tool catalog per chat turn from
+`SERVER_TOOL_CATALOG`, filtered by the active `ViewerStep.kind` and the caller
+role/mode. The middleware SHALL pass this filtered catalog to the LLM provider
+via native function-calling (OpenAI `tools` parameter / Anthropic `tools`
+parameter). The catalog SHALL NOT be injected into the system prompt narrative.
+
+Step-scoping applies to step-LOCAL tools only. **Canvas-NAVIGATION tools
+(`show_extraction`, `show_integrate`, `show_smart_report_render`,
+`show_smart_report_edit`) SHALL be universal — offered from EVERY step** —
+because navigation tools exist to move the user BETWEEN steps; gating them by
+the step the user is already on defeats their purpose (2026-06-11: "go back to
+extractions" typed on the Integrate step degraded to a RAG search because
+`show_extraction` was not offered there).
+
+#### Scenario: A doc-viewer step exposes doc-viewer tools
+
+- **GIVEN** the active ViewerStep is `doc-viewer`
+- **WHEN** the chat handler builds the tool catalog for this turn
+- **THEN** it calls the server catalog filtering path for that step and role
+- **AND** the catalog includes tools admitted for `doc-viewer`
+- **AND** the catalog excludes tools scoped to other steps or unavailable roles.
+
+#### Scenario: Navigation tools are reachable from every step
+
+- **GIVEN** the active ViewerStep is ANY kind (including `integrate` and `ingest-picker`)
+- **WHEN** the chat handler builds the tool catalog for this turn
+- **THEN** the catalog includes all four canvas-navigation `show_*` tools
+
+### Requirement: Tool invocations SHALL be validated against Zod and persisted to intent_log
+
+When the LLM emits a `tool_calls[]` array, the middleware SHALL for each call:
+
+1. Resolve the tool name in `SERVER_TOOL_CATALOG`
+2. Validate the `arguments` JSON against the server tool's Zod schema
+3. Run the server tool's `intentBuilder` if validation passes
+4. Collect the resulting `CanvasIntent` into the chat reply's `intents[]` array
+5. Persist the call to the `intent_log` table with status `dispatched` (success)
+   or `error` (validation/intentBuilder failure) plus the reason
+
+The reply SHALL also carry a `toolFailures: { name: string; reason: string }[]`
+array surfacing failures so the frontend can render them. App `*.tools.ts`
+metadata SHALL NOT execute a handler for production tool calls.
+
+#### Scenario: Valid tool call produces a dispatched intent and a success log row
+
+- **GIVEN** the LLM emits `{ name: "open_document", arguments: { documentId: "doc-A", page: 7 } }`
+- **WHEN** the middleware validates the call and runs the server tool intentBuilder
+- **THEN** the chat reply's `intents[]` contains the corresponding `CanvasIntent`
+- **AND** a row is written to `intent_log` with status `dispatched`.
+
+### Requirement: User-confirmed mutations SHALL render as chips before dispatch
+
+Tools with `category: "mutate"` SHALL NOT auto-dispatch. The middleware SHALL emit them into `suggestedActions[]` on the chat reply (each entry carries the tool name + label + the would-be intent payload as `detail`). The frontend SHALL render a `<SuggestedActionChips>` row beneath the assistant bubble; clicking a chip dispatches the underlying intent.
+
+Tools with `category: "read"` MAY auto-dispatch into `intents[]` directly, surfacing the state change without user confirmation.
+
+#### Scenario: A read tool auto-dispatches
+
+- **GIVEN** the LLM emits `{ name: "open_document", arguments: {...} }` and the tool's category is `read`
+- **WHEN** the middleware processes the response
+- **THEN** the resulting intent lands in `intents[]` for immediate dispatch
+- **AND** no chip is rendered (the canvas surface updates directly)
+
+#### Scenario: A mutate tool requires confirmation
+
+- **GIVEN** the LLM emits `{ name: "save_schema_template", arguments: {...} }` and the tool's category is `mutate`
+- **WHEN** the middleware processes the response
+- **THEN** the call lands in `suggestedActions[]` not `intents[]`
+- **AND** the frontend renders a chip the user must click to dispatch
+
+### Requirement: Tool names SHALL follow a discoverable convention and descriptions SHALL be LLM-actionable
+
+Every app declarative `WidgetTool` and middleware `ServerTool` SHALL satisfy the
+quality rules enforced at build time by `scripts/check-tool-quality.mjs`. The
+LLM sees `name`, `description`, and per-parameter `.describe()` calls from the
+server catalog; app metadata stays mirrored so local widget descriptors and
+reachability checks cannot drift.
+
+1. **Globally unique name.** No two app tool metadata declarations may declare
+   the same `name`, enforced by the metadata collector and quality check.
+2. **Naming convention.** `name` SHALL match the regex `^[a-z][a-z0-9_]*$` AND
+   start with an allowlisted action verb.
+3. **Description quality.** `description` SHALL be at least 40 characters AND
+   SHALL contain either `Use when` or `Triggers when`.
+4. **Per-parameter documentation.** Every field on the Zod `input` schema SHALL
+   carry a `.describe(...)` call with a non-empty string.
+
+#### Scenario: A fully-conforming tool passes all four checks
+
+- **GIVEN** a tool with `name: "open_document"`, a 60-character description
+  containing "Use when", and every Zod field carrying a `.describe(...)`
+- **WHEN** the quality check runs
+- **THEN** the check passes for that tool
+- **AND** the build proceeds.
+
+### Requirement: The tool catalog SHALL include 5 new mutate-category tools
+
+The tool catalog SHALL keep the existing mutate-category tool set mirrored
+between declarative app `*.tools.ts` metadata and middleware
+`SERVER_TOOL_CATALOG`. The app side owns name/description/visibility metadata
+only; the middleware side owns executable input validation and `intentBuilder`
+behavior. The drift guard SHALL fail until both sides are in sync.
+
+#### Scenario: Mirrored mutate tool stays in sync
+
+- **GIVEN** a mutate-category tool is declared in app metadata
+- **WHEN** the parity guard runs
+- **THEN** the middleware `SERVER_TOOL_CATALOG` includes the same tool name,
+  description, availability, and `rendersWidget` binding where applicable.
+
+### Requirement: The verb allowlist SHALL admit `show_` for canvas-dispatch tools
+
+`check-tool-quality`'s `ALLOWED_VERBS` SHALL include `show_`, the canonical canvas-dispatch verb for
+the ScopedViewerWidgets (`show_understand` / `show_document`, `show_extraction`(+`_edit`),
+`show_smart_report_render`(+`_edit`), `show_integrate`). This closes the gap where the `show_*`
+family was spec-only and would have failed the quality guard the moment it was authored (per
+`feedback_no_shortcuts`).
+
+#### Scenario: A show_ tool passes the quality guard
+
+- **GIVEN** a `show_smart_report_render` tool authored as a co-located `*.tools.ts`
+- **WHEN** `check-tool-quality` runs
+- **THEN** the `show_` prefix is allowlisted and the tool passes the verb-prefix rule.
+
+### Requirement: The registry SHALL include the smart-report canvas-dispatch tools, mirrored both sides
+
+The registry SHALL include `show_smart_report_render({ template_id?, scope })` and
+`show_smart_report_edit({ template_id, selected_section_id? })`, where `scope` is a `ContentScope`.
+`show_smart_report_render` SHALL move the canvas to the report render surface (S3) for the
+given scope; `show_smart_report_edit` SHALL move the canvas to the builder (S3a) with the
+named section pre-selected when supplied. Each SHALL be mirrored on BOTH the app `*.tools.ts` AND the
+middleware `SERVER_TOOL_CATALOG`, with the drift-guard test green. The surface contract is owned by
+the `smart-report` capability.
+
+#### Scenario: Render tool opens the report surface for a scope
+
+- **WHEN** the LLM emits `show_smart_report_render` with a `scope`
+- **THEN** the canvas moves to the report render surface rendered over that scope.
+
+#### Scenario: Edit tool opens the builder with a section selected
+
+- **WHEN** the LLM emits `show_smart_report_edit` with a `selected_section_id`
+- **THEN** the canvas moves to the report builder with the named section pre-selected.
+
+### Requirement: Report template-mutation tools SHALL share the Extract builder tool family
+
+The report builder's section-mutation tools SHALL be the SAME tool family as the Extract schema
+builder's field-mutation tools — same naming, Zod-validation, chip routing, and both-side mirroring
+(`*.tools.ts` + `SERVER_TOOL_CATALOG`) — since both operate on the shared template lifecycle. This
+covers proposing, accepting, rejecting, editing, deleting, and reordering a section, setting a
+section's scope, and running a render. Names SHALL use the allowlisted verb set
+(`propose_`/`accept_`/`reject_`/`edit_`/`delete_`/`run_`); any genuinely new verb SHALL be added to
+`ALLOWED_VERBS`, never bypassed.
+
+#### Scenario: A report section mutation uses the shared builder tool family
+
+- **GIVEN** the report builder
+- **WHEN** a section is proposed / edited / deleted / reordered or a render is run via a tool
+- **THEN** the tool conforms to the same family contract (verb allowlist, Zod, chip routing, both-side mirror) as the Extract field-mutation tools.
+
+### Requirement: The registry SHALL include a `save_to_account` gate-open tool, mirrored both sides
+
+The registry SHALL include `save_to_account()` — a `mutate`-category tool owned by
+`GateChatRail` (the gate-lifecycle widget) whose handler emits
+`{ kind: "openGate", trigger: "save" }`. It SHALL be exposed on the analysis
+surfaces where a user would save mid-flow (`availableSteps` ⊇ `doc-viewer`,
+`interact-chat`) and SHALL be mirrored on BOTH the app `GateChatRail.tools.ts`
+AND the middleware `SERVER_TOOL_CATALOG`, with the drift guard
+(`toolCatalog.test.ts`) and the app↔server parity guard (`catalog-parity.test.ts`)
+green. The name uses the allowlisted `save_` verb; the description carries a
+`Use when` clause and disambiguates from `submit_signup` (which submits the
+form, whereas this OPENS the sign-in offer).
+
+#### Scenario: save_to_account opens the sign-in gate on the live canvas
+
+- **GIVEN** an anonymous onboarding session on the Interact (f5) doc-viewer canvas
+- **WHEN** the LLM emits `save_to_account` (or the user clicks the
+  `tool:save_to_account` suggested-action chip)
+- **THEN** an `openGate` intent with `trigger: "save"` dispatches through the
+  canvas orchestrator
+- **AND** the sign-in gate opens (the canvas shows the gate value-prop and the
+  chat rail shows the sign-in offer).
+
+#### Scenario: save_to_account passes the quality + parity guards
+
+- **GIVEN** the `save_to_account` tool authored as a co-located `*.tools.ts` entry
+  and mirrored in `SERVER_TOOL_CATALOG`
+- **WHEN** `check-tool-quality`, `toolCatalog.test.ts`, and `catalog-parity.test.ts` run
+- **THEN** the `save_` prefix is allowlisted, the description + per-field
+  `.describe()` pass, the name set matches on both sides, and there is no
+  app-only / server-only orphan.
+
+### Requirement: The canvas orchestrator SHALL route the `openGate` intent to the onboarding gate
+
+The `openGate` `CanvasIntent` (`{ kind: "openGate", trigger }`) SHALL be routed by
+the canvas orchestrator to `OnboardingSessionContext.openGate(trigger)` — it
+SHALL NOT be a declared-but-unrouted intent. Routing SHALL soft-fail (no throw,
+no effect) when no `OnboardingSessionProvider` is mounted (the steady tree),
+matching the `commit_gate` / `dismiss_gate` routing. This is the single
+mechanism the `save_to_account` tool, the `tool:save_to_account` chip, and any
+future gate-open producer use to open the gate — there is no parallel path.
+
+#### Scenario: openGate intent opens the gate via the session
+
+- **GIVEN** a canvas orchestrator mounted above an `OnboardingSessionProvider`
+- **WHEN** `{ kind: "openGate", trigger: "save" }` is dispatched
+- **THEN** the orchestrator calls `OnboardingSessionContext.openGate("save")` and
+  the gate transitions to `open`.
+
+#### Scenario: openGate is a no-op in the steady tree
+
+- **GIVEN** a canvas orchestrator with no `OnboardingSessionProvider` above the gate
+- **WHEN** `{ kind: "openGate", trigger: "save" }` is dispatched
+- **THEN** the dispatch returns normally with no throw and no gate side effect.
+
+### Requirement: View and primitive tool files SHALL be discoverable by the metadata collector and the quality scanner
+
+The app metadata collector/parity glob and the tool-quality scanner SHALL
+discover `*.tools.ts` files co-located with a view (`OnboardingWizard`) and a
+primitive (`DialogTitle`), in addition to the `chat-widgets/*` and
+`viewer-widgets/*` slots. The two walkers are `collectAppToolSpecs` usage in
+`app/src/tools/catalog-parity.test.ts` (`import.meta.glob`) and `collectToolFiles`
+in `app/scripts/check-tool-quality.mjs`. Both walkers SHALL use the same
+discovery shape so a tool home recognized by one is recognized by the other; a
+`*.tools.ts` in a recognized view/primitive home SHALL be subject to the same
+quality rules as a widget tool.
+
+#### Scenario: A view-hosted tool file is discovered
+
+- **GIVEN** `OnboardingWizard` ships a co-located `*.tools.ts`
+- **WHEN** the metadata collector and the quality scanner run
+- **THEN** the view's tools appear in the metadata collection
+- **AND** the quality scanner evaluates them against the same rules as widget tools.
+
+#### Scenario: A primitive-hosted tool file is discovered
+
+- **GIVEN** the `DialogTitle` primitive ships a co-located `*.tools.ts`
+- **WHEN** the metadata collector and the quality scanner run
+- **THEN** the primitive's tools appear in the metadata collection and are quality-checked.
+
+### Requirement: The verb allowlist SHALL admit submit_, wizard_, and close_
+
+`check-tool-quality`'s `ALLOWED_VERBS` SHALL include `submit_`, `wizard_`, and `close_` so the deferred
+sign-up, onboarding-wizard navigation, and dialog-dismiss tools pass the verb-prefix rule.
+
+#### Scenario: A submit_/wizard_/close_ tool passes the verb-prefix rule
+
+- **GIVEN** tools named `submit_signup`, `wizard_next`, and `close_dialog`
+- **WHEN** the tool-quality guard runs
+- **THEN** each tool's verb prefix is allowlisted and it passes the verb-prefix rule.
+
+### Requirement: The SignUpWidget SHALL expose a submit_signup tool
+
+The agent-tool catalog SHALL include a `submit_signup` mutate tool exposed by the F6 SignUpWidget, with
+a server-catalog mirror. The widget's submit Button SHALL reference the tool; the input fields SHALL
+carry `noTool` with the reason `"value collected by submit_signup"`; the widget's `no-llm.md` opt-out
+SHALL be removed.
+
+#### Scenario: The sign-up submit is LLM-invocable
+
+- **GIVEN** the SignUpWidget tool catalog
+- **WHEN** it is inspected
+- **THEN** a `submit_signup` mutate tool exists, the submit Button references it, and the widget no
+  longer declares a `no-llm.md` opt-out.
+
+### Requirement: The OnboardingWizard SHALL expose navigation tools
+
+The agent-tool catalog SHALL include `wizard_next`, `wizard_back`, `wizard_finish`, and `dismiss_wizard`
+tools exposed by the OnboardingWizard view, each dispatching the corresponding CanvasIntent, with
+server-catalog mirrors. They are navigation tools (auto-dispatch), not state-mutations.
+
+#### Scenario: The LLM advances the onboarding wizard
+
+- **GIVEN** the active surface is the OnboardingWizard
+- **WHEN** the LLM emits `wizard_next`
+- **THEN** the wizard advances via the dispatched navigation CanvasIntent
+- **AND** `wizard_back`, `wizard_finish`, and `dismiss_wizard` are likewise available and dispatch their
+  respective intents.
+
+### Requirement: The DialogTitle primitive SHALL expose a close_dialog tool
+
+The agent-tool catalog SHALL include a `close_dialog` mutate tool exposed by the `DialogTitle`
+primitive, with a server-catalog mirror. The primitive's close IconButton SHALL reference the tool.
+
+#### Scenario: The LLM dismisses the active dialog
+
+- **GIVEN** a dialog is open with a `DialogTitle` close control
+- **WHEN** the LLM emits `close_dialog`
+- **THEN** the active dialog is dismissed via the dispatched CanvasIntent
+- **AND** the close IconButton references the `close_dialog` tool.
+
+### Requirement: The app and server tool catalogs SHALL agree on declarative tool metadata
+
+The app's declarative tool metadata and middleware `SERVER_TOOL_CATALOG` SHALL
+agree on FULL tool shape — mirrored tool names, descriptions (verbatim),
+`category`, `availableSteps`, role visibility, chat-widget `rendersWidget`
+bindings, AND input schemas (compared as JSON-Schema via the middleware's
+`zodToJsonSchema` bridge) — enforced by the app-side cross-package parity guard
+(`app/src/tools/catalog-parity.test.ts`), which is the ONLY mechanism that can
+load both catalogs (the app catalog is assembled via Vite's `import.meta.glob`).
+There SHALL be no committed manifest artifact (gate-answered decision,
+2026-05-31, reaffirmed 2026-06-11): the live cross-package test IS the source of
+truth, and the `toolCatalog.ts` header SHALL document this instead of promising
+a future codegen manifest. Server-only tools SHALL be explicitly allowlisted in
+the parity guard. A tool present on one side but absent on the other, or any
+full-shape drift, SHALL fail automated validation naming the offending tool.
+
+#### Scenario: Mirrored metadata drift fails
+
+- **GIVEN** an app tool declaration named `open_document`
+- **WHEN** the server catalog omits it, changes its description or category, or
+  narrows its input schema
+- **THEN** the parity guard fails and names the mismatched tool and field.
+
+#### Scenario: Server-only tool remains explicit
+
+- **GIVEN** a server-only tool such as `lookup_groundx_docs`
+- **WHEN** parity validation runs
+- **THEN** the tool is allowed only because it appears in the server-only
+  allowlist
+- **AND** any server-only tool with a `rendersWidget` binding must be enumerated
+  in the chat-widget reachability guard.
+
+### Requirement: Every SERVER_TOOL_CATALOG intentBuilder SHALL be covered by an LLM-free tool→intent fixture
+
+The middleware corpus SHALL exercise every `SERVER_TOOL_CATALOG` tool that
+declares an `intentBuilder` by injecting a stub `LlmClient` (via the
+`chatHandler` `deps.llmClient` seam) that emits a scripted tool-call, then
+asserting the resulting `reply.intents[]` carries the expected
+`DispatchedIntent.intent` shape. The suite SHALL make no real LLM request. A
+parity guard SHALL fail if a tool with an `intentBuilder` has no corpus entry,
+cross-checked against the shared `intentCatalog` (every intent-bearing tool maps
+to a catalog entry with that `toolName`) — so a newly added tool cannot ship
+without coverage.
+
+#### Scenario: A scripted tool-call produces the expected dispatched intent
+
+- **GIVEN** the LLM provider is stubbed to emit a valid `show_extraction` tool-call
+- **WHEN** the chat handler processes the turn
+- **THEN** `reply.intents[]` contains a `DispatchedIntent` whose `intent.kind` is `showExtract`
+- **AND** no real LLM provider request is made
+
+#### Scenario: Invalid tool args surface as a failure, not an intent
+
+- **GIVEN** the stubbed provider emits a tool-call with args that violate the tool's Zod `inputSchema`
+- **WHEN** the chat handler validates it
+- **THEN** the result is a `ToolFailure` and no `DispatchedIntent` is produced for that call
+
+#### Scenario: New intent-bearing tool without coverage
+
+- **GIVEN** a new tool with an `intentBuilder` is added to `SERVER_TOOL_CATALOG`
+- **WHEN** the parity guard runs and no corpus entry exercises it
+- **THEN** the guard fails, naming the uncovered tool
+
+### Requirement: Per-tool prompt guidance SHALL be declared with the tool, not in the prompt
+
+Tool usage guidance rendered into the grounded system prompt SHALL be generated
+from the step-filtered tool catalog — each entry's `description` plus an
+optional `ServerTool.promptGuidance` field for tools needing more than their
+description — as a single generated "TOOL NOTES" section. Hand-written per-tool
+paragraphs in prompt text are FORBIDDEN: guidance lives exactly once, on the
+tool declaration. A tool absent from the current step's filtered catalog SHALL
+contribute no guidance to that turn's prompt.
+
+#### Scenario: Guidance tracks the filtered catalog
+
+- **GIVEN** a chat turn on a step where `propose_schema_field` is offered
+- **WHEN** the grounded system prompt is assembled
+- **THEN** the TOOL NOTES section contains that tool's declared guidance
+- **AND** contains no entry for tools not offered on this step.
+
+#### Scenario: No duplicated hand-written guidance
+
+- **GIVEN** the prompts module
+- **WHEN** the grounded prompt source is inspected
+- **THEN** it contains no hand-written per-tool paragraph (the former
+  `propose_schema_field` prose is gone).
+
+### Requirement: Server-executed tools SHALL be declared via `serverExecute` and excluded from intent routing
+
+`ServerTool` SHALL gain an optional `serverExecute` executor. A tool declaring
+it is executed by the middleware inside the grounded tool-result loop and
+SHALL NOT declare an `intentBuilder`, SHALL NOT produce a `CanvasIntent`,
+SHALL NOT surface as a chip, and SHALL be `category: "read"` — invariants
+enforced by a catalog test (exactly one of `serverExecute` / `intentBuilder`
+present; `serverExecute ⇒ read`; `serverExecute ⇒ activityLabel` present,
+the user-facing text for the reply's `toolActivity` annotation). Executor
+dependencies SHALL arrive via an injected `ServerExecuteContext` built from
+the grounded seam's deps (test-injectable) — an executor SHALL NOT close
+over module-level live dependencies. Server-executed tools SHALL appear in the
+app-side parity guard's existing server-only allowlist (the same allowlist
+mechanism — no new exclusion machinery). Every server-executed tool SHALL be
+covered by an LLM-free scripted LOOP-transcript fixture (the counterpart of
+the intentBuilder corpus): a stubbed provider emits the call, the suite
+asserts execution, transcript shape, and absence from `intents[]`/chips.
+
+#### Scenario: Catalog invariants hold
+
+- **GIVEN** the `SERVER_TOOL_CATALOG`
+- **WHEN** the invariant test runs
+- **THEN** every tool has exactly one of `serverExecute` / `intentBuilder`
+- **AND** every `serverExecute` tool is `category: "read"`
+- **AND** every `serverExecute` tool declares an `activityLabel`.
+
+#### Scenario: A server-executed tool without loop coverage fails the guard
+
+- **GIVEN** a new tool declaring `serverExecute` with no loop-transcript fixture
+- **WHEN** the coverage guard runs
+- **THEN** it fails, naming the uncovered tool.
+
+### Requirement: lookup_groundx_docs SHALL retrieve vendored GroundX documentation on demand
+
+The catalog SHALL include `lookup_groundx_docs` — `category: "read"`,
+server-executed, available in every step and to every role (the pack is
+public documentation; nothing tenant-scoped). Its input is
+`{ query: string }` (Zod, min length 3). Its executor SHALL invoke the
+injected retrieval seam (`ctx.skillsRetrieve`, which the loop builds from
+the grounded seam's deps and which defaults to the existing
+`retrieveGroundxKnowledge` — consistent with the no-module-closure rule
+above) over the vendored pack with the entry
+bar bypassed (the model's decision to call is the gate) and the retriever's
+section ranking and character/section caps intact; a missing pack or
+zero-scoring query SHALL return a terse "no matching documentation" string
+(the turn succeeds). The tool SHALL declare `promptGuidance` steering the
+model to call it only when the injected `GROUNDX KNOWLEDGE` block is absent
+or insufficient, and never to cite the result. The tool's `description` SHALL
+satisfy the server catalog guard (`Use when`/`Triggers when` clause, ≥40
+chars) and its `query` field SHALL carry `.describe()`, and the tool name
+SHALL be added to the server `EXPECTED_NAMES` authoritative set. The tool
+SHALL declare `activityLabel: "Checked GroundX docs"`, surfaced via the chat
+reply's `toolActivity` contract (see chat-routing delta). The app-side
+`check-tool-quality` verb allowlist SHALL NOT be modified — that scanner
+covers only app-mirrored `*.tools.ts`, and a server-only tool never reaches
+its verb check.
+
+#### Scenario: Lookup returns ranked sections
+
+- **GIVEN** the vendored pack is present
+- **WHEN** the executor runs with query "how does x-ray chunking work"
+- **THEN** it returns the retriever's top-ranked sections within the standard caps.
+
+#### Scenario: Missing pack degrades to a no-match string
+
+- **GIVEN** a checkout without the synced pack
+- **WHEN** the executor runs
+- **THEN** it returns the no-match string and the chat turn succeeds.
+
+### Requirement: A refined re-search server-executed tool SHALL re-query documents mid-answer
+
+The catalog SHALL include a `read`-category, server-executed tool (declaring
+`serverExecute` + `activityLabel`, no `intentBuilder`) that re-runs the turn's scoped
+GroundX search with a model-supplied refined query inside the grounded tool-result
+loop and feeds the resulting snippets back to the model. It SHALL apply the SAME
+content scope and server-derived RBAC filter as the turn's primary search — it SHALL
+NOT widen scope.
+
+#### Scenario: Model refines a missed search
+
+- **GIVEN** a turn whose initial search returned no relevant snippet
+- **WHEN** the model calls the re-search tool with a refined query
+- **THEN** the middleware runs the scoped search and feeds the results back as a tool message
+- **AND** the model continues its answer from them.
+
+### Requirement: A secondary extraction-fetch server-executed tool SHALL pull another document's extraction mid-answer
+
+The catalog SHALL include a `read`-category, server-executed tool (declaring
+`serverExecute` + `activityLabel`, no `intentBuilder`) that fetches a named document's
+full workflow-extraction — the same payload the grounded prompt's primary-document
+EXTRACTED FIELDS block uses — on demand inside the grounded tool-result loop, so an
+answer spanning multiple documents can reach a second document's structured fields.
+The fetch SHALL be best-effort: a failure feeds a terse error and MUST NOT fail the turn.
+
+The tool SHALL only fetch a document the current turn has already surfaced under the
+caller's authorization — i.e. a document in the turn's RBAC-filtered search results
+(snippets) or the explicit `documents` scope. A model-supplied `documentId` outside
+that set (e.g. one injected into document text) SHALL be REFUSED — the middleware
+returns a terse "not available" result and performs NO fetch. This mirrors the
+re-search tool's no-scope-widening rule: a server-executed read tool can never reach
+content the turn's authorized retrieval did not.
+
+#### Scenario: Model fetches a second document's extraction
+
+- **GIVEN** a turn whose answer references a document surfaced in the turn's search results but not covered by the PRIMARY extraction
+- **WHEN** the model calls the secondary-extraction tool with that `documentId`
+- **THEN** the middleware fetches that document's extraction and feeds it back
+- **AND** the answer draws on both documents.
+
+#### Scenario: An out-of-scope documentId is refused, not fetched
+
+- **GIVEN** a turn whose authorized search surfaced only document A
+- **WHEN** the model calls the secondary-extraction tool with a `documentId` (B) that was NOT surfaced this turn
+- **THEN** the middleware performs NO extraction fetch for B and feeds back a terse "not available" result
+- **AND** the turn still succeeds.
+
+### Requirement: A navigation tool MAY be offered via an `offerAs` disposition
+
+A navigation tool SHALL support being OFFERED as a clickable affordance instead of
+performed, expressed as an optional `offerAs` field on the tool's own input schema
+(`offerAs: { label, anchor? }`). When `offerAs` is absent the tool SHALL
+auto-dispatch per its category (read navigation lands on `reply.intents[]`). When
+`offerAs` is present the middleware SHALL build the intent through the tool's
+existing `intentBuilder` (so it is server-validated, never free-form) and surface
+it as an OFFERED `suggestedActions` entry carrying that intent, `label`, and
+optional `anchor`, and SHALL NOT auto-dispatch it. There SHALL be no new offer tool
+and no new verb prefix; the `ALLOWED_VERBS` allowlist is unchanged. Because `offerAs`
+lives on the tool's domain input schema, it SHALL carry a `.describe(...)` (the
+every-field rule), and each navigation tool's `intentBuilder` SHALL ignore `offerAs`
+so it never leaks into the built intent.
+
+#### Scenario: Offering a navigation produces a validated, non-auto suggested action
+
+- **GIVEN** the agent calls `show_extraction` with `offerAs: { label: "See the Meters" }` and a focusedCategory argument
+- **WHEN** the middleware processes the turn
+- **THEN** it builds the `showExtract` intent via `show_extraction`'s `intentBuilder`
+- **AND** the intent appears as a `suggestedActions` entry, not on `reply.intents[]`
+
+#### Scenario: Absent `offerAs` auto-dispatches as today
+
+- **GIVEN** the agent calls a read navigation tool with no `offerAs`
+- **THEN** its intent auto-dispatches on `reply.intents[]`
+
+#### Scenario: `offerAs` never leaks into the built intent
+
+- **GIVEN** a navigation tool call carrying `offerAs`
+- **WHEN** the intent is built via the tool's `intentBuilder`
+- **THEN** the built intent contains the domain fields only and no `offerAs`
+
+### Requirement: The agent SHALL be able to both perform and offer viewer actions in one turn
+
+The agent SHALL be able to both perform a viewer action and offer one in the same
+turn, and the same action SHALL be expressible either way. Performing is a
+navigation tool call without `offerAs`; offering is the same tool call with
+`offerAs`. Performing behavior SHALL be unchanged by the affordance mechanism.
+
+#### Scenario: A turn performs one action and offers others
+
+- **GIVEN** a turn where the agent calls `show_extraction` without `offerAs` AND calls navigation tools twice with `offerAs`
+- **THEN** the first intent auto-dispatches
+- **AND** two offered suggested actions are returned for the user to click
+
+### Requirement: Offer-eligibility SHALL be governed by the intent catalog
+
+A tool SHALL be offer-eligible only if it has an `intentBuilder` and is marked
+LLM-emittable in the shared `intentCatalog`. The UI-only intents (`showSample`,
+`openDocument`, `showCitations`) SHALL NOT be offerable. A new interact navigation tool
+emitting `showInteract` SHALL be added and marked LLM-emittable in the catalog with its
+coverage prompt. The navigation tool **`show_extraction_edit`** (the `_edit` sibling of
+`show_extraction`, mirroring the shipped `show_smart_report_edit`) SHALL be added,
+emitting `editSchema`, `category: "read"`, marked LLM-emittable — so the agent MAY offer a
+clickable "edit this schema" action; `editSchema` is no longer UI-only. There SHALL be no
+novel `show_schema_editor` tool.
+
+#### Scenario: A UI-only intent cannot be offered
+
+- **GIVEN** an attempt to offer an action whose intent kind is `showSample`, `openDocument`, or `showCitations`
+- **THEN** no suggested action is produced for it
+
+#### Scenario: The schema editor can be offered
+
+- **GIVEN** the agent calls the schema-editor navigation tool with `offerAs`
+- **THEN** an `editSchema` `suggestedActions` entry is produced (not auto-dispatched)
+
+### Requirement: Navigation intents SHALL fully describe their destination
+
+Each per-destination navigation intent SHALL carry everything needed to render its
+destination. The showExtract intent SHALL carry scope, schemaId, and an optional
+focusedCategoryId. The showReport intent SHALL carry templateId and scope. The
+editTemplate intent SHALL carry templateId and an optional selectedSectionId. The
+showIntegrate intent SHALL carry scope. The openDocument intent SHALL carry
+documentId and an optional page. A showInteract intent SHALL be added for the
+Interact destination, carrying scope (the interact-chat step resolves its document
+from that scope). The editSchema intent SHALL reach the schema-design surface by
+moving the active extract-workbench step into its design sub-position (NOT a frame),
+and SHALL work in both the steady and onboarding experiences. There SHALL be no
+frame-named navigation intent.
+
+#### Scenario: showExtract carries category focus
+
+- **GIVEN** a `show_extraction` tool call with a focusedCategory argument
+- **THEN** the built showExtract intent carries that value as focusedCategoryId
+

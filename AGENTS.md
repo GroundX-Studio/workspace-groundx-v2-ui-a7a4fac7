@@ -1,0 +1,61 @@
+# AGENTS.md
+
+Table of contents. Read what's relevant. This is the connective
+tissue between external specs (design bundle, GroundX APIs, harness
+skills) and this codebase.
+
+- [**Tier-1 principles — read first**](docs/agents/principles.md) — how we build here, in priority order: (0) never commit secrets; (1) **solve to the model — composable over forked: add an axis value, not a cross-product** (mechanism stays, policy/data varies; parameterize by a first-class value like `scope`/`role`/experience; compose don't dispatch; earn every axis); (2) TDD failing-test-first; (3) adversarial review after every task; (4) plain succinct English; (5) done = user-visible + round-trip; (6) one source of truth + one planning surface. Carries the "creating a plan / adding code" checklists. The enforceable rules are in `discipline.md`.
+- **Planning + pending work** — managed via OpenSpec at [`openspec/`](openspec/). Run `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 list` for active changes and `… list --specs` for durable capability contracts. Capability specs live at `openspec/specs/<capability>/spec.md`; in-flight proposals live at `openspec/changes/<change-id>/`. Validate with `… validate --all --strict`.
+- [**Discipline rules**](docs/agents/discipline.md) — failing test first, never commit `.env*` or Partner API `*username` fields, tight responses, **definition of done = user-visible test (not seam test)**, **planning via OpenSpec (no tombstones; verify before flagging not-started)**, WIP cap = 3 per epic, closure deletes inline TODOs, **round-trip contract** (Rule 9 — every persisted byte gets a read site, dead-column / dead-endpoint / dead-context checks before closure, `seam-only` status for write-only work), **adversarial review gate after EVERY task** (Rule 10 — a task is not done until a hostile review of its output passes against the plan AND the real code, not the seam; run before marking done and before the next task; fan-out tasks gated per unit).
+- [**Cross-plan execution order**](docs/agents/cross-plan-execution-order.md) — the **LOCKED active set (2026-05-30): 8 changes, 21 ordered steps**, each SEQUENTIAL or WORKFLOW (fan-out), with `blocked-by`, the fan-out groups, and the cross-plan conflict map (pivot = the widget-contract `mode`→`role`+`scope` flip; bidirectional `Catalog<T>` loop; **5** changes edit `specs/app-architecture/spec.md` — serialize by archive order). `cf19` (broken — rework), `wf10`, `cf04` are BACKLOGGED. Per-task adversarial review is the Discipline §10 default gate; bespoke per-step gates are generated **lazily** at execution. Read before executing any plan.
+- [**CONTRIBUTING.md**](CONTRIBUTING.md) — 5-minute "what does a good commit + PR look like" checklist: the failing-test-first flow, drift-guard requirements, commit-message shape, pre-push checklist, PR template. Pair with `discipline.md`.
+- [**Project overview + stack**](docs/agents/overview.md) — chat-driven GroundX onboarding UI on Vite + React + MUI + Express + MySQL + EKS. Two-mode model (Onboarding + Steady).
+- [**Getting started — first day**](docs/agents/getting-started.md) — clone → local preview → test loop → deploy loop → MCP tool usage.
+- [**Architecture**](docs/agents/architecture.md) — Shell, contexts (ChatStore root with paired ViewerSession, EntityRegistry derived facade [renamed → `EntitySessionStore` by registry-catalog-consistency], OnboardingSession, CanvasOrchestrator), views (F1–F7), Helm chart. Chat is converging on one `useConversation` engine + one `ConversationFlow` view + an optional `ChatExperience` catalog (unified-conversation-flow). Where things go when you add a feature.
+- [**Widget contract**](docs/agents/widget-contract.md) — locked. The 5-tier component tree (`primitives/brand/layout/chat-widgets/viewer-widgets/`), the per-widget README + sibling test, and the drift-guard test (`widget-contract.test.ts`) that enforces it. **Props: code today ships a `mode: "onboarding" | "steady"` prop; it is migrating to `role: WidgetRole` + a required `scope: WidgetScope` (no raw `documentId`/`bucketId`/`projectId`) via widget-role-access — build new widgets against role+scope.** Read before adding any component under `app/src/components/`.
+- [**Data model — the structures that power the app**](docs/agents/data-model.md) — inventory (types, ChatStore object graph, contexts, widget/tool layer, middleware persistence, API result/error) + the **cross-layer reconciliation matrix** (concept × layer: app type · wire/middleware type · DB column · persisted JSON — the one table that says "same shape everywhere it crosses"). **Read before adding a widget / type / tool / context / DB table.** Its header carries a "before you add" checklist — reuse the SHIPPED shared bases (`ApiError` + `ScopedViewerWidget` + `Catalog<T>` + `SdkActionResult` in/via `@groundx/shared`, `WidgetTool`, the shared `Template` lifecycle); no dup type, no `Record<string,unknown>` placeholder in a context `*State`, both-sides-mirror tools, every persisted column round-trips, every tool-triggered chat card has a `rendersWidget` binding. **Each checklist item is backed by a recurrence drift guard that turns RED if the debt comes back** — §5(a)–(e) in `app/src/test/recurrence-drift-guards.test.ts` + `middleware/src/db/persistedColumnPolicy.test.ts`, plus the reachability + NAME/DESCRIPTION parity guards in `app/src/tools/catalog-parity.test.ts`. You MUST update this file (incl. the reconciliation matrix) in the same change. Refine as the model evolves.
+- **Citation philosophy (locked 2026-06-14)** — a citation shows **ALL the source material used** to produce an answer or extract a value (every place the cited value/quote appears), **not one "best" source** — so a reader can see everything considered and catch a wrong pick. Highlight EVERY occurrence (value match, no field-path or field-label narrowing); precision **per highlight** (`regions:{page,bbox,tier}[]`); locate NUMBERS numerically (whole numeric token: `7613.2`==`$7,613.20`; reject `18.43`≠`18.44` and `∉118.437`) and WORDS by normalized whole-token (no raw-substring/fuzzy/embedding matching for values — embeddings verify a paraphrased *quote* only); schema-agnostic; never drop a real grounding (a validated-but-unprintable value → label-located or regionless `ambient` chip; an unverified quote → whole-PAGE `ambient` marker), still reject fabricated ones. Detailed on the `Citation` row in [data-model.md](docs/agents/data-model.md); plan = OpenSpec `multi-region-citations`.
+- [**Template + Scope + Results architecture**](docs/agents/template-scope-results.md) — **Result = Template (questions, scope-independent, updatable — NO version) + Scope (`ContentScope`) + generated answers.** Extract and Report are the SAME meta-pattern and SHARE objects/DB/lifecycle (Extract is the precedent; Report conforms, does not fork). Defines the **ScopedViewerWidget** class (the 4 main viewer widgets — PdfViewer · Extract · SmartReport · Integrate — take a `scope` prop, adapt to scope change, expose a `show_*` tool, `_edit` sibling for editable ones) and the scope union (bucket · bucket+filter · documents[] · documents[]+filter · group · group+filter; bucket==workspace, project==filter-field value, group==cross-bucket). Read before adding a viewer surface, a template type, or a scope rule.
+- [**Solve, don't hack**](docs/agents/hacking-vs-solving.md) — root-cause audit of shortcut behavior + the locked rule: solve to the model (doc-org scope, the template/scope/results lifecycle, the widget/tool contracts), reuse/generalize; never hardcode-a-shape, `auto-` around a missing UX, or leave dormant spec-only plumbing the guards can't see. Deferred work → backlog ticket, never orphaned code.
+- [**Onboarding flow (F1–F7)**](docs/agents/onboarding-flow.md) — frame-by-frame, transitions, chat-column narrative, F6 gate, per-scenario behavior (Utility / Loan / Solar).
+- [**Chat session model**](docs/agents/chat-session-model.md) — ChatSession as parent of entity state. **Storage rule (updated 2026-05-25):** DB is source of truth for both anon and authed; localStorage is a cache. Anon `chat_sessions` get a server row from day one (ownerAnonId = cookie session.id); F6 sign-up is a single UPDATE re-key. Compression chain = leaf summaries + meta-compaction (no telephone-game decay).
+- [**Design bundle**](docs/agents/design-bundle.md) — where the wireframes + spec JSX live. How to compare a frame's implementation against its source.
+- [**Deploy + Helm + EKS**](docs/agents/deploy.md) — workflow inputs, per-env vars/secrets cascade, Helm chart, image tagging, ALB Ingress, MCP `publish` / `deploy_config` / `commit_push`. Single-tag scheme + `pullPolicy: Always`. Ops workflows (`diagnose.yml`, `uninstall.yml`, `alb-alarms.yml`).
+- [**Workspace deploy ops**](docs/agents/workspace-deploy-ops-endpoints.md) — scaffold workflow role in first-class workspace deployment operations.
+- [**Observability + security**](docs/agents/observability.md) — pino + OpenTelemetry + Sentry + PostHog + helmet + rate-limit. Where each lives, how to add a metric/span/event, PII scrubbing, log-noise suppression.
+- [**Testing layers**](docs/agents/testing.md) — Vitest unit, apiRouteContract integration, Playwright e2e, contract tests. TDD discipline per layer.
+- [**MCP tool surface**](docs/agents/mcp-tools.md) — `groundx-studio` MCP tools. When to use `publish` vs `commit_push` vs `deploy_config`. Where the Partner API key lives, why `.env.local` is the wrong home for it, how to recover it after a session compact.
+- [**Common gotchas**](docs/agents/gotchas.md) — mistakes already made: the Partner API `*username`-is-actually-the-key trap, the Partner-key persistence trap (`.env.local` is a workaround, not canonical home), GitHub vars precedence, ClusterIP under AWS ALB, no mock mode (real clients always; tests inject fakes at the seam).
+- [**Air-gap / on-prem audit**](docs/agents/airgap-audit.md) — OPS-04 deliverable. Every external host the runtime contacts in production, with a "seam" column showing whether the host is env-var-overridable. Reference when adding new external deps.
+- [**Real-data rewire plan**](docs/agents/real-data-rewire-gap.md) — the no-onboarding-duplicates rule + the concrete plan to fold per-frame views (`UnderstandView`/`ExtractView`/`InteractView`/`IntegrateView`) into thin shells around production widgets. Read before building "onboarding-specific" variants.
+
+## Conventions for additions
+
+New top-level concern → new file under `docs/agents/` + a one-line entry here. Keep this file a strict ToC. Anything that needs more than one line of explanation goes in the linked file.
+
+## OpenSpec
+
+OpenSpec manages the **documentation lifecycle** for this repo (proposal → specs → design →
+tasks). **Implementation** is done with **Superpowers** (brainstorm → plan → TDD → review →
+finish), which is ambient in the harness and triggers automatically. All spec work runs inside
+this repo on the feature branch.
+
+**Schema:** `spec-driven` (official)   **Role:** `frontend`   **Profile:** `custom`   **Default command:** `/opsx:continue`
+
+Per-artifact content rules live in `openspec/config.yaml`. Inspect templates and runtime
+guidance with `openspec instructions <artifact>`.
+
+### Default slash command
+
+`/opsx:continue` — the recommended driver for this repo.
+- `/opsx:ff` — small, low-risk changes; all artifacts at once.
+- `/opsx:continue` — large or correctness-sensitive flows; one gated artifact at a time.
+- `/opsx:explore` — think first; useful when the approach is unclear.
+
+### Skills used by the artifacts
+
+- Open design questions in a proposal → `superpowers:brainstorming`.
+- Given/When/Then scenarios in specs → `superpowers:test-driven-development`.
+- Architectural decisions → `architectural-decision-records` skill; write ADRs to
+  `docs/adr/<LINEAR-TICKET>-<kebab>.md` (Linear ticket prefix mandatory). Cross-service
+  decisions live in the **producing** repo and are referenced from consumers' `design.md`.

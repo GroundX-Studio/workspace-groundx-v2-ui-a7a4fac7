@@ -2,6 +2,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiProvider } from "@/contexts/ApiContext";
+import { makeFakeApi } from "@/test/makeFakeApi";
+
 const contextMocks = vi.hoisted(() => ({
   setIsLoading: vi.fn(),
   setErrorMessage: vi.fn(),
@@ -93,7 +96,6 @@ const contextMocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/api", () => ({ api: contextMocks.api }));
 vi.mock("@/contexts/LoadingContext", () => ({
   useIsLoading: () => ({ setIsLoading: contextMocks.setIsLoading }),
 }));
@@ -115,7 +117,11 @@ import { WorkflowsProvider, useWorkflowsContext } from "./WorkflowsContext";
 
 const wrapper = (Provider: React.FC<{ children: ReactNode }>) =>
   function Wrapper({ children }: { children: ReactNode }) {
-    return <Provider>{children}</Provider>;
+    return (
+      <ApiProvider value={makeFakeApi(contextMocks.api)}>
+        <Provider>{children}</Provider>
+      </ApiProvider>
+    );
   };
 
 describe("SDK contexts", () => {
@@ -253,9 +259,11 @@ describe("SDK contexts", () => {
     contextMocks.api.groundxDocuments.listGroundXDocuments.mockResolvedValue({
       documents: [{ documentId: "doc-1", fileName: "a.pdf" }],
     });
-    contextMocks.api.groundxDocuments.listGroundXProcesses.mockResolvedValue({
-      ingests: [{ processId: "proc-1", status: "queued" }],
-    });
+    // listGroundXProcesses now resolves to a single normalized IngestProcess[]
+    // (2026-06-01-data-model-tail item 6 — the entity collapses processes/ingests).
+    contextMocks.api.groundxDocuments.listGroundXProcesses.mockResolvedValue([
+      { processId: "proc-1", status: "queued" },
+    ]);
     const { result } = renderHook(() => useDocumentsContext(), { wrapper: wrapper(DocumentsProvider) });
 
     await act(async () => {

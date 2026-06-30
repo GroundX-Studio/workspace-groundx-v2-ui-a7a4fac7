@@ -1,0 +1,215 @@
+import Box from "@mui/material/Box";
+import Chip from "@mui/material/Chip";
+import { alpha } from "@mui/material/styles";
+import { useCallback, type FC } from "react";
+
+import {
+  BORDER_RADIUS_PILL,
+  CORAL,
+  CYAN,
+  FONT_SIZE_LABEL,
+  FONT_WEIGHT_LABEL,
+  GREEN,
+  NAVY,
+} from "@/constants";
+import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
+import { track } from "@/lib/analytics";
+import { citationRegions } from "@groundx/shared";
+import type { Citation } from "@/types/onboarding";
+
+export type CiteChipColor = "cyan" | "coral" | "green";
+
+/**
+ * inline-footnote-citations — the canonical index/confidence-keyed citation color,
+ * SHARED by the inline footnote marker and the `SourceList` pill so a citation
+ * reads as one unit: `[1]` green (primary), low-confidence coral, else cyan.
+ *
+ * Lives here (with `CiteChip`) because it is a citation-color concern: both the
+ * `Markdown` footnote override and the `brand/SourceList` consume it, and housing
+ * it here keeps the color rule one-directional (both depend on `brand/CiteChip`)
+ * rather than coupling `brand` to a helper in `primitives/Markdown`.
+ */
+export function citationColor(index: number, c: Citation): CiteChipColor {
+  if (c.confidence != null && c.confidence < 0.5) return "coral";
+  return index === 1 ? "green" : "cyan";
+}
+
+/**
+ * inline-footnote-citations Phase A — `pill` is the standalone badge (today's
+ * default, kept for back-compat); `footnote` is a small inline superscript `[N]`
+ * marker that sits in the text flow. Both share the SAME click behavior,
+ * telemetry, tier color, and `data-*` attributes — only the presentation differs.
+ */
+export type CiteChipVariant = "pill" | "footnote";
+
+export interface CiteChipProps {
+  citation: Citation;
+  /** Numeric index shown in the chip (the [N] in copy). */
+  index: number;
+  /** Optional override for click behavior. Default dispatches highlightCitation. */
+  onActivate?: (citation: Citation) => void;
+  /**
+   * Chip color. Default cyan; coral signals an anomaly / low-confidence
+   * citation (used by extract field-rows per canonical); green is used for
+   * the primary citation in synthesis answers. Maps to the design
+   * tokens, NOT raw hex.
+   */
+  color?: CiteChipColor;
+  /**
+   * Presentation variant. `pill` (default) = standalone badge; `footnote` =
+   * inline superscript marker rendered within prose. Same behavior either way.
+   */
+  variant?: CiteChipVariant;
+}
+
+/**
+ * The shared citation chip. Used wherever the spec calls for `[N]` —
+ * chat bubbles, schema rows, report sections, risk roll-up rows.
+ *
+ * clickable-citations Phase 5: the chip's default click behavior is
+ * now "jump the viewer to the cited region." Phase 3 wired the
+ * orchestrator to handle `highlightCitation` end-to-end (push/swap a
+ * `doc-viewer` ViewerStep + highlight slot). Phase 4 made
+ * `PdfViewerWidget` controlled-page + bbox-overlay aware. This
+ * component drops the pre-UI-04 Popover fallback — the chip now does
+ * the single thing the wireframes asked for: opens the source.
+ *
+ * Hover tooltip is the native `title` attribute, so users still get
+ * a "source · page N" hint without a JS-rendered floating peek.
+ *
+ * When `onActivate` is supplied (callers wiring their own surface),
+ * the orchestrator dispatch is suppressed — the caller's affordance
+ * owns the click.
+ */
+export const CiteChip: FC<CiteChipProps> = ({ citation, index, onActivate, color = "cyan", variant = "pill" }) => {
+  const { dispatch } = useCanvasOrchestrator();
+  // Single accent per color-key — rendered as a soft tinted pill (tint fill +
+  // matching border + navy label) instead of a loud solid chip, so the
+  // citation reads as a refined source tag in the answer footer.
+  const accent = color === "coral" ? CORAL : color === "green" ? GREEN : CYAN;
+
+  // multi-region-citations: the citation's primary page (first region, or the
+  // legacy alias). A regionless "location unknown" citation has none.
+  const primaryPage = citation.page ?? citationRegions(citation)[0]?.page;
+
+  const handle = useCallback(() => {
+    // OB-02 — cite.peeked fires on every citation chip activation
+    // regardless of which surface it sits in (F3 fields, F5 chat, etc.).
+    track("cite.peeked", {
+      documentId: citation.documentId,
+      page: primaryPage,
+      index,
+    });
+    if (onActivate) {
+      onActivate(citation);
+      return;
+    }
+    // A regionless citation (validated value, location unknown) can't jump to a
+    // page — open the document without a highlight.
+    if (primaryPage == null) {
+      dispatch({ kind: "openDocument", documentId: citation.documentId }, "user");
+      return;
+    }
+    // The orchestrator's built-in handler picks this up (no adapter
+    // registration required) and calls ChatStore.gotoDocViewer to
+    // push/swap a doc-viewer step. Shells re-render with the new
+    // step → PdfViewerWidget mounts with targetPage + highlightBbox.
+    const regions = citationRegions(citation);
+    dispatch(
+      {
+        kind: "highlightCitation",
+        documentId: citation.documentId,
+        page: primaryPage,
+        ...(citation.bbox ? { bbox: citation.bbox } : {}),
+        // WF-06b — thread the attribution tier so the viewer overlay
+        // renders at the citation's precision (ambient → chip only).
+        ...(citation.tier ? { tier: citation.tier } : {}),
+        // multi-region-citations P2.1 — light EVERY region the citation supports.
+        ...(regions.length > 0 ? { regions } : {}),
+      },
+      "user",
+    );
+  }, [citation, dispatch, onActivate, index, primaryPage]);
+
+  const tooltip = citation.snippet
+    ? `Source · ${primaryPage != null ? `page ${primaryPage}` : "location unknown"} — ${citation.snippet}`
+    : `Source · ${primaryPage != null ? `page ${primaryPage}` : "location unknown"}`;
+
+  // inline-footnote-citations Phase A — the `footnote` variant is a small inline
+  // superscript `[N]` marker that lives in the prose. It shares the click handler,
+  // tooltip, telemetry (via `handle`), tier color, and `data-*` attributes with the
+  // pill — only the presentation differs (a button so it stays keyboard-accessible).
+  if (variant === "footnote") {
+    return (
+      <Box
+        component="button"
+        type="button"
+        onClick={handle}
+        title={tooltip}
+        aria-label={primaryPage != null ? `Citation ${index} — page ${primaryPage}` : `Citation ${index} — location unknown`}
+        data-testid={`cite-chip-${index}`}
+        data-variant="footnote"
+        data-citation-doc={citation.documentId}
+        data-citation-page={citation.page}
+        data-color={color}
+        sx={{
+          appearance: "none",
+          fontFamily: "inherit",
+          verticalAlign: "super",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: 15,
+          height: 15,
+          ml: "2px",
+          px: 0.5,
+          py: 0,
+          lineHeight: 1,
+          borderRadius: BORDER_RADIUS_PILL,
+          fontSize: FONT_SIZE_LABEL,
+          fontWeight: FONT_WEIGHT_LABEL,
+          color: NAVY,
+          backgroundColor: alpha(accent, 0.38),
+          border: `1px solid ${alpha(accent, 0.9)}`,
+          cursor: "pointer",
+          "&:hover": { backgroundColor: alpha(accent, 0.55) },
+          "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
+        }}
+      >
+        {index}
+      </Box>
+    );
+  }
+
+  return (
+    <Chip
+      data-variant="pill"
+      // A clean little footnote-style badge: just the number (no brackets),
+      // a small circular pill with a tinted fill + accent ring. Reads as a
+      // source reference, not a loud red bubble.
+      label={`${index}`}
+      size="small"
+      onClick={handle}
+      clickable
+      title={tooltip}
+      aria-label={`Citation ${index} — page ${citation.page}`}
+      data-testid={`cite-chip-${index}`}
+      data-citation-doc={citation.documentId}
+      data-citation-page={citation.page}
+      data-color={color}
+      sx={{
+        height: 19,
+        minWidth: 19,
+        borderRadius: BORDER_RADIUS_PILL,
+        fontSize: FONT_SIZE_LABEL,
+        fontWeight: FONT_WEIGHT_LABEL,
+        color: NAVY,
+        backgroundColor: alpha(accent, 0.38),
+        border: `1px solid ${alpha(accent, 0.9)}`,
+        cursor: "pointer",
+        "& .MuiChip-label": { px: 0.5 },
+        "&:hover": { backgroundColor: alpha(accent, 0.55) },
+      }}
+    />
+  );
+};

@@ -1,60 +1,37 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { GroundXRequestOptions } from "@/api/common";
-import { ServiceHealth } from "@/api/entities/groundxHealthEntity";
-import { useIsLoading } from "@/contexts/LoadingContext";
-import { useMessageContext } from "@/contexts/MessageBarContext";
-import { createSdkResult } from "@/contexts/sdkContextTypes";
+import type { RequestOptions } from "@/api/common";
+import type { ServiceHealth } from "@/api/entities/groundxHealthEntity";
+import { useApi } from "@/contexts/ApiContext";
+import { useSdkRunner } from "@/contexts/createEntityContext";
 
 import { HealthContext } from "./HealthContext";
 
 export const HealthProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { setIsLoading } = useIsLoading();
-  const { setErrorMessage } = useMessageContext();
+  const api = useApi();
+  const run = useSdkRunner("Could not load service health.");
   const [services, setServices] = useState<ServiceHealth[]>([]);
   const [selectedService, setSelectedService] = useState<ServiceHealth | null>(null);
 
   const listHealth = useCallback(
-    async (options?: GroundXRequestOptions) => {
-      const result = createSdkResult<ServiceHealth[]>();
-      setIsLoading(true);
-      try {
+    (options?: RequestOptions) =>
+      run(async () => {
         const response = await api.groundxHealth.listGroundXHealth(options);
         setServices(response.health);
-        result.response = response.health;
-        result.isSuccess = true;
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("Could not load service health.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading]
+        return response.health;
+      }),
+    [api, run]
   );
 
   const getServiceHealth = useCallback(
-    async (service: string, options?: GroundXRequestOptions) => {
-      const result = createSdkResult<ServiceHealth>();
-      setIsLoading(true);
-      try {
+    (service: string, options?: RequestOptions) =>
+      run(async () => {
         const response = await api.groundxHealth.getGroundXServiceHealth(service, options);
         setSelectedService(response.health);
-        result.response = response.health;
-        result.isSuccess = true;
-      } catch (error) {
-        result.error = error;
-        setErrorMessage("Could not load service health.");
-      } finally {
-        setIsLoading(false);
-      }
-      return result;
-    },
-    [setErrorMessage, setIsLoading]
+        return response.health;
+      }),
+    [api, run]
   );
 
   return <HealthContext.Provider value={{ services, selectedService, listHealth, getServiceHealth }}>{children}</HealthContext.Provider>;
 };
-

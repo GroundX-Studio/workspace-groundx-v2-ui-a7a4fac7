@@ -1,0 +1,356 @@
+/**
+ * GroundX search dispatch for the RAG pipeline.
+ *
+ * Extracted from `chatRouter.ts` (§1 of 2026-05-31-core-data-followups —
+ * behavior-preserving split). Owns `searchGroundX` (scope-dispatched search +
+ * zero-result retry + WF-03 geometry resolution) and the `composeFilters`
+ * helper. `chatRouter.ts` re-exports `searchGroundX` + `SearchGroundXOptions`
+ * so existing `from "./chatRouter.js"` imports keep resolving.
+ */
+
+import type { GroundXClient } from "../types.js";
+
+import { logger } from "../lib/logger.js";
+import {
+  bboxForResult,
+  pageOf,
+  parseBoundingBoxes,
+  parsePages,
+  resolveGeometryFromXray,
+} from "./citationGeometry.js";
+import { fetchDocumentXray } from "./xrayCache.js";
+import {
+  RAG_FALLBACK_RELEVANCE,
+  RAG_SEARCH_LIMIT,
+  type ChatRouterDebug,
+  type GroundXSearchResult,
+} from "./chatRouterTypes.js";
+
+import { compileScopeFilter, type ContentScope } from "@groundx/shared";
+
+/**
+ * Issue a GroundX search dispatched on `ContentScope` (or `null`). The
+ * endpoint is chosen by the scope discriminant; the optional composable
+ * `filter` is compiled (shared `compileScopeFilter`) and applied uniformly
+ * to ANY shape, then composed with the server-derived `rbacFilter` via $and:
+ *
+ *   bucket    → POST /v1/search/{bucketId} + {query, n}
+ *   group     → POST /v1/search/{groupId}  + {query, n}
+ *   documents → POST /v1/search/documents  + {query, n, documentIds: [...]}
+ *   null      → POST /v1/search/documents  (doc-wide fallback; logged)
+ *
+ *   + filter  → adds {filter: <compiled>}  (project/portfolio/fund/folder
+ *               filter-fields; single→{field:v}, multi→{$in}, multi-field
+ *               →$and). Was bucket+projectIds-only before B1 inc. 3.
+ *
+ * TODO(CF-19): multi-bucket usage today requires the caller to
+ * provide an existing groupId. The "ensure-create group of buckets
+ * [B1, B2, …] if none exists" helper lives outside this function;
+ * when it lands, the handler can pass `{type:"group", groupId}`
+ * after the ensure call. CF-02 + CF-15 closed 2026-05-25 — the
+ * scope dispatch + entity-driven scope derivation are live; only
+ * the multi-bucket→group helper remains.
+ */
+/**
+ * CF-03: options for layering a server-derived metadata filter (RBAC,
+ * tenant, region, etc.) on top of the scope filter. The contract:
+ *
+ *   - If only the scope produces a filter → use it as-is.
+ *   - If only `rbacFilter` is set        → use it as-is.
+ *   - If both are present                → compose via `$and: [rbac, scope]`.
+ *
+ * The `rbacFilter` is ALWAYS server-derived (from session.groundx-
+ * Username → org → allowed visibility). It MUST NOT be accepted from
+ * the client. This function doesn't enforce that — the caller does, by
+ * never plumbing client input into this parameter.
+ */
+export interface SearchGroundXOptions {
+  rbacFilter?: Record<string, unknown>;
+  /**
+   * Optional dev-only diagnostic accumulator. When passed, searchGroundX
+   * populates `debug.groundx` with the final request shape + result
+   * summary so callers (chatRouter → chatHandler → /api/chat) can
+   * surface it to the browser. Never set in production.
+   */
+  debug?: { groundx?: ChatRouterDebug["groundx"] };
+}
+
+/**
+ * Compose two independent filters (RBAC + scope) into one VALID GroundX filter.
+ *
+ * 2026-06-02-onboarding-review-bugfixes #7: a naive `$and: [rbac, scope]` is
+ * WRONG when both constrain the same key — e.g. rbac `{projectId:{$in:[…]}}`
+ * + scope `{projectId:"…"}`. GroundX 400s: "cannot query more than 1 data type
+ * per key." So we merge KEY-AWARE: flatten both sides to single-key clauses,
+ * INTERSECT the allowed value-set of any shared key into ONE clause, and keep
+ * distinct keys as separate clauses. Each key then appears exactly once.
+ *
+ * Value shapes handled: scalar equality (`{k:v}`), array, and `{$in:[…]}` — all
+ * "set-like", which is everything the scope/RBAC filters use (projectId,
+ * workflow_id). A nested `{$and:[…]}` (compileScopeFilter multi-field) is
+ * flattened. Any key whose constraint is NOT set-like (e.g. a range operator —
+ * none today) is preserved as its own clause without intersection.
+ */
+function valueToSet(value: unknown): { setLike: true; values: unknown[] } | { setLike: false; raw: unknown } {
+  if (Array.isArray(value)) return { setLike: true, values: value };
+  if (value !== null && typeof value === "object") {
+    const inVals = (value as Record<string, unknown>).$in;
+    if (Array.isArray(inVals)) return { setLike: true, values: inVals };
+    return { setLike: false, raw: value }; // a non-$in operator object
+  }
+  return { setLike: true, values: [value] }; // scalar equality
+}
+
+/** Flatten a filter into single-key clauses, descending into `$and`. */
+function flattenClauses(filter: Record<string, unknown>): Array<[string, unknown]> {
+  const out: Array<[string, unknown]> = [];
+  for (const [key, value] of Object.entries(filter)) {
+    if (key === "$and" && Array.isArray(value)) {
+      for (const sub of value) {
+        if (sub && typeof sub === "object") out.push(...flattenClauses(sub as Record<string, unknown>));
+      }
+    } else {
+      out.push([key, value]);
+    }
+  }
+  return out;
+}
+
+/** A merged value-set → the smallest valid clause value (scalar | $in | $in:[]). */
+function setToClauseValue(values: unknown[]): unknown {
+  if (values.length === 1) return values[0];
+  return { $in: values };
+}
+
+export function composeFilters(
+  rbac: Record<string, unknown> | null,
+  scope: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!rbac && !scope) return null;
+  if (!rbac) return scope;
+  if (!scope) return rbac;
+
+  const clauses = [...flattenClauses(rbac), ...flattenClauses(scope)];
+  // Preserve first-seen key order for deterministic output.
+  const order: string[] = [];
+  const byKey = new Map<string, unknown[]>();
+  const nonSetLike: Array<[string, unknown]> = [];
+  for (const [key, value] of clauses) {
+    const v = valueToSet(value);
+    if (!v.setLike) {
+      nonSetLike.push([key, value]);
+      continue;
+    }
+    if (!byKey.has(key)) {
+      byKey.set(key, v.values.slice());
+      order.push(key);
+    } else {
+      // INTERSECT with what's already accumulated for this key.
+      const prev = byKey.get(key)!;
+      const next = v.values;
+      byKey.set(
+        key,
+        prev.filter((x) => next.some((y) => Object.is(x, y) || x === y)),
+      );
+    }
+  }
+
+  const merged: Array<Record<string, unknown>> = order.map((key) => ({ [key]: setToClauseValue(byKey.get(key)!) }));
+  for (const [key, value] of nonSetLike) merged.push({ [key]: value });
+
+  if (merged.length === 1) return merged[0];
+  return { $and: merged };
+}
+
+export async function searchGroundX(
+  query: string,
+  scope: ContentScope | null,
+  client: GroundXClient,
+  apiKey: string,
+  options: SearchGroundXOptions = {},
+): Promise<GroundXSearchResult[]> {
+  let path: string;
+  // Body must always include {query, n}; some scopes add fields.
+  const body: Record<string, unknown> = { query, n: RAG_SEARCH_LIMIT };
+
+  if (scope === null) {
+    // No derivable scope — the chatHandler couldn't resolve an active entity
+    // and there's no env samples bucket (early onboarding). Legacy fallback:
+    // doc-wide search. Logged so the gap shows in telemetry.
+    // eslint-disable-next-line no-console
+    console.warn("rag search dispatched with no scope — falling back to /v1/search/documents");
+    path = "/search/documents";
+  } else {
+    switch (scope.type) {
+      case "bucket": {
+        path = `/search/${scope.bucketId}`;
+        break;
+      }
+      case "group": {
+        // Group search has the same shape as bucket search — different
+        // resource id, same endpoint. GroundX resolves the group to its
+        // member buckets server-side.
+        path = `/search/${scope.groupId}`;
+        break;
+      }
+      case "documents": {
+        if (scope.documentIds.length === 0) {
+          throw new Error("rag scope 'documents' requires at least one documentId");
+        }
+        path = "/search/documents";
+        body.documentIds = scope.documentIds;
+        break;
+      }
+      default: {
+        // Exhaustiveness guard — the discriminated union has no other member.
+        const _never: never = scope;
+        throw new Error(`unreachable scope: ${JSON.stringify(_never)}`);
+      }
+    }
+  }
+
+  // Composable scope filter — applies to EVERY scope shape (project /
+  // portfolio / fund / folder filter-fields). Compiled once via the shared
+  // `compileScopeFilter` (single→{field:v}, multi→$in, multi-field→$and).
+  const scopeFilter = scope ? compileScopeFilter(scope.filter) : null;
+
+  // CF-03: compose rbacFilter with scopeFilter via $and. The two are
+  // independent constraints from different sources — never collapse
+  // them naively (e.g. spread-merge would silently drop a key
+  // collision). $and is the contract GroundX search expects when two
+  // independent filters must both match.
+  const composed = composeFilters(options.rbacFilter ?? null, scopeFilter);
+  if (composed) body.filter = composed;
+
+  // Dev/debug request log. Includes the user `query` ON PURPOSE: it is the key
+  // signal for debugging RAG/search behavior (reproducing why a search returned
+  // what it did) and the team needs it. NOTE: `query` is free-form user content
+  // that may contain PII (names/SSNs/account numbers) and is logged in
+  // CLEARTEXT — pino's redact paths (lib/logger.ts) do NOT cover this nested
+  // field. This is a deliberate trade-off; production log access + retention
+  // must be controlled accordingly.
+  logger.info(
+    {
+      groundxSearch: { path, scope: scope?.type ?? "none", query, bodyKeys: Object.keys(body), n: body.n, filter: body.filter ?? null },
+    },
+    "groundx search dispatch",
+  );
+
+  const runSearch = async (relevanceFloor?: number): Promise<Array<Record<string, unknown>>> => {
+    const reqBody = relevanceFloor === undefined ? body : { ...body, relevance: relevanceFloor };
+    const response = await client.forward(path, {
+      method: "POST",
+      apiKey,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(reqBody),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "<unreadable>");
+      throw new Error(`groundx search failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`);
+    }
+    const payload = (await response.json()) as {
+      search?: { results?: Array<Record<string, unknown>> };
+      results?: Array<Record<string, unknown>>;
+    };
+    return payload.search?.results ?? payload.results ?? [];
+  };
+
+  let rawResults = await runSearch();
+  // Zero-result retry: extract-indexed docs (searchable text = extraction
+  // JSON) score below GroundX's default relevance floor of 10, so a natural
+  // query returns nothing and the LLM says "no snippets." Retry once with a
+  // low floor to surface the JSON chunks — the grounding prompt already tells
+  // the model to read JSON. Normal (prose) docs clear the default floor on
+  // the first pass, so they never pay this second round-trip.
+  if (rawResults.length === 0 && Number.isFinite(RAG_FALLBACK_RELEVANCE)) {
+    logger.info(
+      // `query` included for debugging (see the dispatch-log note above):
+      // cleartext free-form user content — ensure prod log access is controlled.
+      { groundxSearchRetry: { path, query, fallbackRelevance: RAG_FALLBACK_RELEVANCE } },
+      "groundx search: 0 results at default relevance — retrying with low floor",
+    );
+    rawResults = await runSearch(RAG_FALLBACK_RELEVANCE);
+  }
+  const mapped: GroundXSearchResult[] = rawResults.map((r) => {
+    // WF-03: the deployed API does NOT return a top-level `r.pageNumber`.
+    // Page + bbox live in `r.boundingBoxes[]` (px corners + pageNumber) and
+    // `r.pages[]` (page dims). Read geometry off the result and normalize.
+    // multi-region: per-box regions on the cited page (no union envelope).
+    const bb = parseBoundingBoxes(r.boundingBoxes);
+    const pg = parsePages(r.pages);
+    const regions = bboxForResult(bb, pg);
+    return {
+      documentId: typeof r.documentId === "string" ? r.documentId : String(r.documentId ?? ""),
+      // The cited page is known even when geometry doesn't normalize (default 1).
+      pageNumber: regions[0]?.page ?? pageOf({ boundingBoxes: bb, pages: pg }),
+      bboxes: regions.length ? regions.map((g) => g.bbox) : undefined,
+      text: typeof r.text === "string" ? r.text : undefined,
+      score: typeof r.score === "number" ? r.score : undefined,
+      fileName: typeof r.fileName === "string" ? r.fileName : undefined,
+      sourceUrl: typeof r.sourceUrl === "string" ? r.sourceUrl : undefined,
+    };
+  });
+  // WF-03 fallback — results that carry NO search-side geometry resolve from
+  // the document's X-Ray (cached per doc). Fires ONLY when `bboxes` is absent,
+  // so the common layout-doc path (geometry already on the result) pays no
+  // X-Ray fetch. Best-effort: a failed fetch/parse leaves the citation bare.
+  for (const r of mapped) {
+    if (r.bboxes || !r.text || !r.documentId) continue;
+    const xray = await fetchDocumentXray(client, apiKey, r.documentId);
+    if (!xray) continue;
+    const regions = resolveGeometryFromXray(r.text, xray);
+    if (regions.length) {
+      r.pageNumber = regions[0].page;
+      r.bboxes = regions.map((g) => g.bbox);
+    }
+  }
+  // Result summary for dev visibility. Carries ONLY non-sensitive telemetry
+  // (count + top score + the document ids/filenames/pages that came back).
+  // The retrieved snippet/document TEXT is DELIBERATELY NOT logged: it is
+  // free-form GroundX result content that can carry user PII, and the module
+  // invariant (lib/logger.ts) is that document text MUST NOT be logged
+  // anywhere — not even truncated/redacted, since pino's redact paths don't
+  // match this nested field and any non-prod/debug deploy would emit it in
+  // cleartext. (Sibling of the `query` leak removed from the dispatch logs
+  // above.) The dev-only `options.debug.groundx` accumulator below still
+  // carries snippet text — that is browser-surfaced diagnostics gated on a
+  // caller debug flag ("Never set in production"), not a server log.
+  logger.info(
+    {
+      groundxSearchResult: {
+        count: mapped.length,
+        topScore: mapped[0]?.score ?? null,
+        files: Array.from(new Set(mapped.map((r) => r.fileName).filter(Boolean))).slice(0, 3),
+        // Top-3 result IDENTIFIERS only (no document text) so the log shows
+        // which docs came back without leaking their content.
+        topResults: mapped.slice(0, 3).map((r) => ({
+          documentId: r.documentId,
+          fileName: r.fileName,
+          page: r.pageNumber,
+          score: r.score,
+        })),
+      },
+    },
+    "groundx search result",
+  );
+  // Capture dev-side debug snapshot (browser surfaces this via _debug
+  // on the chat reply). Only populated when the caller passes
+  // `options.debug` — `searchGroundX` doesn't know whether the caller
+  // wants diagnostics or not.
+  if (options.debug) {
+    options.debug.groundx = {
+      path,
+      query,
+      n: typeof body.n === "number" ? body.n : RAG_SEARCH_LIMIT,
+      filter: body.filter ?? null,
+      resultCount: mapped.length,
+      topSnippets: mapped.slice(0, 3).map((r) => ({
+        documentId: r.documentId,
+        fileName: r.fileName,
+        score: r.score,
+        text: (r.text ?? "").slice(0, 240),
+      })),
+    };
+  }
+  return mapped;
+}

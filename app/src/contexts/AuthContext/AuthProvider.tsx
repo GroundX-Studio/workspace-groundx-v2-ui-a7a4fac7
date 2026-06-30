@@ -1,9 +1,10 @@
 import { FC, ReactNode, useCallback, useState } from "react";
 
-import { api } from "@/api";
-import { LoginI, RegisterI, UpdateAppMetadataInput, User } from "@/api/entities/customerEntity";
+import type { LoginI, RegisterI, UpdateAppMetadataInput, User } from "@/api/entities/customerEntity";
+import { useApi } from "@/contexts/ApiContext";
 import { useIsLoading } from "@/contexts/LoadingContext";
 import { useMessageContext } from "@/contexts/MessageBarContext";
+import { SdkActionResult, sdkFailure, sdkSuccess } from "@/contexts/sdkContextTypes";
 
 import { Auth, AuthContext, LoginReqCallback } from "./AuthContext";
 
@@ -15,17 +16,19 @@ const emptyAuth: Auth = {
 };
 
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Element => {
+  const api = useApi();
+  const authApi = api.auth;
+  const telemetryApi = api.telemetry;
   const { setIsLoading } = useIsLoading();
   const { setErrorMessage } = useMessageContext();
   const [auth, setAuth] = useState<Auth>(emptyAuth);
   const [user, setUser] = useState<User | null>(null);
 
   const getUserData = useCallback(
-    async (userName = ""): Promise<{ response: User | null; error: boolean }> => {
-      const result = { response: null as User | null, error: false };
+    async (userName = ""): Promise<SdkActionResult<User>> => {
       setIsLoading(true);
       try {
-        const response = await api.getUserData(userName);
+        const response = await authApi.getUserData(userName);
         if (response) {
           const customer = {
             ...response.customer,
@@ -38,24 +41,26 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
             token: "",
             xJwtToken: "",
           });
-          result.response = customer;
+          return sdkSuccess(customer);
         }
+        // No user came back — not an error, but no response either; surface as a
+        // failure so the caller (AppInitialization) routes to the login screen.
+        return sdkFailure<User>(new Error("No user data"));
       } catch (error) {
-        console.error(error);
+        telemetryApi.captureException(error, { context: "AuthProvider.getUserData", userName });
         setErrorMessage("Could not get user data");
-        result.error = true;
+        return sdkFailure<User>(error);
       } finally {
         setIsLoading(false);
       }
-      return result;
     },
-    [setErrorMessage, setIsLoading]
+    [authApi, telemetryApi, setErrorMessage, setIsLoading]
   );
 
   const login = useCallback(
     async (data: LoginI): Promise<LoginReqCallback> => {
       try {
-        const response = await api.login(data);
+        const response = await authApi.login(data);
         if (response) {
           setAuth({
             isLoggedIn: true,
@@ -66,24 +71,23 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
 
           await getUserData(response.username);
 
-          return { isLoggedIn: true, error: false, banned: false };
+          return { kind: "success" };
         }
       } catch (error) {
-        console.error(error);
-        return { isLoggedIn: false, error, banned: false };
+        telemetryApi.captureException(error, { context: "AuthProvider.login" });
+        return { kind: "error", error };
       }
 
-      return { isLoggedIn: false, error: false, banned: false };
+      return { kind: "failed" };
     },
-    [getUserData]
+    [authApi, getUserData, telemetryApi]
   );
 
   const register = useCallback(
-    async (data: RegisterI): Promise<{ isSuccess: boolean; error: boolean }> => {
-      const result = { isSuccess: false, error: false };
+    async (data: RegisterI): Promise<SdkActionResult<void>> => {
       setIsLoading(true);
       try {
-        const response = await api.register(data);
+        const response = await authApi.register(data);
         if (response) {
           setAuth({
             isLoggedIn: true,
@@ -93,76 +97,73 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
           });
 
           await getUserData(response.username);
-          result.isSuccess = true;
+          return sdkSuccess(undefined);
         }
+        return sdkFailure<void>(new Error("Registration failed"));
       } catch (error: unknown) {
         if ((error as { response?: { status?: number } })?.response?.status === 409) {
           setErrorMessage("An account with this email already exists. Please login or sign up with a different email.");
         } else {
           setErrorMessage("Registration failed. Please try again.");
         }
-        result.error = true;
+        return sdkFailure<void>(error);
       } finally {
         setIsLoading(false);
       }
-      return result;
     },
-    [getUserData, setErrorMessage, setIsLoading]
+    [authApi, getUserData, setErrorMessage, setIsLoading]
   );
 
   const resetPassword = useCallback(
-    async (email: string): Promise<{ isSuccess: boolean; error: boolean }> => {
-      const result = { isSuccess: false, error: false };
+    async (email: string): Promise<SdkActionResult<void>> => {
       setIsLoading(true);
       try {
-        const response = await api.resetUserPassword(email);
-        if (response.message === "OK") result.isSuccess = true;
+        const response = await authApi.resetUserPassword(email);
+        if (response.message === "OK") return sdkSuccess(undefined);
+        return sdkFailure<void>(new Error("Could not send reset code."));
       } catch (error: unknown) {
         setErrorMessage((error as { message?: string }).message || "Could not send reset code.");
-        result.error = true;
+        return sdkFailure<void>(error);
       } finally {
         setIsLoading(false);
       }
-      return result;
     },
-    [setErrorMessage, setIsLoading]
+    [authApi, setErrorMessage, setIsLoading]
   );
 
   const confirmChangingPassword = useCallback(
-    async (code: string, email: string, password: string): Promise<{ isSuccess: boolean; error: boolean }> => {
-      const result = { isSuccess: false, error: false };
+    async (code: string, email: string, password: string): Promise<SdkActionResult<void>> => {
       setIsLoading(true);
       try {
-        const response = await api.confirmUserChangingPassword(code, email, password);
-        if (response.message === "OK") result.isSuccess = true;
+        const response = await authApi.confirmUserChangingPassword(code, email, password);
+        if (response.message === "OK") return sdkSuccess(undefined);
+        return sdkFailure<void>(new Error("Could not update password."));
       } catch (error: unknown) {
         setErrorMessage((error as { message?: string }).message || "Could not update password.");
-        result.error = true;
+        return sdkFailure<void>(error);
       } finally {
         setIsLoading(false);
       }
-      return result;
     },
-    [setErrorMessage, setIsLoading]
+    [authApi, setErrorMessage, setIsLoading]
   );
 
   const logout = useCallback(async () => {
     try {
-      await api.logout();
+      await authApi.logout();
     } catch (error) {
-      console.error(error);
+      telemetryApi.captureException(error, { context: "AuthProvider.logout" });
     } finally {
       setUser(null);
       setAuth(emptyAuth);
     }
-  }, []);
+  }, [authApi, telemetryApi]);
 
   const updateAppMetadata = useCallback(
-    async (metadata: UpdateAppMetadataInput): Promise<{ isSuccess: boolean; error: boolean }> => {
-      const result = { isSuccess: false, error: false };
+    async (metadata: UpdateAppMetadataInput): Promise<SdkActionResult<void>> => {
       setIsLoading(true);
       try {
-        const appMetadata = await api.updateAppMetadata(metadata);
+        const appMetadata = await authApi.updateAppMetadata(metadata);
         setUser((currentUser) => {
           if (!currentUser) return currentUser;
           return {
@@ -173,17 +174,16 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }): JSX.Ele
             },
           };
         });
-        result.isSuccess = true;
+        return sdkSuccess(undefined);
       } catch (error: unknown) {
-        console.error(error);
+        telemetryApi.captureException(error, { context: "AuthProvider.updateAppMetadata" });
         setErrorMessage("Could not update app metadata.");
-        result.error = true;
+        return sdkFailure<void>(error);
       } finally {
         setIsLoading(false);
       }
-      return result;
     },
-    [setErrorMessage, setIsLoading]
+    [authApi, telemetryApi, setErrorMessage, setIsLoading]
   );
 
   return (

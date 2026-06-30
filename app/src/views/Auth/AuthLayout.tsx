@@ -2,7 +2,7 @@ import { FC, ReactNode } from "react";
 import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
 
-import { BORDER_RADIUS, MAIN_BACKGROUND, WHITE } from "@/constants";
+import { BORDER_RADIUS, FULL_VIEWPORT_MIN_HEIGHT, MAIN_BACKGROUND, WHITE } from "@/constants";
 
 interface AuthLayoutProps {
   children: ReactNode;
@@ -13,7 +13,7 @@ export const AuthLayout: FC<AuthLayoutProps> = ({ children, isTall = false }) =>
   return (
     <Box
       sx={{
-        minHeight: "100vh",
+        minHeight: FULL_VIEWPORT_MIN_HEIGHT,
         width: "100%",
         display: "flex",
         flexDirection: "column",

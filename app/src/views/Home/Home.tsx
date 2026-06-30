@@ -1,161 +1,64 @@
-import AutoAwesomeOutlinedIcon from "@mui/icons-material/AutoAwesomeOutlined";
-import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
-import HubOutlinedIcon from "@mui/icons-material/HubOutlined";
-import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
-import Box from "@mui/material/Box";
-import Chip from "@mui/material/Chip";
-import Divider from "@mui/material/Divider";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
+import { Navigate } from "react-router-dom";
 
-import { EducationalTooltip } from "@/shared/components/EducationalTooltip";
-import { GxCard } from "@/shared/components/GxCard";
-import { GxSectionHeader } from "@/shared/components/GxSectionHeader";
-import { BODY_TEXT, GREEN, NAVY, TINT } from "@/constants";
+import { useAuthContext } from "@/contexts/AuthContext";
+import { ROUTER_PATHS } from "@/router/routerPaths";
 
-const summaryCards = [
-  {
-    label: "Projects",
-    value: "3",
-    detail: "Active knowledge workspaces",
-    icon: <FolderOutlinedIcon aria-hidden="true" />,
-  },
-  {
-    label: "Documents",
-    value: "128",
-    detail: "Indexed and ready to search",
-    icon: <SearchOutlinedIcon aria-hidden="true" />,
-  },
-  {
-    label: "Automations",
-    value: "6",
-    detail: "Grounded workflows online",
-    icon: <HubOutlinedIcon aria-hidden="true" />,
-  },
-];
+/**
+ * ChatStoreProvider isn't mounted at the `/` boundary (it's a child
+ * of SteadyShell), so a hook-based read would always return null
+ * here. Reading the persisted snapshot value directly mirrors how
+ * OnboardingShell reads the same key for its URL-sync effect, and
+ * keeps `Home` a single render with no waiting on context wiring.
+ *
+ * Keep this in sync with `STORAGE_KEY` in ChatStoreContext.tsx — if
+ * either constant moves, both must move together.
+ */
+const CHAT_STORE_STORAGE_KEY = "groundx-onboarding.chat-store.v1";
 
-const activityItems = [
-  "Customer onboarding guide indexed",
-  "Support workflow refreshed",
-  "Quarterly report draft generated",
-];
+const readLastSessionId = (): string | null => {
+  if (typeof window === "undefined") return null;
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(CHAT_STORE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { activeSessionId?: string | null };
+    return parsed.activeSessionId ?? null;
+  } catch {
+    return null;
+  }
+};
 
+/**
+ * ARCH-21 (2026-05-26): the scaffold-default 161-line marketing card
+ * was replaced with an auth-aware redirect. `/home` is no longer a
+ * destination — it's an entry hop that forwards the user to where
+ * they actually belong based on auth + persisted session state:
+ *
+ *   - Signed-in with a last chat session: `/c/<sessionId>` (deep-link
+ *     back into where they left off).
+ *   - Signed-in without one: `/onboarding` (no destination chosen
+ *     yet — bounce them to the picker).
+ *   - Anonymous: `/onboarding`. AppInitialization usually catches
+ *     these earlier and forwards to login, but this fallback keeps
+ *     the redirect contract obvious if the gate is ever loosened.
+ *
+ * The companion drift guard (`no-hardcoded-styles.test.ts`) used to
+ * exempt this file with 2 offenders; the rewrite removes them and
+ * the exemption was deleted in the same change.
+ */
 export const Home = () => {
-  return (
-    <Stack spacing={3}>
-      <Stack spacing={0.75}>
-        <Stack direction="row" alignItems="center" spacing={0.75}>
-          <Typography component="h1" variant="h4" fontWeight={700} color={NAVY}>
-            Studio Workspace
-          </Typography>
-          <EducationalTooltip
-            ariaLabel="About the workspace overview"
-            title="This protected starter view is the first place to shape the product workflow, dashboard metrics, and GroundX-powered actions."
-          />
-        </Stack>
-        <Typography variant="body1" color={BODY_TEXT} sx={{ maxWidth: 760 }}>
-          A ready starting point for authenticated GroundX products, with local middleware, session-aware API proxying, and
-          design-system components already wired.
-        </Typography>
-      </Stack>
+  const { auth } = useAuthContext();
 
-      <Box
-        sx={{
-          display: "grid",
-          gap: 2,
-          gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" },
-        }}
-      >
-        {summaryCards.map((card) => (
-          <GxCard key={card.label} sx={{ minHeight: 160, position: "relative" }}>
-            <Stack spacing={1.5} sx={{ pr: 7 }}>
-              <Box
-                sx={{
-                  alignItems: "center",
-                  backgroundColor: TINT,
-                  borderRadius: "50%",
-                  color: NAVY,
-                  display: "flex",
-                  height: 48,
-                  justifyContent: "center",
-                  position: "absolute",
-                  right: 16,
-                  top: 16,
-                  width: 48,
-                  "& .MuiSvgIcon-root": {
-                    fontSize: 28,
-                  },
-                }}
-              >
-                {card.icon}
-              </Box>
-              <Stack spacing={0.25}>
-                <Typography variant="h4" fontWeight={700} color={NAVY}>
-                  {card.value}
-                </Typography>
-                <Typography variant="subtitle2" fontWeight={700} color={NAVY}>
-                  {card.label}
-                </Typography>
-                <Typography variant="body2" color={BODY_TEXT}>
-                  {card.detail}
-                </Typography>
-              </Stack>
-            </Stack>
-          </GxCard>
-        ))}
-      </Box>
+  if (auth.isLoggedIn) {
+    const sessionId = readLastSessionId();
+    if (sessionId) {
+      return <Navigate to={`/c/${sessionId}`} replace />;
+    }
+  }
 
-      <GxCard>
-        <GxSectionHeader
-          label="NEXT WORKFLOW"
-          education={
-            <EducationalTooltip
-              ariaLabel="About the next workflow"
-              title="Use this section for the primary job your user needs to complete, then connect it to GroundX data and LLM actions through the middleware."
-            />
-          }
-          action={
-            <Chip
-              icon={<AutoAwesomeOutlinedIcon />}
-              label="Ready for agent work"
-              sx={{ backgroundColor: GREEN, color: NAVY, fontWeight: 700 }}
-            />
-          }
-        />
-        <Divider sx={{ my: 2 }} />
-        <Stack spacing={1.5}>
-          <Typography variant="h5" fontWeight={700} color={NAVY}>
-            Build the first customer workflow here
-          </Typography>
-          <Typography variant="body2" color={BODY_TEXT} sx={{ maxWidth: 780 }}>
-            Add the product-specific form, search, report, extraction, or chat experience to this page. Keep browser code on
-            same-origin `/api` routes and let middleware own all GroundX, Partner, and LLM credentials.
-          </Typography>
-        </Stack>
-      </GxCard>
-
-      <GxCard>
-        <GxSectionHeader
-          label="RECENT ACTIVITY"
-          education={
-            <EducationalTooltip
-              ariaLabel="About recent activity"
-              title="Activity rows are intentionally plain so agents can replace them with project events, document ingestion, or workflow status."
-            />
-          }
-        />
-        <Divider sx={{ my: 2 }} />
-        <Stack spacing={1.25}>
-          {activityItems.map((item) => (
-            <Stack key={item} direction="row" alignItems="center" spacing={1.5}>
-              <Box sx={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: GREEN, flexShrink: 0 }} />
-              <Typography variant="body2" color={BODY_TEXT}>
-                {item}
-              </Typography>
-            </Stack>
-          ))}
-        </Stack>
-      </GxCard>
-    </Stack>
-  );
+  return <Navigate to={ROUTER_PATHS.ONBOARDING} replace />;
 };

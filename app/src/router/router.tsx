@@ -1,31 +1,94 @@
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { FC, useEffect, type ReactNode } from "react";
+import { Outlet, createBrowserRouter, Navigate } from "react-router-dom";
 
 import { AppInitialization } from "@/AppInitialization";
-import { AppStatus } from "@/views/AppStatus/AppStatus";
-import { Banned } from "@/views/Banned/Banned";
+import { useAppMode } from "@/contexts/AppModeContext";
 import { OnboardingProvider } from "@/contexts/OnboardingContext/OnboardingProvider";
-import { Dashboard } from "@/views/CoreLayouts/Dashboard";
-import { Health } from "@/views/Health/Health";
+import { Banned } from "@/views/Banned/Banned";
+import { Health } from "@/views/_scaffold/Health/Health";
 import { Home } from "@/views/Home/Home";
 import { Login } from "@/views/Auth/Login";
 import { Register } from "@/views/Auth/Register";
 import { ResetPassword } from "@/views/Auth/ResetPassword";
+import { OnboardingShell } from "@/views/Onboarding/OnboardingShell";
+import { SteadyShell } from "@/views/Steady/SteadyShell";
+import { WorkspacesView, ProjectsView } from "@/views/Scoped/ScopedConversationShell";
 import { ROUTER_PATHS } from "@/router/routerPaths";
+
+/**
+ * DL-2 (e2e-experience-audit): opt into the React Router v7 `startTransition`
+ * future flag so the "Future Flag Warning" console noise (~24×/session) is
+ * silenced and we pre-adopt v7 behavior (state updates wrapped in
+ * `React.startTransition`). This is the ONLY flag the audit observed warning,
+ * and it lives on `<RouterProvider future={...}>` (NOT the data-router
+ * `future` arg). Deliberately NOT opting into `v7_relativeSplatPath` here —
+ * it changes relative-link resolution inside our `/:bucketId/:scenarioId/*`
+ * splat route, a behavior change out of scope for a console-noise fix.
+ * Exported so a guard test can assert it stays set.
+ */
+export const ROUTER_FUTURE_FLAGS = {
+  v7_startTransition: true,
+} as const;
+
+const ProductRouteModeBoundary: FC<{ children: ReactNode }> = ({ children }) => {
+  const { state, promoteToSignedIn, flipToSteady } = useAppMode();
+
+  useEffect(() => {
+    if (state.authState !== "signed-in") promoteToSignedIn();
+    if (state.mode !== "steady") flipToSteady();
+  }, [state.authState, state.mode, promoteToSignedIn, flipToSteady]);
+
+  if (state.authState !== "signed-in" || state.mode !== "steady") {
+    return <>Loading...</>;
+  }
+
+  return <>{children}</>;
+};
+
+export const ProductRouteLayout: FC = () => (
+  <AppInitialization>
+    <ProductRouteModeBoundary>
+      <OnboardingProvider>
+        <Outlet />
+      </OnboardingProvider>
+    </ProductRouteModeBoundary>
+  </AppInitialization>
+);
+
+export const PublicOnboardingLayout: FC = () => (
+  <OnboardingProvider>
+    <Outlet />
+  </OnboardingProvider>
+);
 
 export const router = createBrowserRouter([
   {
+    // ARCH-22 (2026-05-26): the scaffold-default `<Dashboard />`
+    // boxed-content + topbar layout was removed. The canonical
+    // layout for the product is `<AppShell />` mounted by each route
+    // that needs it (OnboardingShell, SteadyShell). The `/` route now
+    // just composes route initialization and renders an Outlet for
+    // whichever child route matches.
+    //
+    // ARCH-21 (2026-05-26): `Home` is an auth-aware redirect, not a
+    // marketing page. Anonymous → /onboarding; signed-in →
+    // /c/<lastSessionId> from persisted ChatStore or /onboarding.
+    //
+    // ARCH-24 (2026-05-26): `/status` + the `AppStatus` stub were
+    // deleted (no real surface behind the route). `Banned` stayed —
+    // the route is load-bearing for axios 403-on-archived-customer
+    // and Login's banned-account branch. `Health` moved under
+    // `views/_scaffold/` to mark it explicitly as non-product
+    // scaffold infrastructure (k8s probe target only).
     path: "/",
     element: (
       <AppInitialization>
-        <OnboardingProvider>
-          <Dashboard />
-        </OnboardingProvider>
+        <Outlet />
       </AppInitialization>
     ),
     errorElement: <>Something went wrong</>,
     children: [
       { path: "", element: <Navigate to={ROUTER_PATHS.HOME} /> },
-      { path: ROUTER_PATHS.APP_STATUS, element: <AppStatus /> },
       { path: ROUTER_PATHS.HOME, element: <Home /> },
     ],
   },
@@ -34,4 +97,43 @@ export const router = createBrowserRouter([
   { path: ROUTER_PATHS.AUTH_RESET_PASSWORD, element: <ResetPassword /> },
   { path: ROUTER_PATHS.HEALTH, element: <Health /> },
   { path: ROUTER_PATHS.BANNED, element: <Banned /> },
+  {
+    element: <PublicOnboardingLayout />,
+    children: [
+      // Onboarding surfaces — URL is the source of truth for which
+      // surface mounts (picker / signup / specific sample). The
+      // OnboardingShell reads useParams() and useLocation() and dispatches
+      // to the right surface. See OnboardingShell's URL-sync useEffect.
+      { path: ROUTER_PATHS.ONBOARDING, element: <OnboardingShell /> },
+      { path: `${ROUTER_PATHS.ONBOARDING}/signup`, element: <OnboardingShell /> },
+      { path: `${ROUTER_PATHS.ONBOARDING}/:bucketId/:scenarioId`, element: <OnboardingShell /> },
+      // WF-01 C4 (2026-05-28). Catch unknown sub-paths under an onboarding
+      // scenario so they don't trip the error boundary. Currently the only
+      // canonical sub-paths recognized at the shell level are the scenario
+      // root + signup; surface navigation happens by dispatching a navigation
+      // intent through the orchestrator (the active viewer step is the source
+      // of truth), not the URL. A splat here mounts the same OnboardingShell,
+      // which then ignores the extra segment and renders the canonical
+      // scenario URL's surface. (If we add real per-surface deep-links later,
+      // this splat becomes the dispatch table.)
+      { path: `${ROUTER_PATHS.ONBOARDING}/:bucketId/:scenarioId/*`, element: <OnboardingShell /> },
+    ],
+  },
+  {
+    element: <ProductRouteLayout />,
+    children: [
+      // Steady-mode chat-session URL. Authenticated users land here after
+      // the onboarding flow completes; the URL carries the active chat
+      // session so refresh / share keeps you in the same conversation.
+      { path: ROUTER_PATHS.STEADY_SESSION, element: <SteadyShell /> },
+      // 2026-05-31-onboarding-experiences — the Workspace / Project scoped
+      // conversations the authenticated nav-rail entries open. Top-level routes
+      // (like onboarding/steady): the core contexts — ScenarioRegistry, ChatStore
+      // — are provided app-wide by AppProviders, so each surface mounts its own
+      // AppShell + the shared ConversationFlow composed with the looked-up
+      // ChatExperience. No new flow component, no flow `mode`.
+      { path: ROUTER_PATHS.WORKSPACES, element: <WorkspacesView /> },
+      { path: ROUTER_PATHS.PROJECTS, element: <ProjectsView /> },
+    ],
+  },
 ]);

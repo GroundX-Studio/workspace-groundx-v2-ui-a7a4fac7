@@ -22,36 +22,139 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.string().default("info"),
   PORT: z.coerce.number().int().positive().default(3001),
+  GROUNDX_DEPLOY_COMMIT_SHA: z.string().optional(),
+  GROUNDX_DEPLOY_ENVIRONMENT: z.string().optional(),
+  GROUNDX_DEPLOY_IMAGE_TAG: z.string().optional(),
+  GROUNDX_DEPLOY_NAMESPACE: z.string().optional(),
+  GROUNDX_DEPLOY_PUBLIC_HOST: z.string().optional(),
+  GROUNDX_DEPLOY_RELEASE_NAME: z.string().optional(),
   ALLOWED_ORIGIN: z.string().optional(),
-  MOCK_MODE: z.preprocess(parseBoolean, z.boolean()).default(false),
-  APP_REPOSITORY_MODE: z.enum(["auto", "memory", "mysql"]).default("auto"),
+  // 2026-06-11 retire-memory-repository-mode: APP_REPOSITORY_MODE is GONE.
+  // The runtime repository is ALWAYS MySQL — MYSQL_* below is required in
+  // every environment (enforced in superRefine). The in-memory repository
+  // survives only as an injected test double (`MemoryAppRepository` in
+  // vitest suites), never as a runtime mode: a dev boot without a database
+  // fails fast instead of silently storing chat history in RAM.
   MYSQL_HOST: z.string().optional(),
   MYSQL_PORT: z.coerce.number().int().positive().default(3306),
   MYSQL_DATABASE: z.string().optional(),
   MYSQL_USER: z.string().optional(),
   MYSQL_PASSWORD: z.string().optional(),
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters").default("dev-session-secret-change-before-production"),
+  // Hard timeout for every upstream fetch (GroundX search/Partner/LLM).
+  // Set well above the slowest legit call (grounded LLM completion is
+  // 5–15s P95) but short enough to prevent a hung backend from holding
+  // a DB pool connection indefinitely.
+  UPSTREAM_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   GROUNDX_BASE_URL: z.string().url().default("https://api.groundx.ai/api/v1"),
   GROUNDX_PARTNER_API_KEY: z.string().optional(),
-  GROUNDX_ANON_API_KEY: z.string().optional(),
+  // Bucket holding the onboarding sample documents. The partner API key is
+  // used directly against GroundX for this bucket — no per-customer key,
+  // since samples are partner-owned content read by every visitor.
+  GROUNDX_SAMPLES_BUCKET_ID: z.coerce.number().int().positive().optional(),
   LLM_SERVICE: z.string().optional(),
   LLM_BASE_URL: z.string().url().optional(),
   LLM_API_KEY: z.string().optional(),
   LLM_AUTH_HEADER_NAME: z.string().default("Authorization"),
   LLM_AUTH_SCHEME: z.string().default("Bearer"),
   LLM_MODEL_ID: z.string().optional(),
+  // CF-16: light-side LLM profile. Used for tasks where a smaller /
+  // cheaper / faster model is fine — today: leaf summarization +
+  // meta-compaction. All six are optional: when any of base_url /
+  // api_key / model_id is unset, the chat-side LLM is reused (back-
+  // compat — existing single-LLM deployments keep working). Auth
+  // header + scheme fall back to the chat-side equivalents.
+  LLM_LIGHT_SERVICE: z.string().optional(),
+  LLM_LIGHT_BASE_URL: z.string().url().optional(),
+  LLM_LIGHT_API_KEY: z.string().optional(),
+  LLM_LIGHT_AUTH_HEADER_NAME: z.string().optional(),
+  LLM_LIGHT_AUTH_SCHEME: z.string().optional(),
+  LLM_LIGHT_MODEL_ID: z.string().optional(),
+  // wire-embedding-verification: the embeddings provider behind the third
+  // citation-verification gate (verifyQuote's embedding similarity). An
+  // OpenAI-compatible `/embeddings` endpoint; the configurable base URL is
+  // the on-prem/air-gap seam (TEI / Ollama / vLLM self-host it). base_url +
+  // model_id are REQUIRED in production (superRefine below) — the gate is
+  // always-on, no feature flag; dev/test boot without them and degrade to
+  // lexical-only verification at runtime (composition root logs a warning).
+  // API key is OPTIONAL EVERYWHERE: keyless self-hosted providers are
+  // first-class — the auth header is attached only when a key is set.
+  EMBEDDINGS_BASE_URL: z.string().url().optional(),
+  EMBEDDINGS_API_KEY: z.string().optional(),
+  EMBEDDINGS_MODEL_ID: z.string().optional(),
+  EMBEDDINGS_AUTH_HEADER_NAME: z.string().optional(),
+  EMBEDDINGS_AUTH_SCHEME: z.string().optional(),
+  // Cosine threshold at/above which an embedding match verifies a quote
+  // (tier `paraphrase`). Calibrate per embedding model without code change.
+  EMBEDDINGS_VERIFY_THRESHOLD: z.coerce.number().min(0.5).max(0.99).default(0.82),
+  // Per-call abort budget for the embeddings request. Deliberately tight:
+  // citation verification BLOCKS the chat reply, so a dead provider must
+  // cost ~2s, never the generic 30s UPSTREAM_TIMEOUT_MS.
+  EMBEDDINGS_TIMEOUT_MS: z.coerce.number().int().min(200).max(10_000).default(2_000),
+  // LLM context window in tokens. Compression triggers at 70% of this.
+  // Different models have wildly different windows (Claude Sonnet=200k,
+  // GPT-4o=128k, GPT-3.5=16k) so the default is the conservative lower
+  // bound; production deployments MUST set this to match their model.
+  // Override range: 4k floor (smallest practical) → 1M ceiling
+  // (Gemini 1.5 Pro extended).
+  LLM_CONTEXT_WINDOW_TOKENS: z.coerce.number().int().min(4_000).max(1_000_000).default(16_000),
+  // Fraction of the context window at which level-1 leaf compaction
+  // fires. 0.7 leaves room for the LLM response; 0.5 = compress
+  // earlier (streaming-friendly); 0.9 = pack more (risky).
+  COMPRESSION_TRIGGER_RATIO: z.coerce.number().min(0.3).max(0.95).default(0.7),
+  // Approximate token budget the leaf-compaction planner targets when
+  // picking the message range to fold. Larger = fewer-but-bigger leaf
+  // summaries; smaller = more leaves with finer time-slice fidelity.
+  COMPRESSION_TARGET_TOKENS: z.coerce.number().int().min(100).max(10_000).default(1_000),
+  // Level-2 meta-compaction trigger: when the count of ACTIVE
+  // summaries exceeds this, the oldest batch gets folded into a
+  // super-summary. Keep this comfortably > 1 so the LLM sees plenty
+  // of leaf-fidelity history before any meta fold.
+  MAX_ACTIVE_SUMMARIES_BEFORE_META: z.coerce.number().int().min(3).max(50).default(10),
+  // Number of OLDEST active summaries to fold in one meta-compaction
+  // pass. Pick so the post-fold active count is well under
+  // MAX_ACTIVE_SUMMARIES_BEFORE_META — otherwise meta fires again
+  // on the next chat post (wasteful LLM call).
+  META_COMPACTION_BATCH_SIZE: z.coerce.number().int().min(2).max(20).default(5),
+  // Hard cap on the LLM's output tokens for summarization calls.
+  // Passed as `max_tokens` in the chat.completions body. ~600 fits
+  // 10-14 bullet lines; an over-eager model can otherwise write a
+  // summary so long it defeats the point of the compression.
+  MAX_SUMMARY_OUTPUT_TOKENS: z.coerce.number().int().min(100).max(4_000).default(600),
+  // Free-tier metering ceiling for BYO uploads (pages, not docs).
+  BYO_PAGES_LIMIT: z.coerce.number().int().positive().default(100),
+  // Rate limits. Tunable per-deploy via env so on-prem can dial down.
+  RATE_LIMIT_AUTH_PER_MIN: z.coerce.number().int().positive().default(20),
+  RATE_LIMIT_API_PER_MIN: z.coerce.number().int().positive().default(120),
+  RATE_LIMIT_LLM_PER_MIN: z.coerce.number().int().positive().default(60),
+  // Metrics + telemetry — off when unset; never required in dev.
+  METRICS_ENABLED: z.preprocess(parseBoolean, z.boolean()).default(true),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  OTEL_SERVICE_NAME: z.string().default("groundx-v2-ui-middleware"),
+  POSTHOG_API_KEY: z.string().optional(),
+  POSTHOG_HOST: z.string().url().optional(),
+  SENTRY_DSN: z.string().url().optional(),
+  // Feature flags decided at deploy time. Defaults keep us safe.
+  SSO_ENABLED: z.preprocess(parseBoolean, z.boolean()).default(false),
+  DISABLE_AGENT_TURN_LOG: z.preprocess(parseBoolean, z.boolean()).default(false),
+  // SC-01 — CSRF enforcement. Default `true` (production-safe). Tests
+  // flip to `false` so route-business-logic suites don't have to
+  // bootstrap a CSRF token on every supertest agent; SC-01-specific
+  // tests opt back into `true` to exercise the defense.
+  CSRF_ENABLED: z.preprocess(parseBoolean, z.boolean()).default(true),
 }).superRefine((env, ctx) => {
-  const requiresMysql = env.NODE_ENV === "production" || env.APP_REPOSITORY_MODE === "mysql";
+  // MySQL is the ONLY runtime repository — connection config is required in
+  // every environment (retire-memory-repository-mode, 2026-06-11).
   for (const key of ["MYSQL_HOST", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD"] as const) {
-    if (requiresMysql && !env[key]) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when using MySQL` });
+    if (!env[key]) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required (MySQL is the only runtime repository)` });
     }
   }
-  if (env.NODE_ENV === "production" && env.MOCK_MODE) {
+  if (env.NODE_ENV === "production" && env.SESSION_SECRET === "dev-session-secret-change-before-production") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ["MOCK_MODE"],
-      message: "MOCK_MODE cannot be enabled in production",
+      path: ["SESSION_SECRET"],
+      message: "SESSION_SECRET must be set to a non-default value in production",
     });
   }
   if (env.NODE_ENV === "production" && !env.GROUNDX_PARTNER_API_KEY) {
@@ -81,6 +184,18 @@ const envSchema = z.object({
       path: ["LLM_MODEL_ID"],
       message: "LLM_MODEL_ID is required in production",
     });
+  }
+  // Embedding verification is always-on: the provider (base_url + model_id)
+  // is required in production. The API key is NOT required — keyless
+  // self-hosted embeddings endpoints are a supported deployment.
+  for (const key of ["EMBEDDINGS_BASE_URL", "EMBEDDINGS_MODEL_ID"] as const) {
+    if (env.NODE_ENV === "production" && !env[key]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} is required in production (embedding citation verification is always-on)`,
+      });
+    }
   }
 });
 

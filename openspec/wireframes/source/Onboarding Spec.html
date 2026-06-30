@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Onboarding Spec · v1</title>
+
+<link rel="stylesheet" href="design-system/colors_and_type.css" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=Architects+Daughter&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; }
+  body { font-family: "Kalam", "Architects Daughter", "Caveat", sans-serif; color: var(--gx-navy); }
+
+  .wf-rough { filter: url(#wf-rough); }
+  .wf-rough-lite { filter: url(#wf-rough-lite); }
+
+  .wf-box { border: 1.5px solid var(--gx-navy); background: #fff; border-radius: 4px; position: relative; }
+  .wf-box-dashed { border: 1.5px dashed rgba(41,51,92,0.55); background: rgba(255,255,255,0.6); border-radius: 4px; }
+  .wf-box-fill { background: #f5f3ee; }
+  .wf-box-navy { background: var(--gx-navy); color: #fff; border-color: var(--gx-navy); }
+  .wf-box-green { background: var(--gx-green); border-color: var(--gx-navy); color: var(--gx-navy); }
+  .wf-box-coral { background: var(--gx-coral); border-color: var(--gx-navy); color: #fff; }
+  .wf-box-cyan { background: var(--gx-cyan); border-color: var(--gx-navy); color: var(--gx-navy); }
+  .wf-box-tint { background: var(--gx-tint); border-color: var(--gx-navy); }
+
+  .wf-hand { font-family: "Caveat", cursive; }
+  .wf-pen  { font-family: "Kalam", "Architects Daughter", cursive; }
+
+  .wf-label { font-family: "Kalam", cursive; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; font-size: 11px; }
+  .wf-h    { font-family: "Caveat", cursive; font-weight: 700; }
+
+  .wf-bw .wf-accent-bg { background: #fff !important; color: var(--gx-navy) !important; }
+  .wf-bw .wf-accent-stroke { border-color: var(--gx-navy) !important; }
+  .wf-bw .wf-accent-text { color: var(--gx-navy) !important; }
+  .wf-bw .wf-box-navy { background: #fff !important; color: var(--gx-navy) !important; }
+  .wf-bw .wf-box-green, .wf-bw .wf-box-coral, .wf-bw .wf-box-cyan, .wf-bw .wf-box-tint { background: #fff !important; color: var(--gx-navy) !important; }
+
+  .wf-anno-hide .wf-anno { display: none !important; }
+
+  .wf-sticky {
+    background: #fff5b8; padding: 10px 14px 12px;
+    font-family: "Caveat", cursive; font-size: 19px; line-height: 1.15; color: #5a4a2a;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.08);
+    border-radius: 2px; position: absolute;
+  }
+  .wf-sticky b { font-weight: 700; color: #2a251f; }
+
+  .wf-line { display: block; height: 6px; background: rgba(41,51,92,0.18); border-radius: 99px; }
+  .wf-line + .wf-line { margin-top: 5px; }
+  .wf-line.dim { background: rgba(41,51,92,0.10); }
+
+  .wf-doc { background: #fff; border: 1px solid var(--gx-navy); border-radius: 2px; padding: 8px; position: relative; }
+  .wf-doc::after {
+    content: ""; position: absolute; right: 0; top: 0;
+    width: 0; height: 0; border-left: 8px solid transparent; border-top: 8px solid var(--gx-navy);
+  }
+
+  .ab {
+    position: relative; width: 100%; height: 100%;
+    background: #fafaf6; padding: 26px 30px 24px;
+    box-sizing: border-box; overflow: hidden;
+  }
+  .ab-title {
+    font-family: "Caveat", cursive; font-weight: 700; font-size: 30px;
+    color: var(--gx-navy); line-height: 1; margin: 0 0 2px;
+  }
+  .ab-sub {
+    font-family: "Kalam", cursive; font-weight: 400; font-size: 14px;
+    color: rgba(41,51,92,0.7); margin: 0 0 16px;
+  }
+  .ab-stage {
+    background: #fff; border: 1.5px solid var(--gx-navy);
+    border-radius: 6px; position: relative;
+    width: 100%; height: calc(100% - 60px); overflow: hidden;
+  }
+  .ab-chrome {
+    height: 24px; border-bottom: 1.5px solid var(--gx-navy);
+    background: #f0eee9; display: flex; align-items: center; gap: 6px;
+    padding: 0 10px; position: relative;
+  }
+  .ab-chrome i { width: 8px; height: 8px; border-radius: 99px; border: 1.2px solid var(--gx-navy); display: block; background: #fff; }
+  .ab-chrome span {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-family: "Kalam", cursive; font-size: 11px; color: rgba(41,51,92,0.55);
+  }
+  .ab-body { position: absolute; inset: 24px 0 0 0; display: flex; }
+
+  .wf-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border: 1.5px solid var(--gx-navy);
+    background: #fff; font-family: "Kalam", cursive;
+    font-weight: 700; font-size: 12px; color: var(--gx-navy);
+    border-radius: 99px;
+  }
+  .wf-btn.primary { background: var(--gx-green); }
+  .wf-btn.coral { background: var(--gx-coral); color: #fff; }
+  .wf-btn.ghost { background: transparent; }
+
+  .wf-link { border-bottom: 1.5px dotted var(--gx-navy); cursor: pointer; }
+
+  .wf-av {
+    width: 22px; height: 22px; border-radius: 99px;
+    border: 1.5px solid var(--gx-navy); background: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: "Caveat", cursive; font-weight: 700; font-size: 14px; flex-shrink: 0;
+  }
+  .wf-av.gx { background: var(--gx-green); }
+
+  .bub {
+    border: 1.5px solid var(--gx-navy); border-radius: 10px;
+    padding: 8px 11px; font-family: "Kalam", cursive;
+    font-size: 13px; line-height: 1.3; color: var(--gx-navy);
+    background: #fff; max-width: 100%;
+  }
+  .bub.me { background: var(--gx-tint); }
+  .bub.gx { background: #fff; }
+  .bub.gx.lead { background: #f4fbef; }
+  .wf-bw .bub.me, .wf-bw .bub.gx.lead { background: #fff !important; }
+
+  .bub b { font-weight: 700; }
+  .bub small { font-family: "Kalam", cursive; font-size: 11px; color: rgba(41,51,92,0.55); display:block; margin-top: 4px; }
+  .bub .opt {
+    display: inline-block; margin: 4px 6px 0 0;
+    padding: 3px 9px; border: 1.2px solid var(--gx-navy);
+    border-radius: 99px; font-size: 12px; background: #fff;
+  }
+  .bub .opt.hot { background: var(--gx-green); }
+</style>
+
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="wf-rough" x="-2%" y="-2%" width="104%" height="104%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.022" numOctaves="2" seed="3" />
+      <feDisplacementMap in="SourceGraphic" scale="1.6" />
+    </filter>
+    <filter id="wf-rough-lite" x="-2%" y="-2%" width="104%" height="104%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="2" seed="7" />
+      <feDisplacementMap in="SourceGraphic" scale="0.9" />
+    </filter>
+  </defs>
+</svg>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<!-- Shared sketchy primitives reused from the loose wireframes -->
+<script type="text/babel" src="wireframe-primitives.jsx"></script>
+<!-- Spec primitives + scenarios + frames -->
+<script type="text/babel" src="spec-primitives.jsx"></script>
+<script type="text/babel" src="spec-layout.jsx"></script>
+<script type="text/babel" src="spec-flow.jsx"></script>
+<script type="text/babel" src="spec-scenarios.jsx"></script>
+<script type="text/babel" src="spec-widgets.jsx"></script>
+<script type="text/babel" src="spec-extract.jsx"></script>
+<script type="text/babel" src="spec-backout.jsx"></script>
+<script type="text/babel" src="spec-responsive.jsx"></script>
+<script type="text/babel" src="spec-responsive-atlas.jsx"></script>
+<script type="text/babel" src="spec-scenario-end.jsx"></script>
+<script type="text/babel" src="spec-canvas-states.jsx"></script>
+<script type="text/babel" src="spec-nav-v2.jsx"></script>
+<script type="text/babel" src="spec-chapters.jsx"></script>
+<script type="text/babel" src="spec-workspace.jsx"></script>
+<script type="text/babel" src="spec-app.jsx"></script>
+
+</body>
+</html>

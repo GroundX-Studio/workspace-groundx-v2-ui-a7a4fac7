@@ -2,7 +2,7 @@ import { FC, ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 
 import { APP_CONFIG } from "@/appConfig";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { OnboardingWizard } from "@/shared/components/OnboardingWizard";
+import { OnboardingWizard } from "@/views/Onboarding/OnboardingWizard";
 
 import { OnboardingContext } from "./OnboardingContext";
 

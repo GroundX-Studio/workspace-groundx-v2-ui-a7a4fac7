@@ -1,0 +1,68 @@
+name: Sync GroundX skill pack
+
+# Refreshes the vendored groundx-agent-harness skill pack used by the GroundX
+# product-knowledge chat capability (middleware/src/services/groundxSkills.ts).
+#
+# Branch model: the sync runs on — and pushes the refresh directly to — the
+# branch resolved as: workflow_dispatch input -> SYNC_TARGET_BRANCH env -> repo
+# default. (Direct push, not a PR: the org disables GitHub Actions from creating
+# pull requests. The default branch is workspace/groundx-v2-ui, so the scheduled
+# run from there pushes back to the same deployed branch.)
+#
+# It only commits when the upstream skill content actually changed (MANIFEST is
+# deterministic for a given upstream commit), so a no-op week pushes nothing.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # weekly, Monday 07:00 UTC
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branch to sync on and PR against"
+        required: false
+        type: string
+        default: "workspace/groundx-v2-ui"
+
+permissions:
+  contents: write
+
+env:
+  # Branch the scheduled sync operates on (the deployed branch, not repo default),
+  # so the refreshed pack lands where it is actually built/deployed.
+  SYNC_TARGET_BRANCH: "workspace/groundx-v2-ui"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # input → env → (blank ⇒ the event's default branch)
+          ref: ${{ github.event.inputs.target_branch || env.SYNC_TARGET_BRANCH }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Refresh vendored skill pack from upstream
+        run: node scripts/sync-groundx-skills.mjs
+
+      - name: Commit and push the refresh (direct to target branch)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_BRANCH: ${{ github.event.inputs.target_branch }}
+        run: |
+          if [ -z "$(git status --porcelain middleware/assets/groundx-skills)" ]; then
+            echo "Vendored skill pack already current — nothing to do."
+            exit 0
+          fi
+          # target branch: dispatch input → SYNC_TARGET_BRANCH env → repo default.
+          target="${INPUT_BRANCH:-${SYNC_TARGET_BRANCH}}"
+          [ -n "$target" ] || target="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"
+          git config user.name "groundx-skills-bot"
+          git config user.email "noreply@groundx.ai"
+          git add middleware/assets/groundx-skills
+          commit="$(jq -r .commit middleware/assets/groundx-skills/MANIFEST.json)"
+          git commit -m "chore: refresh vendored groundx-agent-harness skill pack to ${commit}"
+          # Direct push to the target branch (org policy blocks Actions from opening PRs).
+          git push origin "HEAD:${target}"

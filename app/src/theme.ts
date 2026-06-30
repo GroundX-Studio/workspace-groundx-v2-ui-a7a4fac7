@@ -120,12 +120,11 @@ export const createGxTheme = (designConfig: DesignConfig = DESIGN_CONFIG) => {
 
   return createTheme({
   // ────────────────────────────────────────────────────────────────────────
-  // Breakpoints — `md` is bumped from MUI's default 900 → BREAKPOINT_MD
-  // (1100). This is the brand-wide desktop threshold; every GroundX Studio Harness web project
-  // uses the same breakpoints so components are mutually portable. (The bump
-  // originated where an app shell collapses its sidebar, but it applies
-  // brand-wide.) Values come from constants.generated.ts (generated from
-  // tokens.json) so a change to tokens.json propagates automatically.
+  // Breakpoints — values are pulled from constants.generated.ts. `md` = 900
+  // (MUI default) is the iPad-portrait-to-landscape divide; `lg` = 1200
+  // picks up small-desktop; `xl` = 1536 picks up large/ultrawide displays.
+  // Every GroundX Studio Harness web project uses the same breakpoints so
+  // components are mutually portable.
   // ────────────────────────────────────────────────────────────────────────
   breakpoints: {
     values: {
