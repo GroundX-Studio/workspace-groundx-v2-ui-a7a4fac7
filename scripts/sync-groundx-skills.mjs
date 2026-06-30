@@ -134,7 +134,10 @@ export function syncGroundxSkills({
     walk(staging);
     writeFileSync(
       join(staging, "MANIFEST.json"),
-      JSON.stringify({ repo, ref, commit, syncedAt: new Date().toISOString(), fileCount: files.length, files: files.sort() }, null, 2),
+      // No syncedAt timestamp: the MANIFEST must be deterministic for a given
+      // upstream commit, so an unchanged upstream produces no git diff (the cron
+      // pushes only on real content changes, not a per-run timestamp bump).
+      JSON.stringify({ repo, ref, commit, fileCount: files.length, files: files.sort() }, null, 2),
     );
 
     // Swap the freshly-built pack into place, then remove the old one. Only here
