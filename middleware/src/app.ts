@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
-import { contentScopeSchema, parseCanvasIntent, parseCitations, sourceSchema, templateSaveInputSchema, type CanvasIntent, type Source } from "@groundx/shared";
+import { contentScopeSchema, parseCanvasIntent, parseCitations, rewriteItemRequestSchema, sourceSchema, templateSaveInputSchema, type CanvasIntent, type Source } from "@groundx/shared";
 
 import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
@@ -22,6 +22,7 @@ import { authorizedProjectIds, createProjectWithOwner, rbacFilterForProjects, ro
 import { produceEntityScope } from "./services/entityScopeProducer.js";
 import { resolveFieldGeometry } from "./services/citationGeometry.js";
 import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
+import { rewriteItem } from "./services/itemRewriter.js";
 import {
   renderReport,
   reportTemplateFromRecord,
@@ -1261,6 +1262,71 @@ export function createApp({
             // tiered identically (absent embedder → lexical-only, never-fail).
             ...(quoteEmbedder ? { quoteEmbedder } : {}),
             ...(embedThreshold !== undefined ? { embedThreshold } : {}),
+          },
+        );
+        res.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // ── agentic-template-item-editor — "rewrite with agent" ──────────
+  //
+  // User-invoked (NOT an LLM tool): the editor's "✨ rewrite with agent"
+  // button calls this directly. Grounds an item-definition rewrite in the
+  // source document + the item's current result; returns a proposed item +
+  // reasoning. Expensive LLM call → the `llmLimiter`. Mirrors extract-field's
+  // ownership + scope derivation. The `name` is held fixed in the service.
+  app.post(
+    "/api/template-item/rewrite",
+    llmLimiter,
+    requireSession,
+    async (req, res, next) => {
+      try {
+        const parsed = rewriteItemRequestSchema.safeParse(req.body);
+        if (!parsed.success) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        const request = parsed.data;
+        const chatSession = await repository.getChatSession(request.chatSessionId);
+        if (!chatSession) {
+          res.status(404).json({ error: "chat_session_not_found" });
+          return;
+        }
+        const reqSession = req.session!;
+        if (!assertChatSessionOwnership(chatSession, reqSession)) {
+          res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
+          return;
+        }
+        const activeEntity = chatSession.activeEntityKey
+          ? (await repository.listChatSessionEntities(request.chatSessionId)).find(
+              (e) => e.entityKey === chatSession.activeEntityKey,
+            ) ?? null
+          : null;
+        const contentScope = deriveRagContentScope(activeEntity, env.GROUNDX_SAMPLES_BUCKET_ID ?? null);
+        const groundxApiKey = sessionApiKey(reqSession) ?? env.GROUNDX_PARTNER_API_KEY ?? null;
+
+        const result = await rewriteItem(
+          {
+            kind: request.kind,
+            item: request.item,
+            currentResult:
+              request.currentResult
+                ? {
+                    value: (request.currentResult as { value?: unknown }).value,
+                    body: (request.currentResult as { body?: unknown }).body,
+                    confidence: request.currentResult.confidence,
+                  }
+                : null,
+            contentScope,
+          },
+          {
+            llmClient,
+            groundxClient,
+            groundxApiKey: groundxApiKey ?? undefined,
+            llmModelId: env.LLM_MODEL_ID,
           },
         );
         res.status(200).json(result);

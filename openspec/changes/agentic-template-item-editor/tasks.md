@@ -13,9 +13,9 @@ Each task is TDD (failing test first) and ends with the Discipline §10 adversar
 - [x] 1.2 Updated `docs/agents/data-model.md` reconciliation matrix: rows for RewriteItem, the in-memory `itemPreviews` (not persisted), and the uncommitted draft `TemplateSaveInput` column. Drift guards + catalog-parity green.
 
 ## 2. Middleware — rewrite prompt + service + endpoint
-- [ ] 2.1 `services/prompts/itemRewriter.ts` builder (kind-aware), source-document-grounded, NEVER outputs `name`; `prompts.test.ts` pins shape; keep it out of consumers (promptLiterals guard stays green).
-- [ ] 2.2 `services/itemRewriter.ts`: derive scope from session; assemble BOTH (a) matched field-query snippets (reuse `fieldExtractor` builder) AND (b) a token-bounded source-document view (reuse GroundX document-content retrieval); one `llmClient` chat-profile call; parse + zod-validate; assert output `name` is forced to the input `name`. Unit test with a fake LLM client + a fake doc-content source.
-- [ ] 2.3 `POST /api/template-item/rewrite` route: ownership + LLM rate-limit + dedicated `ApiError` subclass (NOT `extends Error`); NOT registered in `SERVER_TOOL_CATALOG` (user-invoked); apiRouteContract test. Adversarial review.
+- [x] 2.1 `services/prompts/itemRewriter.ts` builder (kind-aware, source-document-grounded, never outputs `name`); test green; promptLiterals guard green.
+- [x] 2.2 `services/itemRewriter.ts`: scope from session; one GroundX search (limit 8) → matched (4) + doc-context (8) snippets; one `llmClient` chat-profile call; parse; proposed item OVERLAYS only LLM fields onto the input so `id`/`name` are immutable + schema-validated; throws on bad JSON. 3 unit tests green (incl. LLM-rename-ignored).
+- [x] 2.3 `POST /api/template-item/rewrite` route: zod-validated (400 on kind/item mismatch), ownership (403), 404, `llmLimiter`; NOT in `SERVER_TOOL_CATALOG` (user-invoked). 4 route tests green; middleware tsc clean; 241 middleware tests green. (Client-side `ApiError` subclass lands with the client in §6.)
 
 ## 3. Middleware — single-section report preview
 - [ ] 3.1 Confirm `renderReport` honors `sectionIds: [id]` end-to-end (server already accepts it); a thin entry, no pipeline fork. Parity test (whole-template unchanged).

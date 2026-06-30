@@ -1302,6 +1302,70 @@ describe("middleware scaffold", () => {
         .expect(403);
     });
   });
+
+  describe("POST /api/template-item/rewrite (agentic-template-item-editor)", () => {
+    const fieldReq = {
+      chatSessionId: "chat-1",
+      kind: "extract-field" as const,
+      item: { id: "f1", name: "addressee", type: "STRING" as const, description: "the recipient name" },
+    };
+
+    it("rejects requests without a session cookie", async () => {
+      const { app } = setup();
+      await request(app).post("/api/template-item/rewrite").send(fieldReq).expect(401);
+    });
+
+    it("returns 400 for a kind/item mismatch (zod discriminated union)", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/template-item/rewrite")
+        .send({ chatSessionId: "chat-1", kind: "extract-field", item: { id: "s1", name: "n", renderAs: "BULLETS", question: "q", instructions: [], variables: [] } })
+        .expect(400, { error: "invalid_payload" });
+    });
+
+    it("returns 404 when the chat session row doesn't exist", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      const res = await agent.post("/api/template-item/rewrite").send(fieldReq).expect(404);
+      expect(res.body.error).toMatch(/chat_session_not_found/);
+    });
+
+    it("returns a proposed item + reasoning with the name held fixed", async () => {
+      const repository = new MemoryAppRepository();
+      const partnerClient = new FakePartnerClient();
+      const groundxClient = new FakeGroundXClient();
+      groundxClient.responseByPathFragment.set("/search", {
+        search: { results: [{ documentId: "utility-bill-2026-04", pageNumber: 1, text: "Mail To: KWIK TRIP (1147)" }] },
+      });
+      const llmClient: LlmClient = {
+        forward: async () =>
+          Response.json({
+            choices: [
+              {
+                message: {
+                  content: '{"name":"evil_rename","type":"STRING","description":"recipient on the service address","instructions":["skip SHED/SHOP"],"identifiers":["Mail To"],"reasoning":"grounded in the Mail To label"}',
+                },
+              },
+            ],
+          }),
+      };
+      const scenarioRegistry = new FakeScenarioRegistry();
+      const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent.post("/api/chat-sessions").send({ id: "chat-1", title: "Onboarding", isOnboarding: true }).expect(200);
+
+      const res = await agent.post("/api/template-item/rewrite").send(fieldReq).expect(200);
+      expect(res.body.kind).toBe("extract-field");
+      expect(res.body.proposedItem.id).toBe("f1");
+      expect(res.body.proposedItem.name).toBe("addressee"); // never the LLM's rename
+      expect(res.body.proposedItem.description).toContain("service address");
+      expect(typeof res.body.reasoning).toBe("string");
+    });
+  });
 });
 
 describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 — route contract, live path)", () => {
