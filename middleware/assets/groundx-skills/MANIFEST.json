@@ -1,8 +1,8 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "23feea4948eae08c35f55ce450042f037a572fa7",
-  "fileCount": 154,
+  "commit": "f4da77913904d76e3a584a76c86fefed47aaf63a",
+  "fileCount": 155,
   "files": [
     "groundx-api/SKILL.md",
     "groundx-api/guides/00-api-surface-changelog.md",
@@ -29,6 +29,7 @@
     "groundx-api/references/12-python-sdk-objects.md",
     "groundx-api/references/README.md",
     "groundx-api/references/credentials.md",
+    "groundx-api/references/debugging.md",
     "groundx-architecture/SKILL.md",
     "groundx-architecture/references/README.md",
     "groundx-architecture/references/agentic-pipeline.md",
