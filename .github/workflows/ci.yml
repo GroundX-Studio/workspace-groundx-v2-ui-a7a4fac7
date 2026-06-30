@@ -75,15 +75,17 @@ jobs:
       # resolution + auth/CSRF regressions the unit suite can't see.
       - name: Dev smoke (boot servers + /api flow)
         env:
-          # The middleware requires MySQL config to boot (MySQL is the only
-          # runtime repository — no mock mode), so the smoke step must pass the
-          # DB env through. Sourced from the `dev` environment, mirroring
-          # deploy.yml's `vars || secrets` pattern (password from secrets only).
-          MYSQL_HOST: ${{ vars.MYSQL_HOST || secrets.MYSQL_HOST || '' }}
-          MYSQL_PORT: ${{ vars.MYSQL_PORT || secrets.MYSQL_PORT || '3306' }}
-          MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE || secrets.MYSQL_DATABASE || '' }}
-          MYSQL_USER: ${{ vars.MYSQL_USER || secrets.MYSQL_USER || '' }}
-          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          # MySQL is the only runtime repository (memory mode retired), so the
+          # middleware must boot against a real MySQL. Use the disposable service
+          # container above (127.0.0.1) — the deployed `dev` RDS lives in a private
+          # VPC and is NOT reachable from a GitHub-hosted runner (connecting to it
+          # times out and the middleware never boots). Same target the Unit tests
+          # use; createSchema runs fresh against the throwaway DB.
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_USER: root
+          MYSQL_PASSWORD: test
+          MYSQL_DATABASE: test
           # The /api flow exercises authed read endpoints, which reach GroundX.
           GROUNDX_PARTNER_API_KEY: ${{ secrets.GROUNDX_PARTNER_API_KEY }}
           GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
@@ -104,12 +106,13 @@ jobs:
           GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
           GROUNDX_SAMPLES_BUCKET_ID: "28454"
           # The e2e suite boots the middleware too — same MySQL requirement as the
-          # dev-smoke step (app-owned projects/sessions/grants live in MySQL).
-          MYSQL_HOST: ${{ vars.MYSQL_HOST || secrets.MYSQL_HOST || '' }}
-          MYSQL_PORT: ${{ vars.MYSQL_PORT || secrets.MYSQL_PORT || '3306' }}
-          MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE || secrets.MYSQL_DATABASE || '' }}
-          MYSQL_USER: ${{ vars.MYSQL_USER || secrets.MYSQL_USER || '' }}
-          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          # dev-smoke step. Use the disposable service container (the deployed dev
+          # RDS is unreachable from GitHub-hosted runners).
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_USER: root
+          MYSQL_PASSWORD: test
+          MYSQL_DATABASE: test
         run: |
           if [ -z "${GROUNDX_PARTNER_API_KEY}" ]; then
             echo "::error::GROUNDX_PARTNER_API_KEY is not set. The e2e suite runs against REAL GroundX and must not pass without it. Configure the secret on the 'dev' environment (and org)."
