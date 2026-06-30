@@ -69,6 +69,12 @@ jobs:
           MYSQL_TEST_DATABASE: test
         run: npm test
 
+      # Playwright chromium is needed by BOTH the dev-smoke frontend-render check
+      # (smoke-dev.mjs launches chromium) and the browser smoke tests, so install
+      # it BEFORE the dev-smoke step rather than between them.
+      - name: Install Playwright browser
+        run: npm --workspace app exec -- playwright install --with-deps chromium
+
       # Local-dev-boot guard: builds @groundx/shared, boots middleware (tsx) +
       # app (Vite), and drives the /api flow (onboarding session, login, the
       # authed read endpoints + a CSRF-protected POST). Catches dev-runtime
@@ -90,9 +96,6 @@ jobs:
           GROUNDX_PARTNER_API_KEY: ${{ secrets.GROUNDX_PARTNER_API_KEY }}
           GROUNDX_BASE_URL: ${{ vars.GROUNDX_BASE_URL || 'https://api.groundx.ai/api/v1' }}
         run: npm run verify:preview
-
-      - name: Install Playwright browser
-        run: npm --workspace app exec -- playwright install --with-deps chromium
 
       # The e2e suite boots the middleware in REAL mode against the live GroundX
       # backend (no MOCK_MODE). Fail LOUDLY if the Partner key secret is absent —
