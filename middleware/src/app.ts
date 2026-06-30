@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 
-import { contentScopeSchema, parseCanvasIntent, parseCitations, rewriteItemRequestSchema, sourceSchema, templateSaveInputSchema, type CanvasIntent, type Source } from "@groundx/shared";
+import { contentScopeSchema, parseCanvasIntent, parseCitations, previewReportSectionRequestSchema, rewriteItemRequestSchema, sourceSchema, templateSaveInputSchema, type CanvasIntent, type Source } from "@groundx/shared";
 
 import type { AppEnv } from "./config/env.js";
 import { logger } from "./lib/logger.js";
@@ -23,6 +23,7 @@ import { produceEntityScope } from "./services/entityScopeProducer.js";
 import { resolveFieldGeometry } from "./services/citationGeometry.js";
 import { extractField, type SchemaFieldType } from "./services/fieldExtractor.js";
 import { rewriteItem } from "./services/itemRewriter.js";
+import { previewReportSection } from "./services/sectionPreview.js";
 import {
   renderReport,
   reportTemplateFromRecord,
@@ -1329,6 +1330,60 @@ export function createApp({
             llmModelId: env.LLM_MODEL_ID,
           },
         );
+        res.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // ── agentic-template-item-editor — single report-section preview ─
+  //
+  // Render ONE ad-hoc (unsaved) report section against the session scope — the
+  // report analog of /api/extract-field. Reuses the per-section grounded render
+  // (citation-verified). Expensive LLM call → `llmLimiter`.
+  app.post(
+    "/api/report-section/preview",
+    llmLimiter,
+    requireSession,
+    async (req, res, next) => {
+      try {
+        const parsed = previewReportSectionRequestSchema.safeParse(req.body);
+        if (!parsed.success) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+        const { chatSessionId, section } = parsed.data;
+        const chatSession = await repository.getChatSession(chatSessionId);
+        if (!chatSession) {
+          res.status(404).json({ error: "chat_session_not_found" });
+          return;
+        }
+        const reqSession = req.session!;
+        if (!assertChatSessionOwnership(chatSession, reqSession)) {
+          res.status(403).json({ error: SESSION_NOT_OWNER_ERROR });
+          return;
+        }
+        if (!env.LLM_MODEL_ID) {
+          res.status(503).json({ error: "llm_unavailable" });
+          return;
+        }
+        const activeEntity = chatSession.activeEntityKey
+          ? (await repository.listChatSessionEntities(chatSessionId)).find(
+              (e) => e.entityKey === chatSession.activeEntityKey,
+            ) ?? null
+          : null;
+        const contentScope = deriveRagContentScope(activeEntity, env.GROUNDX_SAMPLES_BUCKET_ID ?? null);
+        const groundxApiKey = sessionApiKey(reqSession) ?? env.GROUNDX_PARTNER_API_KEY ?? null;
+
+        const result = await previewReportSection(section, contentScope, {
+          groundxClient,
+          groundxApiKey: groundxApiKey ?? "",
+          llmClient,
+          llmModelId: env.LLM_MODEL_ID,
+          ...(quoteEmbedder ? { quoteEmbedder } : {}),
+          ...(embedThreshold !== undefined ? { embedThreshold } : {}),
+        });
         res.status(200).json(result);
       } catch (error) {
         next(error);

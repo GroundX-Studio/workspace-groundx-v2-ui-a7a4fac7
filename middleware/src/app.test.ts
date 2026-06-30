@@ -1366,6 +1366,55 @@ describe("middleware scaffold", () => {
       expect(typeof res.body.reasoning).toBe("string");
     });
   });
+
+  describe("POST /api/report-section/preview (agentic-template-item-editor)", () => {
+    const section = { id: "s1", name: "summary", renderAs: "PARAGRAPH" as const, question: "Summarize the bill.", instructions: [], variables: [] };
+
+    it("rejects requests without a session cookie", async () => {
+      const { app } = setup();
+      await request(app).post("/api/report-section/preview").send({ chatSessionId: "chat-1", section }).expect(401);
+    });
+
+    it("returns 400 for a malformed section", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent
+        .post("/api/report-section/preview")
+        .send({ chatSessionId: "chat-1", section: { id: "s1", name: "n", renderAs: "PIECHART", question: "q", instructions: [], variables: [] } })
+        .expect(400, { error: "invalid_payload" });
+    });
+
+    it("returns 404 when the chat session row doesn't exist", async () => {
+      const { app } = setup();
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      const res = await agent.post("/api/report-section/preview").send({ chatSessionId: "nope", section }).expect(404);
+      expect(res.body.error).toMatch(/chat_session_not_found/);
+    });
+
+    it("renders a single section to a RenderedSection", async () => {
+      const repository = new MemoryAppRepository();
+      const partnerClient = new FakePartnerClient();
+      const groundxClient = new FakeGroundXClient();
+      groundxClient.responseByPathFragment.set("/search", {
+        search: { results: [{ documentId: "utility-bill-2026-04", pageNumber: 1, text: "Total amount due: $7,613.20" }] },
+      });
+      const llmClient: LlmClient = {
+        forward: async () => Response.json({ choices: [{ message: { content: "The bill totals $7,613.20." } }] }),
+      };
+      const scenarioRegistry = new FakeScenarioRegistry();
+      const app = createApp({ env: testEnv, repository, partnerClient, groundxClient, llmClient, scenarioRegistry });
+      const agent = request.agent(app);
+      await agent.post("/api/onboarding/session").expect(200);
+      await agent.post("/api/chat-sessions").send({ id: "chat-1", title: "Onboarding", isOnboarding: true }).expect(200);
+
+      const res = await agent.post("/api/report-section/preview").send({ chatSessionId: "chat-1", section }).expect(200);
+      expect(res.body.sectionId).toBe("s1");
+      expect(typeof res.body.body).toBe("string");
+      expect(Array.isArray(res.body.citations)).toBe(true);
+    });
+  });
 });
 
 describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 — route contract, live path)", () => {

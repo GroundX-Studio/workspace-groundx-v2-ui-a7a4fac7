@@ -631,6 +631,17 @@ export const rewriteItemResultSchema = z.discriminatedUnion("kind", [
 ]);
 export type RewriteItemResult = z.infer<typeof rewriteItemResultSchema>;
 
+/**
+ * `POST /api/report-section/preview` request — render ONE ad-hoc (unsaved)
+ * report section against the session scope. The report analog of the
+ * `/api/extract-field` ad-hoc field request; returns a `RenderedSection`.
+ */
+export const previewReportSectionRequestSchema = z.object({
+  chatSessionId: z.string(),
+  section: reportSectionItemSchema,
+});
+export type PreviewReportSectionRequest = z.infer<typeof previewReportSectionRequestSchema>;
+
 // ──────────────────────────────────────────────────────────────────────
 // ExtractFieldResult — 2026-05-31-core-data-followups §4 #13. The
 // `/api/extract-field` response body. It is declared byte-identically on BOTH

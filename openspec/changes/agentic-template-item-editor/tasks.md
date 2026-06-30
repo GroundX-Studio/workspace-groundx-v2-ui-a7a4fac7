@@ -18,8 +18,8 @@ Each task is TDD (failing test first) and ends with the Discipline §10 adversar
 - [x] 2.3 `POST /api/template-item/rewrite` route: zod-validated (400 on kind/item mismatch), ownership (403), 404, `llmLimiter`; NOT in `SERVER_TOOL_CATALOG` (user-invoked). 4 route tests green; middleware tsc clean; 241 middleware tests green. (Client-side `ApiError` subclass lands with the client in §6.)
 
 ## 3. Middleware — single-section report preview
-- [ ] 3.1 Confirm `renderReport` honors `sectionIds: [id]` end-to-end (server already accepts it); a thin entry, no pipeline fork. Parity test (whole-template unchanged).
-- [ ] 3.2 `POST /api/report-section/preview` returning a `RenderedSection` (`GeneratedResult`) via the shared citation-verify pipeline; dedicated `ApiError` subclass; apiRouteContract test. Adversarial review.
+- [x] 3.1 The reusable per-section render unit is `groundedAnswerOverScope` (what `renderReport` calls per section). `services/sectionPreview.ts` wraps it for ONE ad-hoc (unsaved) section — no whole-template render, no fork; citation-verify identical.
+- [x] 3.2 `POST /api/report-section/preview` (ad-hoc section, the report analog of /api/extract-field) → `RenderedSection`; zod-validated (`previewReportSectionRequestSchema` in shared), ownership, `llmLimiter`, 503 when no model. 4 route tests green; middleware tsc clean; 239 middleware tests green.
 
 ## 4. Data tier — persist the uncommitted draft TEMPLATE on the entity twin (NOT previews)
 - [ ] 4.1 Add additive `JSON NULL` column to `chat_session_entities` (e.g. `draft_template_json`) holding the uncommitted draft as a `TemplateSaveInput`-shaped object (resolved body — plain JSON, no Map/Set), via an explicit idempotent `ALTER TABLE … ADD COLUMN` reconciliation (NOT `CREATE TABLE IF NOT EXISTS`, NOT drop+recreate). Integration test: FRESH has it, STALE reconciles, concurrent-add is idempotent, no dead columns; note the safe-rollback behavior.
