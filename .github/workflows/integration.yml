@@ -3,8 +3,9 @@ name: Integration (live GroundX)
 # Live integration against the REAL GroundX backend. Intentionally NOT a per-PR
 # gate (that lives in ci.yml, which runs a deterministic boot-only smoke): this
 # depends on live GroundX, real keys, and a provisioned customer, so a GroundX
-# outage or missing test data must never block code merges. Runs daily + on
-# demand instead, where flakiness is monitored separately from the merge path.
+# outage or missing test data must never block code merges. Runs on demand
+# (and daily once a test customer is configured — see the disabled schedule
+# below), where flakiness is monitored separately from the merge path.
 #
 # Configure on the `dev` environment (and/or org):
 #   - secret GROUNDX_PARTNER_API_KEY — a real Partner key.
@@ -13,8 +14,13 @@ name: Integration (live GroundX)
 #     ("customer does not exist"); provision one once and set these.
 
 on:
-  schedule:
-    - cron: "0 8 * * *" # daily, 08:00 UTC
+  # Schedule is intentionally DISABLED until a test customer is configured
+  # (SMOKE_EMAIL / SMOKE_PASSWORD on the dev environment). Enabling it before
+  # then would fail the live login every day and re-introduce chronic-red noise.
+  # Once a customer exists, uncomment the schedule to run it daily; until then,
+  # trigger it on demand from the Actions tab.
+  # schedule:
+  #   - cron: "0 8 * * *" # daily, 08:00 UTC
   workflow_dispatch: {}
 
 permissions:
