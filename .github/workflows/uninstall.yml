@@ -1,9 +1,8 @@
 name: Uninstall
 
 # Manual teardown of the Helm release for one environment. Requires the
-# operator to type "uninstall" into the confirm field. Optionally also
-# deletes the namespace (which removes the middleware Secret, any PVCs,
-# and anything else under it).
+# operator to type "uninstall" into the confirm field. Namespaces are
+# pre-created runner configuration and are never deleted by this workflow.
 #
 # For prod, also add required reviewers to the `prod` GitHub Environment
 # (Settings -> Environments -> prod -> Required reviewers) so this
