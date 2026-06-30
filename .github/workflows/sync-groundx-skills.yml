@@ -14,7 +14,7 @@ name: Sync GroundX skill pack
 
 on:
   schedule:
-    - cron: "0 7 * * 1" # weekly, Monday 07:00 UTC
+    - cron: "0 */3 * * *" # every 3 hours (free on a public repo; deterministic MANIFEST means it commits only on a real upstream change)
   workflow_dispatch:
     inputs:
       target_branch:
