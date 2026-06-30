@@ -9,8 +9,8 @@ Each task is TDD (failing test first) and ends with the Discipline §10 adversar
 - [x] 0.6 (2nd review) Persist the draft as an **uncommitted `Template`** (`TemplateSaveInput` shape, resolved body — NOT a Map/Set overlay blob); `itemPreviews` values carry the discriminant (`ExtractedFieldValue | RenderedSection`); clear previews on document-scope change; the `itemPreviews` fix (§5) MUST precede the hook wiring (§6); anon+sample = draft keeps the user's edits / freezes (confirmed; a later sample-schema change does not discard saved edits).
 
 ## 1. Shared contracts (`@groundx/shared`)
-- [ ] 1.1 Add Zod `TemplateItemKind`, `RewriteItemRequest`, `RewriteItemResult` (`{proposedItem, reasoning}`); the preview result REUSES `generatedResultSchema` (`ExtractedFieldValue`/`RenderedSection`) — NO new preview type. Failing schema tests first.
-- [ ] 1.2 Update `docs/agents/data-model.md` reconciliation matrix: rows for the rewrite contract + the persisted uncommitted-draft column (`TemplateSaveInput` shape; session-scoped; orthogonal to committed Template) + the in-memory `itemPreviews` (`ExtractedFieldValue | RenderedSection`, not persisted). Adversarial review.
+- [x] 1.1 Add Zod `TemplateItemKind`, `RewriteItemRequest`, `RewriteItemResult` (`{kind, proposedItem, reasoning}`, discriminated) + `reportSectionItemSchema`; preview REUSES `ExtractedFieldValue`/`RenderedSection` — NO new preview type. 8 contract tests green (`app/src/types/templateItemAgent.contract.test.ts`); shared builds; app tsc clean.
+- [x] 1.2 Updated `docs/agents/data-model.md` reconciliation matrix: rows for RewriteItem, the in-memory `itemPreviews` (not persisted), and the uncommitted draft `TemplateSaveInput` column. Drift guards + catalog-parity green.
 
 ## 2. Middleware — rewrite prompt + service + endpoint
 - [ ] 2.1 `services/prompts/itemRewriter.ts` builder (kind-aware), source-document-grounded, NEVER outputs `name`; `prompts.test.ts` pins shape; keep it out of consumers (promptLiterals guard stays green).

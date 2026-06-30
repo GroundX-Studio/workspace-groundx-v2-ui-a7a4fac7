@@ -561,6 +561,77 @@ export function parseGeneratedResult(input: unknown): GeneratedResult | null {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// agentic-template-item-editor — the cross-surface "rewrite with agent"
+// contract. One ITEM kind discriminant ("extract-field" | "report-section")
+// distinct from the per-TEMPLATE `templateKind` ("extract" | "report"). The
+// rewrite `item` reuses the existing `templateFieldSchema` (extract) and a
+// `reportSectionItemSchema` (report). PREVIEW reuses `ExtractedFieldValue` /
+// `RenderedSection` (no new type). The rewrite NEVER changes the item `name`
+// (enforced structurally in the service); `name` is still present on the
+// proposed item so the before→after diff has both sides.
+// ──────────────────────────────────────────────────────────────────────
+
+/** Which kind of template ITEM an agent operation targets. */
+export const templateItemKindSchema = z.enum(["extract-field", "report-section"]);
+export type TemplateItemKind = z.infer<typeof templateItemKindSchema>;
+
+/** How a report section renders. Mirrors the app `ReportSectionRenderAs`. */
+export const reportSectionRenderAsSchema = z.enum(["PARAGRAPH", "BULLETS", "TABLE"]);
+export type ReportSectionRenderAs = z.infer<typeof reportSectionRenderAsSchema>;
+
+/**
+ * One report section item (the report analog of `templateFieldSchema`). The
+ * `smart-report` change owns the surrounding template body; this is the
+ * per-section editable item the rewrite/preview operations act on. Strip key
+ * handling (NOT passthrough) for the same reason as `templateFieldSchema`.
+ */
+export const reportSectionItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  renderAs: reportSectionRenderAsSchema,
+  question: z.string(),
+  instructions: z.array(z.string()),
+  variables: z.array(z.string()),
+});
+export type ReportSectionItem = z.infer<typeof reportSectionItemSchema>;
+
+/**
+ * `POST /api/template-item/rewrite` request. Discriminated on `kind` so the
+ * `item` (and optional `currentResult`) shape is checked against the kind — a
+ * field item with `kind: "report-section"` (or vice-versa) is rejected.
+ */
+export const rewriteItemRequestSchema = z.discriminatedUnion("kind", [
+  z.object({
+    chatSessionId: z.string(),
+    kind: z.literal("extract-field"),
+    item: templateFieldSchema,
+    currentResult: extractedFieldValueSchema.optional(),
+  }),
+  z.object({
+    chatSessionId: z.string(),
+    kind: z.literal("report-section"),
+    item: reportSectionItemSchema,
+    currentResult: renderedSectionSchema.optional(),
+  }),
+]);
+export type RewriteItemRequest = z.infer<typeof rewriteItemRequestSchema>;
+
+/** `POST /api/template-item/rewrite` response — the proposed item + reasoning. */
+export const rewriteItemResultSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("extract-field"),
+    proposedItem: templateFieldSchema,
+    reasoning: z.string(),
+  }),
+  z.object({
+    kind: z.literal("report-section"),
+    proposedItem: reportSectionItemSchema,
+    reasoning: z.string(),
+  }),
+]);
+export type RewriteItemResult = z.infer<typeof rewriteItemResultSchema>;
+
+// ──────────────────────────────────────────────────────────────────────
 // ExtractFieldResult — 2026-05-31-core-data-followups §4 #13. The
 // `/api/extract-field` response body. It is declared byte-identically on BOTH
 // sides of the wire (app `api/extractField.ts` + middleware
