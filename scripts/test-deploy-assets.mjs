@@ -143,6 +143,7 @@ assert(ingress.includes("alb.ingress.kubernetes.io/target-type"), "Ingress must 
 assert(ingress.includes(".Values.publicHosts"), "Ingress must support additional public host aliases");
 
 const workflow = read(".github/workflows/deploy.yml");
+const skillSyncWorkflow = read(".github/workflows/sync-groundx-skills.yml");
 assert(workflow.includes("branches:\n      - main"), "deploy workflow must run on merge/push to main");
 assert(workflow.includes("workflow_dispatch:"), "deploy workflow must support manual runs");
 assert(workflow.includes("type: choice") && workflow.includes("- dev") && workflow.includes("- prod"), "manual deploy environment must be dev|prod");
@@ -282,6 +283,26 @@ const missingInputs = [...allowedDispatchInputs].filter((n) => !actualDispatchIn
 assert(
   unexpectedInputs.length === 0 && missingInputs.length === 0,
   `workflow_dispatch input set drifted — unexpected: [${unexpectedInputs.join(", ")}], missing: [${missingInputs.join(", ")}]`,
+);
+
+assert(skillSyncWorkflow.includes("actions: write"), "skill sync workflow must be allowed to dispatch deploy.yml after a sync commit");
+assert(skillSyncWorkflow.includes("id: refresh"), "skill sync workflow must expose refresh outputs for the deploy dispatch step");
+assert(skillSyncWorkflow.includes("committed=true"), "skill sync workflow must mark when a real sync commit was created");
+assert(skillSyncWorkflow.includes('commit_sha=${new_sha}'), "skill sync workflow must output the new sync commit SHA");
+assert(
+  skillSyncWorkflow.includes("if: steps.refresh.outputs.committed == 'true'"),
+  "skill sync workflow must only deploy after a real sync commit",
+);
+assert(skillSyncWorkflow.includes("gh workflow run deploy.yml"), "skill sync workflow must explicitly dispatch deploy.yml");
+assert(skillSyncWorkflow.includes('--ref "$TARGET_BRANCH"'), "skill sync deploy dispatch must run from the receiving branch");
+assert(
+  skillSyncWorkflow.includes('-f "environment=$DEPLOY_ENVIRONMENT"'),
+  "skill sync deploy dispatch must pass the configured deploy environment",
+);
+assert(skillSyncWorkflow.includes('SYNC_DEPLOY_ENVIRONMENT: "dev"'), "skill sync workflow must deploy the working branch to dev by default");
+assert(
+  skillSyncWorkflow.includes('-f "commitSha=$COMMIT_SHA"'),
+  "skill sync deploy dispatch must pass the pushed sync commit SHA",
 );
 
 // Ops-side helper workflows for log inspection and teardown. They share

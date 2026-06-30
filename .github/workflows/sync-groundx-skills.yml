@@ -25,11 +25,15 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 env:
   # Branch the scheduled sync operates on (the deployed branch, not repo default),
   # so the refreshed pack lands where it is actually built/deployed.
   SYNC_TARGET_BRANCH: "workspace/groundx-v2-ui"
+  # A scheduled skill-pack refresh updates the working branch, so publish it to dev.
+  # Prod remains an explicit deploy.yml/manual publish decision.
+  SYNC_DEPLOY_ENVIRONMENT: "dev"
 
 jobs:
   sync:
@@ -48,21 +52,42 @@ jobs:
         run: node scripts/sync-groundx-skills.mjs
 
       - name: Commit and push the refresh (direct to target branch)
+        id: refresh
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_BRANCH: ${{ github.event.inputs.target_branch }}
         run: |
-          if [ -z "$(git status --porcelain middleware/assets/groundx-skills)" ]; then
-            echo "Vendored skill pack already current — nothing to do."
-            exit 0
-          fi
           # target branch: dispatch input → SYNC_TARGET_BRANCH env → repo default.
           target="${INPUT_BRANCH:-${SYNC_TARGET_BRANCH}}"
           [ -n "$target" ] || target="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"
+          echo "target_branch=${target}" >> "$GITHUB_OUTPUT"
+          if [ -z "$(git status --porcelain middleware/assets/groundx-skills)" ]; then
+            echo "Vendored skill pack already current — nothing to do."
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git config user.name "groundx-skills-bot"
           git config user.email "noreply@groundx.ai"
           git add middleware/assets/groundx-skills
           commit="$(jq -r .commit middleware/assets/groundx-skills/MANIFEST.json)"
           git commit -m "chore: refresh vendored groundx-agent-harness skill pack to ${commit}"
+          new_sha="$(git rev-parse HEAD)"
           # Direct push to the target branch (org policy blocks Actions from opening PRs).
           git push origin "HEAD:${target}"
+          echo "committed=true" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${new_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy refreshed branch to dev
+        if: steps.refresh.outputs.committed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: ${{ steps.refresh.outputs.target_branch }}
+          COMMIT_SHA: ${{ steps.refresh.outputs.commit_sha }}
+          DEPLOY_ENVIRONMENT: ${{ env.SYNC_DEPLOY_ENVIRONMENT }}
+        run: |
+          gh workflow run deploy.yml \
+            --ref "$TARGET_BRANCH" \
+            -f "environment=$DEPLOY_ENVIRONMENT" \
+            -f "projectId=groundx-v2-ui" \
+            -f "branch=$TARGET_BRANCH" \
+            -f "commitSha=$COMMIT_SHA"
