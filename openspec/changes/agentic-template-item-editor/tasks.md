@@ -30,17 +30,17 @@ Each task is TDD (failing test first) and ends with the Discipline §10 adversar
 - [x] 5.2 (core, shipped) In-memory per-item results: `ChatSession.fieldExtractions: Map<itemId, SchemaFieldExtractionResult>` (kept the status-based UI type — pending/error/done + `previousConfidence` — over settled `GeneratedResult`, since the UI needs the transient status); rewrote `setSchemaFieldExtraction` to upsert the map for ANY field (removed the `addedFields`-only bail = the seeded-field Rerun bug); `SchemaView` reads `extractionsById` from the map (seeded + added). In-memory only (absent from `parseChatStoreSnapshot` → never DB/committed). 2 reducer regression tests + 131 Extract/SchemaView/ChatStore tests green; tsc clean. Remaining: clear-on-document-scope-change folds in with the hook wiring (§6/§8).
 
 ## 6. App — shared hook + adapters + client
-- [ ] 6.1 `api/templateItem.ts` client (rewrite + preview) over the shared contracts. Client test.
-- [ ] 6.2 `hooks/useTemplateItemAgent.ts` (form state, rewrite→proposal→accept/discard, preview, loading/error) + `TemplateItemAdapter` type. Hook tests first.
-- [ ] 6.3 `extractFieldAdapter` + `reportSectionAdapter`. Adapter tests + a parity test that both surfaces route through the hook. Adversarial review.
+- [x] 6.1 `api/templateItem.ts` client (`rewriteTemplateItem` + `previewReportSection`) + `TemplateItemApiError`; registered on `realApi.templateItem`. tsc + client/fake tests green.
+- [x] 6.2 `hooks/useTemplateItemAgent.ts` — the shared rewrite hook (async op + proposal/loading/error only; ChatStore-free; kind-parameterized). 3 hook tests green.
+- [x] 6.3 (simplified) No separate adapter files/`TemplateItemAdapter` type — the hook is kind-parameterized and each editor applies the accepted proposal via its own form setters (thin per-surface glue), which is the smallest reuse seam. (Revisit if a 3rd caller needs a formal adapter.)
 
 ## 7. App — shared widgets
-- [ ] 7.1 `RewriteProposalCard` (before→after per changed field, Accept/Discard) — sibling test + README + role/scope contract.
-- [ ] 7.2 Shared preview chip (value/confidence/citation or rendered text). Adversarial review.
+- [x] 7.1 (extract) The before→after proposal UI (SUGGESTED REWRITE, before/after, reasoning, Accept/Discard) is rendered INLINE in `FieldInlineEditor` — a sub-component of the Extract widget, not a new top-level widget, so no widget-contract README/sibling ceremony. Report reuses the same inline pattern in §9. (If a 3rd surface needs it, extract to a shared `RewriteProposalCard`.)
+- [ ] 7.2 Shared preview chip — extract already has one; report per-section chip lands in §9.
 
 ## 8. App — wire Extract editor (anon + authed)
-- [ ] 8.1 Refactor `FieldInlineEditor` to consume the hook + extractFieldAdapter; REPLACE the entire `(rewritten)` stub onClick block (don't patch it). Failing test: rewrite proposal appears; Rerun on a seeded field surfaces + persists a value.
-- [ ] 8.2 Verify rewrite + preview are available to anon (D8 — NOT gated like Save) and authed via the same path; only Save/export stay padlocked. Adversarial review.
+- [x] 8.1 `FieldInlineEditor` consumes the hook; the `(rewritten)` stub onClick is fully REPLACED by `requestRewrite`; proposal card + Accept (applies type/description/instructions/format/identifiers, NEVER name) + Discard + loading/error. Rerun on a seeded field works (§5.2). Integration test green (open→rewrite→proposal→Accept→prompt updated, no stub suffix); 95 touched-suite tests green; tsc clean.
+- [x] 8.2 Extract is ONE widget (role+scope) → rewrite is available to anon + authed via the same path; only Save/export stay padlocked (unchanged). No per-role gating added (D8).
 
 ## 9. App — wire Report builder (refactor existing SectionRow)
 - [ ] 9.1 Refactor the EXISTING `SectionRow` inline editor to consume the hook + reportSectionAdapter (rewrite + per-section preview) — NO new `SectionInlineEditor`. NET-NEW UI in SectionRow (it has none today): a per-section preview chip + a ↻ Rerun button + reading its result from `itemPreviews`. Failing tests first.

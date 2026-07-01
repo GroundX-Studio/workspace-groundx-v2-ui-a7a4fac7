@@ -37,6 +37,7 @@ import * as partnerGroups from "@/api/entities/partnerGroupsEntity";
 import * as partnerProjects from "@/api/entities/partnerProjectsEntity";
 import { listScenarios } from "@/api/entities/scenarioRegistryEntity";
 import { extractField } from "@/api/extractField";
+import { rewriteTemplateItem, previewReportSection } from "@/api/templateItem";
 import { fetchFieldGeometry } from "@/api/fieldGeometry";
 import { recordIntent } from "@/api/intentLog";
 import { getReportTemplate, renderReport, saveReportTemplate } from "@/api/smartReport";
@@ -208,6 +209,10 @@ export const realApi = {
   extract: {
     extractField: extractFieldWithClientEnsure,
     fetchFieldGeometry,
+  },
+  templateItem: {
+    rewrite: rewriteTemplateItem,
+    previewSection: previewReportSection,
   },
 };
 

@@ -928,3 +928,44 @@ describe("SchemaView (UI-01 Phase 1)", () => {
     await waitFor(() => expect(screen.getByTestId("probe-pre-attached")).toHaveTextContent("es-1"));
   });
 });
+
+// agentic-template-item-editor — the real "rewrite with agent" (replaces the
+// stub that appended "(rewritten)"). Grounded proposal → before/after → Accept
+// applies to the form; the name is never touched.
+describe("SchemaView — rewrite with agent", () => {
+  it("shows the agent's proposal and Accept applies it to the prompt (no stub suffix)", async () => {
+    installLiveExtract();
+    const rewrite = vi.fn(async () => ({
+      kind: "extract-field" as const,
+      proposedItem: {
+        id: "account_number",
+        name: "account_number",
+        type: "STRING" as const,
+        description: "the account number printed on the remittance stub",
+        instructions: ["digits only"],
+        identifiers: ["Account Number"],
+      },
+      reasoning: "grounded in the remittance label",
+    }));
+    const user = userEvent.setup();
+    renderWithOnboardingProviders(<SchemaView />, {
+      initialFrame: "f3a",
+      initialScenario: "utility",
+      initialScenarios: LIVE_SCENARIOS,
+      api: { ...liveExtractApi(), templateItem: { rewrite } } as never,
+    });
+    await screen.findByTestId("schema-field-account_number");
+    await user.click(screen.getByTestId("schema-edit-field-account_number"));
+    await user.click(screen.getByTestId("schema-field-editor-rewrite-account_number"));
+
+    const proposal = await screen.findByTestId("schema-field-editor-rewrite-proposal-account_number");
+    expect(proposal).toHaveTextContent("the account number printed on the remittance stub");
+    expect(rewrite).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByTestId("schema-field-editor-rewrite-accept-account_number"));
+    const promptInput = document.getElementById("schema-field-editor-prompt-input-account_number") as HTMLTextAreaElement;
+    expect(promptInput.value).toBe("the account number printed on the remittance stub");
+    expect(promptInput.value).not.toContain("(rewritten)"); // stub is gone
+    expect(screen.queryByTestId("schema-field-editor-rewrite-proposal-account_number")).not.toBeInTheDocument();
+  });
+});

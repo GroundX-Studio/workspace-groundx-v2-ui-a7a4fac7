@@ -58,6 +58,7 @@ import {
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useApi } from "@/contexts/ApiContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { useTemplateItemAgent } from "@/hooks/useTemplateItemAgent";
 import type {
   SchemaFieldEdit,
   SchemaFieldExtractionResult,
@@ -981,6 +982,43 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
   const [format, setFormat] = useState(field.format ?? "");
   const [identifiers, setIdentifiers] = useState<string[]>(field.identifiers ?? []);
   const [identifierDraft, setIdentifierDraft] = useState<string | null>(null);
+
+  // agentic-template-item-editor — real "rewrite with agent" via the shared
+  // hook (replaces the stub). Rewrite grounds in the current unsaved form
+  // values + the field's latest preview result; Accept applies the proposal to
+  // the form setters (never the name — the agent doesn't return one).
+  const { state: chatStoreStateForAgent } = useChatStore();
+  const agent = useTemplateItemAgent("extract-field");
+  const parsedInstructions = () =>
+    instructions
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  const requestRewrite = () => {
+    const chatSessionId = chatStoreStateForAgent.activeSessionId;
+    if (!chatSessionId) return;
+    const currentResult =
+      extraction?.status === "done"
+        ? { fieldId: field.id, value: extraction.value as string | number | boolean | null, citations: [], ...(extraction.confidence != null ? { confidence: extraction.confidence } : {}) }
+        : undefined;
+    void agent.requestRewrite({
+      chatSessionId,
+      item: { id: field.id, name, type, description: prompt, required, instructions: parsedInstructions(), format: format.trim(), identifiers },
+      currentResult,
+    });
+  };
+  const acceptProposal = () => {
+    const p = agent.proposal;
+    if (!p || p.kind !== "extract-field") return;
+    const item = p.proposedItem;
+    setType(item.type);
+    setPrompt(item.description);
+    setInstructions((item.instructions ?? []).join("\n"));
+    setFormat(item.format ?? "");
+    setIdentifiers(item.identifiers ?? []);
+    // NB: item.name is intentionally NOT applied (name is held fixed).
+    agent.discardProposal();
+  };
   const textareaSx = {
     width: "100%",
     boxSizing: "border-box",
@@ -1118,27 +1156,22 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
             component="button"
             type="button"
             data-testid={`schema-field-editor-rewrite-${field.id}`}
-            onClick={() => {
-              // Phase 2-followup: actually call an LLM to rewrite the
-              // prompt. For now, append a stub suffix so the wiring is
-              // visible end-to-end.
-              setPrompt((current) =>
-                current.includes("(rewritten)") ? current : `${current} (rewritten)`,
-              );
-            }}
+            onClick={requestRewrite}
+            disabled={agent.rewriting}
             sx={{
               border: "none",
               background: "none",
               color: NAVY,
-              cursor: "pointer",
+              cursor: agent.rewriting ? "wait" : "pointer",
               fontFamily: "inherit",
               fontSize: FONT_SIZE_LABEL,
               fontWeight: FONT_WEIGHT_LABEL,
               padding: 0,
+              opacity: agent.rewriting ? 0.6 : 1,
               "&:hover": { textDecoration: "underline" },
             }}
           >
-            ✨ rewrite with agent
+            {agent.rewriting ? "✨ rewriting…" : "✨ rewrite with agent"}
           </Box>
         </Box>
         <Box data-testid={`schema-field-editor-prompt-${field.id}`}>
@@ -1153,6 +1186,40 @@ const FieldInlineEditor: FC<FieldInlineEditorProps> = ({
             sx={textareaSx}
           />
         </Box>
+        {agent.rewriteError && (
+          <Typography variant="caption" data-testid={`schema-field-editor-rewrite-error-${field.id}`} sx={{ color: CORAL, mt: 0.5, display: "block" }}>
+            Couldn't rewrite — try again.
+          </Typography>
+        )}
+        {agent.proposal && agent.proposal.kind === "extract-field" && (
+          <Box
+            data-testid={`schema-field-editor-rewrite-proposal-${field.id}`}
+            sx={{ mt: 1, border: `1px solid ${CORAL}`, borderRadius: BORDER_RADIUS_SM, p: 1.5, backgroundColor: WARM_OFFWHITE }}
+          >
+            <Typography variant="caption" sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_HEADLINE, letterSpacing: 0.4, display: "block" }}>
+              ✨ SUGGESTED REWRITE
+            </Typography>
+            <Box sx={{ mt: 0.75, display: "flex", flexDirection: "column", gap: 0.5 }}>
+              <Typography variant="caption" sx={{ color: MUTED_ON_LIGHT }}>before</Typography>
+              <Typography variant="body2" sx={{ color: MUTED_ON_LIGHT, textDecoration: "line-through" }}>{prompt || "—"}</Typography>
+              <Typography variant="caption" sx={{ color: MUTED_ON_LIGHT, mt: 0.5 }}>after</Typography>
+              <Typography variant="body2" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>{agent.proposal.proposedItem.description}</Typography>
+              {agent.proposal.reasoning && (
+                <Typography variant="caption" sx={{ color: MUTED_ON_LIGHT, mt: 0.5, fontStyle: "italic" }}>{agent.proposal.reasoning}</Typography>
+              )}
+            </Box>
+            <Stack direction="row" spacing={1} sx={{ mt: 1, justifyContent: "flex-end" }}>
+              <Box component="button" type="button" data-testid={`schema-field-editor-rewrite-discard-${field.id}`} onClick={agent.discardProposal}
+                sx={{ border: "none", background: "none", color: BODY_TEXT, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE_LABEL, "&:hover": { color: NAVY, textDecoration: "underline" } }}>
+                Discard
+              </Box>
+              <Box component="button" type="button" data-testid={`schema-field-editor-rewrite-accept-${field.id}`} onClick={acceptProposal}
+                sx={{ border: `1px solid ${GREEN}`, backgroundColor: GREEN, color: WHITE, borderRadius: BORDER_RADIUS_PILL, px: 1.5, py: 0.5, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_HEADLINE }}>
+                Accept
+              </Box>
+            </Stack>
+          </Box>
+        )}
       </Box>
 
       {/* `expand-inline-editor-fields`: editable identifiers — short
