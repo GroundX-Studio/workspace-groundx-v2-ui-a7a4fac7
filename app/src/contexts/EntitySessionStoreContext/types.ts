@@ -1,4 +1,4 @@
-import type { JourneyStage, PersistedViewerStep } from "@groundx/shared";
+import type { DraftTemplate, JourneyStage, PersistedViewerStep } from "@groundx/shared";
 
 /**
  * Kinds of "entities" that can live in the store. Each kind is a
@@ -64,6 +64,17 @@ export interface EntitySession {
   createdAt: number;
   /** Unix-ms when the user last touched this entity. Used by LRU. */
   lastVisitedAt: number;
+  /**
+   * agentic-template-item-editor — the UNCOMMITTED draft template for this
+   * entity: the user's in-progress question set (resolved `DraftTemplate` body,
+   * `name` nullable until committed). Written at editor SAVE-MOMENTS and mirrored
+   * to the DB entity twin (`draft_template_json`) + the localStorage snapshot so
+   * the edits survive a reload even in onboarding/anon where no committed
+   * `Template` can be saved. When present it WINS as the base schema (frozen,
+   * independent of the sample manifest — see design D5). `null`/absent = no draft
+   * yet, seed the base from the live workflow/manifest schema.
+   */
+  draftTemplate?: DraftTemplate | null;
 }
 
 export interface EntitySessionStoreState {

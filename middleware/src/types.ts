@@ -115,6 +115,14 @@ export interface ChatSessionEntityRecord {
   scanProgressJson: string | null;
   extractedValuesJson: string | null;
   /**
+   * agentic-template-item-editor — the uncommitted DRAFT schema/template for
+   * this entity, as a JSON-stringified `TemplateSaveInput` (resolved body,
+   * nullable name). Persisted on save-moments; NOT a committed Template. Null
+   * when the user hasn't edited the schema. Distinct from `extractedValuesJson`
+   * (committed results) — this is the in-progress question set.
+   */
+  draftTemplateJson: string | null;
+  /**
    * CF-15 — RAG scope refs. The active EntitySession carries enough
    * routing info for the chat handler to build a `ContentScope`
    * (`@groundx/shared`) without hardcoding the env samples bucket.

@@ -141,6 +141,18 @@ const ChatMessagesProbe = ({ onSnapshot }: { onSnapshot: (messages: string[]) =>
   return null;
 };
 
+/**
+ * Pushes an arbitrary ViewerStep so a test can express a canvas position the
+ * frame→step shim can't (e.g. a SETTLED, non-`scanning` doc-viewer — the
+ * citation-jump understand surface — which `testFrameToStep("f2")` never
+ * produces because it always sets `scanning: true`).
+ */
+const RawStepPusher = ({ onReady }: { onReady: (push: (step: import("@/contexts/ChatStoreContext").ViewerStep) => void) => void }) => {
+  const { pushStep } = useChatStore();
+  onReady(pushStep);
+  return null;
+};
+
 const activeViewerFrames = (): HTMLElement[] =>
   screen
     .getAllByTestId("viewer-widget-frame")
@@ -475,11 +487,116 @@ describe("OnboardingShell", () => {
     expect(wrap).toHaveAttribute("inert");
   });
 
-  it("WF-01 C1: F2 clears aria-hidden + inert on the underneath shell", () => {
+  // understand-watch-lock (2026-06-30). The Understand experience is a PASSIVE
+  // "watch GroundX read your document" beat — while the scan narration is
+  // playing the whole shell must be non-interactive (nothing clickable, per
+  // product direction). The signal is the active viewer step being a
+  // `doc-viewer` with `scanning: true` (set ONLY by the understand-scanning
+  // beat; it flips off when the ThinkingStream completes and dispatches
+  // showExtract → "Ready to analyze"). `testFrameToStep("f2")` seeds exactly
+  // that scanning beat, so the F2 seed now locks the shell.
+  it("understand-watch-lock: the scan beat (F2) marks the underneath shell aria-hidden + inert", () => {
     renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
     const wrap = screen.getByTestId("onboarding-shell-underneath");
-    expect(wrap).not.toHaveAttribute("aria-hidden");
+    expect(wrap).toHaveAttribute("aria-hidden", "true");
+    expect(wrap).toHaveAttribute("inert");
+  });
+
+  it("understand-watch-lock: 'Book a call' (and the rest of the nav) is non-interactive during the scan beat", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    // The user's recurring complaint: Book-a-call stays clickable during
+    // Understand. It lives inside the underneath shell, so the shell-wide
+    // `inert` must cover it — assert it is inside an inert subtree.
+    expect(screen.getByTestId("onboarding-nav-cta-call").closest("[inert]")).not.toBeNull();
+  });
+
+  it("understand-watch-lock: a SETTLED (non-scanning) doc-viewer stays interactive", () => {
+    // A citation jump back to the document later in the journey pushes a
+    // doc-viewer WITHOUT `scanning` — that is a deliberate, interactive surface,
+    // NOT the auto-playing watch beat. It must not be locked.
+    let push: ((step: import("@/contexts/ChatStoreContext").ViewerStep) => void) | null = null;
+    renderWithOnboardingProviders(
+      <>
+        <OnboardingShell />
+        <RawStepPusher onReady={(p) => (push = p)} />
+      </>,
+      { initialFrame: "f2", initialScenario: "utility" },
+    );
+    act(() => {
+      push!({ kind: "doc-viewer", documentId: "doc-resolved-123" });
+    });
+    const wrap = screen.getByTestId("onboarding-shell-underneath");
     expect(wrap).not.toHaveAttribute("inert");
+    expect(wrap).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("understand-watch-lock: reaching Analyze (F3) unlocks the shell", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f3", initialScenario: "utility" });
+    const wrap = screen.getByTestId("onboarding-shell-underneath");
+    expect(wrap).not.toHaveAttribute("inert");
+    expect(wrap).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("understand-watch-lock: the Analyze + Report step-strip pills are locked during the scan beat", () => {
+    // User direction (2026-06-30): "everything should be locked until the scan
+    // is done, INCLUDING Analyze and Report; once the scan is done everything
+    // unlocked." The step strip (Ingest/Understand/Analyze/Extract/Interact/
+    // Report/Integrate pills) lives in the AppShell header INSIDE the underneath
+    // shell, so the shell-wide `inert` must cover it. Guard the strip directly
+    // so a future change that moves it out of the locked wrapper fails loudly.
+    // (The "reachable after the scan" half is covered by "reaching Analyze (F3)
+    // unlocks the shell" above — the strip sits inside that same wrapper.)
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    expect(screen.getByTestId("step-strip-wrapper").closest("[inert]")).not.toBeNull();
+  });
+
+  it("understand-watch-lock: nav + step strip carry the locked VISUAL treatment during the scan beat", () => {
+    // `inert` makes the chrome non-interactive but invisible-as-locked. Per user
+    // direction (2026-06-30) the lock must also be VISUALLY OBVIOUS — the nav
+    // (Book a call / Docs) and the step strip dim + desaturate while scanning so
+    // it reads as "locked until GroundX finishes reading". The visual hangs off
+    // a `data-watch-locked` flag so the styling is guardable without asserting
+    // pixels.
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    expect(screen.getByTestId("onboarding-nav-lock-region")).toHaveAttribute("data-watch-locked", "true");
+    expect(screen.getByTestId("onboarding-header-strip")).toHaveAttribute("data-watch-locked", "true");
+  });
+
+  it("understand-watch-lock: the locked visual treatment clears once the scan is done (F3)", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f3", initialScenario: "utility" });
+    expect(screen.getByTestId("onboarding-nav-lock-region")).not.toHaveAttribute("data-watch-locked");
+    expect(screen.getByTestId("onboarding-header-strip")).not.toHaveAttribute("data-watch-locked");
+  });
+
+  it("understand-watch-lock: the chat composer (input + Send) is disabled during the scan beat", () => {
+    // User direction (2026-06-30): the chat send button + input must be
+    // disabled during the scan too — any UI affordance is locked until
+    // Understand is done. (The Send button is NOT disabled-when-empty, so this
+    // is unconfounded — it is disabled purely by the scan lock.)
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f2", initialScenario: "utility" });
+    expect(screen.getByTestId("chat-live-send")).toBeDisabled();
+    expect(screen.getByLabelText("Chat input")).toBeDisabled();
+  });
+
+  it("understand-watch-lock: the chat composer is enabled once the scan is done (F3)", () => {
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f3", initialScenario: "utility" });
+    expect(screen.getByTestId("chat-live-send")).not.toBeDisabled();
+    expect(screen.getByLabelText("Chat input")).not.toBeDisabled();
+  });
+
+  it("understand-watch-lock: once Analyze is reached, the Understand pill is completed-but-locked (not a nav target)", () => {
+    // User direction (2026-06-30): Understand is a one-time "watch GroundX read
+    // the doc" beat — once at/past Analyze there's nothing to go back to, so its
+    // step-strip pill is `done-locked`: shows the ✓ but is NOT clickable.
+    // Set the done-flag so the intro doesn't re-snap currentStep back to the
+    // (active) Understand scanning step on this empty-thread mount.
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
+    renderWithOnboardingProviders(<OnboardingShell />, { initialFrame: "f3", initialScenario: "utility" });
+    const strip = screen.getByTestId("step-strip-wrapper");
+    const understandPill = within(strip).getByText("Understand").closest("[data-state]")!;
+    expect(understandPill).toHaveAttribute("data-state", "done-locked");
+    expect(understandPill).toHaveAttribute("aria-disabled", "true");
+    expect(understandPill).toHaveAttribute("tabindex", "-1");
   });
 
   it("F1 picker covers the always-mounted AppShell underneath (overlay model)", () => {
@@ -1470,6 +1587,10 @@ describe("OnboardingShell", () => {
 
   it("report-default-template: navigating Extract → Report renders the template's sections over the scenario's content scope", async () => {
     const user = userEvent.setup();
+    // understand-watch-lock — suppress the utility intro re-snap into the
+    // scanning beat (which would mark the shell `inert` and swallow the strip
+    // clicks below). Same seed the sibling nav tests use (lines 241/282).
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     // Record the scope the render endpoint is called with (the scope-carry
     // assertion) while still returning the seeded template's real content.
     let renderedScope: ContentScope | null = null;

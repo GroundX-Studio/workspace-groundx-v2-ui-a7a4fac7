@@ -98,8 +98,90 @@ suite("MySqlAppRepository.createSchema() against a real MySQL", () => {
 
     expect(await columnExists("chat_session_entities", "last_step_json")).toBe(true);
     expect(await columnExists("chat_session_entities", "reached_stages_json")).toBe(true);
+    // agentic-template-item-editor — the uncommitted draft-Template column ships on a fresh DB.
+    expect(await columnExists("chat_session_entities", "draft_template_json")).toBe(true);
     expect(await columnExists("chat_messages", "tool_calls_json")).toBe(false);
     expect(await columnExists("chat_sessions", "viewer_history_json")).toBe(false);
+  });
+
+  it("STALE DB missing draft_template_json: the additive ALTER adds it (data preserved)", async () => {
+    // Provision the current schema, then REGRESS chat_session_entities to a
+    // pre-draft_template_json shape — the exact state an already-live DB is in
+    // the first time this change deploys. Unlike the pre-rename regression, this
+    // must be an ADDITIVE reconcile (no drop, no data loss).
+    await repo.createSchema();
+    await seedSessionRow("sess-draft-stale");
+    await conn.query("ALTER TABLE chat_session_entities DROP COLUMN draft_template_json");
+    await conn.query(
+      `INSERT INTO chat_session_entities (chat_session_id, entity_key, reached_stages_json)
+       VALUES ('sess-draft-stale', 'e1', '[]')`,
+    );
+    expect(await columnExists("chat_session_entities", "draft_template_json")).toBe(false); // regressed
+
+    await repo.createSchema(); // additive reconcile
+
+    expect(await columnExists("chat_session_entities", "draft_template_json")).toBe(true);
+    // The pre-existing row survived the additive ALTER (no drop+recreate).
+    const rows = await repo.listChatSessionEntities("sess-draft-stale");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].draftTemplateJson).toBeNull();
+  });
+
+  it("ROUND-TRIP: draft_template_json persists a TemplateSaveInput body and re-reads it (add → edit → remove)", async () => {
+    await repo.createSchema();
+    await seedSessionRow("sess-draft-rt");
+    // A resolved TemplateSaveInput body (plain JSON — no Map/Set): the user added
+    // a question, edited another's prompt, and removed a third. Only the resolved
+    // question set is persisted, NOT overlay diffs.
+    const draftBody = {
+      name: null,
+      kind: "extract",
+      categories: [
+        { name: "Totals", fields: [{ id: "f1", name: "Amount Due", type: "currency", instructions: "edited prompt" }] },
+      ],
+    };
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "sess-draft-rt",
+      entityKey: "e1",
+      lastStepJson: null,
+      reachedStagesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      draftTemplateJson: JSON.stringify(draftBody),
+      bucketId: null,
+      projectIdsJson: null,
+      groupId: null,
+      documentIdsJson: null,
+      createdAt: new Date("2026-06-30T00:00:00.000Z"),
+      lastVisitedAt: new Date("2026-06-30T00:00:00.000Z"),
+    });
+
+    const afterWrite = await repo.listChatSessionEntities("sess-draft-rt");
+    expect(afterWrite).toHaveLength(1);
+    // mysql2 auto-parses JSON columns → the value round-trips as a parsed object.
+    expect(afterWrite[0].draftTemplateJson as unknown).toMatchObject({
+      name: null,
+      categories: [{ fields: [{ id: "f1", name: "Amount Due", instructions: "edited prompt" }] }],
+    });
+
+    // Clearing the draft (user reverted to the committed template) persists as null.
+    await repo.upsertChatSessionEntity({
+      chatSessionId: "sess-draft-rt",
+      entityKey: "e1",
+      lastStepJson: null,
+      reachedStagesJson: "[]",
+      scanProgressJson: null,
+      extractedValuesJson: null,
+      draftTemplateJson: null,
+      bucketId: null,
+      projectIdsJson: null,
+      groupId: null,
+      documentIdsJson: null,
+      createdAt: new Date("2026-06-30T00:00:00.000Z"),
+      lastVisitedAt: new Date("2026-06-30T00:00:00.000Z"),
+    });
+    const afterClear = await repo.listChatSessionEntities("sess-draft-rt");
+    expect(afterClear[0].draftTemplateJson).toBeNull();
   });
 
   it("STALE pre-rename chat_session_entities: reconciled so the chat-turn SELECT works again", async () => {

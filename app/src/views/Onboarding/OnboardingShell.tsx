@@ -17,6 +17,7 @@ import {
 import { useApi } from "@/contexts/ApiContext";
 import { useAppMode } from "@/contexts/AppModeContext";
 import { useWidgetRole } from "@/lib/widgetRole";
+import { isUnderstandScanningStep } from "@/hooks/useUnderstandScanningActive";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
 import { selectActiveStep, useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
@@ -90,14 +91,37 @@ const CANVAS_ZOOM_OPACITY = 0.92;
 const STEP_ORDER: StepId[] = ["ingest", "understand", "analyze", "integrate"];
 const stepRank = (s: StepId): number => STEP_ORDER.indexOf(s);
 
+/**
+ * understand-watch-lock — the shared "this chrome is locked while GroundX reads
+ * your document" visual: dimmed + desaturated + not-allowed cursor, eased in/out.
+ * Applied to the nav rail and the step strip during the scan beat, PAIRED with
+ * the shell-wide `inert` that makes them non-interactive — `inert` removes the
+ * affordance, this makes the lock obvious. Returns just the transition (no
+ * visual change) when unlocked so the chrome renders normally and animates back.
+ */
+function watchLockedVisualSx(locked: boolean) {
+  return {
+    transition: "opacity 220ms ease, filter 220ms ease",
+    ...(locked
+      ? { opacity: 0.45, filter: "grayscale(1)", cursor: "not-allowed" as const }
+      : null),
+  };
+}
+
 function pillState(
   stepId: StepId,
   currentStep: StepId,
   completed: Set<StepId>,
   authSignedIn: boolean,
   scenarioPicked: boolean,
+  analyzeReached: boolean,
 ): StepPillState {
   if (stepId === currentStep) return "active";
+  // Understand is a one-time "watch GroundX read the doc" beat. Once the user
+  // is at/past Analyze, going back to it is pointless — show it as completed
+  // but NOT a nav target (done-locked). It still flips to "active" above if a
+  // citation jump makes the doc-viewer the current step. (2026-06-30)
+  if (stepId === "understand" && analyzeReached) return "done-locked";
   if (completed.has(stepId)) return "done-traversed";
   // Integrate is reachable only after sign-in (post-gate). AUTH-gated, not
   // progress-gated — a signed-in user reaches it from anywhere.
@@ -229,6 +253,16 @@ export const OnboardingShell: FC = () => {
       : session.scenario == null) &&
     !bookCallActive &&
     !signupSurfaceActiveEarly;
+
+  // understand-watch-lock (2026-06-30). The Understand experience is a PASSIVE
+  // "watch GroundX read your document" beat: while the scan narration plays the
+  // whole shell is non-interactive (nothing clickable, per product direction)
+  // AND visually locked. The signal — active step is a `doc-viewer` with
+  // `scanning: true`, dropped when narration completes → `showExtract` ("Ready
+  // to analyze") — is shared with ConversationFlow (which disables the composer)
+  // via `isUnderstandScanningStep`, so the shell and the chat can never drift.
+  // A SETTLED doc-viewer (citation jump, scanning falsy) is NOT locked.
+  const understandScanningActive = isUnderstandScanningStep(latestViewerStepEarly);
 
   useEffect(() => {
     if (bookCallActive) setBookCallEmbedState("initializing");
@@ -406,15 +440,15 @@ export const OnboardingShell: FC = () => {
     const analyzeReached =
       stepRank(currentStep) >= stepRank("analyze") || reachedStages.has("analyze");
     return [
-      { id: "ingest", label: JOURNEY_CATALOG.ingest.stepLabel, state: pillState("ingest", currentStep, completedSteps, signedIn, scenarioPicked) },
-      { id: "understand", label: JOURNEY_CATALOG.understand.stepLabel, state: pillState("understand", currentStep, completedSteps, signedIn, scenarioPicked) },
+      { id: "ingest", label: JOURNEY_CATALOG.ingest.stepLabel, state: pillState("ingest", currentStep, completedSteps, signedIn, scenarioPicked, analyzeReached) },
+      { id: "understand", label: JOURNEY_CATALOG.understand.stepLabel, state: pillState("understand", currentStep, completedSteps, signedIn, scenarioPicked, analyzeReached) },
       {
         id: "analyze",
         label: JOURNEY_CATALOG.analyze.stepLabel,
-        state: pillState("analyze", currentStep, completedSteps, signedIn, scenarioPicked),
+        state: pillState("analyze", currentStep, completedSteps, signedIn, scenarioPicked, analyzeReached),
         substeps: analyzeSubsteps(activeSubstep, session.gate.status === "open", analyzeReached),
       },
-      { id: "integrate", label: JOURNEY_CATALOG.integrate.stepLabel, state: pillState("integrate", currentStep, completedSteps, signedIn, scenarioPicked) },
+      { id: "integrate", label: JOURNEY_CATALOG.integrate.stepLabel, state: pillState("integrate", currentStep, completedSteps, signedIn, scenarioPicked, analyzeReached) },
     ];
   }, [currentStep, completedSteps, reachedStages, activeSubstep, appMode.authState, session.scenario, session.gate.status]);
 
@@ -1135,10 +1169,16 @@ export const OnboardingShell: FC = () => {
   // chain down to viewport 947 px.
   const headerStrip = (
     <Box
+      data-testid="onboarding-header-strip"
+      data-watch-locked={understandScanningActive ? "true" : undefined}
       sx={{
         borderBottom: `1px solid ${BORDER}`,
         backgroundColor: WHITE,
         px: 2,
+        // understand-watch-lock — the Analyze + Report pills are locked during
+        // the scan; dim/desaturate the whole strip so that reads visually, not
+        // just via the pills' own disabled state.
+        ...watchLockedVisualSx(understandScanningActive),
       }}
     >
       <StepStrip steps={steps} onStepClick={handleStepClick} onSubstepClick={handleSubstepClick} compact={stripCompact} />
@@ -1152,13 +1192,25 @@ export const OnboardingShell: FC = () => {
   // an overlay — the nav is in the DOM, just visually obscured while the
   // picker covers the viewport. When the picker dismisses, the nav is revealed.
   const navIdle = (
-    <OnboardingNav
-      accountState="loggedOut"
-      collapsed={navCollapsed}
-      onToggleCollapsed={() => setNavCollapsed(!navCollapsed)}
-      onItemClick={handleNavItemClick}
-      onLogoClick={() => navigate("/onboarding")}
-    />
+    // understand-watch-lock — while the scan plays the nav (Book a call, Docs,
+    // …) is not just `inert` (the shell-wide non-interactivity) but VISUALLY
+    // locked: dimmed + desaturated + not-allowed cursor, so it obviously reads
+    // as "unavailable until GroundX finishes reading". The treatment eases back
+    // to normal the instant the scan completes. Driven off the same
+    // `understandScanningActive` signal as the inert lock.
+    <Box
+      data-testid="onboarding-nav-lock-region"
+      data-watch-locked={understandScanningActive ? "true" : undefined}
+      sx={{ height: "100%", ...watchLockedVisualSx(understandScanningActive) }}
+    >
+      <OnboardingNav
+        accountState="loggedOut"
+        collapsed={navCollapsed}
+        onToggleCollapsed={() => setNavCollapsed(!navCollapsed)}
+        onItemClick={handleNavItemClick}
+        onLogoClick={() => navigate("/onboarding")}
+      />
+    </Box>
   );
 
   // ARCH-06B transitions — see the locked spec at the top of this file.
@@ -1194,14 +1246,20 @@ export const OnboardingShell: FC = () => {
           feel without any one element doing the heavy lift. */}
       <motion.div
         data-testid="onboarding-shell-underneath"
-        // WF-01 C1 (2026-05-28). While the picker is up, the underneath shell is
-        // visually masked by the opaque picker overlay AND must be hidden
-        // from assistive tech + keyboard navigation. `aria-hidden`
-        // pulls it out of the a11y tree; `inert` blocks focus + click
-        // (React 19's first-class attr; we set it as a string for
-        // React 18 forward-compat).
-        aria-hidden={isIngestPicker || undefined}
-        {...(isIngestPicker ? { inert: "" as unknown as undefined } : {})}
+        // The underneath shell is locked (out of the a11y tree via
+        // `aria-hidden` + non-interactive via `inert` — React 19's first-class
+        // attr, set as a string for React 18 forward-compat) for TWO reasons:
+        //   • WF-01 C1 (2026-05-28) — while the ingest picker is up it visually
+        //     masks the shell, so phantom sidebar/chat elements must not be
+        //     focus/Tab/click targets underneath the opaque overlay.
+        //   • understand-watch-lock (2026-06-30) — the Understand scan beat is a
+        //     passive "watch" moment; the whole shell (nav incl. Book-a-call,
+        //     chat, back) is non-interactive until "Ready to analyze". See
+        //     `understandScanningActive` above.
+        aria-hidden={isIngestPicker || understandScanningActive || undefined}
+        {...(isIngestPicker || understandScanningActive
+          ? { inert: "" as unknown as undefined }
+          : {})}
         style={{
           position: "absolute",
           inset: 0,

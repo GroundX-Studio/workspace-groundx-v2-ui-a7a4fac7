@@ -71,6 +71,11 @@ afterEach(() => {
 describe("OnboardingShell — save_to_account chip opens sign-in on the live f5 canvas", () => {
   it("clicking the tool:save_to_account chip opens sign-in as a viewer overlay", async () => {
     const user = userEvent.setup();
+    // The save-chip flow happens AFTER Understand: the composer + shell are
+    // locked during the scan beat (understand-watch-lock). Mark the scan as
+    // already played so the experience does not re-snap to the (locked)
+    // scanning Understand step on this empty-thread mount.
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     renderWithOnboardingProviders(<OnboardingShell />, {
       initialFrame: "f5",
       initialScenario: "utility",

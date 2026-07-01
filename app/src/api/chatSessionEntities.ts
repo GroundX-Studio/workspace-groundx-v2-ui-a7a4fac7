@@ -39,6 +39,14 @@ export interface UpsertChatSessionEntityInput {
   scanProgressJson?: string | null;
   /** JSON-stringified extracted values, or null when none. */
   extractedValuesJson?: string | null;
+  /**
+   * JSON-stringified uncommitted draft `Template` (`TemplateSaveInput` shape,
+   * nullable name) — the in-progress question set the user has edited but not
+   * yet saved as a committed Template (agentic-template-item-editor). Null when
+   * the working draft matches the committed template (nothing to persist).
+   * Distinct from `extractedValuesJson` (committed answers).
+   */
+  draftTemplateJson?: string | null;
 }
 
 type ChatSessionEnsureDependency = Pick<ChatSessionEnsureClient, "ensureServerChatSession">;
@@ -66,6 +74,7 @@ export async function upsertChatSessionEntity(
         reachedStagesJson: input.reachedStagesJson,
         scanProgressJson: input.scanProgressJson ?? null,
         extractedValuesJson: input.extractedValuesJson ?? null,
+        draftTemplateJson: input.draftTemplateJson ?? null,
       }),
     });
     if (!res.ok) {

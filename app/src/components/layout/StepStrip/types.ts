@@ -8,7 +8,12 @@
  *
  * Pill states per spec:
  *   • active           — current step (green-filled)
- *   • done-traversed   — completed (✓ tinted)
+ *   • done-traversed   — completed AND revisitable (✓ tinted, clickable)
+ *   • done-locked      — completed but NOT revisitable (✓ tinted, NOT clickable).
+ *                        Used for Understand: it's a one-time "watch GroundX
+ *                        read the doc" beat; once you're at/past Analyze there's
+ *                        nothing to go back to, so the pill shows done but
+ *                        doesn't act as a nav target.
  *   • disabled         — "Available after sign-in" (gray dashed)
  *   • reachable-todo   — clickable; not yet visited (navy outline)
  */
@@ -25,7 +30,12 @@ import type { JourneyStage } from "@groundx/shared";
  */
 export type StepId = JourneyStage;
 
-export type StepPillState = "active" | "done-traversed" | "disabled" | "reachable-todo";
+export type StepPillState =
+  | "active"
+  | "done-traversed"
+  | "done-locked"
+  | "disabled"
+  | "reachable-todo";
 
 export type AnalyzeSubstep = "extract" | "interact" | "report";
 

@@ -202,6 +202,42 @@ function mergeOverlayForSave(
   return { categories };
 }
 
+// agentic-template-item-editor — build an `ExtractionSchemaDef` base from a
+// persisted draft body so the editor resumes on the user's saved edits (design
+// D5: the draft wins as the base). Impedance adapter: the Template body's
+// category `type` is a scenario-agnostic FREE STRING, but the F3a editor's
+// `ExtractionSchemaDef` uses the strict fixture enum (`statement|charges|meters`).
+// Every draft category originates either from the manifest (enum-valued) or the
+// orphan "custom" group (type "statement") — the app never mints a custom
+// category type — so coercing an out-of-enum type to "statement" is runtime-safe.
+// The schema-level `name`/`id` come from the live/manifest base (a draft has no
+// schema-level name — its `name` is the eventual save-name, nullable until then).
+const DRAFT_CATEGORY_TYPES = new Set(["statement", "charges", "meters"]);
+function draftBodyToSchemaDef(
+  body: ExtractBody,
+  liveBase: import("@/types/scenarios").ExtractionSchemaDef | undefined,
+): import("@/types/scenarios").ExtractionSchemaDef {
+  return {
+    id: liveBase?.id ?? "draft-schema",
+    name: liveBase?.name ?? "Custom schema",
+    categories: body.categories.map((c) => ({
+      id: c.id,
+      name: c.name,
+      type: (DRAFT_CATEGORY_TYPES.has(c.type) ? c.type : "statement") as "statement" | "charges" | "meters",
+      fields: c.fields.map((f) => ({
+        id: f.id,
+        name: f.name,
+        type: f.type,
+        description: f.description,
+        ...(f.required !== undefined ? { required: f.required } : {}),
+        ...(f.instructions ? { instructions: f.instructions } : {}),
+        ...(f.format ? { format: f.format } : {}),
+        ...(f.identifiers ? { identifiers: f.identifiers } : {}),
+      })),
+    })),
+  };
+}
+
 // Shared section-label style for the field-detail (provenance) panel.
 const detailLabelSx = {
   display: "block",
@@ -235,6 +271,7 @@ export const Extract: FC<ExtractProps> = ({
     pinSample,
     unpinSample,
     appendAgentMessage,
+    commitDraftTemplate,
   } = useChatStore();
   // standardized-viewer-control — category focus is a viewer-step sub-position
   // now, so the category dropdown DISPATCHES `showExtract` through the
@@ -389,8 +426,6 @@ export const Extract: FC<ExtractProps> = ({
     })();
   });
 
-  const schema = liveSchema ?? scenario?.manifest.extractionSchema;
-
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const templateIdRef = useRef<string | null>(null);
   const activeChatSession = chatState.activeSessionId
@@ -400,6 +435,22 @@ export const Extract: FC<ExtractProps> = ({
   const hasUnsavedChanges = overlay
     ? overlay.addedFields.length + overlay.removedFieldIds.size + overlay.editedFields.size > 0
     : false;
+
+  // agentic-template-item-editor — a persisted uncommitted draft (the user's
+  // saved-but-not-committed question set) WINS as the base schema (design D5):
+  // it is frozen + independent of the sample manifest, so the editor resumes on
+  // the user's edits after a reload (incl. onboarding/anon where no committed
+  // Template can be saved). No draft → seed from the live/manifest schema.
+  const activeEntity =
+    activeChatSession?.activeEntityKey != null
+      ? activeChatSession.entities.get(activeChatSession.activeEntityKey)
+      : null;
+  const draftTemplate =
+    activeEntity?.draftTemplate && activeEntity.draftTemplate.kind === "extract"
+      ? activeEntity.draftTemplate
+      : null;
+  const liveBaseSchema = liveSchema ?? scenario?.manifest.extractionSchema;
+  const schema = draftTemplate ? draftBodyToSchemaDef(draftTemplate.body, liveBaseSchema) : liveBaseSchema;
 
   const isAuthed = appMode.authState === "signed-in";
   // standardized-viewer-control T5 (R7) — the design surface is driven by the
@@ -419,8 +470,13 @@ export const Extract: FC<ExtractProps> = ({
       templateIdRef.current = mintTemplateId();
     }
     setSaveStatus("saving");
+    const merged = mergeOverlayForSave(schema, overlay ?? null);
+    // Save-moment (the chosen write trigger) — persist the resolved draft to the
+    // DB twin + localStorage cache so the edits survive a reload even if the
+    // committed save below can't complete (onboarding/anon → 401 → sign-up gate).
+    // Flattens the overlay into the draft base so a repeat save can't double-add.
+    commitDraftTemplate({ id: templateIdRef.current, kind: "extract", name: null, body: merged });
     try {
-      const merged = mergeOverlayForSave(schema, overlay ?? null);
       await api.template.saveTemplate({
         id: templateIdRef.current,
         kind: "extract",
@@ -428,6 +484,9 @@ export const Extract: FC<ExtractProps> = ({
         body: merged,
       });
       setSaveStatus("saved");
+      // Committed → the draft is now a real Template; clear the uncommitted draft
+      // so it doesn't shadow the committed template as the base on re-open.
+      commitDraftTemplate(null);
       if (templateIdRef.current) {
         const schemaName = `${schema.name} (custom)`;
         // standardized-viewer-control T10 — the "save-and-return to the Ingest
@@ -459,7 +518,7 @@ export const Extract: FC<ExtractProps> = ({
         setSaveStatus("error");
       }
     }
-  }, [api.template, hasUnsavedChanges, saveStatus, schema, overlay, openGate, orchestrator, appendAgentMessage]);
+  }, [api.template, hasUnsavedChanges, saveStatus, schema, overlay, openGate, orchestrator, appendAgentMessage, commitDraftTemplate]);
 
   const postCommitConsumedRef = useRef(false);
   useEffect(() => {
@@ -487,6 +546,9 @@ export const Extract: FC<ExtractProps> = ({
           body: merged,
         });
         setSaveStatus("saved");
+        // Committed post-sign-up → the draft is now a real Template; clear it so
+        // it doesn't shadow the committed template as the base on re-open.
+        commitDraftTemplate(null);
         const schemaName = `${schema!.name} (custom)`;
         // standardized-viewer-control deletion-phase — the onboarding-only
         // "save-and-return to the Ingest picker" choreography dispatches the
@@ -510,7 +572,7 @@ export const Extract: FC<ExtractProps> = ({
         setSaveStatus("error");
       }
     })();
-  }, [api.template, session?.gate, schema, overlay, orchestrator, appendAgentMessage]);
+  }, [api.template, session?.gate, schema, overlay, orchestrator, appendAgentMessage, commitDraftTemplate]);
 
   const valuesByFieldId = useMemo(() => {
     if (liveSchema) {

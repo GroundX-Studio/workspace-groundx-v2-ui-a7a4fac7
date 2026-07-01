@@ -225,6 +225,9 @@ export class MySqlAppRepository implements AppRepository {
         reached_stages_json JSON NOT NULL,
         scan_progress_json JSON NULL,
         extracted_values_json JSON NULL,
+        -- agentic-template-item-editor — uncommitted DRAFT schema/template
+        -- (TemplateSaveInput), persisted on save-moments; nullable.
+        draft_template_json JSON NULL,
         -- CF-15: RAG scope refs. All nullable so existing rows + the
         -- onboarding "no entity scope yet, just use the env samples
         -- bucket" path keep working unchanged.
@@ -238,6 +241,22 @@ export class MySqlAppRepository implements AppRepository {
         FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
       )
     `);
+    // agentic-template-item-editor — ADDITIVE reconcile for the draft column on
+    // already-provisioned tables (CREATE TABLE IF NOT EXISTS above is a no-op on
+    // an existing table, so it won't add the column). Probe information_schema
+    // and ALTER only when missing — fires once on a stale DB, no-op on a fresh
+    // or already-current one. (NOT drop+recreate: additive columns keep data.)
+    const [draftColRows] = await this.pool.execute<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+         WHERE table_schema = DATABASE() AND table_name = 'chat_session_entities'
+           AND column_name = 'draft_template_json'`,
+    );
+    if (Number(draftColRows[0]?.n ?? 0) === 0) {
+      logger.warn("chat_session_entities missing draft_template_json; adding it (additive reconcile)");
+      await this.pool.execute(
+        `ALTER TABLE chat_session_entities ADD COLUMN draft_template_json JSON NULL`,
+      );
+    }
 
     await this.pool.execute(`
       CREATE TABLE IF NOT EXISTS viewer_events (
@@ -636,15 +655,16 @@ export class MySqlAppRepository implements AppRepository {
     await this.pool.execute(
       `INSERT INTO chat_session_entities (
         chat_session_id, entity_key, last_step_json, reached_stages_json,
-        scan_progress_json, extracted_values_json,
+        scan_progress_json, extracted_values_json, draft_template_json,
         bucket_id, project_ids_json, group_id, document_ids_json,
         created_at, last_visited_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         last_step_json = VALUES(last_step_json),
         reached_stages_json = VALUES(reached_stages_json),
         scan_progress_json = VALUES(scan_progress_json),
         extracted_values_json = VALUES(extracted_values_json),
+        draft_template_json = VALUES(draft_template_json),
         bucket_id = VALUES(bucket_id),
         project_ids_json = VALUES(project_ids_json),
         group_id = VALUES(group_id),
@@ -657,6 +677,7 @@ export class MySqlAppRepository implements AppRepository {
         record.reachedStagesJson,
         record.scanProgressJson,
         record.extractedValuesJson,
+        record.draftTemplateJson,
         record.bucketId,
         record.projectIdsJson,
         record.groupId,
@@ -670,7 +691,7 @@ export class MySqlAppRepository implements AppRepository {
   async listChatSessionEntities(chatSessionId: string): Promise<ChatSessionEntityRecord[]> {
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
       `SELECT chat_session_id, entity_key, last_step_json, reached_stages_json,
-        scan_progress_json, extracted_values_json,
+        scan_progress_json, extracted_values_json, draft_template_json,
         bucket_id, project_ids_json, group_id, document_ids_json,
         created_at, last_visited_at
        FROM chat_session_entities
@@ -1000,6 +1021,7 @@ function rowToChatSessionEntity(row: mysql.RowDataPacket): ChatSessionEntityReco
     reachedStagesJson: row.reached_stages_json,
     scanProgressJson: row.scan_progress_json,
     extractedValuesJson: row.extracted_values_json,
+    draftTemplateJson: row.draft_template_json ?? null,
     bucketId: row.bucket_id == null ? null : Number(row.bucket_id),
     projectIdsJson: row.project_ids_json,
     groupId: row.group_id == null ? null : Number(row.group_id),

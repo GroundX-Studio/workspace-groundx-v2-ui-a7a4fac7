@@ -1,4 +1,4 @@
-import { citationSchema, journeyStageSchema, persistedViewerStepSchema } from "@groundx/shared";
+import { citationSchema, draftTemplateSchema, journeyStageSchema, persistedViewerStepSchema } from "@groundx/shared";
 import { z } from "zod";
 
 import type { EntityKey, EntityKind } from "@/contexts/EntitySessionStoreContext";
@@ -44,6 +44,11 @@ const serializedEntitySessionSchema = z
     reachedStages: z.array(journeyStageSchema),
     createdAt: z.number(),
     lastVisitedAt: z.number(),
+    // agentic-template-item-editor — the uncommitted draft template (resolved
+    // `DraftTemplate` body, nullable name). Optional + additive: an older v2
+    // snapshot (written before this field existed) still validates, so no
+    // STORAGE_VERSION bump is needed. Absent → no draft (seed from manifest).
+    draftTemplate: draftTemplateSchema.nullish(),
   })
   .strict();
 export type SerializedEntitySession = z.infer<typeof serializedEntitySessionSchema>;

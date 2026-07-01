@@ -189,6 +189,30 @@ describe("StepStrip", () => {
     expect(onStepClick).not.toHaveBeenCalled();
   });
 
+  it("a done-locked pill shows the ✓ but is NOT a nav target (no click, not focusable)", async () => {
+    // done-locked = completed but not revisitable (Understand once past it).
+    const user = userEvent.setup();
+    const onStepClick = vi.fn();
+    const steps: StepDescriptor[] = [
+      { id: "ingest", label: "1 Ingest", state: "done-traversed" },
+      { id: "understand", label: "2 Understand", state: "done-locked" },
+      { id: "analyze", label: "Analyze", state: "active", substeps: [] },
+      { id: "integrate", label: "4 Integrate", state: "disabled" },
+    ];
+    render(<StepStrip steps={steps} onStepClick={onStepClick} />);
+    const understandPill = screen.getByText("Understand").closest('[role="button"]')!;
+    // Completed → still shows the checkmark…
+    expect(understandPill.textContent).toContain("✓");
+    // …but is inert as a control: aria-disabled, not focusable, no click.
+    expect(understandPill).toHaveAttribute("aria-disabled", "true");
+    expect(understandPill).toHaveAttribute("tabindex", "-1");
+    // Unlike a `disabled` pill it does NOT carry the "available after sign-in"
+    // affordance (it's done, not gated).
+    expect(understandPill).not.toHaveAttribute("title", "Available after sign-in");
+    await user.click(screen.getByText("Understand"));
+    expect(onStepClick).not.toHaveBeenCalled();
+  });
+
   it("analyze bracket renders even when no substeps are provided (it's the slot, not the content)", () => {
     const steps: StepDescriptor[] = [
       { id: "ingest", label: "1 Ingest", state: "active" },

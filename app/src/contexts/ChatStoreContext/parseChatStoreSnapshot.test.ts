@@ -84,6 +84,58 @@ describe("parseChatStoreSnapshot — localStorage trust boundary", () => {
     expect(parseChatStoreSnapshot([])).toBeNull();
   });
 
+  it("parses an entity carrying an uncommitted draftTemplate (agentic-template-item-editor)", () => {
+    const withDraft = {
+      ...validSnapshot,
+      sessions: [
+        {
+          ...validSnapshot.sessions[0],
+          entities: [
+            [
+              "sample:doc-1",
+              {
+                ...(validSnapshot.sessions[0].entities[0][1] as Record<string, unknown>),
+                draftTemplate: {
+                  id: "draft-1",
+                  kind: "extract",
+                  name: null,
+                  body: { categories: [{ id: "c1", type: "statement", name: "Totals", fields: [] }] },
+                },
+              },
+            ],
+          ],
+        },
+      ],
+    };
+    const result = parseChatStoreSnapshot(withDraft);
+    expect(result).not.toBeNull();
+    const draft = result?.sessions[0]?.entities[0]?.[1]?.draftTemplate;
+    expect(draft?.kind).toBe("extract");
+    expect(draft?.name).toBeNull();
+  });
+
+  it("rejects an entity whose draftTemplate is structurally corrupt (trust boundary)", () => {
+    const badDraft = {
+      ...validSnapshot,
+      sessions: [
+        {
+          ...validSnapshot.sessions[0],
+          entities: [
+            [
+              "sample:doc-1",
+              {
+                ...(validSnapshot.sessions[0].entities[0][1] as Record<string, unknown>),
+                // Unknown kind → discriminated-union parse fails → whole blob rejected.
+                draftTemplate: { id: "d", kind: "bogus", name: null, body: {} },
+              },
+            ],
+          ],
+        },
+      ],
+    };
+    expect(parseChatStoreSnapshot(badDraft)).toBeNull();
+  });
+
   it("returns null when an entity tuple is malformed", () => {
     const broken = {
       ...validSnapshot,

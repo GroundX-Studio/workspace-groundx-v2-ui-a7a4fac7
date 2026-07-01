@@ -536,8 +536,11 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
+      // Post-scan, chat-enabled state: the Understand scan beat locks the
+      // composer, so drive the live composer from the chat-enabled Interact step.
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
 
@@ -563,8 +566,9 @@ describe("ChatColumn", () => {
       sendChatMessage.mockRejectedValueOnce(new Error("Failed to fetch"));
 
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
 
@@ -584,8 +588,9 @@ describe("ChatColumn", () => {
     it("504 → renders 'took too long' copy (CF-08)", async () => {
       sendChatMessage.mockRejectedValueOnce(new ChatApiError("timeout", 504, null));
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -599,8 +604,9 @@ describe("ChatColumn", () => {
     it("401 → renders 'sign in to continue' copy (CF-08)", async () => {
       sendChatMessage.mockRejectedValueOnce(new ChatApiError("unauth", 401, null));
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -614,8 +620,9 @@ describe("ChatColumn", () => {
     it("501 → renders 'can't answer that yet' copy (CF-08)", async () => {
       sendChatMessage.mockRejectedValueOnce(new ChatApiError("nyi", 501, null));
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -628,8 +635,9 @@ describe("ChatColumn", () => {
 
     it("empty / whitespace input does not post", async () => {
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -772,8 +780,9 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
 
@@ -818,8 +827,9 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -1002,10 +1012,12 @@ describe("ChatColumn", () => {
   // mount site per frame): the optimistic user turn is held in the engine's
   // local `liveTurns` state ONLY — `sendChatMessage` is called once and
   // `listChatMessages` returns [], so a remount would re-mount an empty thread
-  // and the seeded turn would vanish. We seed the turn at f2, let the first
-  // send auto-advance the journey f2→f5, and assert the SAME turn content is
-  // still present after the advance (no remount/wipe).
-  it("Phase 3: liveTurns persist across an onboarding frame advance f2→f5 (no remount/wipe)", async () => {
+  // and the seeded turn would vanish. We seed the turn at the chat-enabled
+  // Extract step (f3), let the first send auto-advance the journey f3→f5
+  // (the Understand scan beat locks the composer, so we cannot send there),
+  // and assert the SAME turn content is still present after the advance
+  // (no remount/wipe).
+  it("Phase 3: liveTurns persist across an onboarding frame advance f3→f5 (no remount/wipe)", async () => {
     sendChatMessage.mockResolvedValueOnce({
       userMessageId: "u-persist",
       assistantMessageId: "a-persist",
@@ -1035,18 +1047,22 @@ describe("ChatColumn", () => {
     }
 
     const user = userEvent.setup();
+    // Seed at the chat-enabled Extract step (the Understand scan beat at f2
+    // locks the composer); set the intro done-flag so the experience does not
+    // re-snap to the scanning Understand step on an empty-thread mount.
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <StepProbe />
       </>,
-      { initialFrame: "f2", initialScenario: "utility" },
+      { initialFrame: "f3", initialScenario: "utility" },
     );
 
-    // The journey starts on the Understand doc-viewer step.
-    expect(lastStep).toBe("doc-viewer");
+    // The journey starts on the Extract workbench step.
+    expect(lastStep).toBe("extract-workbench");
 
-    // Seed a real round-trip turn at f2.
+    // Seed a real round-trip turn at f3.
     const input = screen.getByTestId("chat-live-input").querySelector("input")!;
     await user.type(input, "Reconcile the totals.");
     await user.click(screen.getByTestId("chat-live-send"));
@@ -1055,15 +1071,15 @@ describe("ChatColumn", () => {
       expect(screen.getByTestId("chat-live-assistant")).toHaveTextContent("Totals reconciled.");
     });
     // The first send also fires the onboarding Choreography's onFirstUserSend,
-    // dispatching showInteract, so the journey auto-advances doc-viewer →
+    // dispatching showInteract, so the journey auto-advances extract-workbench →
     // interact-chat: a genuine onboarding journey advance happens as a
     // side-effect of the seeded turn.
     await waitFor(() => {
       expect(lastStep).toBe("interact-chat");
     });
     // The step REALLY changed (guards against a vacuous pass if the journey
-    // never moved): we observed both doc-viewer and interact-chat.
-    expect(stepsSeen).toContain("doc-viewer");
+    // never moved): we observed both extract-workbench and interact-chat.
+    expect(stepsSeen).toContain("extract-workbench");
     expect(stepsSeen).toContain("interact-chat");
 
     // After that frame advance, the conversation must NOT have remounted: the
@@ -1127,18 +1143,21 @@ describe("ChatColumn", () => {
     }
 
     const user = userEvent.setup();
+    // Start at the chat-enabled Extract step (the Understand scan beat at f2
+    // locks the composer); set the intro done-flag so the experience does not
+    // re-snap to the scanning Understand step on an empty-thread mount.
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     renderWithChatColumnApi(
       <>
         <ChatColumn role="anonymous" scope={{ type: "none" }} />
         <StepProbe />
       </>,
-      { initialFrame: "f2", initialScenario: "utility" },
+      { initialFrame: "f3", initialScenario: "utility" },
     );
 
-    expect(resumeAnchor).toBe("doc-viewer");
+    expect(resumeAnchor).toBe("extract-workbench");
 
-    // First real send → onboarding Choreography auto-advances Understand →
-    // Interact.
+    // First real send → onboarding Choreography auto-advances → Interact.
     const input = screen.getByTestId("chat-live-input").querySelector("input")!;
     await user.type(input, "Reconcile the totals.");
     await user.click(screen.getByTestId("chat-live-send"));
@@ -1185,8 +1204,9 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -1276,8 +1296,9 @@ describe("ChatColumn", () => {
       };
 
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<Harness />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -1347,8 +1368,9 @@ describe("ChatColumn", () => {
       };
 
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<Harness />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -1392,8 +1414,9 @@ describe("ChatColumn", () => {
       });
 
       const user = userEvent.setup();
+      window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
       renderWithChatColumnApi(<ChatColumn role="anonymous" scope={{ type: "none" }} />, {
-        initialFrame: "f2",
+        initialFrame: "f5",
         initialScenario: "utility",
       });
       const input = screen.getByTestId("chat-live-input").querySelector("input")!;

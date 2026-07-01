@@ -5,7 +5,9 @@ import {
   reportSectionItemSchema,
   rewriteItemRequestSchema,
   rewriteItemResultSchema,
+  draftTemplateSchema,
   type RewriteItemResult,
+  type DraftTemplate,
 } from "@groundx/shared";
 
 // agentic-template-item-editor Task 1.1 — the shared wire contracts for the
@@ -95,5 +97,32 @@ describe("rewriteItemResultSchema", () => {
       reasoning: "tightened to the service-address label",
     };
     expect(rewriteItemResultSchema.safeParse(value).success).toBe(true);
+  });
+});
+
+describe("draftTemplateSchema (uncommitted draft — nullable name)", () => {
+  it("accepts an extract draft with a NULL name (not yet committed)", () => {
+    const draft: DraftTemplate = {
+      id: "draft-1",
+      kind: "extract",
+      name: null,
+      body: { categories: [{ id: "c1", type: "statement", name: "Totals", fields: [] }] },
+    };
+    expect(draftTemplateSchema.safeParse(draft).success).toBe(true);
+  });
+  it("accepts a committed name too (draft carries a name once the user names it)", () => {
+    expect(
+      draftTemplateSchema.safeParse({
+        id: "draft-1",
+        kind: "extract",
+        name: "Utility (custom)",
+        body: { categories: [] },
+      }).success,
+    ).toBe(true);
+  });
+  it("rejects a missing name key (nullable, but the key is required — explicit intent)", () => {
+    expect(
+      draftTemplateSchema.safeParse({ id: "draft-1", kind: "extract", body: { categories: [] } }).success,
+    ).toBe(false);
   });
 });

@@ -53,7 +53,31 @@ describe("upsertChatSessionEntity (RT-03 client)", () => {
       reachedStagesJson: JSON.stringify(["ingest", "understand"]),
       scanProgressJson: null,
       extractedValuesJson: null,
+      draftTemplateJson: null,
     });
+  });
+
+  it("serializes the uncommitted draft Template into draftTemplateJson (agentic-template-item-editor)", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    const draft = JSON.stringify({
+      name: null,
+      kind: "extract",
+      categories: [{ name: "Totals", fields: [{ id: "f1", name: "Amount Due", type: "currency" }] }],
+    });
+    await upsertChatSessionEntity({
+      chatSessionId: "chat-1",
+      entityKey: "sample:utility",
+      lastStepJson: JSON.stringify({ kind: "extract-workbench", scenarioId: "utility" }),
+      reachedStagesJson: "[]",
+      draftTemplateJson: draft,
+    });
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.draftTemplateJson).toBe(draft);
   });
 
   it("URL-encodes session id + entity key so colons + slashes survive routing", async () => {

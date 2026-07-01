@@ -80,6 +80,16 @@ const GUARDED_TABLES: GuardedTable[] = [
       // Every grant data column round-trips into ProjectGrantRecord.
     },
   },
+  {
+    // agentic-template-item-editor added draft_template_json here; guarding the
+    // table makes its round-trip (and every peer column's) non-vacuous — a future
+    // write-only column on the entity twin turns this RED.
+    table: "chat_session_entities",
+    mapperFn: "rowToChatSessionEntity",
+    structuralExempt: {
+      // Every data column round-trips into ChatSessionEntityRecord.
+    },
+  },
 ];
 
 function readRepoSource(): string {

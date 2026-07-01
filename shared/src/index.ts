@@ -466,6 +466,23 @@ export const templateSaveInputSchema = z.discriminatedUnion("kind", [
 export type TemplateSaveInput = z.infer<typeof templateSaveInputSchema>;
 
 /**
+ * agentic-template-item-editor — the UNCOMMITTED draft template shape. Same as
+ * `TemplateSaveInput` (id + kind + resolved body) EXCEPT `name` is nullable:
+ * an onboarding/anon draft has no committed name yet (`name: null` until the
+ * user names + saves it). Persisted on the entity twin (`draft_template_json`)
+ * + the localStorage snapshot so the user's in-progress question set survives a
+ * reload even when no committed `Template` can be saved. On commit, the name is
+ * filled and it hands off cleanly to `templateSaveInputSchema`. `name` is
+ * `.nullable()` (NOT `.optional()`) so the key is always present — an explicit
+ * "not named yet", never an accidental omission.
+ */
+export const draftTemplateSchema = z.discriminatedUnion("kind", [
+  z.object({ id: z.string(), kind: z.literal("extract"), name: z.string().nullable(), body: extractBodySchema }),
+  z.object({ id: z.string(), kind: z.literal("report"), name: z.string().nullable(), body: reportBodySchema }),
+]);
+export type DraftTemplate = z.infer<typeof draftTemplateSchema>;
+
+/**
  * Sanitize an untrusted value (DB-read or wire) into a typed `Template`, or
  * `null` if it doesn't validate. The single boundary sanitizer (parallels
  * `parseCitations`); the repo row-mapper and any wire boundary route through it

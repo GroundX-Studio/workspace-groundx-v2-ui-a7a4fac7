@@ -227,6 +227,40 @@ describe("ChatStoreContext", () => {
     expect(entity.lastStep).toEqual({ kind: "interact-chat" });
   });
 
+  // agentic-template-item-editor Task 5.1 — the uncommitted draft template is
+  // serialized to the localStorage cache so an onboarding/anon reload restores
+  // the user's in-progress edits (DB is the durable twin; localStorage is the
+  // same-device fast path). Serialize + rehydrate are the two halves.
+  it("serializes an entity's draftTemplate to localStorage and rehydrates it (keep-their-edits round-trip)", () => {
+    const draft = {
+      id: "draft-utility",
+      kind: "extract" as const,
+      name: null,
+      body: { categories: [{ id: "c1", type: "statement" as const, name: "Totals", fields: [] }] },
+    };
+    const { result, unmount } = renderHook(() => useChatStore(), { wrapper });
+    act(() => {
+      result.current.newSession();
+      result.current.upsertEntityAndActivate("sample", "utility", {
+        lastStep: { kind: "extract-workbench", scenarioId: "utility" },
+      });
+    });
+    act(() => {
+      result.current.updateActiveEntity((entity) => ({ ...entity, draftTemplate: draft }));
+    });
+
+    // Serialize half: the draft is in the persisted blob.
+    const raw = window.localStorage.getItem("groundx-onboarding.chat-store.v1");
+    expect(raw).not.toBeNull();
+    expect(JSON.parse(raw!).sessions[0].entities[0][1].draftTemplate).toEqual(draft);
+
+    // Rehydrate half: a fresh provider (a "reload") restores the draft verbatim.
+    unmount();
+    const { result: reloaded } = renderHook(() => useChatStore(), { wrapper });
+    const active = reloaded.current.state.sessions.get(reloaded.current.state.activeSessionId!)!;
+    expect(active.entities.get("sample:utility" as never)?.draftTemplate).toEqual(draft);
+  });
+
   // -----------------------------------------------------------------
   // Phase E — ViewerEvent recording
   // -----------------------------------------------------------------

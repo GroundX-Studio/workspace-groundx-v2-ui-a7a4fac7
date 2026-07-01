@@ -15,6 +15,7 @@ import Box from "@mui/material/Box";
 import { useEffect, useRef, type FC } from "react";
 
 import { useWidgetRole } from "@/lib/widgetRole";
+import { useUnderstandScanningActive } from "@/hooks/useUnderstandScanningActive";
 
 import type { ChatExperience } from "./ChatExperience";
 import { LiveChatInputBar, LiveTurnList } from "./chatPrimitives";
@@ -74,6 +75,12 @@ export const ConversationFlow: FC<ConversationFlowProps> = ({ chatSessionId, exp
   const Intro = experience?.Intro;
   const Choreography = experience?.Choreography;
 
+  // understand-watch-lock — while the Understand scan beat plays, the composer
+  // is locked along with the rest of the shell: the input + Send are `disabled`
+  // (MUI greys them) so it's visually obvious you can't type yet, until "Ready
+  // to analyze". Single source of truth via the shared hook; false in steady.
+  const scanLocked = useUnderstandScanningActive();
+
   return (
     <Box
       data-testid="conversation-flow"
@@ -108,7 +115,7 @@ export const ConversationFlow: FC<ConversationFlowProps> = ({ chatSessionId, exp
         />
       </Box>
       <Box sx={{ pt: 1, borderTop: `1px solid ${BORDER}` }}>
-        <LiveChatInputBar onSend={send} disabled={sending} />
+        <LiveChatInputBar onSend={send} disabled={sending || scanLocked} />
       </Box>
       {/* Render-null director — observes engine lifecycle, fires side-effects
           (e.g. onboarding frame advances). Mounted last so the chat renders

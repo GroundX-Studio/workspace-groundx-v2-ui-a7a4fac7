@@ -4,7 +4,7 @@ import type { GateStatus } from "@/contexts/OnboardingSessionContext/types";
 // module (type-only → erased → cycle-free with the orchestrator's runtime
 // dependency on ChatStore). Re-exported below for back-compat consumers.
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext/types";
-import type { Citation, ContentScope, NormalizedBbox, PersistedViewerStep, SchemaFieldExtractionResult, Source, TemplateFieldType } from "@groundx/shared";
+import type { Citation, ContentScope, DraftTemplate, NormalizedBbox, PersistedViewerStep, SchemaFieldExtractionResult, Source, TemplateFieldType } from "@groundx/shared";
 
 /**
  * Chat session foundation — see /memory/project_chat_session_model.md.
@@ -665,6 +665,19 @@ export interface ChatStoreApi {
   upsertEntityAndActivate: (kind: EntityKind, id: string, defaults: Partial<EntitySession>) => EntityKey;
   /** Mutate the active entity inside the active session. No-op if either is missing. */
   updateActiveEntity: (updater: (session: EntitySession) => EntitySession) => void;
+
+  /**
+   * agentic-template-item-editor — the editor SAVE-MOMENT primitive. Flattens
+   * the current schema edits into the active entity's uncommitted
+   * `draftTemplate` (the resolved question set) AND clears the session's
+   * `pendingSchemaOverlay`, atomically, then mirrors the draft to the DB twin
+   * (`draft_template_json`) + the localStorage cache. Because the draft now WINS
+   * as the base (design D5), resetting the overlay is what prevents a second
+   * save from re-applying the just-flattened added fields (double-add). Pass
+   * `null` on COMMIT (the draft became a real `Template`) to clear the draft +
+   * overlay. No-op when no active session/entity.
+   */
+  commitDraftTemplate: (draft: DraftTemplate | null) => void;
 
   /**
    * Append a ViewerEvent to the active session's `viewerHistory`.

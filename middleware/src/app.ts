@@ -835,6 +835,7 @@ export function createApp({
             reachedStagesJson?: unknown;
             scanProgressJson?: unknown;
             extractedValuesJson?: unknown;
+            draftTemplateJson?: unknown;
           }
         | null;
       if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -923,6 +924,10 @@ export function createApp({
           body.extractedValuesJson !== undefined
             ? (body.extractedValuesJson as string | null)
             : existing?.extractedValuesJson ?? null,
+        draftTemplateJson:
+          body.draftTemplateJson !== undefined
+            ? (body.draftTemplateJson as string | null)
+            : existing?.draftTemplateJson ?? null,
         // Server-only fields (CF-15 scope refs) — never set by a client
         // PUT. They are written by the entity→scope producer above
         // (`produced`, first write only) and preserved thereafter. The

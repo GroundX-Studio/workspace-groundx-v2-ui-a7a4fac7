@@ -102,8 +102,11 @@ describe("ConversationFlow (no experience → bare chat)", () => {
     });
 
     const user = userEvent.setup();
+    // Chat is exercised in a chat-ENABLED state. The Understand scan beat
+    // (`f2`, a `scanning` doc-viewer) locks the composer (understand-watch-lock);
+    // seed the post-scan Interact step so the composer is live.
     renderWithConversationApi(<ActiveConversationFlow />, {
-      initialFrame: "f2",
+      initialFrame: "f5",
       initialScenario: "utility",
     });
 
@@ -229,13 +232,18 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
       return null;
     }
 
+    // The "first user send" happens AFTER the scan is done (the composer is
+    // locked during the scan — understand-watch-lock). Mark the scan as already
+    // played (suppresses the intro re-snap) and seed the post-scan Extract step
+    // so the composer is live; the first send then advances Understand→Interact.
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     const user = userEvent.setup();
     renderWithConversationApi(
       <>
         <ActiveConversationFlow experience={onboardingExperience()} />
         <StepProbe />
       </>,
-      { initialFrame: "f2", initialScenario: "utility" },
+      { initialFrame: "f3", initialScenario: "utility" },
     );
 
     const input = screen.getByTestId("chat-live-input").querySelector("input")!;
@@ -263,10 +271,12 @@ describe("ConversationFlow (onboarding experience → scripted intro + choreogra
       compressionRan: false,
     });
 
+    // Send after the scan (composer is locked during it — understand-watch-lock).
+    window.sessionStorage.setItem("groundx-onboarding.thinking-stream-done.utility", "1");
     const user = userEvent.setup();
     renderWithConversationApi(
       <ActiveConversationFlow experience={onboardingExperience()} />,
-      { initialFrame: "f2", initialScenario: "utility" },
+      { initialFrame: "f3", initialScenario: "utility" },
     );
 
     const input = screen.getByTestId("chat-live-input").querySelector("input")!;

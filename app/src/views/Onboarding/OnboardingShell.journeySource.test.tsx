@@ -236,13 +236,16 @@ describe("OnboardingShell — frame-free journey-progress source (T3)", () => {
     });
     expect(activeSubstepLabel()).toBe("Interact");
 
-    // The persisted checkmarks survive the reload VERBATIM. Understand + Integrate
-    // are both done-traversed (reached, not current); Integrate is the
-    // load-bearing assertion — a `currentStep`-seeded strip would have lost it.
+    // The persisted checkmarks survive the reload VERBATIM. Both stay CHECKED
+    // (reached, not current); Integrate is the load-bearing assertion — a
+    // `currentStep`-seeded strip would have lost it. Understand is `done-locked`
+    // (not `done-traversed`): once at/past Analyze it's a one-time beat with
+    // nothing to revisit, so it shows the ✓ but isn't a nav target
+    // (understand-watch-lock, 2026-06-30). Integrate stays revisitable.
     expect(
       strip().getByText("Understand").closest('[role="button"]'),
-      "Understand must stay checked after reload",
-    ).toHaveAttribute("data-state", "done-traversed");
+      "Understand must stay checked after reload (done-locked: ✓ but not a nav target)",
+    ).toHaveAttribute("data-state", "done-locked");
     expect(
       strip().getByText("Integrate").closest('[role="button"]'),
       "Integrate's persisted checkmark must survive a non-contiguous reload",

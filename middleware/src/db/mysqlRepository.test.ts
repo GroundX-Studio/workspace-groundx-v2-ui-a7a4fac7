@@ -30,7 +30,11 @@ describe("MySqlAppRepository", () => {
     // 12 CREATE TABLE statements + the DROP TABLE for the superseded
     // extraction_schemas (2026-05-31-extraction-schemas-table-drop) + 2
     // information_schema reconciliation probes (one detects the pre-rename
-    // chat_session_entities table; one detects lingering dead columns) = 15. The
+    // chat_session_entities table; one detects lingering dead columns) + the
+    // agentic-template-item-editor additive draft_template_json reconcile (1
+    // probe + 1 conditional ALTER — the mock returns 0 rows so the ALTER fires;
+    // on a real fresh DB the CREATE already added the column so the probe
+    // returns >0 and no ALTER is issued) = 17. The
     // extraction_schemas table + its boot copy-INSERT…SELECT were removed once
     // `templates` soaked one full prod release; the DROP sheds the table on the next
     // boot. The 12th CREATE is chat_turn_index (chat-response-streaming P2.2 from-DB
@@ -38,8 +42,11 @@ describe("MySqlAppRepository", () => {
     // DROP COLUMN is issued (those paths are covered by their own tests). Note: the
     // probes pass table/column names as PARAMETERS, so the SQL strings here never
     // contain the dead-column literals — the dead-column guards below still hold.
-    expect(statements).toHaveLength(15);
+    expect(statements).toHaveLength(17);
     const joined = statements.join("\n");
+    // agentic-template-item-editor — the uncommitted draft-Template column lands
+    // on the chat_session_entities twin (additive ALTER, idempotent).
+    expect(joined).toContain("draft_template_json");
     // chat-response-streaming P2.2 — the streaming-turn → message index (CREATE-only,
     // no ALTER, so it lands on fresh AND already-provisioned DBs identically).
     expect(joined).toContain("CREATE TABLE IF NOT EXISTS chat_turn_index");

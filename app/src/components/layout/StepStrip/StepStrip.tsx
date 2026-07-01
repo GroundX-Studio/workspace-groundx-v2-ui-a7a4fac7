@@ -57,6 +57,16 @@ const stepChipSx = (state: StepPillState) => {
         color: NAVY,
         fontWeight: FONT_WEIGHT_LABEL,
       };
+    case "done-locked":
+      // Completed like done-traversed (✓ tinted) but NOT a nav target — no
+      // hover, default cursor. See StepPillState docs (Understand watch beat).
+      return {
+        backgroundColor: TINT,
+        borderColor: NAVY,
+        color: NAVY,
+        fontWeight: FONT_WEIGHT_LABEL,
+        cursor: "default",
+      };
     case "disabled":
       return {
         backgroundColor: WHITE,
@@ -78,7 +88,7 @@ const stepChipSx = (state: StepPillState) => {
 };
 
 const badgeSx = (state: StepPillState, _n: number | "check") => {
-  const filled = state === "active" || state === "done-traversed";
+  const filled = state === "active" || state === "done-traversed" || state === "done-locked";
   return {
     display: "inline-flex",
     alignItems: "center",
@@ -102,15 +112,19 @@ const Pill: FC<{
   onClick?: (id: StepDescriptor["id"]) => void;
 }> = ({ step, index, onClick }) => {
   const disabled = step.state === "disabled";
-  const showCheck = step.state === "done-traversed";
-  const interactive = !disabled && Boolean(onClick);
+  const locked = step.state === "done-locked";
+  const showCheck = step.state === "done-traversed" || locked;
+  // `done-locked` is completed-but-not-revisitable: render the ✓ but make it a
+  // non-target (no onClick, not focusable), like a disabled pill but without the
+  // "available after sign-in" affordance/styling.
+  const interactive = !disabled && !locked && Boolean(onClick);
   return (
     <Box
       role="button"
       aria-current={step.state === "active" ? "step" : undefined}
-      aria-disabled={disabled || undefined}
+      aria-disabled={disabled || locked || undefined}
       data-state={step.state}
-      tabIndex={disabled ? -1 : 0}
+      tabIndex={interactive ? 0 : -1}
       title={disabled ? "Available after sign-in" : undefined}
       onClick={interactive ? () => onClick!(step.id) : undefined}
       onKeyDown={(event) => {
@@ -212,8 +226,11 @@ function findCurrent(steps: StepDescriptor[]): { current: StepDescriptor; n: num
 
 const CompactStrip: FC<{ steps: StepDescriptor[] }> = ({ steps }) => {
   const found = findCurrent(steps);
-  // Progress as a percentage; we count done + active vs total.
-  const completed = steps.filter((s) => s.state === "done-traversed").length;
+  // Progress as a percentage; we count done + active vs total. `done-locked`
+  // (e.g. Understand once past it) is still a COMPLETED step for progress.
+  const completed = steps.filter(
+    (s) => s.state === "done-traversed" || s.state === "done-locked",
+  ).length;
   const total = steps.length;
   const fillPct = ((completed + (found ? 0.5 : 0)) / total) * 100;
   return (

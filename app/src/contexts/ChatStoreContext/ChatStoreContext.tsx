@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useApi } from "@/contexts/ApiContext";
 import { makeEntityKey, type EntityKey, type EntityKind, type EntitySession } from "@/contexts/EntitySessionStoreContext";
 import { cryptoRandom } from "@/lib/cryptoRandom";
-import { compileScopeFilter, parseCanvasIntent, type ContentScope, type JourneyStage, type NormalizedBbox, type PersistedViewerStep } from "@groundx/shared";
+import { compileScopeFilter, parseCanvasIntent, type ContentScope, type DraftTemplate, type JourneyStage, type NormalizedBbox, type PersistedViewerStep } from "@groundx/shared";
 
 import {
   parseChatStoreSnapshot,
@@ -245,6 +245,11 @@ function serialize(state: ChatStoreState): string {
           reachedStages: [...entity.reachedStages],
           createdAt: entity.createdAt,
           lastVisitedAt: entity.lastVisitedAt,
+          // agentic-template-item-editor — mirror the uncommitted draft into the
+          // localStorage cache so an anon/onboarding reload restores the user's
+          // in-progress edits. Omit the key entirely when there is no draft (the
+          // `.strict()` schema accepts its absence; keeps the blob small).
+          ...(entity.draftTemplate ? { draftTemplate: entity.draftTemplate } : {}),
         },
       ]);
     }
@@ -310,6 +315,10 @@ function deserialize(raw: string): ChatStoreState | null {
           reachedStages: new Set<JourneyStage>(entity.reachedStages),
           createdAt: entity.createdAt,
           lastVisitedAt: entity.lastVisitedAt,
+          // Restore the uncommitted draft template (the working question set)
+          // so the schema editor resumes on the user's edits (design D5: the
+          // draft wins as the base). Absent in older snapshots → null.
+          draftTemplate: entity.draftTemplate ?? null,
         });
       }
       sessions.set(s.id, {
@@ -666,6 +675,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         entityKey: EntityKey;
         lastStepJson: string;
         reachedStagesJson: string;
+        draftTemplateJson: string | null;
       };
       // Use a 1-slot tuple so the closure-mutation assignment doesn't
       // confuse TS's flow-analysis narrowing (which otherwise sees the
@@ -708,6 +718,9 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
           entityKey: key,
           lastStepJson: JSON.stringify(committed.lastStep),
           reachedStagesJson: JSON.stringify([...committed.reachedStages]),
+          // Preserve any existing draft on (re)activation (`committed` spreads
+          // `existing`); a freshly-created entity has none (→ null).
+          draftTemplateJson: committed.draftTemplate ? JSON.stringify(committed.draftTemplate) : null,
         };
         return { ...prev, sessions };
       });
@@ -842,6 +855,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       entityKey: EntityKey;
       lastStepJson: string;
       reachedStagesJson: string;
+      draftTemplateJson: string | null;
     } | null = null;
 
     setState((prev) => {
@@ -862,6 +876,11 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         entityKey: current.activeEntityKey,
         lastStepJson: JSON.stringify(committed.lastStep),
         reachedStagesJson: JSON.stringify([...committed.reachedStages]),
+        // agentic-template-item-editor — mirror the uncommitted draft to the DB
+        // twin. The in-memory value is authoritative (localStorage-hydrated on
+        // the same device), so serializing it here preserves an existing draft
+        // across unrelated entity updates AND clears it (→ null) once committed.
+        draftTemplateJson: committed.draftTemplate ? JSON.stringify(committed.draftTemplate) : null,
       };
       return { ...prev, sessions };
     });
@@ -870,6 +889,57 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       void api.chat.upsertChatSessionEntity(putPayload);
     }
   }, [api.chat]);
+
+  // agentic-template-item-editor — the editor SAVE-MOMENT primitive. Sets the
+  // active entity's uncommitted `draftTemplate` AND resets the session overlay
+  // in ONE state transition (the draft is the flattened, resolved question set;
+  // the overlay's edits are now baked into it, so clearing the overlay prevents
+  // a second save from re-adding the same fields on top of the draft base). Then
+  // mirrors the draft to the DB twin + localStorage via the same PUT path as
+  // updateActiveEntity. Pass `null` on commit to clear both.
+  const commitDraftTemplate = useCallback(
+    (draft: DraftTemplate | null) => {
+      let putPayload: {
+        chatSessionId: string;
+        entityKey: EntityKey;
+        lastStepJson: string;
+        reachedStagesJson: string;
+        draftTemplateJson: string | null;
+      } | null = null;
+
+      setState((prev) => {
+        if (!prev.activeSessionId) return prev;
+        const current = prev.sessions.get(prev.activeSessionId);
+        if (!current || !current.activeEntityKey) return prev;
+        const entity = current.entities.get(current.activeEntityKey);
+        if (!entity) return prev;
+        const committed: EntitySession = { ...entity, draftTemplate: draft, lastVisitedAt: Date.now() };
+        const entities = new Map(current.entities);
+        entities.set(current.activeEntityKey, committed);
+        const sessions = new Map(prev.sessions);
+        sessions.set(prev.activeSessionId, {
+          ...current,
+          entities,
+          // Flatten: the overlay's edits are now in the draft base.
+          pendingSchemaOverlay: EMPTY_PENDING_SCHEMA_OVERLAY,
+          updatedAt: Date.now(),
+        });
+        putPayload = {
+          chatSessionId: prev.activeSessionId,
+          entityKey: current.activeEntityKey,
+          lastStepJson: JSON.stringify(committed.lastStep),
+          reachedStagesJson: JSON.stringify([...committed.reachedStages]),
+          draftTemplateJson: draft ? JSON.stringify(draft) : null,
+        };
+        return { ...prev, sessions };
+      });
+
+      if (putPayload) {
+        void api.chat.upsertChatSessionEntity(putPayload);
+      }
+    },
+    [api.chat],
+  );
 
   /**
    * RT-05 — merge a server-provided list of ChatSessionRecord into
@@ -1845,6 +1915,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       activateEntity,
       upsertEntityAndActivate,
       updateActiveEntity,
+      commitDraftTemplate,
       appendViewerEvent,
       setCurrentIntent,
       hydrateFromServer,
@@ -1885,6 +1956,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
       activateEntity,
       upsertEntityAndActivate,
       updateActiveEntity,
+      commitDraftTemplate,
       appendViewerEvent,
       setCurrentIntent,
       hydrateFromServer,
