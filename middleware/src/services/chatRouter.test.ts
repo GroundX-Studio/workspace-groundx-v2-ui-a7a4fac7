@@ -2656,17 +2656,39 @@ describe("routeChat — planner-derived mode (appState)", () => {
     return repo;
   }
 
-  it("appState:true + documentSearch:false → structured", async () => {
+  it("appState:true + documentSearch:false + a KNOWN app-state topic → structured", async () => {
+    const { deps } = ragClients();
+    const planTurn = vi.fn(async () => ({
+      documentSearch: false, productKnowledge: false, extractionContext: false, appState: true,
+    }));
+    // "page budget" is one of the recognized structured sub-queries, so this
+    // stays on the structured path (a real app-state answer, not the dead-end).
+    const res = await routeChat(
+      makeRequest({ newUserMessage: "what's my page budget?" }),
+      { ...deps, repository: await repoFixture(), chatSessionId: "chat-r", planTurn },
+    );
+    expect(res.mode).toBe("structured");
+    expect(planTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("appState:true + documentSearch:false but NOT a known app-state topic → hybrid, never the 'couldn't match' dead-end", async () => {
+    // chat-QA 2026-07-01 (finding #2). The light-LLM planner over-flags appState
+    // for phrasings like "delete this document" (it sees document/data and
+    // guesses account/workspace). The structured sub-classifier then finds no
+    // matching topic and used to emit "I couldn't match … to a known query. Try
+    // pages remaining / saved schemas / …", leaking internal command vocabulary.
+    // An unmatched app-state query is a misroute → fall through to the hybrid
+    // grounded path so the user gets a real answer instead of the dead-end.
     const { deps } = ragClients();
     const planTurn = vi.fn(async () => ({
       documentSearch: false, productKnowledge: false, extractionContext: false, appState: true,
     }));
     const res = await routeChat(
-      makeRequest({ newUserMessage: "how many pages do I have left on my plan?" }),
+      makeRequest({ newUserMessage: "delete this document and wipe all the extracted data permanently" }),
       { ...deps, repository: await repoFixture(), chatSessionId: "chat-r", planTurn },
     );
-    expect(res.mode).toBe("structured");
-    expect(planTurn).toHaveBeenCalledTimes(1);
+    expect(res.mode).toBe("hybrid");
+    expect(res.answer).not.toMatch(/couldn't match|to a known query/i);
   });
 
   it("appState:true + documentSearch:true → hybrid", async () => {

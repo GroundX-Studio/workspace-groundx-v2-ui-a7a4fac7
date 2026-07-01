@@ -33,6 +33,17 @@ describe("buildTurnRouterPrompt", () => {
     expect(system).toContain('"appState": <bool>');
     expect(system).toMatch(/appState.*false when unsure/is);
   });
+
+  // chat-QA 2026-07-01 (finding #2, secondary). appState is account/workspace
+  // META only — acting on a document or its data (delete/export/re-run) or
+  // asking about document CONTENT is documentSearch, not appState. This keeps
+  // the planner from over-routing phrasings like "delete this document" into
+  // the structured account path.
+  it("scopes appState to account/workspace meta, excluding document content or actions", () => {
+    const { system } = buildTurnRouterPrompt("hi");
+    expect(system).toMatch(/NOT appState/);
+    expect(system).toMatch(/delete|export|re-run/i);
+  });
 });
 
 describe("fragments", () => {
@@ -106,6 +117,18 @@ describe("buildGroundedSystem", () => {
     expect(system).toMatch(/navigation or UI[- ]action tool/i);
     expect(system).toMatch(/SAME turn/i);
     expect(system).toMatch(/busy person/i);
+  });
+
+  // chat-QA 2026-07-01 (finding #3). "Show me exactly where the total appears"
+  // was answered with a bare open-the-document navigation (no answer, wrong
+  // page, no highlight). A locate/point-to/highlight request is a CONTENT
+  // question: answer + cite, and the citation places the on-page highlight.
+  it("treats a 'where is X / show me where' request as a cited answer, not a bare navigation", () => {
+    const system = buildGroundedSystem();
+    expect(system).toMatch(/LOCATING A VALUE/);
+    expect(system).toMatch(/show me where|point to|highlight/i);
+    expect(system).toMatch(/your citation places the highlight/i);
+    expect(system).toMatch(/not (only )?a bare.*navigation|bare open-the-document/i);
   });
 
   it("extraction option adds the EXTRACTED FIELDS guidance", () => {

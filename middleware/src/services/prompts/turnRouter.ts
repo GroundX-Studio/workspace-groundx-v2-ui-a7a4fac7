@@ -27,10 +27,12 @@ export function buildTurnRouterPrompt(question: string): { system: string; user:
     "dates, line items) — generally any document-content question, and " +
     "whenever you are unsure. False for pure small talk and pure product " +
     "questions.\n" +
-    "- appState: true when the question is about the USER'S ACCOUNT or " +
-    "WORKSPACE rather than document content or the product — saved " +
+    "- appState: true ONLY when the question is about the USER'S ACCOUNT or " +
+    "WORKSPACE settings rather than document content or the product — saved " +
     "schemas, page budget or pages remaining, API keys, subscription, " +
-    "their projects or workspace. false when unsure.\n" +
+    "their projects or workspace list. Acting ON a document or its data " +
+    "(delete, export, re-run, edit) or asking about a document's CONTENT is " +
+    "NOT appState — that is documentSearch. false when unsure.\n" +
     "documentSearch and productKnowledge can both be true (e.g. \"how " +
     "would GroundX extract the meter number from this bill?\"). All false " +
     "only for pure small talk with no document tie-in.";

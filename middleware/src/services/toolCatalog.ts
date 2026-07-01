@@ -161,6 +161,19 @@ const openDocument: ServerTool = {
     "Open a document in the viewer pane. Use when the user references a document " +
     "by name, asks to see a source, or you are about to cite the document and want " +
     "the source visible while the user reads your answer.",
+  // chat-QA 2026-07-01 (finding #3) — locate requests ("show me where the total
+  // is", "point to the due date", "highlight X") were being satisfied by calling
+  // this tool alone, which only opens a page and CANNOT mark the spot (it carries
+  // no bbox). The on-page highlight comes from the CITATION on an answer, so a
+  // locate request must be ANSWERED, not just navigated to.
+  promptGuidance:
+    "This tool only brings a page into view — it CANNOT highlight a specific value " +
+    "(it has no way to mark a spot on the page). When the user asks WHERE a value " +
+    "is, to point to it, or to highlight it, do NOT answer by calling this tool: " +
+    "answer the value in text and cite it. The citation is what draws the " +
+    "highlight on the exact spot. Reserve this tool for \"open document X\" / " +
+    "\"show me the source\" requests that name a document rather than ask to locate " +
+    "a value.",
   category: "read",
   inputSchema: z.object({
     documentId: z

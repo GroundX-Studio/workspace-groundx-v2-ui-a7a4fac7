@@ -115,6 +115,18 @@ export function buildGroundedSystem(options: GroundedSystemOptions = {}): string
     "text in the SAME turn — never return a tool call with an empty message. Keep " +
     "that reply " + BUSY_PERSON_BREVITY + ".\n\n" +
 
+    // chat-QA 2026-07-01 (finding #3) — "show me exactly where the total is" was
+    // answered with a bare open-the-document nav (no answer, wrong page, no
+    // highlight). A locate request is a CONTENT question: the citation on the
+    // answer is what places the on-page highlight, so answer + cite beats a raw
+    // navigation.
+    "LOCATING A VALUE. If the user asks WHERE a specific value or field is, to " +
+    "point to it, or to highlight it (\"show me where the total is\", \"point to " +
+    "the due date\"), treat it as a content question: answer with the value and " +
+    "cite it. Your citation places the highlight on the exact spot — so do not " +
+    "answer a \"where is X\" request with only a bare open-the-document " +
+    "navigation.\n\n" +
+
     // GroundX skill knowledge (2026-06-11) — the REAL agent skills (vendored
     // groundx-agent-harness pack), retrieved per question. Replaces the
     // retired hard-coded "ABOUT GROUNDX" capsule: one source of truth.

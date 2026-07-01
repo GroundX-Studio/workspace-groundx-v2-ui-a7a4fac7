@@ -28,7 +28,7 @@
  *   - ragPipeline.ts     — grounded search → prompt → LLM → citations.
  */
 
-import { runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
+import { classifyStructuredQuery, runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
 import { classifyChatMode, modeFromIntent } from "./chatClassifier.js";
 import { searchGroundX } from "./groundxSearch.js";
 import { runRagPipeline } from "./ragPipeline.js";
@@ -157,7 +157,18 @@ export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps
     partnerClient: deps.partnerClient,
   };
   if (mode === "structured") {
-    return runStructuredQuery(request, structuredDeps);
+    // chat-QA 2026-07-01 (finding #2). The structured path only knows a fixed
+    // set of account/workspace topics (pages remaining, saved schemas, API
+    // keys, projects…). When the planner over-flags `appState` for a phrasing
+    // it shouldn't (e.g. "delete this document"), the sub-classifier finds no
+    // match and would dead-end with "I couldn't match … to a known query",
+    // leaking internal command names. An UNMATCHED app-state query is proof of
+    // a misroute → fall through to the hybrid grounded path (a real answer with
+    // workspace context) instead of the dead-end. Known topics stay structured.
+    if (classifyStructuredQuery(request) !== "unknown") {
+      return runStructuredQuery(request, structuredDeps);
+    }
+    mode = "hybrid";
   }
   // Hybrid (chat-architecture-hardening Task 3): the grounded seam owns the
   // ONLY search — the former router-side hybrid search is deleted (no double
