@@ -557,3 +557,52 @@ describe("SmartReportBuilder — 2026-05-29-smart-report-screen Phase 4", () => 
     expect(vi.mocked(saveReportTemplate).mock.calls[0][0].id).toBe("rt-mine");
   });
 });
+
+// agentic-template-item-editor — the report builder reuses the same rewrite hook
+// + a new per-section preview (net-new UI in SectionRow).
+describe("SmartReportBuilder — rewrite + preview (agentic-template-item-editor)", () => {
+  it("rewrite proposes a new question; Accept applies it (name never changes)", async () => {
+    const rewrite = vi.fn(async () => ({
+      kind: "report-section" as const,
+      proposedItem: {
+        id: "billing_summary",
+        name: "billing_summary",
+        renderAs: "BULLETS" as const,
+        question: "List each meter and its charge for the billing period.",
+        instructions: ["one bullet per meter"],
+        variables: [],
+      },
+      reasoning: "the answer is a list, so BULLETS fits",
+    }));
+    const user = userEvent.setup();
+    renderWithSeededRows(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+      initialFrame: "f4a",
+      initialScenario: "utility",
+      api: { templateItem: { rewrite } } as never,
+    });
+    await user.click(await screen.findByTestId("report-builder-edit-billing_summary"));
+    await user.click(screen.getByTestId("report-builder-rewrite-billing_summary"));
+    const proposal = await screen.findByTestId("report-builder-rewrite-proposal-billing_summary");
+    expect(proposal).toHaveTextContent("List each meter and its charge");
+    expect(rewrite).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByTestId("report-builder-rewrite-accept-billing_summary"));
+    const questionInput = document.getElementById("report-builder-question-input-billing_summary") as HTMLTextAreaElement;
+    expect(questionInput.value).toBe("List each meter and its charge for the billing period.");
+    expect(screen.queryByTestId("report-builder-rewrite-proposal-billing_summary")).not.toBeInTheDocument();
+  });
+
+  it("preview renders the single section's answer", async () => {
+    const previewSection = vi.fn(async () => ({ sectionId: "billing_summary", body: "Total billed: $7,613.20.", citations: [] }));
+    const user = userEvent.setup();
+    renderWithSeededRows(<SmartReportBuilder role="member" scope={UTILITY_SCOPE} />, {
+      initialFrame: "f4a",
+      initialScenario: "utility",
+      api: { templateItem: { previewSection } } as never,
+    });
+    await user.click(await screen.findByTestId("report-builder-edit-billing_summary"));
+    await user.click(screen.getByTestId("report-builder-preview-billing_summary"));
+    const result = await screen.findByTestId("report-builder-preview-result-billing_summary");
+    expect(result).toHaveTextContent("Total billed: $7,613.20.");
+    expect(previewSection).toHaveBeenCalledTimes(1);
+  });
+});

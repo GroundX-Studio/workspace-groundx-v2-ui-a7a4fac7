@@ -66,6 +66,7 @@ import {
 } from "@/constants";
 import type { ReportTemplateDefinition, SaveReportTemplateInput } from "@/api/smartReport";
 import { useApi } from "@/contexts/ApiContext";
+import { useTemplateItemAgent } from "@/hooks/useTemplateItemAgent";
 import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import type { ReportSectionEdit, ReportSectionItem, ReportSectionRenderAs } from "@/contexts/ChatStoreContext";
@@ -577,6 +578,61 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
   const [variableName, setVariableName] = useState("");
   // The `⋮` menu open state (reused from the schema-design row menu).
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // agentic-template-item-editor — rewrite-with-agent + per-section preview
+  // (net-new in the report builder), reusing the shared hook + preview endpoint.
+  const api = useApi();
+  const { state: chatStoreState } = useChatStore();
+  const agent = useTemplateItemAgent("report-section");
+  const [preview, setPreview] = useState<{ body: string } | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const parsedInstructions = () =>
+    instructions
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+  const currentSectionItem = () => ({
+    id: row.id,
+    name,
+    renderAs,
+    question,
+    instructions: parsedInstructions(),
+    variables,
+  });
+  const requestRewrite = () => {
+    const chatSessionId = chatStoreState.activeSessionId;
+    if (!chatSessionId) return;
+    void agent.requestRewrite({
+      chatSessionId,
+      item: currentSectionItem(),
+      ...(preview ? { currentResult: { sectionId: row.id, body: preview.body, citations: [] } } : {}),
+    });
+  };
+  const acceptProposal = () => {
+    const p = agent.proposal;
+    if (!p || p.kind !== "report-section") return;
+    const item = p.proposedItem;
+    setRenderAs(item.renderAs);
+    setQuestion(item.question);
+    setInstructions((item.instructions ?? []).join("\n"));
+    setVariables(item.variables ?? []);
+    // NB: item.name is intentionally NOT applied (name is held fixed).
+    agent.discardProposal();
+  };
+  const requestPreview = async () => {
+    const chatSessionId = chatStoreState.activeSessionId;
+    if (!chatSessionId) return;
+    setPreviewing(true);
+    try {
+      const result = await api.templateItem.previewSection({ chatSessionId, section: currentSectionItem() });
+      setPreview({ body: result.body });
+    } catch {
+      setPreview({ body: "Couldn't preview this section — try again." });
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
   const textareaSx = {
     width: "100%",
     boxSizing: "border-box",
@@ -768,6 +824,55 @@ const SectionRow: FC<SectionRowProps> = ({ row, open, onOpen, onClose, onSave, o
               onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setQuestion(e.target.value)}
               sx={textareaSx}
             />
+            <Stack direction="row" spacing={1.5} sx={{ mt: 0.5 }}>
+              <Box
+                component="button"
+                type="button"
+                data-testid={`report-builder-rewrite-${row.id}`}
+                onClick={requestRewrite}
+                disabled={agent.rewriting}
+                sx={{ border: "none", background: "none", color: NAVY, cursor: agent.rewriting ? "wait" : "pointer", fontFamily: "inherit", fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_LABEL, padding: 0, opacity: agent.rewriting ? 0.6 : 1, "&:hover": { textDecoration: "underline" } }}
+              >
+                {agent.rewriting ? "✨ rewriting…" : "✨ rewrite with agent"}
+              </Box>
+              <Box
+                component="button"
+                type="button"
+                data-testid={`report-builder-preview-${row.id}`}
+                onClick={requestPreview}
+                disabled={previewing}
+                sx={{ border: "none", background: "none", color: NAVY, cursor: previewing ? "wait" : "pointer", fontFamily: "inherit", fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_LABEL, padding: 0, opacity: previewing ? 0.6 : 1, "&:hover": { textDecoration: "underline" } }}
+              >
+                {previewing ? "↻ previewing…" : "↻ preview section"}
+              </Box>
+            </Stack>
+            {agent.rewriteError && (
+              <Box data-testid={`report-builder-rewrite-error-${row.id}`} sx={{ color: CORAL, fontSize: FONT_SIZE_LABEL, mt: 0.5 }}>
+                Couldn't rewrite — try again.
+              </Box>
+            )}
+            {agent.proposal && agent.proposal.kind === "report-section" && (
+              <Box data-testid={`report-builder-rewrite-proposal-${row.id}`} sx={{ mt: 1, border: `1px solid ${CORAL}`, borderRadius: BORDER_RADIUS_SM, p: 1.5, backgroundColor: WARM_OFFWHITE }}>
+                <Box sx={{ color: EYEBROW_ON_LIGHT, fontWeight: FONT_WEIGHT_HEADLINE, fontSize: FONT_SIZE_LABEL, letterSpacing: 0.4 }}>✨ SUGGESTED REWRITE</Box>
+                <Box sx={{ mt: 0.5, color: MUTED_ON_LIGHT, fontSize: FONT_SIZE_CAPTION, textDecoration: "line-through" }}>{question || "—"}</Box>
+                <Box sx={{ mt: 0.25, color: NAVY, fontSize: FONT_SIZE_CAPTION, fontWeight: FONT_WEIGHT_LABEL }}>{agent.proposal.proposedItem.question}</Box>
+                {agent.proposal.reasoning && (
+                  <Box sx={{ mt: 0.5, color: MUTED_ON_LIGHT, fontSize: FONT_SIZE_LABEL, fontStyle: "italic" }}>{agent.proposal.reasoning}</Box>
+                )}
+                <Stack direction="row" spacing={1} sx={{ mt: 1, justifyContent: "flex-end" }}>
+                  <Box component="button" type="button" data-testid={`report-builder-rewrite-discard-${row.id}`} onClick={agent.discardProposal}
+                    sx={{ border: "none", background: "none", color: BODY_TEXT, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE_LABEL, "&:hover": { color: NAVY, textDecoration: "underline" } }}>Discard</Box>
+                  <Box component="button" type="button" data-testid={`report-builder-rewrite-accept-${row.id}`} onClick={acceptProposal}
+                    sx={{ border: `1px solid ${NAVY}`, backgroundColor: NAVY, color: WHITE, borderRadius: BORDER_RADIUS_PILL, px: 1.5, py: 0.5, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_HEADLINE }}>Accept</Box>
+                </Stack>
+              </Box>
+            )}
+            {preview && (
+              <Box data-testid={`report-builder-preview-result-${row.id}`} sx={{ mt: 1, border: `1px solid ${BORDER}`, borderRadius: BORDER_RADIUS_SM, p: 1.5, backgroundColor: WHITE }}>
+                <Box sx={{ color: MUTED_ON_LIGHT, fontSize: FONT_SIZE_LABEL, letterSpacing: 0.4, mb: 0.5 }}>SECTION PREVIEW</Box>
+                <Box sx={{ color: NAVY, fontSize: FONT_SIZE_CAPTION, whiteSpace: "pre-wrap" }}>{preview.body}</Box>
+              </Box>
+            )}
           </Box>
           <Box>
             <Box

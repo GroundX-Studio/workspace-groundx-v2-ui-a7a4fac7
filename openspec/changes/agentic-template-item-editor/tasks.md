@@ -36,15 +36,14 @@ Each task is TDD (failing test first) and ends with the Discipline §10 adversar
 
 ## 7. App — shared widgets
 - [x] 7.1 (extract) The before→after proposal UI (SUGGESTED REWRITE, before/after, reasoning, Accept/Discard) is rendered INLINE in `FieldInlineEditor` — a sub-component of the Extract widget, not a new top-level widget, so no widget-contract README/sibling ceremony. Report reuses the same inline pattern in §9. (If a 3rd surface needs it, extract to a shared `RewriteProposalCard`.)
-- [ ] 7.2 Shared preview chip — extract already has one; report per-section chip lands in §9.
+- [x] 7.2 Preview chip — extract reuses its existing preview chip; report gained a per-section preview result box in §9.
 
 ## 8. App — wire Extract editor (anon + authed)
 - [x] 8.1 `FieldInlineEditor` consumes the hook; the `(rewritten)` stub onClick is fully REPLACED by `requestRewrite`; proposal card + Accept (applies type/description/instructions/format/identifiers, NEVER name) + Discard + loading/error. Rerun on a seeded field works (§5.2). Integration test green (open→rewrite→proposal→Accept→prompt updated, no stub suffix); 95 touched-suite tests green; tsc clean.
 - [x] 8.2 Extract is ONE widget (role+scope) → rewrite is available to anon + authed via the same path; only Save/export stay padlocked (unchanged). No per-role gating added (D8).
 
-## 9. App — wire Report builder (refactor existing SectionRow)
-- [ ] 9.1 Refactor the EXISTING `SectionRow` inline editor to consume the hook + reportSectionAdapter (rewrite + per-section preview) — NO new `SectionInlineEditor`. NET-NEW UI in SectionRow (it has none today): a per-section preview chip + a ↻ Rerun button + reading its result from `itemPreviews`. Failing tests first.
-- [ ] 9.2 Adversarial review.
+- [x] 9.1 Refactored the EXISTING `SectionRow` (no new component): consumes `useTemplateItemAgent("report-section")` for rewrite (before→after proposal → Accept applies renderAs/question/instructions/variables, NEVER name) + a net-new per-section preview (`↻ preview section` → `api.templateItem.previewSection` → result box). 2 integration tests (rewrite accept + preview) + 24 report tests green; tsc clean.
+- [x] 9.2 Same hook/pattern as extract (one shared implementation across both surfaces); Box-based inline UI mirroring the extract proposal card.
 
 ## 10. Closure
 - [ ] 10.1 `openspec validate --all --strict`; full app + middleware suites green; drift guards (catalog-parity, recurrence-drift, persistedColumnPolicy, no-hardcoded-styles) green.
