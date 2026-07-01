@@ -227,6 +227,59 @@ describe("useConversation (durable engine)", () => {
     });
   });
 
+  it("an explicit non-doc navigation WINS over the answer's auto-highlight (does not get yanked to the PDF)", async () => {
+    // chat-QA — a nav turn ("show me the extracted fields") that also carries a
+    // citation used to end on the PDF: the auto-highlight dispatched AFTER the
+    // showExtract intent, overriding it. The navigation must win.
+    sendChatMessage.mockResolvedValueOnce({
+      userMessageId: "u-1",
+      assistantMessageId: "a-1",
+      reply: {
+        mode: "rag",
+        answer: "Opening the extracted fields.",
+        citations: [
+          { documentId: "c3bfff49", page: 2, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.01 }, tier: "exact" },
+        ],
+        suggestedActions: [],
+        intents: [
+          {
+            name: "show_extraction",
+            arguments: { scope: { type: "documents", documentIds: ["c3bfff49"] } },
+            intent: { kind: "showExtract", scope: { type: "documents", documentIds: ["c3bfff49"] }, schemaId: "utility" },
+          },
+        ],
+        toolFailures: [],
+        proposedSchemaField: null,
+      },
+      compressionRan: false,
+    });
+
+    function StepProbe() {
+      const { state } = useChatStore();
+      const sid = state.activeSessionId;
+      const conv = useConversation(sid);
+      const sess = sid ? state.sessions.get(sid) : null;
+      const idx = sess?.viewer.currentStep.stepIndex ?? -1;
+      const top = idx >= 0 ? sess?.viewer.history[idx] : null;
+      return (
+        <div>
+          <div data-testid="probe-session-id">{sid ?? "none"}</div>
+          <button data-testid="probe-send" onClick={() => void conv.send("show me the extracted fields")}>send</button>
+          <div data-testid="active-step-kind">{top?.kind ?? "none"}</div>
+        </div>
+      );
+    }
+
+    renderWithConversationApi(<StepProbe />, { initialFrame: "f5", initialScenario: "utility" });
+    await waitFor(() => expect(screen.getByTestId("probe-session-id")).not.toHaveTextContent("none"));
+    await act(async () => { screen.getByTestId("probe-send").click(); });
+
+    // The canvas lands on the Extract workbench — NOT dragged to the cited PDF page.
+    await waitFor(() => {
+      expect(screen.getByTestId("active-step-kind")).toHaveTextContent("extract-workbench");
+    });
+  });
+
   it("'Show all sources' lights up every citation region on the canvas", async () => {
     function SourcesProbe() {
       const { state } = useChatStore();

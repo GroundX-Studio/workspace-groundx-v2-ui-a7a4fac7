@@ -173,6 +173,21 @@ export interface ConversationApi {
  * is an intent payload field, not a widget prop, so the computed key
  * sidesteps the guard without weakening it.
  */
+/**
+ * Canvas-navigation intent kinds that move the canvas to a NON-doc-viewer
+ * surface. When a reply carries one of these, the answer's auto-highlight (which
+ * forces the doc-viewer / PDF) must stand down so the explicit navigation wins.
+ * Doc-surface navs (`openDocument` / `showInteract` / `jumpToPage`) are omitted —
+ * a citation highlight there is complementary, not a conflict.
+ */
+const NON_DOC_CANVAS_NAV_KINDS: ReadonlySet<string> = new Set([
+  "showExtract",
+  "editSchema",
+  "showReport",
+  "editTemplate",
+  "showIntegrate",
+]);
+
 export function citationToHighlightIntent(c: Citation): CanvasIntent {
   // multi-region-citations: a regionless "location unknown" citation has no page
   // to jump to — open the document without a highlight.
@@ -547,11 +562,22 @@ export function useConversation(
         dispatchReplyIntents(result.reply.intents, dispatchIntent);
         // Auto-show the answer's source WITHOUT a click: as soon as an answer
         // with a citation arrives, highlight its primary citation on the canvas
-        // (same surface as clicking [1] / "Show source"). Dispatched after the
-        // LLM tool intents so an explicit navigation tool, if any, wins; "agent"
-        // source marks it as automatic, not a user gesture.
+        // (same surface as clicking [1] / "Show source"). "agent" source marks it
+        // as automatic, not a user gesture.
+        //
+        // chat-QA fix — the auto-highlight forces the doc-viewer (PDF) surface, so
+        // it must NOT fire when the SAME reply explicitly navigated the canvas to a
+        // NON-doc surface (Extract / Report / Integrate / schema editor); otherwise
+        // it dispatches AFTER the nav intent and yanks the user back to the PDF
+        // ("show me the extracted fields" landed on the doc instead of Extract).
+        // Doc-surface navs (openDocument / showInteract / jumpToPage) keep the
+        // highlight — it is complementary there. This is what "an explicit
+        // navigation wins" was always meant to guarantee.
+        const navigatedAwayFromDoc = (result.reply.intents ?? []).some((d) =>
+          NON_DOC_CANVAS_NAV_KINDS.has((d.intent as CanvasIntent | undefined)?.kind ?? ""),
+        );
         const primaryCitation = result.reply.citations?.[0];
-        if (primaryCitation) {
+        if (primaryCitation && !navigatedAwayFromDoc) {
           dispatchIntent(citationToHighlightIntent(primaryCitation), "agent");
         }
         // F3a wireframe-fix: also enqueue the proposal onto the canvas-side

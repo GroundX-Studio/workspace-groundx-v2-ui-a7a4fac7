@@ -1987,6 +1987,40 @@ describe("Phase 5 — function-calling tool round-trip", () => {
     expect(reply.toolFailures).toEqual([]);
   });
 
+  it("tool-only navigation SURVIVES a failed prose repair — keeps the intent + a deterministic confirmation, never errors the turn", async () => {
+    // chat-QA — the pre-existing repair round-trip 30s-timed-out for tool-only
+    // navigation, failing the whole turn and LOSING the navigation. A UI move must
+    // not depend on a second LLM call: on repair failure we fall back to a
+    // deterministic confirmation and still return the intent.
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "doc-1", pageNumber: 1, text: "snippet text" }] } })),
+    };
+    let call = 0;
+    const llmForward = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return jsonOk({
+          choices: [{ message: { content: "", tool_calls: [{ id: "c0", type: "function", function: { name: "show_extraction", arguments: JSON.stringify({ scope: { type: "documents", documentIds: ["doc-1"] } }) } }] } }],
+        });
+      }
+      throw new Error("upstream timed out after 30000ms"); // the repair call fails
+    });
+    const llmClient: LlmClient = { forward: llmForward };
+    const reply = await routeChat(makeRequest({ newUserMessage: "show me the extracted fields" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+    });
+    // Navigation preserved …
+    expect(reply.intents).toHaveLength(1);
+    expect(reply.intents[0]).toMatchObject({ name: "show_extraction" });
+    // … turn did NOT fail, and the bubble carries the deterministic confirmation.
+    expect(reply.answer).toBe("Opening the extracted fields.");
+    expect(llmForward).toHaveBeenCalledTimes(2); // it DID try the repair first
+  });
+
   it("tool-only read replies ask the LLM for user-facing prose instead of using canned copy", async () => {
     const prose = "The source says the relevant document section is available on page 5.";
     const { groundxClient, llmClient, llmForward } = mkToolOnlyThenProseClients(prose, [
@@ -2006,10 +2040,15 @@ describe("Phase 5 — function-calling tool round-trip", () => {
     const repairBody = JSON.parse((llmForward.mock.calls[1][1] as { body: string }).body) as {
       tools?: unknown;
       messages?: Array<{ content?: string }>;
+      max_completion_tokens?: number;
     };
     expect(Array.isArray(firstBody.tools)).toBe(true);
     expect(repairBody.tools).toBeUndefined();
     expect(repairBody.messages?.[repairBody.messages.length - 1]?.content).toMatch(/Do not call tools now/);
+    // chat-QA Finding 5 — the repair MUST carry an output ceiling + ask for a
+    // succinct busy-person reply, so it can't run away into a 30s generation.
+    expect(repairBody.max_completion_tokens).toBeGreaterThan(0);
+    expect(repairBody.messages?.[repairBody.messages.length - 1]?.content).toMatch(/succinct|busy person/i);
   });
 
   it("tool-only invalid replies still use LLM prose and surface toolFailures", async () => {

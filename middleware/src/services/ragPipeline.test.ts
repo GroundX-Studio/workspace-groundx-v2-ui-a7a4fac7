@@ -4,7 +4,7 @@ import type { GroundXClient, LlmClient } from "../types.js";
 import type { ChatRouterRequest } from "./chatRouterTypes.js";
 
 import * as groundedAnswerModule from "./groundedAnswer.js";
-import { callGroundedLlm, parseGroundedAnswer, runRagPipeline } from "./ragPipeline.js";
+import { callGroundedLlm, parseGroundedAnswer, runRagPipeline, synthesizeToolOnlyConfirmation } from "./ragPipeline.js";
 
 /**
  * 2026-06-01-live-report-render §3 — behavior-parity for the `runRagPipeline`
@@ -417,5 +417,37 @@ describe("offerAs disposition (standardized-viewer-control T7)", () => {
     const intent = reply.intents.map((i) => i.intent as { kind?: string; schemaId?: string }).find((i) => i.kind === "editSchema");
     expect(intent).toBeDefined();
     expect(intent!.schemaId).toBe("tmpl-1");
+  });
+});
+
+describe("synthesizeToolOnlyConfirmation — never claims an action that won't dispatch (Finding 4)", () => {
+  const call = (name: string, args: unknown) => ({ id: "c0", name, argumentsJson: JSON.stringify(args) });
+  const validScope = { scope: { type: "documents", documentIds: ["doc-1"] } };
+
+  it("confirms a navigation whose args VALIDATE", () => {
+    expect(synthesizeToolOnlyConfirmation([call("show_extraction", validScope)])).toBe(
+      "Opening the extracted fields.",
+    );
+  });
+
+  it("does NOT claim the action when the nav args are INVALID (would be dropped downstream)", () => {
+    // A malformed scope fails the same inputSchema.safeParse the intent router
+    // uses, so the intent is dropped — the confirmation must not say "Opening…".
+    const out = synthesizeToolOnlyConfirmation([call("show_extraction", { scope: { type: "bogus" } })]);
+    expect(out).not.toMatch(/Opening the extracted fields/);
+    expect(out).toBe("Done.");
+  });
+
+  it("confirms only the VALID call in a mixed batch", () => {
+    const out = synthesizeToolOnlyConfirmation([
+      call("show_extraction", { scope: { nonsense: true } }), // invalid → dropped
+      call("show_integrate", validScope), // valid → confirmed
+    ]);
+    expect(out).toBe("Opening the integration options.");
+  });
+
+  it("ignores unknown tools + non-JSON args", () => {
+    expect(synthesizeToolOnlyConfirmation([{ id: "c1", name: "not_a_tool", argumentsJson: "{}" }])).toBe("Done.");
+    expect(synthesizeToolOnlyConfirmation([{ id: "c2", name: "show_extraction", argumentsJson: "{not json" }])).toBe("Done.");
   });
 });

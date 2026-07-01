@@ -106,6 +106,17 @@ export function buildGroundedSystem(options: GroundedSystemOptions = {}): string
     "aren't content questions — respond conversationally and offer a " +
     "starter question or two grounded in the snippets.\n\n" +
 
+    // chat-QA — the #1 cost is emitting a tool call with NO text: that forces a
+    // whole SECOND LLM call just to fill the chat bubble. Do BOTH in one turn.
+    // Framed for the model to self-regulate length (a busy person, not a word
+    // count) rather than a mechanical cap.
+    "IMPORTANT: whenever you call a navigation or UI-action tool (showing a view, " +
+    "opening the document, pinning to the report), you MUST also write your reply " +
+    "text in the SAME turn — never return a tool call with an empty message. Keep " +
+    "that reply succinct and in plain English, written for a busy person: a line " +
+    "or two that confirms what you did and, only if it genuinely helps, the single " +
+    "most useful fact. Don't restate the snippets or list fields.\n\n" +
+
     // GroundX skill knowledge (2026-06-11) — the REAL agent skills (vendored
     // groundx-agent-harness pack), retrieved per question. Replaces the
     // retired hard-coded "ABOUT GROUNDX" capsule: one source of truth.
