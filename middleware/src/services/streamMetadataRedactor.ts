@@ -29,7 +29,21 @@
  * is never lost — it lands with the final message.
  */
 
-const META_KEYS = ["citations", "suggestedIntent", "proposedSchemaField"] as const;
+/**
+ * The keys that mark a trailing block as MODEL METADATA (not user-facing prose),
+ * shared with `parseGroundedAnswer` (the final-answer stripper) so the two
+ * detectors — one streaming/incremental, one on the completed answer — can never
+ * disagree about what counts as a metadata block. `citations` is the live key;
+ * `suggestedIntent`/`proposedSchemaField` are retired but still stripped.
+ */
+export const METADATA_BLOCK_KEYS = ["citations", "suggestedIntent", "proposedSchemaField"] as const;
+
+/** Does a PARSED JSON object open a metadata block (has a metadata key)? */
+export function isMetadataBlockObject(block: Record<string, unknown>): boolean {
+  return METADATA_BLOCK_KEYS.some((k) => k in block);
+}
+
+const META_KEYS = METADATA_BLOCK_KEYS;
 
 // A ```json fence opening (content OR metadata — classified afterwards).
 const FENCE_RE = /```[ \t]*json/i;

@@ -33,7 +33,7 @@ import type {
   ChatSuggestedAction,
   ProposedSchemaField,
 } from "@/api/chatSessions";
-import { citationRegions, type Citation, type ToolActivity } from "@groundx/shared";
+import { citationRegions, isNonDocNavIntentKind, type Citation, type ToolActivity } from "@groundx/shared";
 import { useApi } from "@/contexts/ApiContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
@@ -173,21 +173,6 @@ export interface ConversationApi {
  * is an intent payload field, not a widget prop, so the computed key
  * sidesteps the guard without weakening it.
  */
-/**
- * Canvas-navigation intent kinds that move the canvas to a NON-doc-viewer
- * surface. When a reply carries one of these, the answer's auto-highlight (which
- * forces the doc-viewer / PDF) must stand down so the explicit navigation wins.
- * Doc-surface navs (`openDocument` / `showInteract` / `jumpToPage`) are omitted —
- * a citation highlight there is complementary, not a conflict.
- */
-const NON_DOC_CANVAS_NAV_KINDS: ReadonlySet<string> = new Set([
-  "showExtract",
-  "editSchema",
-  "showReport",
-  "editTemplate",
-  "showIntegrate",
-]);
-
 export function citationToHighlightIntent(c: Citation): CanvasIntent {
   // multi-region-citations: a regionless "location unknown" citation has no page
   // to jump to — open the document without a highlight.
@@ -574,7 +559,7 @@ export function useConversation(
         // highlight — it is complementary there. This is what "an explicit
         // navigation wins" was always meant to guarantee.
         const navigatedAwayFromDoc = (result.reply.intents ?? []).some((d) =>
-          NON_DOC_CANVAS_NAV_KINDS.has((d.intent as CanvasIntent | undefined)?.kind ?? ""),
+          isNonDocNavIntentKind((d.intent as CanvasIntent | undefined)?.kind ?? ""),
         );
         const primaryCitation = result.reply.citations?.[0];
         if (primaryCitation && !navigatedAwayFromDoc) {

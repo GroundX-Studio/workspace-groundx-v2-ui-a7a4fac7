@@ -58,6 +58,28 @@ Types come from one Zod schema in `@groundx/shared` (`z.infer`); no twin
 definitions. Planning is OpenSpec only — no rival tracking files, no tombstones,
 verify before flagging. discipline §8.
 
+## 7. Measure twice, cut once — do no harm
+Before you REMOVE or materially change existing code, first understand **why it
+is there** and **what depends on it**. Existing code is a claim that someone
+solved a problem; deleting it without reading that claim is how you trade a fix
+for a regression. The fastest way to break something is to delete a thing whose
+**second purpose** you never saw.
+- **Before cutting, audit the blast radius:** every call site, every test that
+  pins the behavior, and the *semantics* (what user-visible thing it guarantees).
+  If a test asserts it, that test is documentation of intent — read it, don't just
+  update it to green.
+- **Look for a second purpose.** A thing that looks like a removable duplicate
+  often serves a second case. *Worked example:* the tool-only prose-repair looked
+  like a duplicate of the first LLM call, but it also **force-answered** after the
+  model exhausted the server-tool loop — the audit caught that, so we removed the
+  call only for navigation and kept it for answer-forcing. Blind removal would
+  have regressed "the model searched a lot and never answered."
+- **Prefer fixing at the source over a compensating add.** If output is wrong,
+  fix generation (the prompt / the schema); don't bolt on a second call/branch to
+  patch it downstream — that's a fork (principle 1) and it grows unbounded.
+- Changing behavior a test encodes is a **deliberate decision**: update the test
+  *with a comment explaining the reversal*, never silently.
+
 ---
 
 ## When you CREATE A PLAN (OpenSpec change)
@@ -69,6 +91,13 @@ verify before flagging. discipline §8.
 ## When you ADD CODE
 - [ ] Failing test first (2). Review your own diff adversarially before claiming done (3).
 - [ ] Reuse the shared base (`@groundx/shared`, `ScopedViewerWidget`, `Template`, `ApiError`, the `Catalog<T>` contract) — no dup, no `Record<string,unknown>` placeholder (1, 6).
+- [ ] A classification/enumeration (which intents/steps/surfaces are which) lives **once** — next to the union it classifies (e.g. `CANVAS_NON_DOC_NAV_INTENT_KINDS` in `@groundx/shared`, `satisfies` the kind union). Don't re-hardcode a subset per consumer (1, 6).
 - [ ] Required, explicit props (`scope`, `role`) — no silent omission, no raw `documentId`/`bucketId`/`projectId` where a `scope` belongs (1).
 - [ ] Both sides mirror (app `*.tools.ts` ↔ middleware `SERVER_TOOL_CATALOG`); update `data-model.md` in the same change (6, 5).
 - [ ] Round-trip: every byte you persist has a read site (5).
+
+## When you REMOVE or CHANGE existing code (principle 7)
+- [ ] List its **call sites** and the **tests that pin it** — read them for intent before touching them.
+- [ ] Name the **user-visible behavior** it guarantees, and check for a **second purpose** you might not have noticed.
+- [ ] If it looks like a removable duplicate, prove it: what breaks if it's gone? (Run the dependent tests deliberately.)
+- [ ] Fix at the source, not with a compensating add (1). Any behavior change to a pinned test is deliberate + commented.

@@ -16,7 +16,7 @@
  *      pointer to what the doc DOES cover. No fabrication, no
  *      general-knowledge fill-in.
  */
-import { citationsContract, VOICE_RULE } from "./fragments.js";
+import { BUSY_PERSON_BREVITY, citationsContract, VOICE_RULE } from "./fragments.js";
 
 export interface GroundedSystemOptions {
   /**
@@ -113,9 +113,7 @@ export function buildGroundedSystem(options: GroundedSystemOptions = {}): string
     "IMPORTANT: whenever you call a navigation or UI-action tool (showing a view, " +
     "opening the document, pinning to the report), you MUST also write your reply " +
     "text in the SAME turn — never return a tool call with an empty message. Keep " +
-    "that reply succinct and in plain English, written for a busy person: a line " +
-    "or two that confirms what you did and, only if it genuinely helps, the single " +
-    "most useful fact. Don't restate the snippets or list fields.\n\n" +
+    "that reply " + BUSY_PERSON_BREVITY + ".\n\n" +
 
     // GroundX skill knowledge (2026-06-11) — the REAL agent skills (vendored
     // groundx-agent-harness pack), retrieved per question. Replaces the

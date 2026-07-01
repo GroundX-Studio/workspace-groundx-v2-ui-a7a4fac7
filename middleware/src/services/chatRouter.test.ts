@@ -1987,24 +1987,20 @@ describe("Phase 5 — function-calling tool round-trip", () => {
     expect(reply.toolFailures).toEqual([]);
   });
 
-  it("tool-only navigation SURVIVES a failed prose repair — keeps the intent + a deterministic confirmation, never errors the turn", async () => {
-    // chat-QA — the pre-existing repair round-trip 30s-timed-out for tool-only
-    // navigation, failing the whole turn and LOSING the navigation. A UI move must
-    // not depend on a second LLM call: on repair failure we fall back to a
-    // deterministic confirmation and still return the intent.
+  it("navigation tool-only turn is confirmed DETERMINISTICALLY — no second LLM call, intent preserved", async () => {
+    // chat-QA audit (Finding 1) — a dispatchable navigation with no prose needs
+    // only a deterministic confirmation. Making a SECOND LLM call would merely
+    // duplicate what the first call should have written (and it 30s-hung). The
+    // navigation is a client action, not something a second model round-trip
+    // should gate. Exactly ONE upstream call for the whole turn.
     const groundxClient: GroundXClient = {
       forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "doc-1", pageNumber: 1, text: "snippet text" }] } })),
     };
-    let call = 0;
-    const llmForward = vi.fn(async () => {
-      call += 1;
-      if (call === 1) {
-        return jsonOk({
-          choices: [{ message: { content: "", tool_calls: [{ id: "c0", type: "function", function: { name: "show_extraction", arguments: JSON.stringify({ scope: { type: "documents", documentIds: ["doc-1"] } }) } }] } }],
-        });
-      }
-      throw new Error("upstream timed out after 30000ms"); // the repair call fails
-    });
+    const llmForward = vi.fn(async () =>
+      jsonOk({
+        choices: [{ message: { content: "", tool_calls: [{ id: "c0", type: "function", function: { name: "show_extraction", arguments: JSON.stringify({ scope: { type: "documents", documentIds: ["doc-1"] } }) } }] } }],
+      }),
+    );
     const llmClient: LlmClient = { forward: llmForward };
     const reply = await routeChat(makeRequest({ newUserMessage: "show me the extracted fields" }), {
       llmClient,
@@ -2013,17 +2009,14 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       samplesBucketId: 42,
       llmModelId: "test-model",
     });
-    // Navigation preserved …
     expect(reply.intents).toHaveLength(1);
     expect(reply.intents[0]).toMatchObject({ name: "show_extraction" });
-    // … turn did NOT fail, and the bubble carries the deterministic confirmation.
-    expect(reply.answer).toBe("Opening the extracted fields.");
-    expect(llmForward).toHaveBeenCalledTimes(2); // it DID try the repair first
+    expect(reply.answer).toBe("Opening the extracted fields."); // deterministic confirmation
+    expect(llmForward).toHaveBeenCalledTimes(1); // NO second LLM call for navigation
   });
 
-  it("tool-only read replies ask the LLM for user-facing prose instead of using canned copy", async () => {
-    const prose = "The source says the relevant document section is available on page 5.";
-    const { groundxClient, llmClient, llmForward } = mkToolOnlyThenProseClients(prose, [
+  it("a second (deterministic-confirmable) navigation is also single-call", async () => {
+    const { groundxClient, llmClient, llmForward } = mkToolOnlyThenProseClients("unused — repair must not run", [
       { name: "open_document", arguments: { documentId: "doc-abc", page: 5 } },
     ]);
     const reply = await routeChat(makeRequest({ newUserMessage: "show me doc-abc page 5" }), {
@@ -2034,27 +2027,20 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       llmModelId: "test-model",
     });
     expect(reply.intents).toHaveLength(1);
-    expect(reply.answer).toBe(prose);
-    expect(llmForward).toHaveBeenCalledTimes(2);
-    const firstBody = JSON.parse((llmForward.mock.calls[0][1] as { body: string }).body) as Record<string, unknown>;
-    const repairBody = JSON.parse((llmForward.mock.calls[1][1] as { body: string }).body) as {
-      tools?: unknown;
-      messages?: Array<{ content?: string }>;
-      max_completion_tokens?: number;
-    };
-    expect(Array.isArray(firstBody.tools)).toBe(true);
-    expect(repairBody.tools).toBeUndefined();
-    expect(repairBody.messages?.[repairBody.messages.length - 1]?.content).toMatch(/Do not call tools now/);
-    // chat-QA Finding 5 — the repair MUST carry an output ceiling + ask for a
-    // succinct busy-person reply, so it can't run away into a 30s generation.
-    expect(repairBody.max_completion_tokens).toBeGreaterThan(0);
-    expect(repairBody.messages?.[repairBody.messages.length - 1]?.content).toMatch(/succinct|busy person/i);
+    expect(reply.answer).toBe("Opened the document for you."); // deterministic, not the mock's prose
+    expect(llmForward).toHaveBeenCalledTimes(1); // first call only — no repair round-trip
   });
 
-  it("tool-only invalid replies still use LLM prose and surface toolFailures", async () => {
+  it("NON-navigation tool-only (invalid nav / server-tool exhaustion) DOES force an answer via a tools-off dispatch", async () => {
+    // Case B (audit): there is no dispatchable navigation to confirm — the intent
+    // is dropped as invalid — so a canned line would be wrong. The user asked a
+    // question and gets a real answer. The answer-forcing round REUSES the loop's
+    // own `dispatch` with tools switched off (no separate repair builder); it
+    // therefore streams, inherits the turn abort, and carries the FULL grounded
+    // output cap so it can write a complete answer.
     const prose = "I can still answer from the source text, but I couldn't open that citation automatically.";
     const { groundxClient, llmClient, llmForward } = mkToolOnlyThenProseClients(prose, [
-      { name: "open_document", arguments: { documentId: 42 } },
+      { name: "open_document", arguments: { documentId: 42 } }, // invalid → not dispatchable → null → force answer
     ]);
     const reply = await routeChat(makeRequest({ newUserMessage: "show me that source" }), {
       llmClient,
@@ -2066,15 +2052,33 @@ describe("Phase 5 — function-calling tool round-trip", () => {
     expect(reply.intents).toEqual([]);
     expect(reply.toolFailures).toHaveLength(1);
     expect(reply.answer).toBe(prose);
-    expect(llmForward).toHaveBeenCalledTimes(2);
-    const repairBody = JSON.parse((llmForward.mock.calls[1][1] as { body: string }).body) as {
+    expect(llmForward).toHaveBeenCalledTimes(2); // the answer-forcing dispatch DID run
+    const forcedBody = JSON.parse((llmForward.mock.calls[1][1] as { body: string }).body) as {
       tools?: unknown;
+      tool_choice?: unknown;
+      messages?: Array<{ content?: string }>;
+      max_completion_tokens?: number;
     };
-    expect(repairBody.tools).toBeUndefined();
+    // Tools are OFF for the forced round, so the model MUST answer instead of
+    // calling another tool.
+    expect(forcedBody.tools).toBeUndefined();
+    expect(forcedBody.tool_choice).toBeUndefined();
+    expect(forcedBody.messages?.[forcedBody.messages.length - 1]?.content).toMatch(/Do not call tools now/);
+    // DELIBERATE REVERSAL (measure-twice audit): the old separate repair asked for
+    // a *succinct* one-liner under a 512-token cap — wrong for an answer-forcing
+    // round, which owes the user a complete answer. Reusing `dispatch` gives the
+    // full grounded cap (4096) and the instruction now asks for a complete answer,
+    // not a busy-person one-liner. Assert the full cap + the answer framing.
+    expect(forcedBody.max_completion_tokens).toBeGreaterThan(1000);
+    expect(forcedBody.messages?.[forcedBody.messages.length - 1]?.content).toMatch(/answer[^.]*\b(directly|completely|fully)\b/i);
   });
 
-  it("tool replies with only citation metadata are repaired after parsing without dropping citations", async () => {
-    const prose = "The cited source text is the relevant evidence for this page.";
+  it("citations-only reply + a navigation → deterministic confirmation, citations still preserved (no repair)", async () => {
+    // A reply whose only prose is a ```json citations block (cleanedAnswer empty)
+    // that ALSO navigated: this is the deterministic path (Finding 1) — one LLM
+    // call, a canned confirmation — and the invariant that matters here is that
+    // the citations parsed out of that block are NOT dropped along the way.
+    const prose = "unused — the repair must not run for a navigation";
     const metadataOnly = [
       "```json",
       JSON.stringify({
@@ -2094,11 +2098,11 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       samplesBucketId: 42,
       llmModelId: "test-model",
     });
-    expect(reply.answer).toBe(prose);
-    expect(reply.citations).toHaveLength(1);
+    expect(reply.answer).toBe("Opened the document for you."); // deterministic, not the mock prose
+    expect(reply.citations).toHaveLength(1); // citations survive the deterministic path
     expect(reply.citations[0]).toMatchObject({ documentId: "doc-1", page: 1 });
     expect(reply.intents).toHaveLength(1);
-    expect(llmForward).toHaveBeenCalledTimes(2);
+    expect(llmForward).toHaveBeenCalledTimes(1); // no second LLM call
   });
 
   it("optional arg defaults are filled by the handler (open_document page → 1)", async () => {

@@ -32,6 +32,41 @@ export const VOICE_RULE =
   "and knows the product.\n\n";
 
 /**
+ * chat-QA — shared brevity framing. Both the grounded prompt's "confirm your
+ * navigation in the same turn" instruction and the tool-only answer-repair
+ * builder want the same thing: a short, human reply that trusts the model to
+ * self-regulate length (a busy person, not a word count). Single source so the
+ * two never drift.
+ */
+export const BUSY_PERSON_BREVITY =
+  "succinct and in plain English, written for a busy person — a line or two, " +
+  "and only the single most useful fact if one genuinely helps. Don't restate " +
+  "the snippets, list fields, or write a long answer";
+
+/**
+ * chat-QA — the ANSWER-FORCING instruction (the case where the model called
+ * server tools up to the loop cap without ever writing prose, so it must be
+ * asked to actually answer). Appended to the transcript before a tools-OFF
+ * dispatch (the loop reuses its own `dispatch`, no separate repair builder), so
+ * the model MUST write an answer instead of calling another tool. Lives here,
+ * not inlined at the call site, so the prompts-module convention + guard hold.
+ * `selectedActions` names the calls the model already made, for context.
+ *
+ * This owes the user a COMPLETE answer, not a one-liner — do NOT reuse
+ * `BUSY_PERSON_BREVITY` here (that framing is for a navigation confirmation, a
+ * different case; reusing it once starved this answer to a terse fragment).
+ */
+export function forceAnswerAfterToolsInstruction(selectedActions: string): string {
+  return (
+    "Your previous response selected UI action(s) but did not include an answer. " +
+    `Selected action(s): ${selectedActions}. ` +
+    "Do not call tools now — answer the user's question directly and completely, " +
+    "in plain English, using the snippets, extracted fields, tool results, and " +
+    "workspace context above."
+  );
+}
+
+/**
  * The merged citations output contract (harden-citation-emission U1) — ONE
  * builder, ONE example fence; the extraction-form entry appears iff the
  * EXTRACTED FIELDS block does. Citation of content claims is REQUIRED (the

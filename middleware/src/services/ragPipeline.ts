@@ -28,7 +28,8 @@ import { consumeChatCompletionStream } from "./chatCompletionStream.js";
 import { turnStreamContext, type TurnStreamSink } from "./streamSink.js";
 import { buildGroundedSystem } from "./prompts/grounded.js";
 import { buildToolNotes } from "./prompts/toolNotes.js";
-import { snippetHeader } from "./prompts/fragments.js";
+import { snippetHeader, forceAnswerAfterToolsInstruction } from "./prompts/fragments.js";
+import { isMetadataBlockObject } from "./streamMetadataRedactor.js";
 import { groundedAnswerOverScope } from "./groundedAnswer.js";
 import {
   MAX_SNIPPET_BLOCK_CHARS,
@@ -432,9 +433,9 @@ export function parseGroundedAnswer(rawAnswer: string): ParsedRagAnswer {
     // stripped post-A.5). Other parsed JSON is CONTENT and stays in the body.
     if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
     const block = parsed as Record<string, unknown>;
-    const isMetadataBlock =
-      "citations" in block || "suggestedIntent" in block || "proposedSchemaField" in block;
-    if (!isMetadataBlock) continue;
+    // Shared predicate with the streaming redactor — one definition of "metadata
+    // block", so the streaming and final-answer detectors can't drift.
+    if (!isMetadataBlockObject(block)) continue;
     consumedMetadataBlock = true;
     cleaned = cleaned.replace(match[0], "");
     collectFromBlock(block);
@@ -543,7 +544,8 @@ const GROUNDED_MAX_COMPLETION_TOKENS = 4096;
  * controller does NOT recognize (intent/chip tools) accumulate and are
  * returned in `toolCalls` for the caller to route — exactly today's behavior
  * when no loop is supplied (every call is "routed"). The final round's prose
- * is the answer and still feeds the existing tool-only prose repair.
+ * is the answer; a tool-only final round with no prose is resolved after the
+ * loop (deterministic nav confirmation, or a tools-off answer-forcing dispatch).
  *
  * Structured outputs (still required):
  *   - `citations` array inside a fenced JSON block. `runRagPipeline` validates
@@ -618,7 +620,13 @@ export async function callGroundedLlm(
   ];
 
   // One LLM dispatch over the current transcript → normalized result.
-  const dispatch = async (messages: GroundedMessage[]): Promise<{ rawAnswer: string; toolCalls: RawToolCall[]; finishReason: string | null }> => {
+  // `disableTools` omits the tool catalog entirely so the model MUST write an
+  // answer instead of calling a tool — the answer-forcing round reuses this same
+  // dispatch (streaming, output cap, turn-abort) rather than a separate builder.
+  const dispatch = async (
+    messages: GroundedMessage[],
+    opts?: { disableTools?: boolean },
+  ): Promise<{ rawAnswer: string; toolCalls: RawToolCall[]; finishReason: string | null }> => {
     logger.info(
       {
         groundedLlmCall: {
@@ -650,7 +658,9 @@ export async function callGroundedLlm(
     // Phase 5 — advertise the (filtered) tool catalog via OpenAI function
     // calling. Always include the `tools` key when the caller passed one
     // (even if empty) so the "step with zero tools" test can assert shape.
-    if (tools !== undefined) {
+    // `disableTools` (the answer-forcing round) omits the catalog outright so
+    // the model can't call another tool and must answer.
+    if (tools !== undefined && !opts?.disableTools) {
       requestBody.tools = tools;
       if (tools.length > 0) requestBody.tool_choice = "auto";
     }
@@ -792,57 +802,63 @@ export async function callGroundedLlm(
     throw new Error("grounded llm call returned no content");
   }
   let answer = rawAnswer;
-  // Tool-only prose repair: the final round selected UI action(s) (a navigation
-  // or an action tool) but returned no prose, so the chat bubble would be empty.
-  // We ask the model for a natural one-line reply (kept — a canned line reads
-  // robotically; see chatRouter "instead of canned copy"). Hardened after the
-  // chat-QA finding that this reliably 30s-timed-out for tool-only navigation:
-  //   • STREAMS (via the ambient sink), like the main dispatch, so it returns on
-  //     first token instead of waiting for a whole non-streamed completion under
-  //     the 30s wall — the actual cause of the hang.
-  //   • is NON-FATAL: a UI navigation must never depend on a second LLM call
-  //     succeeding. On any failure we fall back to a deterministic confirmation
-  //     so the turn still lands (canvas moves, bubble non-empty) instead of
-  //     failing the whole turn with a generic error and LOSING the navigation.
+  // The final round selected tool(s) but wrote no prose, so the chat bubble would
+  // be empty. Two DIFFERENT causes, handled differently (chat-QA audit):
+  //
+  //   A. Navigation / action tool-only (e.g. show_extraction). The grounded prompt
+  //      already asks the model to write its reply in the SAME turn as the tool
+  //      call; when it doesn't, a DETERMINISTIC confirmation is correct and
+  //      instant. We do NOT make a second LLM call here — that call would only
+  //      duplicate what the first call should have produced (and it 30s-hung).
+  //
+  //   B. No nav/action to confirm — e.g. the model called a SERVER tool (search)
+  //      every round up to the loop cap without ever answering. Here a canned line
+  //      would be wrong: the user asked a question and deserves an answer. So we
+  //      force one by REUSING the loop's own `dispatch` with tools switched off:
+  //      the model can no longer call a tool and must write an answer. That reuse
+  //      is why this can't hang the way a bespoke non-streaming call did — it
+  //      streams, is capped, and inherits the turn abort. It is bounded by the
+  //      same 30s upstream fetch timeout as every other round (not the old 9s
+  //      soft deadline, which only ever protected the now-deterministic nav path).
+  //      Non-fatal: any failure falls back to an honest line rather than erroring
+  //      the whole turn.
+  //
+  // `synthesizeToolOnlyConfirmation` returns null exactly when case B applies.
   if (lastRoundCalls.length > 0 && !parseGroundedAnswer(rawAnswer).cleanedAnswer) {
-    let repairedAnswer: string;
-    try {
-      // Bound the repair well under the 30s upstream wall: a nav confirmation
-      // must land fast. If the repair beats the deadline we use its natural
-      // prose (chatRouter "instead of canned copy"); otherwise we abort it and
-      // fall through to the deterministic confirmation. A UI navigation never
-      // waits on a slow second LLM call.
-      const repairAbort = new AbortController();
-      const onTurnAbort = () => repairAbort.abort();
-      sink?.abortSignal?.addEventListener("abort", onTurnAbort, { once: true });
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const deadline = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          repairAbort.abort();
-          reject(new Error("tool-only prose repair exceeded soft deadline"));
-        }, TOOL_ONLY_REPAIR_DEADLINE_MS);
-      });
+    const navConfirmation = synthesizeToolOnlyConfirmation(lastRoundCalls);
+    if (navConfirmation) {
+      // Case A — deterministic, no second LLM call.
+      if (sink?.onToken) sink.onToken(navConfirmation);
+      answer = rawAnswer ? `${navConfirmation}\n\n${rawAnswer}` : navConfirmation;
+    } else {
+      // Case B — force an answer via a tools-off dispatch (no separate builder).
+      const selectedActions = lastRoundCalls.map((c) => `${c.name}(${c.argumentsJson})`).join("; ");
+      convo.push({ role: "user", content: forceAnswerAfterToolsInstruction(selectedActions) });
+      let forced = "";
       try {
-        repairedAnswer = await Promise.race([
-          callToolOnlyProseRepair({ llmClient, modelId, messages: convo, toolCalls: lastRoundCalls, sink, abortSignal: repairAbort.signal }),
-          deadline,
-        ]);
-      } finally {
-        clearTimeout(timer); // release the timer whether the repair won or the deadline fired
-        sink?.abortSignal?.removeEventListener("abort", onTurnAbort);
+        const res2 = await dispatch(convo, { disableTools: true });
+        forced = res2.rawAnswer.trim();
+        // The forced round IS the final answer now, so its finish reason is what
+        // the returned `truncated` flag should reflect — overwrite unconditionally
+        // (a prior tool-plumbing round being length-cut must not linger as truncated).
+        lastFinishReason = res2.finishReason;
+      } catch (err) {
+        logger.warn({ err, tools: lastRoundCalls.map((c) => c.name) }, "answer-forcing dispatch failed — neutral fallback");
       }
-    } catch (err) {
-      repairedAnswer = synthesizeToolOnlyConfirmation(lastRoundCalls);
-      logger.warn(
-        { err, tools: lastRoundCalls.map((c) => c.name) },
-        "tool-only prose repair failed — using deterministic confirmation (navigation preserved)",
-      );
-      // Stream the fallback so the streaming UI shows it too (the main round
-      // emitted no content tokens on a tool-only turn). The final envelope's
-      // `answer` replaces the streamed draft regardless.
-      if (sink?.onToken && repairedAnswer) sink.onToken(repairedAnswer);
+      if (!forced) {
+        // The model wrote nothing (empty completion) or the dispatch threw. There
+        // is no navigation to confirm here, so fall back to an honest, non-
+        // committal line rather than a fabricated answer or a generic error. The
+        // streamed sink (if any) already emitted whatever tokens arrived; emit the
+        // fallback line too so a streaming client isn't left with an empty bubble.
+        forced = "I wasn't able to finish that — please try asking again.";
+        if (sink?.onToken) sink.onToken(forced);
+        // The fallback line is a complete, fixed string — it can't be "truncated",
+        // so a prior length-cut round must not linger as truncated on the reply.
+        lastFinishReason = null;
+      }
+      answer = rawAnswer ? `${forced}\n\n${rawAnswer}` : forced;
     }
-    answer = rawAnswer ? `${repairedAnswer}\n\n${rawAnswer}` : repairedAnswer;
   }
   // Capture dev-side debug snapshot (browser surfaces this via _debug
   // on the chat reply). Only populated when the caller passed `debug`.
@@ -871,22 +887,11 @@ export async function callGroundedLlm(
   return { answer, toolCalls: routed, toolActivity, serverToolFailures, truncated: lastFinishReason === "length" };
 }
 
-// A short, deterministic confirmation per navigation / action tool — the
-// LAST-RESORT backstop used only when the streamed prose repair itself fails, so
-// a tool-only turn never lands with an empty bubble or a lost navigation. This is
-// a rare fallback (the model usually voices its own line; see the grounded
-// prompt), so a compact local map is the right cost — no per-tool `confirmation`
-// field is earned by a single consumer.
-// Soft deadline for the tool-only prose repair. Well under the 30s upstream
-// timeout and just above a healthy answer latency (~7s), so a fast repair still
-// wins but a stalled one falls through to the deterministic confirmation quickly.
-const TOOL_ONLY_REPAIR_DEADLINE_MS = 9000;
-// The repair writes a one-line confirmation, not an answer — bound its output so
-// it can't run away into a long generation. Generous vs. one sentence, but leaves
-// headroom for the gpt-5 family's hidden reasoning tokens (which share this
-// budget) so the visible sentence isn't starved to empty.
-const TOOL_ONLY_REPAIR_MAX_TOKENS = 512;
-
+// A short, deterministic confirmation per navigation / action tool, used when a
+// tool-only turn carries a dispatchable navigation but no prose, so the turn
+// never lands with an empty bubble or a lost navigation. The model usually voices
+// its own line (see the grounded prompt), so a compact local map is the right
+// cost — no per-tool `confirmation` field is earned by a single consumer.
 const TOOL_ONLY_CONFIRMATION: Record<string, string> = {
   open_document: "Opened the document for you.",
   jump_to_page: "Jumped to that page.",
@@ -919,7 +924,17 @@ function toolCallWillDispatch(call: RawToolCall): boolean {
   return tool.inputSchema.safeParse(args).success;
 }
 
-export function synthesizeToolOnlyConfirmation(toolCalls: RawToolCall[]): string {
+/**
+ * A deterministic one-line confirmation for a tool-only turn whose calls are
+ * dispatchable NAVIGATION / ACTION tools — or `null` when there is nothing to
+ * confirm (no dispatchable nav/action tool). `null` is the signal that this turn
+ * is NOT a navigation (e.g. the model exhausted the server-tool loop without
+ * writing prose), so the caller must fall back to a real LLM answer (a tools-off
+ * dispatch) rather than a canned line. This is what lets us confirm a navigation
+ * deterministically (no second LLM call) while still forcing a genuine answer
+ * when there's nothing to confirm.
+ */
+export function synthesizeToolOnlyConfirmation(toolCalls: RawToolCall[]): string | null {
   const phrases = [
     ...new Set(
       toolCalls
@@ -928,75 +943,7 @@ export function synthesizeToolOnlyConfirmation(toolCalls: RawToolCall[]): string
         .filter(Boolean),
     ),
   ];
-  // Fall back to a neutral line only when nothing concrete can be confirmed —
-  // never a specific claim about an action that won't happen.
-  return phrases.length > 0 ? phrases.join(" ") : "Done.";
-}
-
-async function callToolOnlyProseRepair(input: {
-  llmClient: LlmClient;
-  modelId: string;
-  messages: GroundedMessage[];
-  toolCalls: RawToolCall[];
-  sink?: TurnStreamSink;
-  abortSignal?: AbortSignal;
-}): Promise<string> {
-  const selectedActions = input.toolCalls
-    .map((call) => `${call.name}(${call.argumentsJson})`)
-    .join("; ");
-  const repairBody: Record<string, unknown> = {
-    model: input.modelId,
-    messages: [
-      ...input.messages,
-      {
-        role: "user",
-        content:
-          "Your previous response selected UI action(s) but did not include prose. " +
-          `Selected action(s): ${selectedActions}. ` +
-          "Do not call tools now. Reply with a succinct, plain-English confirmation written for a busy " +
-          "person — a line or two at most — that says what you did and, only if it genuinely helps, the " +
-          "single most useful fact. Do NOT restate the snippets, list fields, or write a long answer.",
-      },
-    ],
-    // The repair only needs a one-line confirmation. Without a ceiling the model
-    // generated a full free-text answer over the whole re-sent context and blew
-    // past the 30s upstream timeout (measured: main call 349ms/0-output tool call
-    // vs repair 30s/uncapped). A tight cap keeps output short so it returns fast.
-    max_completion_tokens: TOOL_ONLY_REPAIR_MAX_TOKENS,
-  };
-  // Stream when the turn is streaming — parity with the main dispatch. This is
-  // the fix for the 30s timeout: a streamed response returns on first token
-  // instead of blocking for a whole non-streamed completion.
-  if (input.sink?.onToken) repairBody.stream = true;
-  const response = await input.llmClient.forward("/chat/completions", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(repairBody),
-    // The caller's signal is the repair's OWN abort (soft-deadline + turn abort
-    // composed), so a slow repair can be cancelled without killing the turn.
-    ...(input.abortSignal ? { signal: input.abortSignal } : {}),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "<unreadable>");
-    throw new Error(
-      `grounded llm prose repair failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`,
-    );
-  }
-  // Streaming path (provider returned an event-stream) — consume SSE + re-emit
-  // each delta as a live token. Falls through to the JSON parse when the provider
-  // ignored `stream` and returned JSON (provider-agnostic, mirrors the dispatch).
-  if (input.sink?.onToken && (response.headers.get("content-type") ?? "").includes("text/event-stream")) {
-    const streamed = await consumeChatCompletionStream(response, { onText: input.sink.onToken });
-    const streamedAnswer = streamed.rawAnswer.trim();
-    if (!streamedAnswer) throw new Error("grounded llm prose repair returned no content");
-    return streamedAnswer;
-  }
-  const payload = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string | null } }>;
-  };
-  const answer = payload.choices?.[0]?.message?.content?.trim() ?? "";
-  if (!answer) throw new Error("grounded llm prose repair returned no content");
-  return answer;
+  return phrases.length > 0 ? phrases.join(" ") : null;
 }
 
 /**

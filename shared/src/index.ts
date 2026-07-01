@@ -1301,6 +1301,30 @@ export function parseCanvasIntent(input: unknown): CanvasIntent | null {
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * chat-QA Finding 2 — the SINGLE SOURCE for "which navigation intents move the
+ * canvas to a NON-doc-viewer surface" (the Extract / Report / Integrate / schema-
+ * editor widgets), as opposed to the doc-viewer surface (`openDocument`,
+ * `jumpToPage`, `showInteract`, `highlightCitation`). Co-located with the
+ * CanvasIntent union so a new navigation intent is classified HERE, once, instead
+ * of re-hardcoded per consumer (e.g. the chat auto-highlight guard). Non-
+ * navigation intents (gates, proposals, wizard, citation display) are absent —
+ * they don't move the canvas to a surface. A drift guard (`canvasSurface.test`)
+ * pins every entry to a real CanvasIntent kind.
+ */
+export const CANVAS_NON_DOC_NAV_INTENT_KINDS = [
+  "showExtract",
+  "editSchema",
+  "showReport",
+  "editTemplate",
+  "showIntegrate",
+] as const satisfies readonly CanvasIntent["kind"][];
+
+/** True when a canvas intent navigates to a non-doc-viewer surface. */
+export function isNonDocNavIntentKind(kind: string): boolean {
+  return (CANVAS_NON_DOC_NAV_INTENT_KINDS as readonly string[]).includes(kind);
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Catalog<T> — the shared READ contract every data catalog satisfies. A
 // catalog looks up a descriptor by id and enumerates the set; it is NEVER a

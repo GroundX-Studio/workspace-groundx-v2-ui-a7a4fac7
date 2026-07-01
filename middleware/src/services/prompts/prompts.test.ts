@@ -97,10 +97,11 @@ describe("buildGroundedSystem", () => {
   });
 
   it("requires reply text in the SAME turn as a navigation/UI tool call (avoids the second LLM call)", () => {
-    // Root fix for the tool-only prose-repair round-trip: if the model writes its
-    // reply in the SAME turn as the navigation, there is no empty bubble to repair,
-    // so the fragile + slow second LLM call is rarely hit. Framed for the model to
-    // self-regulate length ("a busy person") rather than a mechanical word cap.
+    // Root fix for the tool-only empty-bubble case: if the model writes its reply
+    // in the SAME turn as the navigation, there is no empty bubble at all, so the
+    // post-loop backstops (deterministic confirmation / answer-forcing dispatch)
+    // are rarely hit. Framed for the model to self-regulate length ("a busy
+    // person") rather than a mechanical word cap.
     const system = buildGroundedSystem();
     expect(system).toMatch(/navigation or UI[- ]action tool/i);
     expect(system).toMatch(/SAME turn/i);

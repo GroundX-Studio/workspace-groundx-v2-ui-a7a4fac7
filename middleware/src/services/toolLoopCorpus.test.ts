@@ -145,8 +145,8 @@ describe("agentic tool-result loop (no real LLM)", () => {
 
   it("stops at the round cap and still produces an answer", async () => {
     // The model keeps calling the tool every round. The loop must stop after
-    // maxRounds (4) server rounds → 5 grounded dispatches; the pre-existing
-    // tool-only prose-repair then yields a final answer (one more call). The
+    // maxRounds (4) server rounds → 5 grounded dispatches; the tools-off
+    // answer-forcing dispatch then yields a final answer (one more call). The
     // point: it is BOUNDED and terminates — no hang, no unbounded calls.
     const bodies = [
       TOOL_CALL_ROUND,
@@ -154,10 +154,10 @@ describe("agentic tool-result loop (no real LLM)", () => {
       TOOL_CALL_ROUND,
       TOOL_CALL_ROUND,
       TOOL_CALL_ROUND,
-      PROSE_ROUND, // consumed by the tool-only prose repair after the cap
+      PROSE_ROUND, // consumed by the tools-off answer-forcing dispatch after the cap
     ];
     const { reply, forward } = await run(bodies);
-    // ≤ maxRounds+1 loop dispatches (5) + ≤1 prose-repair completion.
+    // ≤ maxRounds+1 loop dispatches (5) + ≤1 answer-forcing completion.
     expect(forward.mock.calls.length).toBeLessThanOrEqual(6);
     expect(reply.mode).toBe("rag");
     expect(reply.answer).toContain("semantic objects");
@@ -270,7 +270,7 @@ describe("agentic tool-result loop (no real LLM)", () => {
 describe("loop off (report / hybrid seam) — single LLM call", () => {
   it("makes exactly one grounded completion and does not execute the server tool", async () => {
     // Prose + a server-executable tool call in one reply. With the loop OFF and
-    // prose present, neither the loop NOR the pre-existing prose-repair fires →
+    // prose present, neither the loop NOR the answer-forcing dispatch fires →
     // exactly one completion; the call routes out un-executed.
     const proseWithLookup = {
       choices: [

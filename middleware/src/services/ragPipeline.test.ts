@@ -430,12 +430,12 @@ describe("synthesizeToolOnlyConfirmation — never claims an action that won't d
     );
   });
 
-  it("does NOT claim the action when the nav args are INVALID (would be dropped downstream)", () => {
+  it("returns null (NOT a claim) when the nav args are INVALID — signals 'fall back to a real answer'", () => {
     // A malformed scope fails the same inputSchema.safeParse the intent router
-    // uses, so the intent is dropped — the confirmation must not say "Opening…".
+    // uses, so the intent is dropped — no confirmation, and null tells the caller
+    // this isn't a navigation (so it forces a real answer instead of a canned line).
     const out = synthesizeToolOnlyConfirmation([call("show_extraction", { scope: { type: "bogus" } })]);
-    expect(out).not.toMatch(/Opening the extracted fields/);
-    expect(out).toBe("Done.");
+    expect(out).toBeNull();
   });
 
   it("confirms only the VALID call in a mixed batch", () => {
@@ -446,8 +446,11 @@ describe("synthesizeToolOnlyConfirmation — never claims an action that won't d
     expect(out).toBe("Opening the integration options.");
   });
 
-  it("ignores unknown tools + non-JSON args", () => {
-    expect(synthesizeToolOnlyConfirmation([{ id: "c1", name: "not_a_tool", argumentsJson: "{}" }])).toBe("Done.");
-    expect(synthesizeToolOnlyConfirmation([{ id: "c2", name: "show_extraction", argumentsJson: "{not json" }])).toBe("Done.");
+  it("returns null for server tools / unknown tools / non-JSON args (no nav to confirm → answer-forcing path)", () => {
+    // A server tool (search) has no intentBuilder → null → the caller forces a
+    // real answer via a tools-off dispatch (the tool-loop-exhaustion case).
+    expect(synthesizeToolOnlyConfirmation([call("search_documents", { query: "x" })])).toBeNull();
+    expect(synthesizeToolOnlyConfirmation([{ id: "c1", name: "not_a_tool", argumentsJson: "{}" }])).toBeNull();
+    expect(synthesizeToolOnlyConfirmation([{ id: "c2", name: "show_extraction", argumentsJson: "{not json" }])).toBeNull();
   });
 });

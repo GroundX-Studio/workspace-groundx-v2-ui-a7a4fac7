@@ -87,4 +87,28 @@ describe("prompt-literal drift guard", () => {
       `inline system-prompt literals found outside services/prompts/ — build them in the prompts module:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
+
+  // chat-QA Finding 3 — the check above only caught inline `role:"system"`
+  // literals. A synthetic `role:"user"` message whose content is a STRING LITERAL
+  // (not a builder-provided variable like `content: user`) is also a model-facing
+  // prompt being born outside the module — that's exactly how the tool-only repair
+  // prompt slipped in. Genuine user turns pass a variable, so they don't match;
+  // tool-RESULT messages are `role:"tool"` and are protocol, not prompts, so they
+  // are intentionally not swept here.
+  it("no inline user-role prompt string literal exists outside services/prompts/", () => {
+    const offenders: string[] = [];
+    // `content:` immediately followed by a quote/backtick = a literal; an
+    // identifier (a builder's variable) does not match.
+    const inlineUserPrompt = /role:\s*"user",\s*(?:\/\/[^\n]*\n\s*)?content:\s*["'`]/;
+    for (const file of collectSourceFiles(SERVICES_DIR)) {
+      const text = readFileSync(file, "utf8");
+      if (inlineUserPrompt.test(text)) {
+        offenders.push(relative(SERVICES_DIR, file));
+      }
+    }
+    expect(
+      offenders,
+      `inline user-prompt literals found outside services/prompts/ — build them in the prompts module:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
 });
