@@ -43,6 +43,41 @@ describe("ChatStoreContext", () => {
     expect(result.current.state.activeSessionId).toBeNull();
   });
 
+  // agentic-template-item-editor — the seeded-field Rerun fix: results are held
+  // in the per-item `fieldExtractions` map for ANY field, not only addedFields.
+  it("setSchemaFieldExtraction stores a result for a SEEDED field (not in addedFields)", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    act(() => {
+      result.current.newSession();
+    });
+    act(() => {
+      result.current.setSchemaFieldExtraction("seeded-field-1", { status: "done", value: "KWIK TRIP", confidence: 0.91, citation: null });
+    });
+    const session = result.current.state.sessions.get(result.current.state.activeSessionId!)!;
+    const stored = session.fieldExtractions?.get("seeded-field-1");
+    expect(stored?.status).toBe("done");
+    if (stored?.status === "done") {
+      expect(stored.value).toBe("KWIK TRIP");
+      expect(stored.confidence).toBe(0.91);
+    }
+  });
+
+  it("setSchemaFieldExtraction enriches previousConfidence across a re-run", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    act(() => {
+      result.current.newSession();
+    });
+    act(() => {
+      result.current.setSchemaFieldExtraction("f", { status: "done", value: 1, confidence: 0.6, citation: null });
+    });
+    act(() => {
+      result.current.setSchemaFieldExtraction("f", { status: "done", value: 2, confidence: 0.9, citation: null });
+    });
+    const stored = result.current.state.sessions.get(result.current.state.activeSessionId!)!.fieldExtractions?.get("f");
+    expect(stored?.status).toBe("done");
+    if (stored?.status === "done") expect(stored.previousConfidence).toBe(0.6);
+  });
+
   it("newSession() creates a session with empty messages + empty entities and activates it", () => {
     const { result } = renderHook(() => useChatStore(), { wrapper });
     let createdId: string | null = null;

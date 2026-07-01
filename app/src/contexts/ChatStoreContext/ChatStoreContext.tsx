@@ -1793,39 +1793,36 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
         if (!prev.activeSessionId) return prev;
         const current = prev.sessions.get(prev.activeSessionId);
         if (!current) return prev;
-        const idx = current.pendingSchemaOverlay.addedFields.findIndex((f) => f.id === fieldId);
-        if (idx === -1) return prev;
-        const existing = current.pendingSchemaOverlay.addedFields[idx];
+        // agentic-template-item-editor — write to the per-item `fieldExtractions`
+        // map for ANY field (SEEDED or added), fixing the former
+        // `addedFields`-only bail that silently dropped a seeded field's Rerun
+        // result. Transient / in-memory only.
+        const existing = current.fieldExtractions?.get(fieldId);
         // Reference-equality short-circuit so a repeat of the same
         // result (network retry, double-click) doesn't churn re-renders.
         // `value`/`confidence` live ONLY on the "done" arm, so the value
         // comparison is meaningful only when both sides are "done".
         const same =
-          existing.extraction &&
-          existing.extraction.status === result.status &&
-          (result.status === "done" && existing.extraction.status === "done"
-            ? existing.extraction.value === result.value &&
-              existing.extraction.confidence === result.confidence
+          existing &&
+          existing.status === result.status &&
+          (result.status === "done" && existing.status === "done"
+            ? existing.value === result.value && existing.confidence === result.confidence
             : true);
         if (same) return prev;
-        const nextAdditions = current.pendingSchemaOverlay.addedFields.slice();
-        // `expand-inline-editor-fields` — when transitioning to "done"
-        // and a previous "done" extraction was on record, capture its
-        // confidence so the preview chip can render `conf <new> ↑ <old>`.
-        const priorConfidence =
-          existing.extraction?.status === "done" ? existing.extraction.confidence : undefined;
+        // `expand-inline-editor-fields` — when transitioning to "done" and a
+        // previous "done" extraction was on record, capture its confidence so
+        // the preview chip can render `conf <new> ↑ <old>`.
+        const priorConfidence = existing?.status === "done" ? existing.confidence : undefined;
         const enriched: import("./types").SchemaFieldExtractionResult =
           result.status === "done" && priorConfidence != null && result.previousConfidence == null
             ? { ...result, previousConfidence: priorConfidence }
             : result;
-        nextAdditions[idx] = { ...existing, extraction: enriched };
+        const nextMap = new Map(current.fieldExtractions ?? []);
+        nextMap.set(fieldId, enriched);
         const sessions = new Map(prev.sessions);
         sessions.set(prev.activeSessionId, {
           ...current,
-          pendingSchemaOverlay: {
-            ...current.pendingSchemaOverlay,
-            addedFields: nextAdditions,
-          },
+          fieldExtractions: nextMap,
           updatedAt: Date.now(),
         });
         return { ...prev, sessions };

@@ -234,13 +234,11 @@ export const SchemaView: FC<SchemaViewProps> = ({
       // render the delta narration after the new result lands. We read
       // from the latest chatState snapshot (not the closure) — the
       // overlay's addedFields hold the per-field extraction record.
-      const priorAddition = chatState.activeSessionId
-        ? chatState.sessions
-            .get(chatState.activeSessionId)
-            ?.pendingSchemaOverlay.addedFields.find((f) => f.id === fieldId)
+      const priorResult = chatState.activeSessionId
+        ? chatState.sessions.get(chatState.activeSessionId)?.fieldExtractions?.get(fieldId)
         : null;
       const priorConfidence =
-        priorAddition?.extraction?.status === "done" ? priorAddition.extraction.confidence : undefined;
+        priorResult?.status === "done" ? priorResult.confidence : undefined;
       setSchemaFieldExtraction(fieldId, { status: "pending" });
       try {
         const result = await api.extract.extractField({
@@ -308,9 +306,19 @@ export const SchemaView: FC<SchemaViewProps> = ({
   }
 
   const valuesById = new Map(sampleValues.map((v: ExtractedFieldValue) => [v.fieldId, v]));
+  // agentic-template-item-editor — extraction/preview results now come from the
+  // per-item `fieldExtractions` map (SEEDED + added), so a Rerun on a seeded
+  // field surfaces its value. Legacy `addedFields.extraction` entries are merged
+  // as a fallback (the map wins).
   const extractionsById = new Map<string, SchemaFieldExtractionResult>();
   for (const added of overlay.addedFields) {
     if (added.extraction) extractionsById.set(added.id, added.extraction);
+  }
+  const sessionPreviews = chatState.activeSessionId
+    ? chatState.sessions.get(chatState.activeSessionId)?.fieldExtractions
+    : null;
+  if (sessionPreviews) {
+    for (const [id, result] of sessionPreviews) extractionsById.set(id, result);
   }
 
   // Build the master id list (post-overlay) so the inline editor can

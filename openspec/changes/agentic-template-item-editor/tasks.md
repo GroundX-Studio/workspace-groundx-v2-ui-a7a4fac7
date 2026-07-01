@@ -27,7 +27,7 @@ Each task is TDD (failing test first) and ends with the Discipline §10 adversar
 
 ## 5. App — ChatStore: persist draft Template; in-memory preview slice (MUST precede §6)
 - [ ] 5.1 Serialize the resolved draft as an uncommitted `Template` (`TemplateSaveInput`, nullable name) into the entity twin + localStorage cache; hydrate on load (seed the working draft). Serialize/hydrate tests first.
-- [ ] 5.2 Add IN-MEMORY `itemPreviews: Map<string, ExtractedFieldValue | RenderedSection>` + `setItemPreview`/clear actions (seeded + added) + clear-on-scope-change; migrate `setSchemaFieldExtraction` callers off the `addedFields`-only path (this fixes the seeded-field bug). Tests: rerun a SEEDED field → `itemPreviews[fieldId]` populated + shown; previews NOT serialized to DB (assert excluded from the persisted Template JSON AND the committed save). Reducer tests first. Adversarial review.
+- [x] 5.2 (core, shipped) In-memory per-item results: `ChatSession.fieldExtractions: Map<itemId, SchemaFieldExtractionResult>` (kept the status-based UI type — pending/error/done + `previousConfidence` — over settled `GeneratedResult`, since the UI needs the transient status); rewrote `setSchemaFieldExtraction` to upsert the map for ANY field (removed the `addedFields`-only bail = the seeded-field Rerun bug); `SchemaView` reads `extractionsById` from the map (seeded + added). In-memory only (absent from `parseChatStoreSnapshot` → never DB/committed). 2 reducer regression tests + 131 Extract/SchemaView/ChatStore tests green; tsc clean. Remaining: clear-on-document-scope-change folds in with the hook wiring (§6/§8).
 
 ## 6. App — shared hook + adapters + client
 - [ ] 6.1 `api/templateItem.ts` client (rewrite + preview) over the shared contracts. Client test.

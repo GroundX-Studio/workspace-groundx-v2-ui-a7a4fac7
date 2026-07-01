@@ -578,6 +578,14 @@ export interface ChatSession {
   // endpoint is Phase 6.
   reportOverlay: PendingReportOverlay;
 
+  // agentic-template-item-editor — TRANSIENT per-item preview/extraction
+  // results, keyed by item id, covering SEEDED and added items (fixes the
+  // `addedFields`-only `setSchemaFieldExtraction` bug: seeded fields had no slot
+  // for a Rerun result). In-memory only — NOT serialized to DB and NOT part of a
+  // committed Template; recomputed on demand. Optional so existing ChatSession
+  // constructors need no change; the reducer/readers treat absent as empty.
+  fieldExtractions?: ReadonlyMap<string, SchemaFieldExtractionResult>;
+
   // `master-viewer-session` Phase 1 — paired ViewerSession. The active
   // `ViewerStep` is the single source of truth for the canvas surface; the
   // gate is a z-stacked overlay on top.
