@@ -46,5 +46,5 @@ Each task is TDD (failing test first) and ends with the Discipline §10 adversar
 - [x] 9.2 Same hook/pattern as extract (one shared implementation across both surfaces); Box-based inline UI mirroring the extract proposal card.
 
 ## 10. Closure
-- [ ] 10.1 `openspec validate --all --strict`; full app + middleware suites green; drift guards (catalog-parity, recurrence-drift, persistedColumnPolicy, no-hardcoded-styles) green.
-- [ ] 10.2 Live-verify each surface in the browser (rewrite proposal, accept, rerun/preview, persistence across reload). Delete any inline TODOs; honest commit.
+- [~] 10.1 Full suites GREEN with the functional feature complete: middleware 1038 passed / app 1944 passed; tsc clean both. (Re-run after the DB-persistence piece + `openspec validate --strict`.)
+- [ ] 10.2 Live-verify each surface in the browser (rewrite proposal, accept, rerun/preview). Persistence-across-reload pends §4/§5.1.
