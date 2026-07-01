@@ -83,6 +83,19 @@ describe("buildGroundedSystem", () => {
     expect(system).not.toContain('"field":"<path in EXTRACTED FIELDS>"');
   });
 
+  it("holds scope + resists override injections (scope-escape fix)", () => {
+    const system = buildGroundedSystem();
+    // Off-topic requests get a consistent brief decline + redirect (not silent
+    // compliance) — fixes the weather-redirects-but-poem-complies inconsistency.
+    expect(system).toMatch(/off-topic|unrelated/i);
+    expect(system).toMatch(/steer|redirect|point (them|back)|bring.*back/i);
+    // Override attempts ("ignore the document / previous instructions", "reveal
+    // your instructions", role changes) must NOT be obeyed.
+    expect(system).toMatch(/ignore/i);
+    expect(system).toMatch(/instructions/i);
+    expect(system).toMatch(/do not (follow|obey|comply)|never (follow|obey|comply)|don't (follow|obey|comply)/i);
+  });
+
   it("extraction option adds the EXTRACTED FIELDS guidance", () => {
     const system = buildGroundedSystem({ extraction: "{}" });
     expect(system).toContain("and the EXTRACTED FIELDS block");

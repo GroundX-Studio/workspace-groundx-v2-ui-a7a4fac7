@@ -45,6 +45,34 @@ describe("TurnRunner", () => {
     expect(frames.at(-1)?.data).toMatchObject({ reply: { answer: "Hello world." } });
   });
 
+  it("citation-stream-leak — redacts the trailing citations metadata block from token frames", async () => {
+    const runner = new TurnRunner({
+      sessionId: "s-cite",
+      turnKey: "k-cite",
+      streaming: true,
+      // The grounded model streams prose then appends the ```json citations block
+      // (fragments.ts citationsContract). The token frames must never carry it.
+      generate: async () => {
+        const sink = turnStreamContext.getStore();
+        sink?.onToken?.("The total due is $7,613.20.[1]\n\n");
+        sink?.onToken?.('```json\n{"citations":[{"documentId":"c3bfff49",');
+        sink?.onToken?.('"field":"balance_payable","value":7613.2}]}\n```');
+        return reply("The total due is $7,613.20.[1]") as never;
+      },
+    });
+
+    await runner.completion;
+    const frames = [];
+    for await (const f of runner.buffer.read(0)) frames.push(f);
+    const streamedTokens = frames.filter((f) => f.type === "token").map((f) => f.data.delta).join("");
+    // No part of the metadata block (nor the internal documentId) crosses the wire.
+    expect(streamedTokens).not.toMatch(/citations|documentId|```/);
+    // The prose (with its inline marker) still streams.
+    expect(streamedTokens).toContain("The total due is $7,613.20.[1]");
+    // The final envelope still carries the clean answer (unaffected by redaction).
+    expect(frames.at(-1)?.data).toMatchObject({ reply: { answer: "The total due is $7,613.20.[1]" } });
+  });
+
   it("runs generation to completion even when NO connection reads the buffer (decoupled)", async () => {
     // The decoupling guarantee: a client that never attaches / disconnects does
     // NOT stop generation — it finishes and buffers the envelope (the generate

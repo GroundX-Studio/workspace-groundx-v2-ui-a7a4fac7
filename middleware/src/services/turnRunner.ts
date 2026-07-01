@@ -18,6 +18,7 @@
 import { logger } from "../lib/logger.js";
 import { ChatHandlerError, type HandleChatMessageResponse } from "./chatHandler.js";
 import { TurnEventBuffer } from "./turnEventBuffer.js";
+import { makeMetadataStreamRedactor } from "./streamMetadataRedactor.js";
 import { turnStreamContext, type TurnStreamSink } from "./streamSink.js";
 
 /** How long a completed runner is retained for late reconnect/replay before eviction. */
@@ -89,11 +90,20 @@ export class TurnRunner {
     this.buffer.append("meta", { turnKey: this.turnKey });
     // The abort signal is ALWAYS wired (so any turn can be superseded); the live
     // callbacks are streaming-only (JSON keeps its upstream call byte-identical).
+    // citation-stream-leak — redact the trailing ```json {"citations":…} metadata
+    // block from the streamed tokens so the raw JSON (incl. the internal GroundX
+    // documentId) never crosses the wire or flashes mid-stream. The FINAL envelope
+    // carries the fence-stripped body and replaces the streamed draft, so holding
+    // back the block costs nothing.
+    const redactToken = makeMetadataStreamRedactor();
     const sink: TurnStreamSink = {
       abortSignal: this.controller.signal,
       ...(this.streaming
         ? {
-            onToken: (delta: string) => this.buffer.append("token", { delta }),
+            onToken: (delta: string) => {
+              const safe = redactToken(delta);
+              if (safe) this.buffer.append("token", { delta: safe });
+            },
             onActivity: (activity) => this.buffer.append("activity", activity),
           }
         : {}),
