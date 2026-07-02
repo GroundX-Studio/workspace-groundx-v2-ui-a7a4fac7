@@ -31,6 +31,7 @@ import { buildToolNotes } from "./prompts/toolNotes.js";
 import { snippetHeader, forceAnswerAfterToolsInstruction } from "./prompts/fragments.js";
 import { isMetadataBlockObject } from "./streamMetadataRedactor.js";
 import { groundedAnswerOverScope } from "./groundedAnswer.js";
+import { buildWorkspaceStateContext } from "./workspaceContext.js";
 import {
   MAX_SNIPPET_BLOCK_CHARS,
   RAG_SNIPPET_CHARS,
@@ -121,6 +122,18 @@ export async function runRagPipeline(
   // tool absent from this step contributes no notes), declared on the tool.
   const toolNotes = buildToolNotes(catalog);
 
+  // chat-unified-tool-loop D2 — inject the small workspace-state block ("where
+  // you are": active entity, journey stage, saved-schema count, recent trail) on
+  // EVERY chat turn, so the one loop can answer "where am I / what can I do"
+  // without a separate mode. Chat-path only (report/hybrid pass their own /
+  // nothing); omitted (null) when session deps are absent (anon/no session).
+  const workspaceContext = await buildWorkspaceStateContext({
+    ...(deps.repository ? { repository: deps.repository } : {}),
+    ...(deps.chatSessionId ? { chatSessionId: deps.chatSessionId } : {}),
+    groundxUsername: deps.groundxUsername ?? null,
+    activeStepKind: request.activeStepKind,
+  });
+
   // 2026-06-01-live-report-render §3 — the search → grounded-generation →
   // WF-06b-verify per-answer pipeline is now the SHARED `groundedAnswerOverScope`
   // seam (one home, two callers: this chat path + the Smart Report live render).
@@ -149,6 +162,7 @@ export async function runRagPipeline(
     {
       ...(options?.turnPlan ? { turnPlan: options.turnPlan } : {}),
       ...(request.scopeHint ? { scopeHint: request.scopeHint } : {}),
+      ...(workspaceContext ? { structuredContext: workspaceContext } : {}),
       tools: openAiTools,
       ...(toolNotes ? { toolNotes } : {}),
       ...(debugEnabled ? { debug: debugCapture } : {}),
