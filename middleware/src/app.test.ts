@@ -168,6 +168,50 @@ describe("middleware scaffold", () => {
     expect(d2.page).toBeUndefined();
   });
 
+  it("the messages-hydrate route emits each row's createdAt (send time) — the client derives the footer timestamp from it", async () => {
+    const { app, repository } = setup();
+    const agent = request.agent(app);
+    const created = await agent.post("/api/onboarding/session").expect(200);
+    const sid: string = created.body.sessionId;
+    const sent = new Date("2026-07-01T15:33:00.000Z");
+    await repository.upsertChatSession({
+      id: "cs-ts",
+      onboardingSessionId: sid,
+      ownerUserId: null,
+      ownerAnonId: sid,
+      title: "t",
+      isOnboarding: true,
+      activeEntityKey: null,
+      currentIntent: null,
+      createdAt: sent,
+      updatedAt: sent,
+      archivedAt: null,
+    });
+    await repository.appendChatMessage({
+      id: "m-ts",
+      chatSessionId: "cs-ts",
+      turnIndex: 1,
+      role: "assistant",
+      content: "answer",
+      citationsJson: null,
+      compressedIntoSummaryId: null,
+      llmProvider: null,
+      llmModelId: null,
+      latencyMs: null,
+      promptTokens: null,
+      completionTokens: null,
+      errorCode: null,
+      createdAt: sent,
+    });
+
+    const res = await agent.get("/api/chat-sessions/cs-ts/messages").expect(200);
+    const row = res.body.messages[0];
+    // The persisted send time is on the wire as `createdAt` and parses back to
+    // the same instant — this is what a hydrated LiveTurn's timestamp derives from.
+    expect(typeof row.createdAt).toBe("string");
+    expect(new Date(row.createdAt).getTime()).toBe(sent.getTime());
+  });
+
   it("skips request logging for kube-probe and Prometheus endpoints", async () => {
     // Direct unit test on the helper; the pino-http wiring is a
     // one-liner that delegates to it.

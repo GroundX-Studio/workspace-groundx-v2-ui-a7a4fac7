@@ -107,6 +107,14 @@ describe("server tool catalog", () => {
     expect(getServerTool("nonexistent_tool")).toBeUndefined();
   });
 
+  // chat-message-actions-timestamps — the mutate chips declare a concise
+  // chipLabel so the chat row shows a clean CTA (ragPipeline prefers it over the
+  // description's first sentence). Covers save_to_account too, not just book_call.
+  it("mutate tools with a UI chip declare a concise chipLabel", () => {
+    expect(getServerTool("book_call")?.chipLabel).toBe("Book a call");
+    expect(getServerTool("save_to_account")?.chipLabel).toBe("Save to account");
+  });
+
   // agentic-tool-loop — a tool is EITHER intent-routed or server-executed, never
   // both and never neither; a server-executed tool is read-only and carries the
   // user-facing activity label surfaced on reply.toolActivity[].

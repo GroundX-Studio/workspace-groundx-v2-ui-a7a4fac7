@@ -130,7 +130,7 @@ describe("ConversationFlow (experience.seedTurns → one-shot opener injected on
     // `seedTurns` path end-to-end.
     const seedExperience: ChatExperience = {
       seedTurns: () => [
-        { id: "seed-1", role: "assistant", content: "Here is what is in this workspace.", pinnable: true },
+        { id: "seed-1", role: "assistant", content: "Here is what is in this workspace.", pinnable: true, timestamp: 1_782_000_000_000 },
       ],
     };
     renderWithConversationApi(<ActiveConversationFlow experience={seedExperience} />, {
@@ -149,7 +149,7 @@ describe("ConversationFlow (experience.seedTurns → one-shot opener injected on
     // affordance is actually reachable under a rendered assistant turn.
     const seedExperience: ChatExperience = {
       seedTurns: () => [
-        { id: "seed-1", role: "assistant", content: "Here is what is in this workspace.", pinnable: true },
+        { id: "seed-1", role: "assistant", content: "Here is what is in this workspace.", pinnable: true, timestamp: 1_782_000_000_000 },
       ],
     };
     renderWithConversationApi(<ActiveConversationFlow experience={seedExperience} />, {

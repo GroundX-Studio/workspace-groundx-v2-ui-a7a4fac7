@@ -592,6 +592,14 @@ export interface PersistedChatMessage {
    * Surfaces in the rendered chat thread so chips survive a refresh.
    */
   citations: Citation[];
+  /**
+   * ISO send time, projected from `chat_messages.created_at` (the middleware
+   * spreads `ChatMessageRecord.createdAt` onto each row). The rendered
+   * conversation derives a hydrated turn's numeric `timestamp` from this via
+   * `Date.parse`. Optional: older middleware deployments that predate the
+   * projection omit it (the client falls back to "now" only if absent).
+   */
+  createdAt?: string;
 }
 
 interface ListChatMessagesResponse {

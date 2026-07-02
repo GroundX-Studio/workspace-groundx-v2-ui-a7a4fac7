@@ -127,6 +127,12 @@ export const SuggestedActionChips: FC<SuggestedActionChipsProps> = ({
             "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
           }}
         >
+          {/* NOTE: text-overflow:ellipsis works here ONLY because this span is a
+              DIRECT flex child of the inline-flex chip (a flex item is blockified,
+              giving the span the block formatting context ellipsis needs). If this
+              markup changes so the span is no longer a direct flex child,
+              truncation silently breaks — jsdom can't measure layout, so no unit
+              test catches it (browser/e2e-verified instead). */}
           <Box
             component="span"
             sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}

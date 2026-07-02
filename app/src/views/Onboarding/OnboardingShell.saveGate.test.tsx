@@ -44,7 +44,9 @@ const SAVE_CHIP_REPLY: SendChatMessageResult = {
     suggestedActions: [
       {
         key: "tool:save_to_account",
-        label: "💾 Save to account",
+        // Matches the real server output — save_to_account declares
+        // chipLabel: "Save to account" (no emoji). See toolCatalog.
+        label: "Save to account",
         detail: { intent: { kind: "openGate", trigger: "save" } },
       },
     ],

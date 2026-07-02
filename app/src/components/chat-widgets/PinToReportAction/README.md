@@ -12,12 +12,12 @@ auto-create). The action returns a `PinResolution` (`prompt-new-only` /
 confirmation.
 
 **report-pin-affordance:** it is OPT-IN and COMPACT, not carried on every turn.
-It renders only on genuine answer turns (`LiveTurn.pinnable === true`), hosted by
-the internal `components/conversation/AnswerActions` control on the answer's
-affordance row — NOT a full-width pill, and never on agent narration / scripted /
-error turns. `variant="compact"` (the AnswerActions host) renders a single 📌
-icon button with a TRANSIENT confirmation; `variant="pill"` (default) is the
-legacy labelled pill.
+It renders only on genuine answer turns (`LiveTurn.pinnable === true`), hosted in
+the `components/conversation/MessageActions` footer (alongside Copy + the
+timestamp) — NOT a full-width pill, and never on agent narration / scripted /
+error turns. `variant="compact"` (the MessageActions host) renders a single
+greyscale pin icon (recolorable inline SVG, not the colored 📌 emoji) with a
+TRANSIENT confirmation; `variant="pill"` (default) is the legacy labelled pill.
 
 ## Props
 
@@ -33,7 +33,7 @@ interface PinToReportActionProps {
   turnText: string;
   /** True while the turn is still streaming — dims + `aria-disabled`s the button and queues clicks. */
   streaming?: boolean;
-  /** `"compact"` = a single 📌 icon button + transient confirmation (hosted in AnswerActions); `"pill"` (default) = the legacy labelled pill. */
+  /** `"compact"` = a single greyscale pin icon button + transient confirmation (hosted in the MessageActions footer); `"pill"` (default) = the legacy labelled pill. */
   variant?: "pill" | "compact";
 }
 ```

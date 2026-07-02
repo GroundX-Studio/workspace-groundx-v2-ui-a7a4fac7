@@ -16,6 +16,7 @@ function assistantTurn(extra: Partial<LiveTurn>): LiveTurn {
     id: "a-1",
     role: "assistant",
     content: "X-Ray breaks documents into semantic objects.",
+    timestamp: 1_782_000_000_000,
     // Not pinnable (opt-in) → skips the pin affordance branch, which needs
     // ChatStore context the bare render doesn't provide and isn't under test here.
     ...extra,
@@ -221,10 +222,11 @@ describe("report-pin-affordance — opt-in compact pin (T1)", () => {
     id: "a-1",
     role: "assistant",
     content: "The total amount due is $7,613.20.",
+    timestamp: 1_782_000_000_000,
     ...extra,
   });
 
-  it("a genuine answer turn (pinnable) shows the COMPACT AnswerActions control", () => {
+  it("a genuine answer turn (pinnable) shows the compact pin in the message footer", () => {
     renderWithOnboardingProviders(
       <LiveTurnList
         liveTurns={[turn({ pinnable: true })]}
@@ -233,10 +235,11 @@ describe("report-pin-affordance — opt-in compact pin (T1)", () => {
         onSuggestedAction={() => {}}
       />,
     );
-    expect(screen.getByTestId("answer-actions")).toBeInTheDocument();
+    const footer = screen.getByTestId("message-actions");
+    expect(within(footer).getByRole("button", { name: /pin/i })).toBeInTheDocument();
   });
 
-  it("a narration / scripted turn (NOT pinnable) shows NO pin affordance at all", () => {
+  it("a narration / scripted turn (NOT pinnable) shows the footer but NO pin", () => {
     renderWithOnboardingProviders(
       <LiveTurnList
         liveTurns={[turn({})]}
@@ -245,8 +248,10 @@ describe("report-pin-affordance — opt-in compact pin (T1)", () => {
         onSuggestedAction={() => {}}
       />,
     );
-    expect(screen.queryByTestId("answer-actions")).not.toBeInTheDocument();
-    // and NOT the old full-width pill either.
+    // The footer (copy + timestamp) still renders for an assistant turn with
+    // content, but a non-pinnable turn carries NO pin control.
+    const footer = screen.getByTestId("message-actions");
+    expect(within(footer).queryByRole("button", { name: /pin/i })).toBeNull();
     expect(screen.queryByTestId("pin-to-report-action")).not.toBeInTheDocument();
   });
 
@@ -259,8 +264,39 @@ describe("report-pin-affordance — opt-in compact pin (T1)", () => {
         onSuggestedAction={() => {}}
       />,
     );
-    const actions = screen.getByTestId("answer-actions");
-    const btn = within(actions).getByRole("button", { name: /pin/i });
+    const footer = screen.getByTestId("message-actions");
+    const btn = within(footer).getByRole("button", { name: /pin/i });
     expect(btn.tagName).toBe("BUTTON");
+  });
+});
+
+describe("per-message footer (chat-message-actions-timestamps)", () => {
+  const TIME_RE = /\d{1,2}:\d{2}\s?(AM|PM)/i;
+
+  it("a user turn renders a right-aligned footer with copy + timestamp", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[{ id: "u-1", role: "user", content: "what is the total?", timestamp: Date.now() }]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    const footer = screen.getByTestId("message-actions");
+    expect(footer).toHaveAttribute("data-role", "user");
+    expect(within(footer).getByTestId("copy-message-button")).toBeInTheDocument();
+    expect(footer.textContent).toMatch(TIME_RE);
+  });
+
+  it("an empty (still-streaming) assistant placeholder renders NO footer", () => {
+    renderWithOnboardingProviders(
+      <LiveTurnList
+        liveTurns={[{ id: "a-1", role: "assistant", content: "", timestamp: Date.now() }]}
+        sending={true}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("message-actions")).not.toBeInTheDocument();
   });
 });

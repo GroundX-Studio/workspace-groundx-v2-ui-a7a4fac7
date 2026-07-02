@@ -56,7 +56,12 @@ function Probe({ onFirstUserSend }: { onFirstUserSend?: () => void }) {
       </button>
       <ul>
         {conv.liveTurns.map((t) => (
-          <li key={t.id} data-testid={`probe-turn-${t.role}`} data-pinnable={String(t.pinnable === true)}>
+          <li
+            key={t.id}
+            data-testid={`probe-turn-${t.role}`}
+            data-pinnable={String(t.pinnable === true)}
+            data-timestamp={String(t.timestamp)}
+          >
             {t.content}
             {(t.citations ?? []).map((c, i) => (
               <span key={i} data-testid="probe-citation">
@@ -468,6 +473,35 @@ describe("useConversation (durable engine)", () => {
     expect(answer).toHaveAttribute("data-pinnable", "true");
     expect(user).toHaveAttribute("data-pinnable", "false");
     expect(err).toHaveAttribute("data-pinnable", "false");
+  });
+
+  it("every turn carries a numeric timestamp; a hydrated turn uses the persisted createdAt", async () => {
+    const sentIso = "2026-07-01T15:33:00.000Z";
+    listChatMessages.mockResolvedValue([
+      { id: "m-a", role: "assistant", content: "Hydrated answer.", citations: [], createdAt: sentIso },
+    ]);
+    renderWithConversationApi(<Probe />, { initialFrame: "f2", initialScenario: "utility" });
+    // Hydrated turn: timestamp derived from the persisted createdAt.
+    await waitFor(() => expect(screen.getByText("Hydrated answer.")).toBeInTheDocument());
+    const hydrated = screen.getAllByTestId(/probe-turn-/).find((t) => t.textContent?.includes("Hydrated answer."));
+    expect(hydrated).toHaveAttribute("data-timestamp", String(Date.parse(sentIso)));
+
+    // Freshly-sent turns: both carry a numeric (non-NaN) timestamp.
+    sendChatMessage.mockResolvedValueOnce({
+      userMessageId: "u-1",
+      assistantMessageId: "a-1",
+      reply: { mode: "rag", answer: "Fresh answer.", citations: [], suggestedActions: [], intents: [], toolFailures: [], proposedSchemaField: null },
+      compressionRan: false,
+    });
+    await act(async () => {
+      screen.getByTestId("probe-send").click();
+    });
+    await waitFor(() => expect(screen.getByText("Fresh answer.")).toBeInTheDocument());
+    for (const turn of screen.getAllByTestId(/probe-turn-/)) {
+      const ts = Number(turn.getAttribute("data-timestamp"));
+      expect(Number.isFinite(ts)).toBe(true);
+      expect(ts).toBeGreaterThan(0);
+    }
   });
 
   it("hydrates scoped product sessions with non-onboarding ensure metadata", async () => {

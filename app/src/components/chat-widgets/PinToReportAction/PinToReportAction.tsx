@@ -23,6 +23,7 @@
  */
 
 import Box from "@mui/material/Box";
+import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useRef, useState, type FC } from "react";
 
 import type { WidgetRole, WidgetScope } from "@groundx/shared";
@@ -30,11 +31,12 @@ import type { WidgetRole, WidgetScope } from "@groundx/shared";
 import {
   BODY_TEXT,
   BORDER,
-  BORDER_RADIUS_2X,
   BORDER_RADIUS_PILL,
+  BORDER_RADIUS_SM,
   EYEBROW_ON_LIGHT,
   FONT_SIZE_LABEL,
   FONT_WEIGHT_LABEL,
+  MUTED_ON_LIGHT,
   NAVY,
   WHITE,
 } from "@/constants";
@@ -53,9 +55,11 @@ export interface PinToReportActionProps {
   /** True while the turn is still streaming — dims + `aria-disabled`s the button and queues clicks. */
   streaming?: boolean;
   /**
-   * report-pin-affordance — `"compact"` renders a single 📌 ICON button (hosted
-   * inside `AnswerActions` on the answer's affordance row) with a TRANSIENT
-   * confirmation; `"pill"` (default) is the legacy full-width labelled pill.
+   * report-pin-affordance — `"compact"` renders a single greyscale pin ICON
+   * button (hosted in the `MessageActions` footer, alongside Copy) with a
+   * TRANSIENT confirmation; `"pill"` (default) is the legacy full-width labelled
+   * pill. chat-message-actions-timestamps replaced the colored 📌 emoji with a
+   * recolorable inline-SVG pin so the compact variant renders muted-grey.
    */
   variant?: "pill" | "compact";
 }
@@ -125,22 +129,52 @@ export const PinToReportAction: FC<PinToReportActionProps> = ({
         aria-disabled={streaming || undefined}
         onClick={handleClick}
         sx={{
-          border: `1px solid ${BORDER}`,
-          backgroundColor: WHITE,
-          color: NAVY,
-          borderRadius: compact ? BORDER_RADIUS_2X : BORDER_RADIUS_PILL,
+          // Compact (footer): borderless, muted-grey recolorable icon matching
+          // CopyButton. Pill (legacy): the bordered white labelled chip.
           ...(compact
-            ? { display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 28, height: 28, px: 0.75 }
-            : { px: 1.5, py: 0.5 }),
+            ? {
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                p: 0.25,
+                border: "none",
+                background: "none",
+                borderRadius: BORDER_RADIUS_SM,
+                color: MUTED_ON_LIGHT,
+                lineHeight: 0,
+                transition: "color 120ms ease",
+                "&:hover": { color: streaming ? MUTED_ON_LIGHT : NAVY },
+                "&:focus-visible": { outline: `2px solid ${alpha(NAVY, 0.5)}`, outlineOffset: 1 },
+              }
+            : {
+                border: `1px solid ${BORDER}`,
+                backgroundColor: WHITE,
+                color: NAVY,
+                borderRadius: BORDER_RADIUS_PILL,
+                px: 1.5,
+                py: 0.5,
+                "&:focus-visible": { outline: `2px solid ${NAVY}` },
+              }),
           cursor: streaming ? "default" : "pointer",
           opacity: streaming ? 0.5 : 1,
           fontFamily: "inherit",
           fontSize: FONT_SIZE_LABEL,
           fontWeight: FONT_WEIGHT_LABEL,
-          "&:focus-visible": { outline: `2px solid ${NAVY}` },
         }}
       >
-        {compact ? "📌" : "📌 pin to report"}
+        {compact ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden focusable="false">
+            <path
+              d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5zM12 14v6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : (
+          "📌 pin to report"
+        )}
       </Box>
 
       {/* Existing-or-new prompt (NO silent auto-create). The resolution decides

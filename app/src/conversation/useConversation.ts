@@ -62,6 +62,12 @@ export interface LiveTurn {
   role: "user" | "assistant";
   content: string;
   /**
+   * chat-message-actions-timestamps — the message's send time (epoch ms),
+   * rendered as the per-message footer timestamp. Fresh turns stamp
+   * `Date.now()`; hydrated turns derive it from the persisted `createdAt`.
+   */
+  timestamp: number;
+  /**
    * UI-01 Phase 2a — non-null when the grounded LLM proposed adding a
    * schema field on this turn. Rendered as an inline
    * `<ProposeSchemaFieldCard>` beneath the assistant bubble.
@@ -360,6 +366,9 @@ export function useConversation(
             id: m.id,
             role: m.role as "user" | "assistant",
             content: m.content,
+            // The persisted send time is authoritative; parse the ISO `createdAt`
+            // the middleware projects. Older deployments omit it → fall back to now.
+            timestamp: m.createdAt ? Date.parse(m.createdAt) : Date.now(),
             citations: m.citations ?? [],
             // report-pin-affordance — opt-in: a hydrated NON-error ASSISTANT turn
             // is a genuine persisted answer → pinnable. User turns and error
@@ -396,7 +405,7 @@ export function useConversation(
     const seen = revealedAgentIdsRef.current;
     const fresh: LiveTurn[] = activeChatSession.messages
       .filter((m) => m.id.startsWith("agent-") && !seen.has(m.id))
-      .map((m) => ({ id: m.id, role: "assistant" as const, content: m.content }));
+      .map((m) => ({ id: m.id, role: "assistant" as const, content: m.content, timestamp: Date.now() }));
     if (fresh.length === 0) return;
     for (const t of fresh) seen.add(t.id);
     setPendingAgentReveals((cur) => [...cur, ...fresh]);
@@ -426,7 +435,7 @@ export function useConversation(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || sending) return;
-      const userTurn: LiveTurn = { id: `u-${cryptoRandom()}`, role: "user", content: trimmed };
+      const userTurn: LiveTurn = { id: `u-${cryptoRandom()}`, role: "user", content: trimmed, timestamp: Date.now() };
       setLiveTurns((cur) => [...cur, userTurn]);
 
       // Lifecycle: fire onFirstUserSend exactly once + flip the observable
@@ -446,6 +455,7 @@ export function useConversation(
             id: `a-${cryptoRandom()}`,
             role: "assistant",
             content: "No active chat session — please refresh and try again.",
+            timestamp: Date.now(),
             // Not pinnable (a local error turn, not a genuine answer).
           },
         ]);
@@ -478,7 +488,7 @@ export function useConversation(
         // append live, activity drives the indicator; the cleaned envelope
         // finalizes it. The fake api delegates streamChatMessage→sendChatMessage,
         // so non-streaming callers/tests are unaffected.
-        setLiveTurns((cur) => [...cur, { id: assistantTurnId, role: "assistant", content: "" }]);
+        setLiveTurns((cur) => [...cur, { id: assistantTurnId, role: "assistant", content: "", timestamp: Date.now() }]);
         const runStream = (sid: string) =>
           api.chat.streamChatMessage(
             {
@@ -614,9 +624,9 @@ export function useConversation(
         setLiveTurns((cur) =>
           cur.some((t) => t.id === assistantTurnId)
             ? cur.map((t) =>
-                t.id === assistantTurnId ? { id: assistantTurnId, role: "assistant", content: mapped.message } : t,
+                t.id === assistantTurnId ? { id: assistantTurnId, role: "assistant", content: mapped.message, timestamp: t.timestamp } : t,
               )
-            : [...cur, { id: assistantTurnId, role: "assistant", content: mapped.message }],
+            : [...cur, { id: assistantTurnId, role: "assistant", content: mapped.message, timestamp: Date.now() }],
         );
       } finally {
         // Release the controller once this turn settles so the unmount effect can't

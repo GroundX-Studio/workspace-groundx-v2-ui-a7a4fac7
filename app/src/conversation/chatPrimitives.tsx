@@ -21,7 +21,7 @@ import { useState, type FC, type FormEvent, type ReactNode } from "react";
 import type { ChatSuggestedAction } from "@/api/chatSessions";
 import type { Citation, WidgetRole } from "@groundx/shared";
 import { SourceList } from "@/components/brand/SourceList/SourceList";
-import { AnswerActions } from "@/components/conversation/AnswerActions/AnswerActions";
+import { MessageActions } from "@/components/conversation/MessageActions/MessageActions";
 import { PinToReportAction } from "@/components/chat-widgets/PinToReportAction/PinToReportAction";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
@@ -135,6 +135,21 @@ export const PickViewPill: FC<PickViewPillProps> = ({ label, testid, onClick }) 
 // ── Live turn list ──────────────────────────────────────────────────────────
 
 /**
+ * chat-message-actions-timestamps — the per-message footer (`MessageActions`)
+ * is `opacity: 0` by default; on hover-capable devices the turn wrapper fades it
+ * in on hover / keyboard focus-within. Touch devices show it persistently
+ * (handled inside `MessageActions` via `@media (hover: none)`). Space is always
+ * reserved, so revealing it never shifts the transcript.
+ */
+const revealFooterOnHoverSx = {
+  "@media (hover: hover)": {
+    "&:hover [data-testid='message-actions'], &:focus-within [data-testid='message-actions']": {
+      opacity: 1,
+    },
+  },
+} as const;
+
+/**
  * The live ad-hoc turn list — user/assistant bubbles + the answer-source
  * footer (CiteChips + SuggestedActionChips) + propose-card + the "thinking"
  * indicator. ONE definition for the single flow; testids are the unprefixed
@@ -166,9 +181,10 @@ export function LiveTurnList({
     <Stack spacing={1} sx={{ mt: 0.5 }}>
       {liveTurns.map((turn, idx) =>
         turn.role === "user" ? (
-          <UserBubble key={turn.id} testid="chat-live-user">
-            {turn.content}
-          </UserBubble>
+          <Stack key={turn.id} spacing={0.25} sx={revealFooterOnHoverSx}>
+            <UserBubble testid="chat-live-user">{turn.content}</UserBubble>
+            <MessageActions role="user" text={turn.content} timestamp={turn.timestamp} />
+          </Stack>
         ) : (
           (() => {
             // standardized-viewer-control T8 — partition the offered actions into
@@ -188,7 +204,7 @@ export function LiveTurnList({
               if (action) onSuggestedAction(action, turn.citations);
             };
             return (
-          <Stack key={turn.id} spacing={1}>
+          <Stack key={turn.id} spacing={1} sx={revealFooterOnHoverSx}>
             {turn.content.trim().length > 0 && (
               <BotBubble testid="chat-live-assistant">
                 {/* inline-footnote-citations — pass citations so inline `[N]` tokens
@@ -247,25 +263,25 @@ export function LiveTurnList({
                 scope={{ type: "none" }}
               />
             )}
-            {turn.pinnable === true && turn.content.trim().length > 0 && (
-              <AnswerActions
-                actions={[
-                  {
-                    id: "pin",
-                    label: "Pin to report",
-                    icon: "📌",
-                    node: (
-                      <PinToReportAction
-                        role={role}
-                        scope={{ type: "none" }}
-                        turnId={turn.id}
-                        turnText={turn.content}
-                        streaming={sending && idx === liveTurns.length - 1}
-                        variant="compact"
-                      />
-                    ),
-                  },
-                ]}
+            {/* chat-message-actions-timestamps — per-message footer (copy +
+                timestamp, plus the greyscale pin ONLY on a pinnable answer). */}
+            {turn.content.trim().length > 0 && (
+              <MessageActions
+                role="assistant"
+                text={turn.content}
+                timestamp={turn.timestamp}
+                extraActions={
+                  turn.pinnable === true ? (
+                    <PinToReportAction
+                      role={role}
+                      scope={{ type: "none" }}
+                      turnId={turn.id}
+                      turnText={turn.content}
+                      streaming={sending && idx === liveTurns.length - 1}
+                      variant="compact"
+                    />
+                  ) : undefined
+                }
               />
             )}
           </Stack>
