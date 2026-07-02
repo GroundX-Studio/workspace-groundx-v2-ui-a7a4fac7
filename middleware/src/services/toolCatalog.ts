@@ -24,6 +24,7 @@
 import { z } from "zod";
 
 import { contentScopeSchema, offerAsField, viewerStepKindSchema, type ViewerStepKind, type WidgetRole } from "@groundx/shared";
+import type { AppRepository, GroundXPartnerClient } from "../types.js";
 
 export type { ViewerStepKind, WidgetRole };
 
@@ -53,6 +54,20 @@ export interface ServerExecuteContext {
    * never reach content the turn's authorized retrieval did not surface.
    */
   fetchExtraction: (documentId: string) => Promise<string>;
+  /**
+   * chat-unified-tool-loop D3 — account/workspace reader deps, for the account
+   * reader tools (`list_projects` / `list_api_keys` / `pages_remaining` /
+   * `saved_schemas`). Bound by the grounded loop from the chat router's deps;
+   * OPTIONAL so the report/hybrid callers (which don't advertise these tools)
+   * needn't supply them. A reader tool whose dep is absent returns a frank
+   * "not available" line rather than throwing.
+   */
+  repository?: AppRepository;
+  partnerClient?: GroundXPartnerClient;
+  /** Signed-in groundxUsername, or null/undefined when anonymous. */
+  groundxUsername?: string | null;
+  /** Free-tier BYO page budget (env config), for `pages_remaining`. */
+  byoPagesLimit?: number;
 }
 
 /**
@@ -909,6 +924,85 @@ const lookupGroundxKnowledge: ServerTool = {
     ctx.skillsRetrieve(query, { bypassEntryBar: true }) ?? "No GroundX product information found for that.",
 };
 
+/**
+ * chat-unified-tool-loop D3 — the user's ACCOUNT/workspace facts as ONE reader
+ * tool with a `topic` axis (principle 1: an axis value, not four near-duplicate
+ * tools). Replaces the deleted `structured` mode's `answerMyProjects` /
+ * `answerApiKeys` / pages / schemas readers — one implementation, one source.
+ * Server-only; uses the ctx's repository / partnerClient / groundxUsername /
+ * byoPagesLimit (absent dep → a frank "not available" line, never a throw).
+ * API key values are shown name + last-4 only (never-expose-secrets).
+ */
+const getAccountInfo: ServerTool = {
+  name: "get_account_info",
+  description:
+    "Read the user's ACCOUNT / workspace facts: their projects, API keys, remaining page " +
+    "budget, or saved extraction schemas. Use when the user asks about their own account or " +
+    "workspace (not about document content or the GroundX product); pick the matching topic.",
+  category: "read",
+  inputSchema: z.object({
+    topic: z
+      .enum(["projects", "api_keys", "pages_remaining", "saved_schemas"])
+      .describe("Which account/workspace fact to read."),
+  }),
+  promptGuidance:
+    "Call for a question about the USER'S OWN account/workspace — their projects, API keys, " +
+    "pages remaining, or saved schemas. NOT for document content (search the docs) or GroundX " +
+    "product facts (use lookup_groundx_knowledge). Answer naturally from the result.",
+  activityLabel: "Checked your account",
+  serverExecute: async ({ topic }, ctx) => {
+    if (topic === "pages_remaining") {
+      const limit = ctx.byoPagesLimit ?? 100;
+      return (
+        `Your BYO free-tier budget is ${limit} pages per month. I don't have the live usage ` +
+        `count wired yet — once page-usage telemetry is queryable I'll show "X of ${limit} pages used."`
+      );
+    }
+    const username = ctx.groundxUsername;
+    const subject = topic === "api_keys" ? "API keys" : topic === "saved_schemas" ? "saved schemas" : "projects";
+    if (!username) return `Sign in to see your ${subject}.`;
+    if (topic === "saved_schemas") {
+      if (!ctx.repository) return "The saved-schemas reader isn't available right now.";
+      const rows = await ctx.repository.listTemplates(username, "extract");
+      if (rows.length === 0) return "You haven't saved any extraction schemas yet.";
+      return (
+        `You have ${rows.length} saved schema${rows.length === 1 ? "" : "s"}:\n` +
+        rows.map((s) => `• ${s.name} (id ${s.id})`).join("\n")
+      );
+    }
+    // projects / api_keys — live Partner fetch.
+    if (!ctx.partnerClient) return "That account reader isn't available right now.";
+    const path = topic === "api_keys" ? "/apikey" : "/project";
+    let response: Response;
+    try {
+      response = await ctx.partnerClient.forward(path, { method: "GET", customerKey: username });
+    } catch {
+      return `I couldn't reach the workspace API to look up your ${subject} — please try again in a moment.`;
+    }
+    if (!response.ok) {
+      return `I couldn't reach the workspace API to look up your ${subject} — please try again in a moment.`;
+    }
+    const payload = (await response.json().catch(() => null)) as
+      | { projects?: Array<{ projectId?: string; id?: string; name?: string }>; apiKeys?: Array<{ name?: string; apiKey?: string }> }
+      | null;
+    if (topic === "api_keys") {
+      const keys = payload?.apiKeys ?? [];
+      if (keys.length === 0) return "You don't have any API keys yet. Create one from the workspace settings.";
+      return (
+        `You have ${keys.length} API key${keys.length === 1 ? "" : "s"}:\n` +
+        keys.map((k) => `• ${k.name ?? "(unnamed)"} (…${(k.apiKey ?? "").slice(-4)})`).join("\n") +
+        `\n\nFull key values aren't shown here — manage them in workspace settings.`
+      );
+    }
+    const projects = payload?.projects ?? [];
+    if (projects.length === 0) return "You don't have any projects in your workspace yet.";
+    return (
+      `You have ${projects.length} project${projects.length === 1 ? "" : "s"}:\n` +
+      projects.map((p) => `• ${p.name ?? "(unnamed)"} (id ${p.projectId ?? p.id ?? "?"})`).join("\n")
+    );
+  },
+};
+
 export const SERVER_TOOL_CATALOG: ServerTool[] = [
   openDocument,
   jumpToPage,
@@ -963,6 +1057,9 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   // chat-unified-tool-loop D4 — GroundX product-knowledge tool (server-only;
   // the planner's `productKnowledge` flag replacement).
   lookupGroundxKnowledge,
+  // chat-unified-tool-loop D3 — account/workspace reader (server-only; replaces
+  // the deleted structured mode's account answerers).
+  getAccountInfo,
 ];
 
 /**

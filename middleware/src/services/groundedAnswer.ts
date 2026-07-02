@@ -129,6 +129,15 @@ export interface GroundedAnswerDeps {
   quoteEmbedder?: import("./attribution.js").Embedder;
   /** Verification threshold for the embedding gate (env `EMBEDDINGS_VERIFY_THRESHOLD`, default 0.82). */
   embedThreshold?: number;
+  /**
+   * chat-unified-tool-loop D3 — account/workspace reader deps threaded to the
+   * server-tool loop's `ServerExecuteContext` for the account reader tools.
+   * OPTIONAL: only the chat caller (which advertises those tools) passes them.
+   */
+  repository?: import("../types.js").AppRepository;
+  partnerClient?: import("../types.js").GroundXPartnerClient;
+  groundxUsername?: string | null;
+  byoPagesLimit?: number;
 }
 
 /** Optional knobs for the grounded call — the chat path passes its scope hint,
@@ -1011,7 +1020,17 @@ export async function groundedAnswerOverScope(
               return { result: `${call.name} failed: invalid arguments — ${reason}`, failure: { name: call.name, reason: `invalid arguments — ${reason}` } };
             }
             try {
-              const result = await tool.serverExecute(parse.data, { skillsRetrieve, researchDocuments, fetchExtraction });
+              const result = await tool.serverExecute(parse.data, {
+                skillsRetrieve,
+                researchDocuments,
+                fetchExtraction,
+                // chat-unified-tool-loop D3 — account reader deps (undefined for
+                // callers that don't pass them; those tools then aren't advertised).
+                ...(deps.repository ? { repository: deps.repository } : {}),
+                ...(deps.partnerClient ? { partnerClient: deps.partnerClient } : {}),
+                groundxUsername: deps.groundxUsername ?? null,
+                ...(deps.byoPagesLimit !== undefined ? { byoPagesLimit: deps.byoPagesLimit } : {}),
+              });
               return {
                 result,
                 ...(tool.activityLabel ? { activity: { name: call.name, label: tool.activityLabel } } : {}),

@@ -48,6 +48,8 @@ const SERVER_ONLY = new Set([
   "fetch_document_fields",
   // chat-unified-tool-loop D4 — GroundX product-knowledge reader (no app mirror).
   "lookup_groundx_knowledge",
+  // chat-unified-tool-loop D3 — account/workspace reader (no app mirror).
+  "get_account_info",
 ]);
 
 // The single source-of-truth role map (matrix §3). Any tool NOT listed here is

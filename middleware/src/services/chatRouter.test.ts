@@ -2223,6 +2223,8 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       "edit_report_section",
       // loop-tool-secondary-extraction — server-executed extraction fetch is universal.
       "fetch_document_fields",
+      // chat-unified-tool-loop D3 — account reader is universal.
+      "get_account_info",
       // agentic-tool-loop — server-executed product-docs lookup is universal.
       "lookup_groundx_docs",
       // chat-unified-tool-loop D4 — product-knowledge lookup is universal.

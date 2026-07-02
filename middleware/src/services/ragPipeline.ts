@@ -158,6 +158,12 @@ export async function runRagPipeline(
       ...(deps.planTurn ? { planTurn: deps.planTurn } : {}),
       ...(deps.quoteEmbedder ? { quoteEmbedder: deps.quoteEmbedder } : {}),
       ...(deps.embedThreshold !== undefined ? { embedThreshold: deps.embedThreshold } : {}),
+      // chat-unified-tool-loop D3 — account reader deps for the account tools'
+      // serverExecute (list_projects / list_api_keys / pages_remaining / saved_schemas).
+      ...(deps.repository ? { repository: deps.repository } : {}),
+      ...(deps.partnerClient ? { partnerClient: deps.partnerClient } : {}),
+      groundxUsername: deps.groundxUsername ?? null,
+      ...(deps.byoPagesLimit !== undefined ? { byoPagesLimit: deps.byoPagesLimit } : {}),
     },
     {
       ...(options?.turnPlan ? { turnPlan: options.turnPlan } : {}),

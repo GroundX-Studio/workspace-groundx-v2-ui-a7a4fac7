@@ -63,6 +63,8 @@ const EXPECTED_NAMES = [
   "fetch_document_fields",
   // chat-unified-tool-loop D4 — GroundX product-knowledge reader (universal, server-only).
   "lookup_groundx_knowledge",
+  // chat-unified-tool-loop D3 — account/workspace reader (universal, server-only).
+  "get_account_info",
 ].sort();
 
 describe("server tool catalog", () => {
@@ -145,6 +147,8 @@ describe("server tool catalog", () => {
         "dismiss_wizard",
         // loop-tool-secondary-extraction — server-executed extraction fetch is universal.
         "fetch_document_fields",
+        // chat-unified-tool-loop D3 — account reader is universal.
+        "get_account_info",
         "jump_to_page",
         // agentic-tool-loop — server-executed product-docs lookup is universal.
         "lookup_groundx_docs",
@@ -195,6 +199,8 @@ describe("server tool catalog", () => {
       "edit_report_section",
       // loop-tool-secondary-extraction — server-executed extraction fetch is universal.
       "fetch_document_fields",
+      // chat-unified-tool-loop D3 — account reader is universal.
+      "get_account_info",
       // agentic-tool-loop — server-executed product-docs lookup is universal.
       "lookup_groundx_docs",
       // chat-unified-tool-loop D4 — product-knowledge lookup is universal.
@@ -420,5 +426,45 @@ describe("server tool catalog", () => {
     it("requires page (no default)", () => {
       expect(tool.inputSchema.safeParse({ documentId: "doc-2" }).success).toBe(false);
     });
+  });
+});
+
+// chat-unified-tool-loop D3 — the account/workspace reader tool's serverExecute.
+describe("get_account_info reader tool (chat-unified-tool-loop D3)", () => {
+  const tool = SERVER_TOOL_CATALOG.find((t) => t.name === "get_account_info");
+  const run = (topic: string, ctx: Record<string, unknown>) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (tool!.serverExecute as any)({ topic }, ctx);
+  const jsonResp = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+
+  it("pages_remaining reports the budget without needing sign-in", async () => {
+    expect(await run("pages_remaining", { byoPagesLimit: 100 })).toContain("100 pages per month");
+  });
+
+  it("prompts sign-in for projects / api_keys / saved_schemas when anonymous", async () => {
+    for (const topic of ["projects", "api_keys", "saved_schemas"]) {
+      expect(await run(topic, { groundxUsername: null })).toMatch(/sign in/i);
+    }
+  });
+
+  it("lists saved schemas from the repository", async () => {
+    const repository = { listTemplates: async () => [{ id: "s1", name: "Utility" }] };
+    const out = await run("saved_schemas", { groundxUsername: "u1", repository });
+    expect(out).toContain("1 saved schema");
+    expect(out).toContain("Utility");
+  });
+
+  it("lists projects via the partner client", async () => {
+    const partnerClient = { forward: async () => jsonResp({ projects: [{ projectId: "p1", name: "Alpha" }] }) };
+    expect(await run("projects", { groundxUsername: "u1", partnerClient })).toContain("Alpha");
+  });
+
+  it("redacts API keys to name + last-4 (never the full value)", async () => {
+    const partnerClient = { forward: async () => jsonResp({ apiKeys: [{ name: "prod", apiKey: "sk-abcd1234" }] }) };
+    const out = await run("api_keys", { groundxUsername: "u1", partnerClient });
+    expect(out).toContain("prod");
+    expect(out).toContain("…1234");
+    expect(out).not.toContain("sk-abcd");
   });
 });
