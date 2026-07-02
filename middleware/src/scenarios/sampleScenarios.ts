@@ -40,7 +40,7 @@ export const SAMPLE_SCENARIOS: readonly SampleScenarioConfig[] = [
       },
       thinkingScript: [
         "parsing layout · page 1",
-        "found header · account 1023456",
+        "found header · invoice 10295809",
         "extracting meter table · 8 rows",
         "extracting charge ledger · 56 rows",
         "matching legend to charge codes",

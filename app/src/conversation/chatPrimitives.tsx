@@ -227,7 +227,10 @@ export function LiveTurnList({
               <Stack
                 direction="row"
                 alignItems="center"
-                sx={{ pl: 0.25, columnGap: 0.75, rowGap: 0.5, flexWrap: "wrap" }}
+                // Assistant-side, so left-aligned; cap the row at the same 85%
+                // the BotBubble uses so a clipped chip's right edge lines up
+                // with the answer bubbles above it instead of stretching wider.
+                sx={{ columnGap: 0.75, rowGap: 0.5, flexWrap: "wrap", maxWidth: "85%" }}
               >
                 <SuggestedActionChips
                   actions={pillActions}

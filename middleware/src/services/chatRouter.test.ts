@@ -2305,6 +2305,23 @@ describe("Phase 8 — category-aware mutate-tool routing", () => {
       expect(chip?.label).toMatch(/Mutate-category probe/);
     });
   });
+
+  it("a mutate tool with a chipLabel uses it verbatim (not the description first sentence)", async () => {
+    // The real book_call tool declares a concise chipLabel so the chat row shows
+    // a clean CTA ("Book a call") instead of its LLM-facing description sentence.
+    const { groundxClient, llmClient } = mkClients("Sure — you can book a call.", [
+      { name: "book_call", arguments: {} },
+    ]);
+    const reply = await routeChat(makeRequest({ newUserMessage: "can i talk to someone" }), {
+      llmClient,
+      groundxClient,
+      groundxApiKey: "k",
+      samplesBucketId: 42,
+      llmModelId: "test-model",
+    });
+    const chip = reply.suggestedActions.find((a) => a.key === "tool:book_call");
+    expect(chip?.label).toBe("Book a call");
+  });
 });
 
 // chat-architecture-hardening Task 6 — TOOL NOTES tracks the step-FILTERED

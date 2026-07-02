@@ -246,11 +246,12 @@ export async function runRagPipeline(
       continue;
     }
     if (tool.category === "mutate") {
-      // Surface as a chip the user must click to confirm. The label
-      // is the first sentence of the tool description (terminated at
-      // the first ".", "?", or "!") so the chat row stays compact.
+      // Surface as a chip the user must click to confirm. Prefer the tool's
+      // concise `chipLabel` (a clean CTA); otherwise fall back to the first
+      // sentence of the description (terminated at the first ".", "?", or "!")
+      // so a terse tool still yields a compact row.
       const firstSentenceMatch = tool.description.match(/^[^.?!]+[.?!]?/);
-      const label = (firstSentenceMatch?.[0] ?? tool.description).trim();
+      const label = (tool.chipLabel ?? firstSentenceMatch?.[0] ?? tool.description).trim();
       mutateChips.push({
         key: `tool:${call.name}`,
         label,

@@ -145,6 +145,16 @@ export interface ServerTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
    * docs"). REQUIRED when `serverExecute` is present (catalog-invariant test).
    */
   activityLabel?: string;
+  /**
+   * Concise, user-facing CTA shown on the confirmable chip a `mutate` tool
+   * surfaces (e.g. "Book a call"). WITHOUT it, `ragPipeline` falls back to the
+   * first sentence of `description` — fine for a terse tool, but a
+   * selection-tuned description ("Open the Calendly booking surface for a
+   * 30-minute engineer call. Use when …") leaks developer prose into the UI.
+   * Set this on any mutate tool whose description does not double as a clean
+   * button label. Ignored for `read` tools (they never surface a chip).
+   */
+  chipLabel?: string;
 }
 
 /**
@@ -362,6 +372,7 @@ const saveToAccount: ServerTool = {
     "their progress but has NOT yet entered sign-up details (use submit_signup " +
     "once they have). Surfaces the gate; it does not create the account.",
   category: "mutate",
+  chipLabel: "Save to account",
   inputSchema: z.object({}),
   availableSteps: ["doc-viewer", "interact-chat"],
   // §5 reachability — mirror of the app-side GateChatRail save_to_account binding.
@@ -377,6 +388,7 @@ const bookCall: ServerTool = {
   description:
     "Open the Calendly booking surface for a 30-minute engineer call. Use when the user asks to speak with a team member or wants a human-assisted path forward: uncertainty about fit, complex documents, evaluation questions a sales engineer can answer. The user confirms by clicking the chip; the scheduler is not opened automatically.",
   category: "mutate",
+  chipLabel: "Book a call",
   inputSchema: z.object({}),
   // §5 reachability — mirror of the app-side suggested-action chip binding.
   rendersWidget: "chat-widgets/SuggestedActionChips",

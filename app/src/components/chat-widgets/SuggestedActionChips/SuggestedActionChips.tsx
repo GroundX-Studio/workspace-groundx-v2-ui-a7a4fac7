@@ -39,6 +39,7 @@ import {
   BORDER_RADIUS_PILL,
   FONT_SIZE_LABEL,
   FONT_WEIGHT_LABEL,
+  LETTER_SPACING_PILL,
   NAVY,
   WHITE,
 } from "@/constants";
@@ -78,7 +79,7 @@ export const SuggestedActionChips: FC<SuggestedActionChipsProps> = ({
       spacing={0.5}
       data-testid="suggested-action-chips"
       data-role={role}
-      sx={{ pl: 0.25, flexWrap: "wrap", rowGap: 0.5 }}
+      sx={{ flexWrap: "wrap", rowGap: 0.5, minWidth: 0, maxWidth: "100%" }}
     >
       {actions.map((action) => (
         <Box
@@ -88,6 +89,7 @@ export const SuggestedActionChips: FC<SuggestedActionChipsProps> = ({
           data-testid={`suggested-action-chip-${action.key}`}
           data-action-key={action.key}
           aria-label={action.label}
+          title={action.label}
           onClick={() => onAction?.(action)}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
@@ -98,8 +100,18 @@ export const SuggestedActionChips: FC<SuggestedActionChipsProps> = ({
           sx={{
             display: "inline-flex",
             alignItems: "center",
-            height: 22,
+            justifyContent: "center",
+            height: 26,
             px: 1.25,
+            // minWidth:0 lets this flex item shrink below its text's intrinsic
+            // width so the inner span's ellipsis can engage instead of forcing
+            // the row wider than the pane.
+            minWidth: 0,
+            // Stay a tidy single-line pill: labels are meant to be short, so a
+            // long one truncates with an ellipsis (full text on hover / a11y)
+            // rather than wrapping into a tall multi-line block. Cap width to
+            // the pane so it never overflows horizontally either.
+            maxWidth: "100%",
             borderRadius: BORDER_RADIUS_PILL,
             backgroundColor: WHITE,
             border: `1px solid ${BORDER}`,
@@ -107,13 +119,20 @@ export const SuggestedActionChips: FC<SuggestedActionChipsProps> = ({
             fontSize: FONT_SIZE_LABEL,
             fontWeight: FONT_WEIGHT_LABEL,
             lineHeight: 1,
+            letterSpacing: LETTER_SPACING_PILL,
+            textTransform: "uppercase",
             cursor: "pointer",
             transition: "background-color 120ms ease, border-color 120ms ease",
             "&:hover": { backgroundColor: alpha(NAVY, 0.05), borderColor: alpha(NAVY, 0.4) },
             "&:focus-visible": { outline: `2px solid ${NAVY}`, outlineOffset: 1 },
           }}
         >
-          {action.label}
+          <Box
+            component="span"
+            sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {action.label}
+          </Box>
         </Box>
       ))}
     </Stack>
