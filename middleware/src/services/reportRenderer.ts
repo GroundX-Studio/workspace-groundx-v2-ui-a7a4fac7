@@ -41,6 +41,7 @@ import {
 
 import { groundedAnswerOverScope, type GroundedAnswerDeps } from "./groundedAnswer.js";
 import type { GroundXClient, LlmClient } from "../types.js";
+import { logger } from "../lib/logger.js";
 
 // ──────────────────────────────────────────────────────────────────────
 // App-owned report template shapes (the durable, scope-independent artifact).
@@ -463,6 +464,87 @@ function emptyRender(
   };
 }
 
+// progressive-report-render B1 — bounded-concurrency fan-out. Starts
+// min(limit, N) workers that pull from a shared index cursor; results are
+// returned in INPUT ORDER so the report always displays in template order
+// regardless of which section finishes first.
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]!, i);
+    }
+  };
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
+const REPORT_SECTION_CONCURRENCY = 4;
+const REPORT_SECTION_RETRIES = 1;
+
+// Render ONE section, isolated: retry once on a transient failure, then degrade
+// in-slot (never throw out of the fan-out — one slow section must not 504 the
+// whole report). Returns the wire + the variable bindings this section resolved
+// (merged by the caller in template order).
+async function renderOneSection(
+  section: ReportSection,
+  scope: ContentScope,
+  groundedDeps: GroundedAnswerDeps,
+  variables: Record<string, string>,
+): Promise<{ wire: RenderedSectionWire; resolvedDelta: Record<string, string> }> {
+  const resolvedDelta: Record<string, string> = {};
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= REPORT_SECTION_RETRIES; attempt++) {
+    try {
+      // The section question comes from the PERSISTED template — never the client
+      // request (one source of truth). FIXED turn plan: report sections always
+      // search, never inject product knowledge (that would leak into report prose).
+      const grounded = await groundedAnswerOverScope(section.question, scope, groundedDeps, {
+        turnPlan: { documentSearch: true, productKnowledge: false, extractionContext: true },
+      });
+      const wire = degradeSection(
+        {
+          name: section.name,
+          renderAs: section.renderAs,
+          body: grounded.body,
+          citations: grounded.citations,
+          ...(grounded.confidence !== undefined ? { confidence: grounded.confidence } : {}),
+          ...(grounded.warnings !== undefined ? { warnings: grounded.warnings } : {}),
+        },
+        variables,
+        resolvedDelta,
+      );
+      return { wire, resolvedDelta };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  // Every attempt failed — degrade THIS section in its slot; the report still ships.
+  logger.warn(
+    { err: lastErr, section: section.name },
+    "report section render failed after retry — degrading in slot",
+  );
+  return {
+    wire: {
+      name: section.name,
+      render_as: section.renderAs,
+      body: "—",
+      cites: [],
+      confidence: 0,
+      warnings: ["⚠ couldn't generate this section — retry"],
+    },
+    resolvedDelta,
+  };
+}
+
 /**
  * Render a report `Template` over a `ContentScope`. Returns the ordered cited
  * sections, OR the gate envelope (#10) when the scope is BYO, OR a graceful
@@ -546,31 +628,22 @@ export async function renderReport(
       ? template.sections
       : template.sections.filter((s) => subset.includes(s.name) || subset.includes(s.id));
 
+  // progressive-report-render B1 — render sections with BOUNDED CONCURRENCY and
+  // PER-SECTION isolation. Sequential-await + no per-section catch meant one slow
+  // section (LLM upstream timeout) threw out of the whole render → a wholesale
+  // 504, and total latency was the SUM of sections. Now: each section renders
+  // independently (retry-once on a transient failure, then degrade IN ITS SLOT),
+  // and the fan-out is capped so a wide template can't burst the provider.
+  const rendered = await mapWithConcurrency(liveSections, REPORT_SECTION_CONCURRENCY, (section) =>
+    renderOneSection(section, request.scope, groundedDeps, request.variables),
+  );
+  // Merge in TEMPLATE ORDER (mapWithConcurrency preserves index order); each
+  // section wrote only its own `resolvedDelta`, so the merge is deterministic.
   const resolved: Record<string, string> = {};
   const sections: RenderedSectionWire[] = [];
-  for (const section of liveSections) {
-    // The section question comes from the PERSISTED template — never the
-    // client request (one source of truth).
-    // Task 4 — FIXED turn plan: report sections always search, never inject
-    // product knowledge (intentional change: the old default let the skill
-    // pack leak into report prose).
-    const grounded = await groundedAnswerOverScope(section.question, request.scope, groundedDeps, {
-      turnPlan: { documentSearch: true, productKnowledge: false, extractionContext: true },
-    });
-    sections.push(
-      degradeSection(
-        {
-          name: section.name,
-          renderAs: section.renderAs,
-          body: grounded.body,
-          citations: grounded.citations,
-          ...(grounded.confidence !== undefined ? { confidence: grounded.confidence } : {}),
-          ...(grounded.warnings !== undefined ? { warnings: grounded.warnings } : {}),
-        },
-        request.variables,
-        resolved,
-      ),
-    );
+  for (const r of rendered) {
+    Object.assign(resolved, r.resolvedDelta);
+    sections.push(r.wire);
   }
 
   return {

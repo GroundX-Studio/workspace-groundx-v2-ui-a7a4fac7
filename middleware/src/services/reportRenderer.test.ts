@@ -307,6 +307,78 @@ function jsonOk(payload: unknown): Response {
   });
 }
 
+// progressive-report-render B1 — parallel fan-out + per-section resilience.
+describe("renderReport — parallel + per-section resilience (progressive-report-render B1)", () => {
+  const CITED = (body: string) =>
+    jsonOk({
+      choices: [
+        {
+          message: {
+            content: [
+              body,
+              "",
+              "```json",
+              `{"citations":[{"documentId":"utility-bill-2026-04","page":1,"quote":${JSON.stringify(body.slice(0, 40))}}]}`,
+              "```",
+            ].join("\n"),
+          },
+        },
+      ],
+    });
+
+  function depsWithLlm(llmForward: LlmClient["forward"]): RenderReportDeps {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [{ documentId: "utility-bill-2026-04", text: "x" }] } })),
+    };
+    return {
+      samplesBucketId: SAMPLE_BUCKET,
+      getTemplate: async () => utilityTemplate,
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient: { forward: llmForward },
+      llmModelId: "test-model",
+    };
+  }
+
+  it("renders sections concurrently, not one-at-a-time (deterministic in-flight probe)", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const llmForward = vi.fn(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Promise.resolve();
+      await Promise.resolve();
+      inFlight -= 1;
+      return CITED("The total amount due is $214.07.");
+    });
+    const result = await renderReport(baseRequest(), depsWithLlm(llmForward));
+    if ("gated" in result) throw new Error("expected a render");
+    expect(result.sections).toHaveLength(4);
+    // Sequential (today) → maxInFlight === 1. Bounded-parallel fan-out → > 1.
+    expect(maxInFlight).toBeGreaterThan(1);
+  });
+
+  it("one failed section does not sink the whole report (no throw/504) — it degrades in its slot", async () => {
+    // The "List anomalies." section's grounded call always times out (so the
+    // retry-once still fails); the other three succeed.
+    const llmForward = vi.fn(async (_path: string, opts?: { body?: string }) => {
+      if (String(opts?.body ?? "").includes("List anomalies.")) {
+        throw new Error("llm:chat: upstream timed out after 30000ms");
+      }
+      return CITED("The total amount due is $214.07.");
+    });
+    // Must NOT throw (today it throws → 504 for the whole report).
+    const result = await renderReport(baseRequest(), depsWithLlm(llmForward));
+    if ("gated" in result) throw new Error("expected a render");
+    expect(result.sections).toHaveLength(4);
+    const anomalies = result.sections.find((s) => s.name === "anomalies");
+    expect(anomalies?.warnings?.some((w) => /couldn.t generate|failed|unavailable/i.test(w))).toBe(true);
+    // The other sections rendered normally (not degraded to the no-source em-dash).
+    const billing = result.sections.find((s) => s.name === "billing_summary");
+    expect(billing?.body).toContain("$214.07");
+  });
+});
+
 /** Injected clients that THROW if touched — proves a branch short-circuits
  * BEFORE any search/LLM call (gate / no-template / empty-scope). */
 function throwingClients(): { groundxClient: GroundXClient; llmClient: LlmClient } {

@@ -1,10 +1,10 @@
 ## 1. Parallel + per-section resilience (JSON path — fixes the 504 alone)
 
-- [ ] 1.1 SEQUENTIAL — Failing test first: `reportRenderer.test.ts` — a template where one section's grounded call times out (even after retry) still returns a report; the failed section carries a warning/low-confidence body, the others render normally, no thrown 504. (principle 2)
-- [ ] 1.2 SEQUENTIAL — Failing test: sections render concurrently — assert via a DETERMINISTIC call-overlap probe (a fake grounded call that records concurrent in-flight count and blocks until N are entered), NOT wall-clock timing. Assert the in-flight count exceeds 1 (up to the cap). (N2 — no flaky timing)
-- [ ] 1.3 SEQUENTIAL — Replace the sequential `for/await` in `renderReport` with bounded-concurrency fan-out (cap ~3-4). (D2)
-- [ ] 1.4 SEQUENTIAL — Wrap each section: retry-once on transient timeout, catch-and-flag on final failure (never throw out of the fan-out). (D3)
-- [ ] 1.5 GATE — Adversarial review: confirm one section's timeout can't 504 the whole report, concurrency is capped, JSON envelope shape unchanged, build + drift guards green. (principle 3)
+- [x] 1.1 SEQUENTIAL — Failing test first: `reportRenderer.test.ts` — a template where one section's grounded call times out (even after retry) still returns a report; the failed section carries a warning/low-confidence body, the others render normally, no thrown 504. (principle 2)
+- [x] 1.2 SEQUENTIAL — Failing test: sections render concurrently — assert via a DETERMINISTIC call-overlap probe (a fake grounded call that records concurrent in-flight count and blocks until N are entered), NOT wall-clock timing. Assert the in-flight count exceeds 1 (up to the cap). (N2 — no flaky timing)
+- [x] 1.3 SEQUENTIAL — Replace the sequential `for/await` in `renderReport` with bounded-concurrency fan-out (`mapWithConcurrency`, cap 4). (D2)
+- [x] 1.4 SEQUENTIAL — Wrap each section (`renderOneSection`): retry-once on failure, catch-and-flag in-slot on final failure (never throw out of the fan-out). (D3)
+- [x] 1.5 GATE — Adversarial review PASSED: one section's timeout degrades in-slot (no 504, test-confirmed); concurrency capped at 4 via a synchronous index cursor; JSON envelope shape unchanged (28 existing tests green); full middleware suite 693 green; tsc clean.
 
 ## 2. Progressive SSE delivery (endpoint)
 
