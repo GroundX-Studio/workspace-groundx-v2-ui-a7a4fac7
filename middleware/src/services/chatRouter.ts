@@ -1,54 +1,42 @@
 /**
- * Three-mode chat router (per project_llm_runtime.md).
+ * Chat router — ONE grounded tool-loop (chat-unified-tool-loop).
  *
- * Routes an incoming user message to the right pipeline. Since
- * turn-router-extraction-appstate the mode comes from, in order: an
- * explicit UI intent hint (deterministic, free, authoritative) → the light-
- * LLM RoutePlan's `appState`×`documentSearch` derivation → the keyword
- * classifier (`classifyChatMode`) as the deterministic fallback. Modes:
- *
- *   - "rag"        — user asks about doc content. GroundX search →
- *                    grounded prompt → LLM.
- *   - "structured" — user asks about app state ("saved schemas?",
- *                    "pages remaining?"). Query MySQL / Partner
- *                    directly; LLM only for formatting.
- *   - "hybrid"     — "Explain this sample" / "what can I do?" —
- *                    combines metadata + grounded snippets.
+ * Every incoming user message runs the same path: the grounded loop in
+ * `runRagPipeline` (GroundX search → grounded prompt → LLM with the server-tool
+ * catalog → citations). There is no pre-flight mode classifier and no light-LLM
+ * planner picking a handler. Capability is carried by TOOLS inside the loop —
+ * navigation intents, `get_account_info` (app-state facts), and
+ * `lookup_groundx_knowledge` (product knowledge) — so behavior is never gated by
+ * a guessed "mode". The former `structured` / `hybrid` modes are folded into
+ * this single loop; `reply.mode` still reports "rag" and the wire schema keeps
+ * the `ChatMode` value for one release.
  *
  * §1 of 2026-05-31-core-data-followups split the original 1600-line
- * implementation into cohesive modules. This file is now a thin
- * composition layer: it owns `routeChat` (the entry point that picks a
- * mode + dispatches) and re-exports the public surface from the
- * sub-modules so existing `from "./chatRouter.js"` imports resolve to
- * the SAME bindings — no behavior change, one source of truth.
+ * implementation into cohesive modules. This file is now a thin composition
+ * layer: it owns `routeChat` (the single entry point) and re-exports the public
+ * surface from the sub-modules so existing `from "./chatRouter.js"` imports
+ * resolve to the SAME bindings — one source of truth.
  *
  *   - chatRouterTypes.ts — wire types, shared constants, envelope schema, error.
- *   - chatClassifier.ts  — the deterministic mode classifier.
+ *   - chatClassifier.ts  — the keyword classifier (retained as a re-export; no
+ *                          longer part of routing — deleted in Stage-3 cleanup).
  *   - groundxSearch.ts   — `searchGroundX` + filter composition.
- *   - ragPipeline.ts     — grounded search → prompt → LLM → citations.
+ *   - ragPipeline.ts     — grounded search → prompt → LLM (tool-loop) → citations.
  */
 
-import { classifyStructuredQuery, runHybridQuery, runStructuredQuery } from "./structuredHandler.js";
-import { classifyChatMode, modeFromIntent } from "./chatClassifier.js";
-import { searchGroundX } from "./groundxSearch.js";
+// chat-unified-tool-loop — the body needs only the grounded loop entry
+// (`runRagPipeline`) and the wire types. The mode classifier, the light-LLM
+// planner (`planTurn`/RoutePlan/TurnPlan), and the structured/hybrid handlers
+// are no longer part of the routing decision. The public surface below still
+// re-exports the classifier + search helpers straight from their sub-modules
+// (self-contained `export … from` statements — no local import needed) so
+// existing `from "./chatRouter.js"` importers keep resolving to the SAME bindings.
 import { runRagPipeline } from "./ragPipeline.js";
 import {
-  CLASSIFIER_DECIDES,
-  FALLBACK_ROUTE_PLAN,
-  FALLBACK_TURN_PLAN,
-  planTurn,
-  type RoutePlan,
-  type TurnPlan,
-} from "./turnRouter.js";
-import {
-  ChatRouteNotImplementedError,
-  type ChatMode,
   type ChatRouterDeps,
   type ChatRouterRequest,
   type ChatRouterResponse,
 } from "./chatRouterTypes.js";
-
-import type { ContentScope } from "@groundx/shared";
 
 // ────────────────────────────────────────────────────────────────────
 // Public surface re-exports. Keeps `from "./chatRouter.js"` resolving to
@@ -90,106 +78,19 @@ export { parseGroundedAnswer, buildSnippetBlock } from "./ragPipeline.js";
  * tests inject fake clients at the dependency seam.
  */
 export async function routeChat(request: ChatRouterRequest, deps: ChatRouterDeps): Promise<ChatRouterResponse> {
-  // turn-router-extraction-appstate — planner-derived mode routing.
-  // 1. An explicit UI intent hint is authoritative, deterministic, and free:
-  //    it picks the mode WITHOUT a planner call. A hinted rag turn plans its
-  //    retrieval inside the grounded seam exactly as before (still at most
-  //    one planner call per turn).
-  // 2. Otherwise the RoutePlan's appState×documentSearch derives the mode;
-  //    the seam plan (appState stripped) threads to the rag path so the seam
-  //    never plans a second time.
-  // 3. The CLASSIFIER_DECIDES sentinel (planner absent/failed) routes via
-  //    the deterministic keyword classifier — byte-for-byte the pre-flag
-  //    behavior. The keyword heuristics never run when the planner answered.
-  const hinted = modeFromIntent(request);
-  let mode: ChatMode;
-  let threadedPlan: TurnPlan | undefined;
-  if (hinted) {
-    mode = hinted;
-  } else {
-    const routePlan: RoutePlan = deps.planTurn
-      ? await deps.planTurn(request.newUserMessage)
-      : deps.lightLlmClient && deps.lightLlmModelId
-        ? await planTurn(request.newUserMessage, {
-            lightLlmClient: deps.lightLlmClient,
-            lightLlmModelId: deps.lightLlmModelId,
-          })
-        : FALLBACK_ROUTE_PLAN;
-    const { appState, ...seamPlan } = routePlan;
-    if (appState === CLASSIFIER_DECIDES) {
-      mode = classifyChatMode(request);
-      threadedPlan = seamPlan;
-    } else if (appState) {
-      mode = routePlan.documentSearch ? "hybrid" : "structured";
-      if (!deps.repository || !deps.chatSessionId) {
-        // Planner-routed structured/hybrid without session deps DEGRADES to
-        // rag on the deterministic seam fallback (search ON — never the
-        // planner's documentSearch:false, which would ground the answer in
-        // nothing). Keyword/intent-routed turns keep the throwing behavior.
-        mode = "rag";
-        threadedPlan = FALLBACK_TURN_PLAN;
-      }
-    } else {
-      mode = "rag";
-      threadedPlan = seamPlan;
-    }
-  }
-
-  if (mode === "rag") {
-    return runRagPipeline(request, deps, threadedPlan ? { turnPlan: threadedPlan } : undefined);
-  }
-
-  // Structured + hybrid: lightweight live wiring via structuredHandler.
-  // The framework dispatches by sub-query kind; each sub-handler either
-  // returns a real answer (for the kinds whose data readers ARE built —
-  // pages_remaining, onboarding_state, current_entity) or a frank
-  // "needs reader" reply (for saved_schemas / my_projects / api_keys
-  // until those tables/Partner reads land). This gives us a real surface
-  // in production without fabricating answers.
-  if (!deps.repository || !deps.chatSessionId) {
-    throw new ChatRouteNotImplementedError(mode);
-  }
-  const structuredDeps = {
-    repository: deps.repository,
-    chatSessionId: deps.chatSessionId,
-    groundxUsername: deps.groundxUsername ?? null,
-    byoPagesLimit: deps.byoPagesLimit ?? 100,
-    partnerClient: deps.partnerClient,
-  };
-  if (mode === "structured") {
-    // chat-QA 2026-07-01 (finding #2). The structured path only knows a fixed
-    // set of account/workspace topics (pages remaining, saved schemas, API
-    // keys, projects…). When the planner over-flags `appState` for a phrasing
-    // it shouldn't (e.g. "delete this document"), the sub-classifier finds no
-    // match and would dead-end with "I couldn't match … to a known query",
-    // leaking internal command names. An UNMATCHED app-state query is proof of
-    // a misroute → fall through to the hybrid grounded path (a real answer with
-    // workspace context) instead of the dead-end. Known topics stay structured.
-    if (classifyStructuredQuery(request) !== "unknown") {
-      return runStructuredQuery(request, structuredDeps);
-    }
-    mode = "hybrid";
-  }
-  // Hybrid (chat-architecture-hardening Task 3): the grounded seam owns the
-  // ONLY search — the former router-side hybrid search is deleted (no double
-  // search). The handler composes workspace state into the seam's
-  // structuredContext block and applies the citation contract.
-  const scope: ContentScope | null =
-    deps.contentScope ??
-    (deps.samplesBucketId != null
-      ? { type: "bucket", bucketId: deps.samplesBucketId }
-      : null);
-  return runHybridQuery(request, {
-    ...structuredDeps,
-    // CF-05: chat-profile LLM composes the answer. Hybrid is user-facing —
-    // quality matters more than cost.
-    llmClient: deps.llmClient,
-    llmModelId: deps.llmModelId,
-    groundxClient: deps.groundxClient,
-    groundxApiKey: deps.groundxApiKey,
-    contentScope: scope,
-    ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
-    ...(deps.quoteEmbedder ? { quoteEmbedder: deps.quoteEmbedder } : {}),
-    ...(deps.embedThreshold !== undefined ? { embedThreshold: deps.embedThreshold } : {}),
+  // chat-unified-tool-loop — ONE grounded tool-loop is the only answer path.
+  // No pre-flight mode classifier and no planner: the loop carries the full
+  // tool catalog (navigation + the account/product reader tools), the
+  // workspace-state context (injected in `runRagPipeline`), and a default
+  // up-front document search. So navigation works on EVERY turn regardless of
+  // phrasing; account facts answer via `get_account_info`; GroundX-product
+  // questions via `lookup_groundx_knowledge` — capability is never gated by a
+  // guessed mode. The fixed turn plan is the planner's replacement (D4):
+  // document search ON, product knowledge OFF (it's a tool now), extraction
+  // context ON. `reply.mode` reports "rag" (the single path); the wire schema
+  // keeps the value for one release. Explicit UI intent hints no longer pick a
+  // handler — the one loop serves them all.
+  return runRagPipeline(request, deps, {
+    turnPlan: { documentSearch: true, productKnowledge: false, extractionContext: true },
   });
 }

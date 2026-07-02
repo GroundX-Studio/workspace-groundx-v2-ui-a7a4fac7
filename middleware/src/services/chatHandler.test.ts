@@ -471,7 +471,13 @@ describe("handleChatMessage — typed error mapping", () => {
     groundxClient = { forward: vi.fn(async () => jsonResponse({})) };
   });
 
-  it("handles a structured query end-to-end with a frank reply (no 501 once handler is wired)", async () => {
+  // chat-unified-tool-loop OBSOLETE — structured mode is removed; an account
+  // query ("what are my saved schemas?") now routes through the single grounded
+  // tool-loop and is answered by the `get_account_info` reader tool (topic
+  // saved_schemas). This test drove the old deterministic frank-reply path with
+  // a trivial empty-LLM fake, which the loop cannot exercise. Skipped pending the
+  // Stage-3 end-to-end rewrite that uses a tool-calling llm fake. (D5)
+  it.skip("handles a structured query end-to-end with a frank reply (no 501 once handler is wired)", async () => {
     // P0 #3: structured mode now runs live via the structuredHandler.
     // The "saved schemas" sub-query is one of the kinds whose data
     // reader isn't built yet; the framework returns a frank "needs

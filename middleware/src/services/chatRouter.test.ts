@@ -127,6 +127,29 @@ describe("routeChat", () => {
     expect(res.suggestedActions.length).toBeGreaterThan(0);
   });
 
+  // chat-unified-tool-loop — the collapse: routeChat runs ONE grounded tool-loop
+  // for EVERY turn. Phrasings that the retired router would have classified as
+  // `structured` (app-state questions) or `hybrid` ("explain this sample") now
+  // all resolve to mode "rag" — the single path — with no pre-flight classifier
+  // or planner picking a handler. Capability (nav, account facts, product
+  // knowledge) is carried by tools inside the loop, never gated by a guessed mode.
+  it("collapses every turn onto the one grounded tool-loop (former structured/hybrid phrasings → rag)", async () => {
+    const phrasings = [
+      "what are my saved schemas?", // was: structured
+      "how many pages do I have left?", // was: structured
+      "explain this sample", // was: hybrid
+      "what can I do here?", // was: hybrid
+    ];
+    for (const message of phrasings) {
+      const res = await routeChat(
+        makeRequest({ newUserMessage: message, currentEntityKey: "sample:utility" }),
+        liveRagDeps("utility-bill-2026-04", "Here is what I found."),
+      );
+      expect(res.mode).toBe("rag");
+      expect(res.answer).toBeTruthy();
+    }
+  });
+
   it("live RAG mode requires GroundX client + api key (live wiring)", async () => {
     // The failure mode is a typed configuration error when deps are missing —
     // there is no mock path to fall back to.
@@ -190,7 +213,8 @@ describe("routeChat", () => {
     });
   });
 
-  it("non-MOCK structured mode throws when repository/chatSessionId aren't supplied (chatHandler is the right wiring point)", async () => {
+  // chat-unified-tool-loop OBSOLETE (structured mode removed) — skipped pending Stage-3 deletion.
+  it.skip("non-MOCK structured mode throws when repository/chatSessionId aren't supplied (chatHandler is the right wiring point)", async () => {
     const { ChatRouteNotImplementedError } = await import("./chatRouter.js");
     await expect(
       routeChat(makeRequest({ newUserMessage: "what are my saved schemas?" }), {
@@ -201,7 +225,8 @@ describe("routeChat", () => {
     ).rejects.toBeInstanceOf(ChatRouteNotImplementedError);
   });
 
-  it("non-MOCK structured mode returns a frank reply when repository + chatSessionId are supplied", async () => {
+  // chat-unified-tool-loop OBSOLETE (structured mode removed) — skipped pending Stage-3 deletion.
+  it.skip("non-MOCK structured mode returns a frank reply when repository + chatSessionId are supplied", async () => {
     const { MemoryAppRepository } = await import("../db/memoryRepository.js");
     const repo = new MemoryAppRepository();
     // Pre-create a session so the onboarding-state sub-handler returns
@@ -230,7 +255,8 @@ describe("routeChat", () => {
     expect(reply.answer).toMatch(/100 pages/);
   });
 
-  it("non-MOCK hybrid mode returns a tour-style reply with snippet citations when RAG is configured", async () => {
+  // chat-unified-tool-loop OBSOLETE (hybrid mode removed) — skipped pending Stage-3 deletion.
+  it.skip("non-MOCK hybrid mode returns a tour-style reply with snippet citations when RAG is configured", async () => {
     const { MemoryAppRepository } = await import("../db/memoryRepository.js");
     const repo = new MemoryAppRepository();
     const now = new Date();
@@ -841,7 +867,10 @@ describe("CF-07 viewer-intent chip gating in runRagPipeline", () => {
   // snippets-only. The retriever is a dep so these tests pin the WIRING
   // deterministically; the retrieval itself is pinned in groundxSkills.test.
   describe("grounded prompt carries retrieved GroundX skill knowledge", () => {
-    it("injects retrieved skill sections for a GroundX question", async () => {
+    // chat-unified-tool-loop OBSOLETE — product knowledge is no longer injected
+    // into the prompt from a planner flag; it is fetched on demand via the
+    // `lookup_groundx_knowledge` tool. Skipped pending Stage-3 deletion.
+    it.skip("injects retrieved skill sections for a GroundX question", async () => {
       const { groundxClient, llmClient } = mkClients("GroundX is EyeLevel's document platform.");
       const skillsRetrieve = vi.fn((q: string) =>
         /groundx/i.test(q) ? "### [groundx-architecture] Pipeline\nX-Ray parses layout into semantic objects." : null,
@@ -2459,10 +2488,11 @@ describe("Phase 8 — category-aware mutate-tool routing", () => {
   });
 });
 
-// chat-architecture-hardening Task 4 — the LLM turn router gates BOTH
-// retrievals. Probe-derived regression: "what is the meter number?" was
-// paying 3-4.5KB of irrelevant skill-authoring content per turn.
-describe("turn plan gates search + skill retrieval", () => {
+// chat-unified-tool-loop — OBSOLETE: the light-LLM turn plan (search/skill
+// gating) was removed. Document search is always on; GroundX-product knowledge
+// is a tool (`lookup_groundx_knowledge`), not a planner-gated prompt block.
+// Skipped pending deletion in the Stage-3 cleanup.
+describe.skip("turn plan gates search + skill retrieval", () => {
   function jsonOk2(payload: unknown): Response {
     return new Response(JSON.stringify(payload), {
       status: 200,
@@ -2611,7 +2641,12 @@ describe("generated TOOL NOTES section", () => {
 // the keyword classifier survives ONLY as the intent-hint fast path and the
 // deterministic fallback (CLASSIFIER_DECIDES / planner failure).
 // ─────────────────────────────────────────────────────────────────────
-describe("routeChat — planner-derived mode (appState)", () => {
+// chat-unified-tool-loop — OBSOLETE: the planner + appState-derived mode routing
+// was removed (routeChat now always runs the one grounded tool-loop). Skipped
+// pending deletion in the Stage-3 cleanup; kept briefly to document the removed
+// contract. The replacement behavior is asserted by "collapses every turn onto
+// the one grounded tool-loop" below.
+describe.skip("routeChat — planner-derived mode (appState)", () => {
   function jsonOk(payload: unknown): Response {
     return new Response(JSON.stringify(payload), {
       status: 200,
