@@ -114,7 +114,7 @@ function humanizeName(name: string): string {
 
 export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) => {
   const {
-    report: { renderReport },
+    report: { renderReportStream },
   } = useApi();
   const { state: chatState } = useChatStore();
   // 2026-05-31-shared-canvas-affordance-restoration — the `✎ edit §N` control
@@ -140,6 +140,16 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
   // `rerendering` while the POST is in flight; `error` on a rejected call.
   const [rerenderState, setRerenderState] = useState<"idle" | "rerendering" | "error">("idle");
 
+  // progressive-report-render B3 — streaming fill-in state. `orderedIds` is the
+  // template-order slot layout (from the `meta` frame); a slot renders its
+  // arrived section or a per-slot loading placeholder. `failedIds` marks slots
+  // the server couldn't generate — each shows a "retry §N" affordance (shown to
+  // EVERY role) and, while non-empty, gates Save/Export (completeness gate).
+  const [orderedIds, setOrderedIds] = useState<string[]>([]);
+  const [failedIds, setFailedIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Section id currently being re-fetched via the per-section retry affordance.
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+
   const canEdit = widgetRoleCanEdit(role);
 
   // DL-4 (e2e-experience-audit): a pinned answer lands in the session's
@@ -164,62 +174,158 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
   // (the first paint vs. a later re-render) so the loading/error affordances
   // stay distinct, but the network call + response handling are identical.
   const runRender = useCallback(
-    async (renderScope: ContentScope, phase: "first-paint" | "rerender") => {
+    (renderScope: ContentScope, phase: "first-paint" | "rerender") => {
       const chatSessionId = chatState.activeSessionId;
-      const templateId = overlayTemplateId;
-      if (phase === "first-paint") {
-        // No template for this scope (or no session yet) → empty state, no
-        // network round-trip.
-        if (!templateId || !chatSessionId) {
+      const templateId = phase === "rerender" ? (report?.templateId ?? overlayTemplateId) : overlayTemplateId;
+      // No template for this scope (or no session yet) → empty state on first
+      // paint (no round-trip); a re-render with nothing to render is a no-op.
+      if (!templateId || !chatSessionId) {
+        if (phase === "first-paint") {
           setReport(null);
+          setOrderedIds([]);
           setFirstPaintState("empty");
-          return;
-        }
-        setFirstPaintState("loading");
-      } else {
-        if (rerenderState === "rerendering") return;
-        const rerenderTemplateId = report?.templateId ?? templateId;
-        if (!chatSessionId || !rerenderTemplateId) return;
-        setRerenderState("rerendering");
-        try {
-          const result = await renderReport({ templateId: rerenderTemplateId, scope: renderScope, chatSessionId });
-          if (result.gated) {
-            // A BYO scope returns the sign-in gate envelope — leave the current
-            // (sample) report in place; the builder Save path owns gate opening.
-            setRerenderState("idle");
-            return;
-          }
-          setReport(result.report);
-          setRerenderState("idle");
-        } catch {
-          setRerenderState("error");
         }
         return;
       }
+      if (phase === "rerender" && rerenderState === "rerendering") return;
+      if (phase === "first-paint") setFirstPaintState("loading");
+      else setRerenderState("rerendering");
+      setFailedIds(new Set());
 
-      try {
-        const result = await renderReport({ templateId, scope: renderScope, chatSessionId });
-        if (result.gated) {
-          // A BYO scope returns the sign-in gate — there is no sample report to
-          // fall back to on first paint, so show the empty state.
-          setReport(null);
-          setFirstPaintState("empty");
-          return;
-        }
-        if (result.report.sections.length === 0) {
-          setReport(null);
-          setFirstPaintState("empty");
-          return;
-        }
-        setReport(result.report);
-        setFirstPaintState("ready");
-        setRerenderState("idle");
-      } catch {
-        setFirstPaintState("error");
-      }
+      // Progressive streaming (B3): sections fill template-order slots as they
+      // complete; first paint and ↻ re-render share this one path.
+      let terminalHandled = false;
+      void renderReportStream(
+        { templateId, scope: renderScope, chatSessionId },
+        {
+          onMeta: (ids) => {
+            setOrderedIds(ids);
+            // Skeleton so the slot frame renders while sections stream in; the
+            // envelope-level fields (previewOnly / exportFormats) land on `done`.
+            setReport({
+              reportId: `rr-${templateId}`,
+              templateId,
+              scope: renderScope,
+              status: "streaming",
+              sections: [],
+              resolvedVariables: {},
+              exportFormats: [],
+              previewOnly: true,
+            });
+            if (phase === "first-paint") setFirstPaintState("ready");
+            setRerenderState("idle");
+          },
+          onSection: (section, _index, failed) => {
+            // Upsert by id; the JSX orders by `orderedIds`, so arrival order is free.
+            setReport((prev) =>
+              prev
+                ? { ...prev, sections: [...prev.sections.filter((s) => s.sectionId !== section.sectionId), section] }
+                : prev,
+            );
+            if (failed) setFailedIds((prev) => new Set(prev).add(section.sectionId));
+          },
+          onDone: (result) => {
+            terminalHandled = true;
+            if (result.gated) {
+              // BYO gate: first paint has no sample to fall back to → empty; a
+              // re-render leaves the current report in place.
+              if (phase === "first-paint") {
+                setReport(null);
+                setOrderedIds([]);
+                setFirstPaintState("empty");
+              }
+              setRerenderState("idle");
+              return;
+            }
+            const r = result.report;
+            if (r.sections.length === 0 && phase === "first-paint") {
+              setReport(null);
+              setOrderedIds([]);
+              setFirstPaintState("empty");
+              setRerenderState("idle");
+              return;
+            }
+            // Finalize envelope-level fields (progressive sections already set).
+            setReport((prev) =>
+              prev
+                ? { ...prev, status: r.status, previewOnly: r.previewOnly, exportFormats: r.exportFormats, resolvedVariables: r.resolvedVariables }
+                : r,
+            );
+            if (phase === "first-paint") setFirstPaintState("ready");
+            setRerenderState("idle");
+          },
+          onError: () => {
+            if (terminalHandled) return;
+            if (phase === "first-paint") setFirstPaintState("error");
+            else setRerenderState("error");
+          },
+        },
+      );
     },
-    [chatState.activeSessionId, overlayTemplateId, rerenderState, report, renderReport],
+    [chatState.activeSessionId, overlayTemplateId, rerenderState, report, renderReportStream],
   );
+
+  // Per-section retry (shown for EVERY role, Q1) — re-render just this section
+  // via the `section_ids` subset over the streaming path; the other slots are
+  // untouched. Clears the slot's failed flag on success.
+  const handleRetrySection = useCallback(
+    (sectionId: string) => {
+      const chatSessionId = chatState.activeSessionId;
+      const templateId = report?.templateId;
+      if (!chatSessionId || !templateId || retryingId) return;
+      setRetryingId(sectionId);
+      void renderReportStream(
+        { templateId, scope, chatSessionId, sectionIds: [sectionId] },
+        {
+          onSection: (section, _index, failed) => {
+            setReport((prev) =>
+              prev
+                ? { ...prev, sections: [...prev.sections.filter((s) => s.sectionId !== section.sectionId), section] }
+                : prev,
+            );
+            setFailedIds((prev) => {
+              const next = new Set(prev);
+              if (failed) next.add(section.sectionId);
+              else next.delete(section.sectionId);
+              return next;
+            });
+          },
+          onDone: () => setRetryingId(null),
+          onError: () => setRetryingId(null),
+        },
+      );
+    },
+    [chatState.activeSessionId, report, retryingId, renderReportStream, scope],
+  );
+
+  // Retry ALL failed sections at once (the completeness-gate reload affordance).
+  const handleRetryAllFailed = useCallback(() => {
+    const chatSessionId = chatState.activeSessionId;
+    const templateId = report?.templateId;
+    const ids = [...failedIds];
+    if (!chatSessionId || !templateId || retryingId || ids.length === 0) return;
+    setRetryingId("__all__");
+    void renderReportStream(
+      { templateId, scope, chatSessionId, sectionIds: ids },
+      {
+        onSection: (section, _index, failed) => {
+          setReport((prev) =>
+            prev
+              ? { ...prev, sections: [...prev.sections.filter((s) => s.sectionId !== section.sectionId), section] }
+              : prev,
+          );
+          setFailedIds((prev) => {
+            const next = new Set(prev);
+            if (failed) next.add(section.sectionId);
+            else next.delete(section.sectionId);
+            return next;
+          });
+        },
+        onDone: () => setRetryingId(null),
+        onError: () => setRetryingId(null),
+      },
+    );
+  }, [chatState.activeSessionId, report, failedIds, retryingId, renderReportStream, scope]);
 
   // ScopedViewerWidget adaptation: route the FIRST paint — and any re-scope —
   // through the render endpoint (`runRender`), not a synchronous fixture read.
@@ -380,106 +486,157 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
             </Box>
           ) : null}
 
-          {report.sections.map((section, i) => (
-            <Box
-              key={section.sectionId}
-              data-testid={`report-section-${section.sectionId}`}
-              sx={{
-                border: `1px solid ${BORDER}`,
-                borderRadius: BORDER_RADIUS_2X,
-                backgroundColor: WARM_OFFWHITE,
-                p: 2,
-                display: "flex",
-                flexDirection: "column",
-                gap: 1,
-              }}
-            >
+          {/* progressive-report-render B3 — iterate template-ORDER slots (from the
+              `meta` frame). A slot renders its arrived section, a per-slot loading
+              placeholder while pending, or a "retry §N" affordance when the server
+              couldn't generate it (shown to EVERY role — Q1). */}
+          {(orderedIds.length > 0 ? orderedIds : report.sections.map((s) => s.sectionId)).map((sectionId, i) => {
+            const section = report.sections.find((s) => s.sectionId === sectionId);
+            const isFailed = failedIds.has(sectionId);
+            // Pending slot — hasn't streamed in yet and isn't a known failure.
+            if (!section && !isFailed) {
+              return (
+                <Box
+                  key={sectionId}
+                  data-testid={`report-section-loading-${sectionId}`}
+                  role="status"
+                  aria-busy="true"
+                  aria-live="polite"
+                  sx={{
+                    border: `1px solid ${BORDER}`,
+                    borderRadius: BORDER_RADIUS_2X,
+                    backgroundColor: WARM_OFFWHITE,
+                    p: 2,
+                    color: BODY_TEXT,
+                    fontSize: FONT_SIZE_CAPTION,
+                  }}
+                >
+                  Rendering {humanizeName(sectionId)}…
+                </Box>
+              );
+            }
+            return (
               <Box
+                key={sectionId}
+                data-testid={`report-section-${sectionId}`}
                 sx={{
+                  border: `1px solid ${BORDER}`,
+                  borderRadius: BORDER_RADIUS_2X,
+                  backgroundColor: WARM_OFFWHITE,
+                  p: 2,
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
+                  flexDirection: "column",
                   gap: 1,
                 }}
               >
                 <Box
-                  component="h3"
-                  data-testid={`report-section-heading-${section.sectionId}`}
-                  sx={{
-                    m: 0,
-                    color: NAVY,
-                    fontSize: FONT_SIZE_CAPTION,
-                    fontWeight: FONT_WEIGHT_HEADLINE,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 0.75,
-                  }}
+                  sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}
                 >
-                  <Box component="span" aria-hidden sx={{ color: BODY_TEXT }}>
-                    {renderAsGlyph(section.renderAs)}
+                  <Box
+                    component="h3"
+                    data-testid={`report-section-heading-${sectionId}`}
+                    sx={{
+                      m: 0,
+                      color: NAVY,
+                      fontSize: FONT_SIZE_CAPTION,
+                      fontWeight: FONT_WEIGHT_HEADLINE,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 0.75,
+                    }}
+                  >
+                    <Box component="span" aria-hidden sx={{ color: BODY_TEXT }}>
+                      {renderAsGlyph(section?.renderAs ?? "PARAGRAPH")}
+                    </Box>
+                    {humanizeName(section?.name ?? sectionId)}
                   </Box>
-                  {humanizeName(section.name)}
+                  {/* ✎ edit §N — opens the builder surface with this section
+                      pre-selected via the `editTemplate` intent (same as
+                      `show_smart_report_edit`). Rendered for every role; persist is
+                      gated at the builder Save boundary. */}
+                  <Box
+                    component="button"
+                    type="button"
+                    data-testid={`report-section-edit-${sectionId}`}
+                    aria-label={`Edit section ${i + 1}`}
+                    onClick={() =>
+                      orchestrator?.dispatch(
+                        { kind: "editTemplate", templateId: report.templateId, selectedSectionId: sectionId },
+                        "user",
+                      )
+                    }
+                    sx={{
+                      border: "none",
+                      background: "none",
+                      cursor: "pointer",
+                      color: NAVY,
+                      fontSize: FONT_SIZE_LABEL,
+                      fontWeight: FONT_WEIGHT_LABEL,
+                      p: 0,
+                      "&:focus-visible": { outline: `2px solid ${NAVY}` },
+                    }}
+                  >
+                    {`✎ edit §${i + 1}`}
+                  </Box>
                 </Box>
-                {/* ✎ edit §N — opens the report builder surface with this
-                    section pre-selected, by dispatching the `editTemplate`
-                    intent through the orchestrator (the same intent
-                    `show_smart_report_edit` emits → a `report` step with
-                    `surface: "builder"` + `selectedSectionId`). Rendered for
-                    every role; whether the edit *persists* is gated at the
-                    builder Save boundary. */}
-                <Box
-                  component="button"
-                  type="button"
-                  data-testid={`report-section-edit-${section.sectionId}`}
-                  aria-label={`Edit section ${i + 1}`}
-                  onClick={() =>
-                    orchestrator?.dispatch(
-                      {
-                        kind: "editTemplate",
-                        templateId: report.templateId,
-                        selectedSectionId: section.sectionId,
-                      },
-                      "user",
-                    )
-                  }
-                  sx={{
-                    border: "none",
-                    background: "none",
-                    cursor: "pointer",
-                    color: NAVY,
-                    fontSize: FONT_SIZE_LABEL,
-                    fontWeight: FONT_WEIGHT_LABEL,
-                    p: 0,
-                    "&:focus-visible": { outline: `2px solid ${NAVY}` },
-                  }}
-                >
-                  {`✎ edit §${i + 1}`}
-                </Box>
+
+                {isFailed ? (
+                  // Failed slot — a "retry §N" affordance (shown to every role) that
+                  // re-renders just this section. The other slots are untouched.
+                  <Stack
+                    direction="row"
+                    spacing={1.5}
+                    alignItems="center"
+                    data-testid={`report-section-failed-${sectionId}`}
+                  >
+                    <Box component="span" sx={{ color: CORAL, fontSize: FONT_SIZE_LABEL, fontWeight: FONT_WEIGHT_LABEL }}>
+                      Couldn’t generate this section.
+                    </Box>
+                    <Box
+                      component="button"
+                      type="button"
+                      data-testid={`report-section-retry-${sectionId}`}
+                      aria-label={`Retry section ${i + 1}`}
+                      disabled={retryingId !== null}
+                      onClick={() => handleRetrySection(sectionId)}
+                      sx={{
+                        border: `1px solid ${BORDER}`,
+                        background: "none",
+                        cursor: retryingId !== null ? "wait" : "pointer",
+                        color: NAVY,
+                        fontSize: FONT_SIZE_LABEL,
+                        fontWeight: FONT_WEIGHT_LABEL,
+                        borderRadius: BORDER_RADIUS_2X,
+                        px: 1.25,
+                        py: 0.5,
+                        opacity: retryingId !== null ? 0.6 : 1,
+                        "&:focus-visible": { outline: `2px solid ${NAVY}` },
+                      }}
+                    >
+                      {retryingId === sectionId ? "↻ retrying…" : `↻ retry §${i + 1}`}
+                    </Box>
+                  </Stack>
+                ) : (
+                  <>
+                    <Box sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION }}>
+                      <Markdown citations={section?.result.citations ?? []}>{section?.result.body ?? ""}</Markdown>
+                    </Box>
+                    {section?.result.warnings && section.result.warnings.length > 0 ? (
+                      <Box
+                        data-testid={`report-section-warnings-${sectionId}`}
+                        sx={{ color: EYEBROW_ON_LIGHT, fontSize: FONT_SIZE_LABEL }}
+                      >
+                        {section.result.warnings.join(" · ")}
+                      </Box>
+                    ) : null}
+                    {section && section.result.citations.length > 0 ? (
+                      <SourceList citations={section.result.citations} />
+                    ) : null}
+                  </>
+                )}
               </Box>
-
-              <Box sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION }}>
-                {/* inline-footnote-citations — same footnote model as chat: inline
-                    `[N]` markers in the section prose + a grouped SourceList below. */}
-                <Markdown citations={section.result.citations}>{section.result.body}</Markdown>
-              </Box>
-
-              {section.result.warnings && section.result.warnings.length > 0 ? (
-                <Box
-                  data-testid={`report-section-warnings-${section.sectionId}`}
-                  sx={{ color: EYEBROW_ON_LIGHT, fontSize: FONT_SIZE_LABEL }}
-                >
-                  {section.result.warnings.join(" · ")}
-                </Box>
-              ) : null}
-
-              {/* inline-footnote-citations — the grouped, collapsed source list
-                  (same component as chat); the inline `[N]` markers in the section
-                  prose above are the per-claim affordance. Numbering is per-section. */}
-              {section.result.citations.length > 0 ? (
-                <SourceList citations={section.result.citations} />
-              ) : null}
-            </Box>
-          ))}
+            );
+          })}
 
           {/* ↻ re-render — the production client caller of the render
               endpoint. Re-runs the template over the current scope and swaps in
@@ -520,22 +677,69 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
             ) : null}
           </Stack>
 
-          {/* Export / Save are locked-for-anonymous (#9 / role gate). The
-              control renders for both roles; the lock is the disabled state +
-              the preview badge above. */}
-          <Box
-            data-testid="smart-report-export"
-            aria-disabled={!canEdit || report.previewOnly || undefined}
-            sx={{
-              alignSelf: "flex-start",
-              color: canEdit && !report.previewOnly ? NAVY : BODY_TEXT,
-              fontSize: FONT_SIZE_LABEL,
-              fontWeight: FONT_WEIGHT_LABEL,
-              opacity: canEdit && !report.previewOnly ? 1 : 0.6,
-            }}
-          >
-            {canEdit && !report.previewOnly ? "export ▾ · 💾 Save" : "export ▾ 🔒 · 💾 Save 🔒"}
-          </Box>
+          {/* progressive-report-render B3 — completeness gate (Q2). While ANY
+              section failed, the report is incomplete → Save/Export are disabled
+              and a "N sections failed — retry" reload re-renders all failed
+              sections at once. Viewing is never blocked (this is separate from
+              the scope-based anon/BYO gate). */}
+          {failedIds.size > 0 ? (
+            <Stack
+              direction="row"
+              spacing={1.5}
+              alignItems="center"
+              data-testid="smart-report-incomplete"
+            >
+              <Box component="span" sx={{ color: EYEBROW_ON_LIGHT, fontSize: FONT_SIZE_LABEL }}>
+                {`${failedIds.size} section${failedIds.size === 1 ? "" : "s"} failed — retry to complete the report.`}
+              </Box>
+              <Box
+                component="button"
+                type="button"
+                data-testid="smart-report-retry-failed"
+                aria-label="Retry all failed sections"
+                disabled={retryingId !== null}
+                onClick={handleRetryAllFailed}
+                sx={{
+                  border: `1px solid ${NAVY}`,
+                  background: "none",
+                  cursor: retryingId !== null ? "wait" : "pointer",
+                  color: NAVY,
+                  fontSize: FONT_SIZE_LABEL,
+                  fontWeight: FONT_WEIGHT_LABEL,
+                  borderRadius: BORDER_RADIUS_2X,
+                  px: 1.25,
+                  py: 0.5,
+                  opacity: retryingId !== null ? 0.6 : 1,
+                  "&:focus-visible": { outline: `2px solid ${NAVY}` },
+                }}
+              >
+                {retryingId === "__all__" ? "↻ retrying…" : "↻ retry failed"}
+              </Box>
+            </Stack>
+          ) : null}
+
+          {/* Export / Save are locked-for-anonymous (#9 / role gate) AND gated on
+              a COMPLETE report (Q2 — no failed sections). The control renders for
+              both roles; the lock is the disabled state + the preview badge / the
+              incomplete notice above. */}
+          {(() => {
+            const canShip = canEdit && !report.previewOnly && failedIds.size === 0;
+            return (
+              <Box
+                data-testid="smart-report-export"
+                aria-disabled={!canShip || undefined}
+                sx={{
+                  alignSelf: "flex-start",
+                  color: canShip ? NAVY : BODY_TEXT,
+                  fontSize: FONT_SIZE_LABEL,
+                  fontWeight: FONT_WEIGHT_LABEL,
+                  opacity: canShip ? 1 : 0.6,
+                }}
+              >
+                {canShip ? "export ▾ · 💾 Save" : "export ▾ 🔒 · 💾 Save 🔒"}
+              </Box>
+            );
+          })()}
         </>
       )}
     </Box>

@@ -8,7 +8,7 @@ vi.mock("@/lib/sentry", () => ({
 import type { ContentScope, RenderedSection } from "@groundx/shared";
 import { ApiError } from "@groundx/shared";
 
-import { SmartReportApiError, getReportTemplate, renderReport, saveReportTemplate, type RenderedSectionWire } from "./smartReport";
+import { SmartReportApiError, getReportTemplate, renderReport, renderReportStream, saveReportTemplate, type RenderedSectionWire } from "./smartReport";
 
 /**
  * generated-result drift guard (Report side, app) —
@@ -185,6 +185,63 @@ describe("renderReport (smart-report Phase 6 client caller)", () => {
     await expect(
       renderReportForTest({ templateId: "t", scope: UTILITY_SCOPE, chatSessionId: "chat-1" }),
     ).rejects.toMatchObject({ name: "SmartReportApiError", status: 403 });
+  });
+});
+
+describe("renderReportStream (progressive-report-render B3 client)", () => {
+  function sseResponse(sseText: string): Response {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sseText));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }
+
+  it("drives onMeta → onSection (with failed flag) → onDone from the SSE frames", async () => {
+    const sse =
+      `id: 1\nevent: meta\ndata: ${JSON.stringify({ report_id: "rr-x", template_id: "t", section_ids: ["billing_summary", "anomalies"] })}\n\n` +
+      `id: 2\nevent: section\ndata: ${JSON.stringify({ index: 0, section: { name: "billing_summary", render_as: "PARAGRAPH", body: "Total is $18,742.16.", cites: [] }, failed: false })}\n\n` +
+      `id: 3\nevent: section\ndata: ${JSON.stringify({ index: 1, section: { name: "anomalies", render_as: "BULLETS", body: "—", cites: [], warnings: ["⚠ couldn't generate this section — retry"] }, failed: true })}\n\n` +
+      `id: 4\nevent: done\ndata: ${JSON.stringify(RENDER_WIRE)}\n\n`;
+    apiResponses.push(sseResponse(sse));
+
+    const meta: string[][] = [];
+    const sections: Array<{ id: string; failed: boolean }> = [];
+    let doneResult: { gated: boolean } | null = null;
+    await renderReportStream(
+      { templateId: "t", scope: UTILITY_SCOPE, chatSessionId: "chat-1" },
+      {
+        onMeta: (ids) => meta.push(ids),
+        onSection: (s, _i, failed) => sections.push({ id: s.sectionId, failed }),
+        onDone: (r) => {
+          doneResult = r as { gated: boolean };
+        },
+      },
+      { ensureServerChatSession },
+    );
+
+    expect(meta).toEqual([["billing_summary", "anomalies"]]);
+    expect(sections).toEqual([
+      { id: "billing_summary", failed: false },
+      { id: "anomalies", failed: true },
+    ]);
+    expect(doneResult).toMatchObject({ gated: false });
+    // The POST advertised the SSE Accept header (content-negotiation).
+    const post = apiFetchCalls().find(([p]) => String(p).includes("/reports/render"));
+    expect(new Headers((post?.[1] as RequestInit)?.headers).get("Accept")).toBe("text/event-stream");
+  });
+
+  it("invokes onError (not throw) when the stream request is non-2xx", async () => {
+    apiResponses.push(jsonResponse({ error: "boom" }, 500));
+    let errored = false;
+    await renderReportStream(
+      { templateId: "t", scope: UTILITY_SCOPE, chatSessionId: "chat-1" },
+      { onError: () => { errored = true; } },
+      { ensureServerChatSession },
+    );
+    expect(errored).toBe(true);
   });
 });
 

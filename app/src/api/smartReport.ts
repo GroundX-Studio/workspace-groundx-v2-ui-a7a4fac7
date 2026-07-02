@@ -25,10 +25,11 @@
 
 import { ensureServerChatSession, type ChatSessionEnsureClient } from "@/api/chatSessions";
 import { csrfFetch } from "@/api/csrfFetch";
+import { readSseFrames } from "@/api/sseFrames";
 import { captureException } from "@/lib/sentry";
 import { ApiError } from "@groundx/shared";
 import type { ContentScope, RenderedSection } from "@groundx/shared";
-import type { RenderedReport, ReportSectionRenderAs } from "@/types/report";
+import type { RenderedReport, RenderedReportSection, ReportSectionRenderAs } from "@/types/report";
 
 const RENDER_ROUTE = "/api/widgets/smart-report/reports/render";
 const SAVE_ROUTE = "/api/widgets/smart-report/reports";
@@ -190,6 +191,101 @@ export async function renderReport(
     previewOnly: body.preview_only,
   };
   return { gated: false, report };
+}
+
+// ── Render (streaming, progressive) ─────────────────────────────────────────
+
+export interface RenderReportStreamHandlers {
+  /** Ordered section ids, once known — the surface lays out template-order slots. */
+  onMeta?: (sectionIds: string[]) => void;
+  /** One section as it completes (completion order); `failed` marks a degraded slot. */
+  onSection?: (section: RenderedReportSection, index: number, failed: boolean) => void;
+  /** Terminal envelope — the authoritative final state (gate / complete + previewOnly). */
+  onDone?: (result: RenderReportResult) => void;
+  /** The whole stream failed (network / non-2xx / server error frame). */
+  onError?: (err: unknown) => void;
+}
+
+/**
+ * Progressive render: POST with `Accept: text/event-stream` and drive the
+ * handlers as `meta` / `section` / `done` frames arrive (progressive-report-render
+ * B3). The surface fills template-order slots as sections complete; `done`
+ * carries the final envelope. Mirrors `renderReport` (JSON) — same request,
+ * same mapping — but delivered progressively.
+ */
+export async function renderReportStream(
+  input: RenderReportInput,
+  handlers: RenderReportStreamHandlers,
+  chatSessionEnsure: ChatSessionEnsureDependency = { ensureServerChatSession },
+): Promise<void> {
+  await chatSessionEnsure.ensureServerChatSession({
+    id: input.chatSessionId,
+    onboardingSessionId: input.chatSessionId,
+    title: "Onboarding",
+    isOnboarding: true,
+  });
+  const requestBody = {
+    template_id: input.templateId,
+    scope: input.scope,
+    variables: input.variables ?? {},
+    section_ids: input.sectionIds ?? null,
+    chat_session_id: input.chatSessionId,
+    parent_message_id: null,
+  };
+  let res: Response;
+  try {
+    res = await csrfFetch(RENDER_ROUTE, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(requestBody),
+    });
+  } catch (err) {
+    captureException(err, { route: RENDER_ROUTE });
+    handlers.onError?.(err);
+    return;
+  }
+  if (!res.ok || !res.body) {
+    const error = new SmartReportApiError(`POST ${RENDER_ROUTE} (stream) failed: ${res.status}`, res.status, null);
+    if (res.status >= 500) captureException(error, { route: RENDER_ROUTE, status: res.status });
+    handlers.onError?.(error);
+    return;
+  }
+  try {
+    for await (const frame of readSseFrames(res.body)) {
+      if (frame.event === "meta") {
+        const d = JSON.parse(frame.data) as { section_ids?: string[] };
+        handlers.onMeta?.(d.section_ids ?? []);
+      } else if (frame.event === "section") {
+        const d = JSON.parse(frame.data) as { index: number; section: RenderedSectionWire; failed?: boolean };
+        handlers.onSection?.(wireSectionToRendered(d.section), d.index, d.failed === true);
+      } else if (frame.event === "done") {
+        const body = JSON.parse(frame.data) as RenderReportResponseWire | RenderGateResponseWire;
+        if (isGateWire(body)) {
+          handlers.onDone?.({ gated: true, gate: body.gate, reason: body.reason });
+        } else {
+          handlers.onDone?.({
+            gated: false,
+            report: {
+              reportId: body.report_id,
+              templateId: body.template_id,
+              scope: input.scope,
+              status: body.status,
+              sections: (body.sections ?? []).map(wireSectionToRendered),
+              resolvedVariables: body.resolved_variables ?? {},
+              exportFormats: body.export_formats ?? [],
+              previewOnly: body.preview_only,
+            },
+          });
+        }
+      } else if (frame.event === "error") {
+        handlers.onError?.(new SmartReportApiError("render stream error frame", 500, frame.data));
+      }
+    }
+  } catch (err) {
+    captureException(err, { route: RENDER_ROUTE });
+    handlers.onError?.(err);
+  }
 }
 
 // ── Save ────────────────────────────────────────────────────────────────

@@ -291,5 +291,26 @@ export const makeFakeApi = (overrides: ApiOverrides = {}): Api => {
   if (!("chat" in overrides && (overrides.chat as Record<string, unknown> | undefined)?.streamChatMessage)) {
     api.chat.streamChatMessage = ((input) => api.chat.sendChatMessage(input)) as Api["chat"]["streamChatMessage"];
   }
+  // progressive-report-render B3 — unless a test overrides it, the fake's
+  // streaming render DELEGATES to `renderReport` (the base dispatch or a per-test
+  // override) and drives the `meta`/`section`/`done` handlers from that result,
+  // faithfully to the server (no `meta` on a gate/empty render). So tests that
+  // override or assert on `report.renderReport` keep working when the surface
+  // switched to the streaming client.
+  if (!("report" in overrides && (overrides.report as Record<string, unknown> | undefined)?.renderReportStream)) {
+    api.report.renderReportStream = (async (input, handlers) => {
+      const result = await api.report.renderReport(input);
+      if (result.gated) {
+        handlers.onDone?.(result);
+        return;
+      }
+      const r = result.report;
+      if (r.sections.length > 0) {
+        handlers.onMeta?.(r.sections.map((s) => s.sectionId));
+        r.sections.forEach((s, i) => handlers.onSection?.(s, i, false));
+      }
+      handlers.onDone?.(result);
+    }) as Api["report"]["renderReportStream"];
+  }
   return api;
 };

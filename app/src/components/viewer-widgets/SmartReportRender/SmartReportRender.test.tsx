@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FC, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
-import type { RenderReportInput, RenderReportResult } from "@/api/smartReport";
+import type { RenderReportInput, RenderReportResult, RenderReportStreamHandlers } from "@/api/smartReport";
 import type { RenderedReport } from "@/types/report";
 
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
@@ -20,7 +20,10 @@ const UTILITY_SCOPE: ContentScope = {
   filter: { projectId: "proj_c7701da7-0e08-482a-a496-df9dfe991613" },
 };
 
-const renderReport = vi.fn<[RenderReportInput], Promise<RenderReportResult>>();
+// progressive-report-render B3 — the surface now consumes the STREAMING client
+// (`renderReportStream`), driving `onMeta` → `onSection` → `onDone` handlers.
+const renderReportStream =
+  vi.fn<[RenderReportInput, RenderReportStreamHandlers], Promise<void>>();
 
 type RenderOptions = NonNullable<Parameters<typeof renderWithOnboardingProviders>[1]>;
 const renderWithReportApi = (ui: ReactElement, options: RenderOptions = {}) =>
@@ -30,10 +33,40 @@ const renderWithReportApi = (ui: ReactElement, options: RenderOptions = {}) =>
       ...options.api,
       report: {
         ...options.api?.report,
-        renderReport,
+        renderReportStream,
       },
     },
   });
+
+/**
+ * Drive the streaming handlers from a `RenderReportResult`, faithfully to the
+ * server: `onMeta` fires only when there are sections (the backend skips it for
+ * a gate / empty / no-template render); one `onSection` per section; then
+ * `onDone`. `failedIds` marks section ids to deliver with `failed: true`.
+ */
+function streamInto(
+  handlers: RenderReportStreamHandlers,
+  result: RenderReportResult,
+  failedIds: ReadonlySet<string> = new Set(),
+): void {
+  if (result.gated) {
+    handlers.onDone?.(result);
+    return;
+  }
+  const r = result.report;
+  if (r.sections.length > 0) {
+    handlers.onMeta?.(r.sections.map((s) => s.sectionId));
+    r.sections.forEach((s, i) => handlers.onSection?.(s, i, failedIds.has(s.sectionId)));
+  }
+  handlers.onDone?.(result);
+}
+
+/** A mock implementation that streams a fixed result. */
+function streamFrom(result: RenderReportResult, failedIds?: ReadonlySet<string>) {
+  return async (_input: RenderReportInput, handlers: RenderReportStreamHandlers): Promise<void> => {
+    streamInto(handlers, result, failedIds);
+  };
+}
 
 const SEEDED_TEMPLATE_ID = "rt-utility-ic-brief";
 
@@ -140,10 +173,10 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.mocked(renderReport).mockReset();
-  // Default: the endpoint returns the Utility IC-brief report. Individual
-  // tests override (empty, error, in-flight) as needed.
-  vi.mocked(renderReport).mockResolvedValue(utilityResult);
+  vi.mocked(renderReportStream).mockReset();
+  // Default: the endpoint streams the Utility IC-brief report. Individual tests
+  // override (empty, error, in-flight, failed section) as needed.
+  vi.mocked(renderReportStream).mockImplementation(streamFrom(utilityResult));
 });
 
 afterEach(() => {
@@ -159,7 +192,7 @@ afterEach(() => {
   // Drop any queued `*Once` responses / implementation so the next test's
   // `beforeEach` default (or its own override) is the only source of truth
   // for what the render endpoint returns.
-  vi.mocked(renderReport).mockReset();
+  vi.mocked(renderReportStream).mockReset();
 });
 
 describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-followups)", () => {
@@ -173,14 +206,14 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       expect(root).toHaveAttribute("data-role", role);
       // Let the first-paint fetch settle so no act() warning leaks (the
       // templateId-change re-render effect drives the call after the seeder).
-      await waitFor(() => expect(renderReport).toHaveBeenCalled());
+      await waitFor(() => expect(renderReportStream).toHaveBeenCalled());
     },
   );
 
   it("FIRST paint calls the render endpoint client (not a synchronous fixture read)", async () => {
     renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
-    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(renderReport).mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(renderReportStream).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(renderReportStream).mock.calls[0][0]).toMatchObject({
       templateId: "rt-utility-ic-brief",
       scope: UTILITY_SCOPE,
     });
@@ -229,7 +262,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
         },
       ],
     };
-    vi.mocked(renderReport).mockResolvedValue({ gated: false, report: reportWithMarker });
+    vi.mocked(renderReportStream).mockImplementation(streamFrom({ gated: false, report: reportWithMarker }));
 
     renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
 
@@ -294,7 +327,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       initialScenario: "utility",
     });
     expect(await screen.findByTestId("smart-report-empty")).toBeInTheDocument();
-    expect(renderReport).not.toHaveBeenCalled();
+    expect(renderReportStream).not.toHaveBeenCalled();
   });
 
   it("DL-4: empty state surfaces a reachable 'open builder' affordance ONLY when a pinned draft exists", async () => {
@@ -353,13 +386,11 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     const noFixture: ContentScope = { type: "documents", documentIds: ["nope"] };
     // The endpoint returns empty (no sections) for the no-fixture scope, then
     // the Utility report after the scope flips.
-    vi.mocked(renderReport).mockImplementation(async (input) => {
+    vi.mocked(renderReportStream).mockImplementation(async (input, handlers) => {
       const isUtility =
         input.scope.type === "bucket" &&
         input.scope.filter?.projectId === "proj_c7701da7-0e08-482a-a496-df9dfe991613";
-      return isUtility
-        ? utilityResult
-        : { gated: false, report: { ...UTILITY_REPORT, sections: [] } };
+      streamInto(handlers, isUtility ? utilityResult : { gated: false, report: { ...UTILITY_REPORT, sections: [] } });
     });
     const Harness: FC = () => {
       const [scope, setScope] = useState<ContentScope>(noFixture);
@@ -390,7 +421,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     // The adapter drove the re-scope through the endpoint with the Utility scope
     // (the LAST call carries the new scope identity).
     await waitFor(() => {
-      const calls = vi.mocked(renderReport).mock.calls;
+      const calls = vi.mocked(renderReportStream).mock.calls;
       expect(calls[calls.length - 1][0]).toMatchObject({ scope: UTILITY_SCOPE });
     });
   });
@@ -398,7 +429,11 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
   // ── first-paint lifecycle: loading / empty / error ──────────────────
   it("shows a loading affordance while the FIRST render call is in flight", async () => {
     const d = deferred<RenderReportResult>();
-    vi.mocked(renderReport).mockReturnValueOnce(d.promise);
+    // Hold before any frame → the surface stays in its loading state; releasing
+    // the deferred streams the report in.
+    vi.mocked(renderReportStream).mockImplementationOnce((_input, handlers) =>
+      d.promise.then((result) => streamInto(handlers, result)),
+    );
     renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     // Before the call resolves the surface shows a loading state, not a blank
     // surface and not the (now-gone) synchronous fixture.
@@ -411,17 +446,18 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
   });
 
   it("shows the empty state when the endpoint returns no sections for the scope", async () => {
-    vi.mocked(renderReport).mockResolvedValueOnce({
-      gated: false,
-      report: { ...UTILITY_REPORT, sections: [] },
-    });
+    vi.mocked(renderReportStream).mockImplementationOnce(
+      streamFrom({ gated: false, report: { ...UTILITY_REPORT, sections: [] } }),
+    );
     renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     expect(await screen.findByTestId("smart-report-empty")).toBeInTheDocument();
   });
 
   it("shows a retryable error banner when the FIRST render call rejects", async () => {
     const user = userEvent.setup();
-    vi.mocked(renderReport).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(renderReportStream).mockImplementationOnce(async (_input, handlers) => {
+      handlers.onError?.(new Error("boom"));
+    });
     renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     // First paint failed → a retryable error affordance, not a blank surface
     // and not a thrown render.
@@ -429,7 +465,7 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
     expect(screen.getByTestId("smart-report-retry")).toBeInTheDocument();
 
     // Retry re-issues the call; the next response paints the report.
-    vi.mocked(renderReport).mockResolvedValueOnce(utilityResult);
+    vi.mocked(renderReportStream).mockImplementationOnce(streamFrom(utilityResult));
     await user.click(screen.getByTestId("smart-report-retry"));
     expect(await screen.findByText(/billing summary/i)).toBeInTheDocument();
     expect(screen.queryByTestId("smart-report-error")).not.toBeInTheDocument();
@@ -463,19 +499,19 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
       },
     };
     // First paint → Utility report; the ↻ re-render → the fresh response.
-    vi.mocked(renderReport)
-      .mockResolvedValueOnce(utilityResult)
-      .mockResolvedValueOnce(responseReport);
+    vi.mocked(renderReportStream)
+      .mockImplementationOnce(streamFrom(utilityResult))
+      .mockImplementationOnce(streamFrom(responseReport));
 
     renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     // First paint is the endpoint response (the four IC-brief sections).
     expect(await screen.findByText(/billing summary/i)).toBeInTheDocument();
-    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(renderReportStream).toHaveBeenCalledTimes(1));
 
     await user.click(screen.getByTestId("smart-report-rerender"));
     // Re-render shares the same fetch path: a second call to the SAME client.
-    await waitFor(() => expect(renderReport).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(renderReport).mock.calls[1][0]).toMatchObject({
+    await waitFor(() => expect(renderReportStream).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(renderReportStream).mock.calls[1][0]).toMatchObject({
       templateId: "rt-utility-ic-brief",
       scope: UTILITY_SCOPE,
     });
@@ -488,14 +524,97 @@ describe("SmartReportRender — first-paint round-trip (2026-05-31-smart-report-
 
   it("surfaces an error state when the re-render endpoint call rejects", async () => {
     const user = userEvent.setup();
-    vi.mocked(renderReport)
-      .mockResolvedValueOnce(utilityResult)
-      .mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(renderReportStream)
+      .mockImplementationOnce(streamFrom(utilityResult))
+      .mockImplementationOnce(async (_input, handlers) => {
+        handlers.onError?.(new Error("boom"));
+      });
     renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
     await screen.findByText(/billing summary/i);
     await user.click(screen.getByTestId("smart-report-rerender"));
     await waitFor(() =>
       expect(screen.getByTestId("smart-report-rerender-error")).toBeInTheDocument(),
     );
+  });
+});
+
+// ── progressive-report-render B3 — progressive fill-in, per-section failure ──
+// ── retry, and the Save/Export completeness gate. ───────────────────────────
+describe("SmartReportRender — progressive streaming (progressive-report-render B3)", () => {
+  it("fills template-order slots as sections stream in (pending slot → section)", async () => {
+    // Deliver meta + three sections, but HOLD the fourth (recommendation) until
+    // a deferred releases — so its slot shows the per-slot loading placeholder.
+    const hold = deferred<void>();
+    vi.mocked(renderReportStream).mockImplementationOnce(async (_input, handlers) => {
+      handlers.onMeta?.(UTILITY_REPORT.sections.map((s) => s.sectionId));
+      UTILITY_REPORT.sections.slice(0, 3).forEach((s, i) => handlers.onSection?.(s, i, false));
+      await hold.promise;
+      const last = UTILITY_REPORT.sections[3];
+      handlers.onSection?.(last, 3, false);
+      handlers.onDone?.(utilityResult);
+    });
+    renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    // Three arrived; the fourth slot is still a loading placeholder.
+    expect(await screen.findByTestId("report-section-billing_summary")).toBeInTheDocument();
+    expect(screen.getByTestId("report-section-loading-recommendation")).toBeInTheDocument();
+    expect(screen.queryByTestId("report-section-recommendation")).not.toBeInTheDocument();
+    // Release the last section → its slot fills in.
+    hold.resolve();
+    expect(await screen.findByTestId("report-section-recommendation")).toBeInTheDocument();
+    expect(screen.queryByTestId("report-section-loading-recommendation")).not.toBeInTheDocument();
+  });
+
+  it("a failed section shows a retry affordance (for every role), and retrying re-renders just it", async () => {
+    const user = userEvent.setup();
+    // First stream: anomalies fails; retry (subset) succeeds.
+    vi.mocked(renderReportStream)
+      .mockImplementationOnce(streamFrom(utilityResult, new Set(["anomalies"])))
+      .mockImplementationOnce(async (input, handlers) => {
+        expect(input.sectionIds).toEqual(["anomalies"]);
+        const anomalies = UTILITY_REPORT.sections.find((s) => s.sectionId === "anomalies")!;
+        handlers.onSection?.(anomalies, 2, false);
+        handlers.onDone?.(utilityResult);
+      });
+    // Anonymous — retry must still be offered (Q1).
+    renderWithTemplate(<SmartReportRender role="anonymous" scope={UTILITY_SCOPE} />);
+    expect(await screen.findByTestId("report-section-failed-anomalies")).toBeInTheDocument();
+    const retry = screen.getByTestId("report-section-retry-anomalies");
+    // Other sections rendered normally.
+    expect(screen.getByTestId("report-section-billing_summary")).toBeInTheDocument();
+    await user.click(retry);
+    // The slot fills with the retried section; the failed marker is gone.
+    await waitFor(() =>
+      expect(screen.queryByTestId("report-section-failed-anomalies")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("report-section-anomalies")).toBeInTheDocument();
+  });
+
+  it("gates Save/Export while a section is failed, then re-enables after a retry-all (Q2)", async () => {
+    const user = userEvent.setup();
+    // A MEMBER, non-preview report (so only the completeness gate — not preview
+    // or role — can lock Save/Export). One section fails.
+    const memberReport: RenderReportResult = {
+      gated: false,
+      report: { ...UTILITY_REPORT, previewOnly: false },
+    };
+    vi.mocked(renderReportStream)
+      .mockImplementationOnce(streamFrom(memberReport, new Set(["anomalies"])))
+      .mockImplementationOnce(async (input, handlers) => {
+        expect(input.sectionIds).toEqual(["anomalies"]);
+        const anomalies = UTILITY_REPORT.sections.find((s) => s.sectionId === "anomalies")!;
+        handlers.onSection?.(anomalies, 2, false);
+        handlers.onDone?.(memberReport);
+      });
+    renderWithTemplate(<SmartReportRender role="member" scope={UTILITY_SCOPE} />);
+    // While incomplete: Save/Export disabled + the retry-failed reload shows.
+    await screen.findByTestId("smart-report-incomplete");
+    expect(screen.getByTestId("smart-report-export")).toHaveAttribute("aria-disabled", "true");
+    // Retry all failed → the section completes → Save/Export re-enables.
+    await user.click(screen.getByTestId("smart-report-retry-failed"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("smart-report-incomplete")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("smart-report-export")).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByTestId("smart-report-export")).toHaveTextContent("💾 Save");
   });
 });

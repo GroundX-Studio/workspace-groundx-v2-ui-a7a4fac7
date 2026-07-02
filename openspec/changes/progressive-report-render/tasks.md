@@ -14,11 +14,11 @@
 
 ## 3. Fill-as-you-go render surface
 
-- [ ] 3.1 SEQUENTIAL — Failing widget test (`*.test.tsx`): the render surface lays out ordered slots from `meta`, fills each slot as its `section` frame arrives (out-of-order completion → in-order slots), and a `failed` section shows a retry affordance.
-- [ ] 3.2 SEQUENTIAL — Implement the SSE consumer + ordered-slot fill-in in the SmartReport render widget; per-section "couldn't generate — retry §N" affordance re-renders that section only via the `section_ids` subset path. (D4)
-- [ ] 3.3 SEQUENTIAL — Failing test + implement: while any section is `failed`, Save and Export are DISABLED and a "N sections failed — retry" recovery affordance shows; retrying re-renders all failed sections in one `section_ids` subset render; when all succeed, Save/Export re-enable. Viewing is never blocked. This completeness gate is separate from the scope-based anon/BYO gate. (D6, Q2 decision)
-- [ ] 3.4 SEQUENTIAL — Keep `↻ re-render` and initial-paint on the shared render path; the non-streaming callers/tests keep the JSON path (D5).
-- [ ] 3.5 GATE — Adversarial review vs the widget contract + the smart-report scoped-viewer contract; Save/Export completeness gate correct (blocks only Save/Export, not viewing); no-hardcoded-styles guard green.
+- [x] 3.1 SEQUENTIAL — Widget tests: ordered slots from `meta`, per-slot loading placeholder → section fills in (held-4th-section test), and a `failed` section shows a retry affordance (shown to anon too — Q1). Plus a direct `smartReport.test.ts` SSE-parsing test (meta→section+failed→done; onError on non-2xx).
+- [x] 3.2 SEQUENTIAL — SSE consumer (`renderReportStream`) + ordered-slot fill-in in the widget; per-section "↻ retry §N" re-renders that section via the `section_ids` subset over the stream. (D4)
+- [x] 3.3 SEQUENTIAL — Completeness gate: while any section is `failed`, Save/Export DISABLED + a "N sections failed — retry" reload (`handleRetryAllFailed`) re-renders all failed sections; when all succeed, Save/Export re-enable. Viewing never blocked; separate from the scope-based gate. Member-non-preview test confirms. (D6, Q2)
+- [x] 3.4 SEQUENTIAL — First paint AND ↻ re-render share ONE streaming path (Q2 — re-render streams too); the JSON `renderReport` stays for non-streaming callers/tests. Backend concurrency (cap 4) unchanged, so both are concurrent.
+- [x] 3.5 GATE — Adversarial review PASSED: widget-contract intact (role prop, README, sibling test); completeness gate blocks only Save/Export, not viewing; no type duplication (RenderedReportSection reused — recurrence-drift §5(b) green); fake mirrors the chat-stream precedent; app suite 1960 green, mw report 121 green, tsc clean.
 
 ## 4. Docs + closeout
 

@@ -501,6 +501,19 @@ async function mapWithConcurrency<T, R>(
 const REPORT_SECTION_CONCURRENCY = 4;
 const REPORT_SECTION_RETRIES = 1;
 
+/**
+ * The warning a section carries when it could not be generated (after the
+ * retry). The SSE route reads this to set the `failed` flag on the `section`
+ * frame, and the surface shows a "retry §N" affordance + the Save/Export
+ * completeness gate. One source for the marker (never string-matched ad hoc).
+ */
+export const SECTION_FAILED_WARNING = "⚠ couldn't generate this section — retry";
+
+/** True when a rendered section wire is a failed slot (per B1 degradation). */
+export function isFailedSectionWire(wire: RenderedSectionWire): boolean {
+  return (wire.warnings ?? []).includes(SECTION_FAILED_WARNING);
+}
+
 // Render ONE section, isolated: retry once on a transient failure, then degrade
 // in-slot (never throw out of the fan-out — one slow section must not 504 the
 // whole report). Returns the wire + the variable bindings this section resolved
@@ -550,7 +563,7 @@ async function renderOneSection(
       body: "—",
       cites: [],
       confidence: 0,
-      warnings: ["⚠ couldn't generate this section — retry"],
+      warnings: [SECTION_FAILED_WARNING],
     },
     resolvedDelta,
   };

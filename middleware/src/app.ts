@@ -28,6 +28,7 @@ import {
   renderReport,
   reportTemplateFromRecord,
   reportTemplateToSaveInput,
+  isFailedSectionWire,
   type ReportSection,
   type ReportSectionRenderAs,
   type ReportTemplate,
@@ -1530,7 +1531,8 @@ export function createApp({
             ...renderDeps,
             onMeta: (sectionIds) =>
               frame("meta", { report_id: `rr-${templateId}`, template_id: templateId, section_ids: sectionIds }),
-            onSection: (wire, index) => frame("section", { index, section: wire }),
+            onSection: (wire, index) =>
+              frame("section", { index, section: wire, failed: isFailedSectionWire(wire) }),
           });
           // Terminal frame carries the FULL final envelope (gate / empty / complete
           // + resolved_variables + export_formats + preview_only) — the authoritative

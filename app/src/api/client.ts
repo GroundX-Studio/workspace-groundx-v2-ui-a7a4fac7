@@ -40,7 +40,7 @@ import { extractField } from "@/api/extractField";
 import { rewriteTemplateItem, previewReportSection } from "@/api/templateItem";
 import { fetchFieldGeometry } from "@/api/fieldGeometry";
 import { recordIntent } from "@/api/intentLog";
-import { getReportTemplate, renderReport, saveReportTemplate } from "@/api/smartReport";
+import { getReportTemplate, renderReport, renderReportStream, saveReportTemplate } from "@/api/smartReport";
 import { saveTemplate } from "@/api/templates";
 import { recordViewerEvent } from "@/api/viewerEvents";
 import { captureException } from "@/lib/sentry";
@@ -113,6 +113,9 @@ const recordViewerEventWithClientEnsure: typeof recordViewerEvent = (input) =>
 
 const renderReportWithClientEnsure: typeof renderReport = (input) =>
   renderReport(input, chatSessionEnsure);
+
+const renderReportStreamWithClientEnsure: typeof renderReportStream = (input, handlers) =>
+  renderReportStream(input, handlers, chatSessionEnsure);
 
 const extractFieldWithClientEnsure: typeof extractField = (input) =>
   extractField(input, chatSessionEnsure);
@@ -203,6 +206,7 @@ export const realApi = {
   },
   report: {
     renderReport: renderReportWithClientEnsure,
+    renderReportStream: renderReportStreamWithClientEnsure,
     saveReportTemplate,
     getReportTemplate,
   },
