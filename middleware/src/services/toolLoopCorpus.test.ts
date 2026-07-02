@@ -262,6 +262,28 @@ describe("agentic tool-result loop (no real LLM)", () => {
   });
 });
 
+// chat-unified-tool-loop Task 1.6 — the grounded loop NEVER manufactures
+// navigation. A plain content question answered with pure prose (no tool_calls)
+// must dispatch ZERO intents: navigation happens only when the model explicitly
+// emits a nav tool, never as a side effect of the always-on tool catalog. This
+// guards the collapse — advertising nav tools on every turn must not tempt a
+// spurious jump on an ordinary "explain this" content answer.
+describe("no spurious navigation on content turns", () => {
+  it("dispatches no intents when a content question is answered with prose only", async () => {
+    const { reply, forward } = await run([PROSE_ROUND]);
+
+    // A single grounded completion — no tool round, no answer-forcing second call.
+    expect(forward.mock.calls.length).toBe(1);
+    // The content answer came through.
+    expect(reply.answer).toContain("semantic objects");
+    // The crux: zero routed intents. No open_document / jump_to_page / show_*
+    // navigation was fabricated by the loop for a pure-prose content turn.
+    expect(reply.intents).toHaveLength(0);
+    // No server tool ran either (no lookup) — the activity trail is clean.
+    expect(reply.toolActivity ?? []).toEqual([]);
+  });
+});
+
 // design §H-5 — the loop is OFF unless the caller opts in. Report/hybrid call
 // the shared seam with no `toolLoop`, so a server-executed tool call is NOT
 // run by the middleware (it routes out as an ordinary tool call) and the LLM
