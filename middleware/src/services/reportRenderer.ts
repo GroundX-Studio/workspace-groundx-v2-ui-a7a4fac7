@@ -369,6 +369,17 @@ export interface RenderReportDeps {
   /** Embedding verification seam — see `GroundedAnswerDeps.quoteEmbedder`. */
   quoteEmbedder?: import("./attribution.js").Embedder;
   embedThreshold?: number;
+  /**
+   * progressive-report-render B2 — OPTIONAL streaming sink. When present, fires
+   * once the template's ordered section ids are known (`onMeta`) and once per
+   * section AS IT COMPLETES (`onSection`), so the SSE route can emit progressive
+   * frames. The final aggregate is STILL returned (the JSON path ignores the
+   * sink); one compute path, two deliveries. `onSection` fires in completion
+   * order (the wire carries its own `name`; the route pairs it to a slot by the
+   * `index`, which is the template-order position).
+   */
+  onMeta?: (sectionIds: string[]) => void;
+  onSection?: (wire: RenderedSectionWire, index: number) => void;
 }
 
 /** {var} token regex (literal variables only, #12). */
@@ -634,9 +645,16 @@ export async function renderReport(
   // 504, and total latency was the SUM of sections. Now: each section renders
   // independently (retry-once on a transient failure, then degrade IN ITS SLOT),
   // and the fan-out is capped so a wide template can't burst the provider.
-  const rendered = await mapWithConcurrency(liveSections, REPORT_SECTION_CONCURRENCY, (section) =>
-    renderOneSection(section, request.scope, groundedDeps, request.variables),
-  );
+  // Streaming sink (B2): announce the ordered section ids up front so the SSE
+  // route can paint template-order slots before any section finishes.
+  deps.onMeta?.(liveSections.map((s) => s.id));
+  const rendered = await mapWithConcurrency(liveSections, REPORT_SECTION_CONCURRENCY, async (section, index) => {
+    const r = await renderOneSection(section, request.scope, groundedDeps, request.variables);
+    // Fire AS this section completes (completion order, arbitrary) — the route
+    // slots it by `index` (its template-order position).
+    deps.onSection?.(r.wire, index);
+    return r;
+  });
   // Merge in TEMPLATE ORDER (mapWithConcurrency preserves index order); each
   // section wrote only its own `resolvedDelta`, so the merge is deterministic.
   const resolved: Record<string, string> = {};

@@ -8,9 +8,9 @@
 
 ## 2. Progressive SSE delivery (endpoint)
 
-- [ ] 2.1 SEQUENTIAL — Failing apiRouteContract test: `POST /reports/render` with `Accept: text/event-stream` emits `meta` → per-section `section` frames (as each completes) → terminal `done`; WITHOUT the header returns the existing JSON envelope byte-compatible. (D1, principle 7)
-- [ ] 2.2 SEQUENTIAL — Add SSE content-negotiation to the `/reports/render` handler (`app.ts`), reusing the chat SSE framing/transport; emit frames from the SAME `renderReport` per-section results (one compute path, two deliveries).
-- [ ] 2.3 GATE — Adversarial review: JSON default path untouched (existing tests green), SSE frames ordered + carry status, no compute-path duplication.
+- [x] 2.1 SEQUENTIAL — Route tests (`app.test.ts`): `Accept: text/event-stream` emits `meta` → 4 `section` frames → terminal `done` (with `status`/`preview_only`); WITHOUT the header returns the existing JSON envelope (back-compat). Streaming sink unit tests in `reportRenderer.test.ts` (onMeta once + ordered ids; onSection per section; aggregate still returned). (D1, principle 7)
+- [x] 2.2 SEQUENTIAL — SSE content-negotiation on the `/reports/render` handler (`app.ts`): own `meta`/`section`/`done` frame writer + heartbeat (Option A — NOT `TurnEventBuffer`; see design D1); frames emitted from the SAME `renderReport` via the `onMeta`/`onSection` sink (one compute path, two deliveries).
+- [x] 2.3 GATE — Adversarial review PASSED: JSON default path is the untouched original call (back-compat + happy-path tests green); SSE frames ordered + `done` carries the authoritative envelope; one compute path; post-writeHead errors → `error` frame (not `next()`); heartbeat unref'd + cleared; SSE inside the same auth/ownership guards. Full middleware suite 1070 green (twice); tsc clean.
 
 ## 3. Fill-as-you-go render surface
 

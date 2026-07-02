@@ -1460,42 +1460,90 @@ export function createApp({
           repository,
           reportCallerUsername,
         );
-        const result = await renderReport(
-          {
-            templateId,
-            scope: scopeParsed.data,
-            variables,
-            sectionIds,
-            chatSessionId,
-            parentMessageId:
-              typeof body.parent_message_id === "string" ? body.parent_message_id : null,
+        const renderRequest = {
+          templateId,
+          scope: scopeParsed.data,
+          variables,
+          sectionIds,
+          chatSessionId,
+          parentMessageId:
+            typeof body.parent_message_id === "string" ? body.parent_message_id : null,
+        };
+        const renderDeps = {
+          samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
+          // The template loader is the server source of truth for section
+          // questions; a `null` result is the graceful no-template state.
+          // harden-report-render-template-access — ACCESS-SCOPED by the SAME
+          // rule as the builder read endpoint: load only a template the caller
+          // may read (public sample or own). An inaccessible id resolves to
+          // null → the no-template empty render, leaking no existence signal
+          // (closes the read-side IDOR before private member templates exist).
+          getTemplate: async (id: string) => {
+            const record = await repository.getTemplate(id);
+            if (!record || !reportTemplateAccess(record, reportCallerUsername).accessible) {
+              return null;
+            }
+            return reportTemplateFromRecord(record);
           },
-          {
-            samplesBucketId: env.GROUNDX_SAMPLES_BUCKET_ID ?? null,
-            // The template loader is the server source of truth for section
-            // questions; a `null` result is the graceful no-template state.
-            // harden-report-render-template-access — ACCESS-SCOPED by the SAME
-            // rule as the builder read endpoint: load only a template the caller
-            // may read (public sample or own). An inaccessible id resolves to
-            // null → the no-template empty render, leaking no existence signal
-            // (closes the read-side IDOR before private member templates exist).
-            getTemplate: async (id) => {
-              const record = await repository.getTemplate(id);
-              if (!record || !reportTemplateAccess(record, reportCallerUsername).accessible) {
-                return null;
-              }
-              return reportTemplateFromRecord(record);
-            },
-            llmClient,
-            groundxClient,
-            ...(groundxApiKey ? { groundxApiKey } : {}),
-            rbacFilter: rbacFilterForProjects(reportAuthorizedProjects),
-            ...(env.LLM_MODEL_ID ? { llmModelId: env.LLM_MODEL_ID } : {}),
-            ...(quoteEmbedder ? { quoteEmbedder } : {}),
-            ...(embedThreshold !== undefined ? { embedThreshold } : {}),
-          },
-        );
-        res.status(200).json(result);
+          llmClient,
+          groundxClient,
+          ...(groundxApiKey ? { groundxApiKey } : {}),
+          rbacFilter: rbacFilterForProjects(reportAuthorizedProjects),
+          ...(env.LLM_MODEL_ID ? { llmModelId: env.LLM_MODEL_ID } : {}),
+          ...(quoteEmbedder ? { quoteEmbedder } : {}),
+          ...(embedThreshold !== undefined ? { embedThreshold } : {}),
+        };
+
+        // progressive-report-render B2 — content negotiation. `Accept:
+        // text/event-stream` streams `meta`/`section`/`done` frames as each
+        // section completes (progressive fill-in); any other request gets the
+        // existing single JSON envelope UNCHANGED (back-compat). One compute
+        // path (`renderReport`), two deliveries — the SSE frames are emitted
+        // from the SAME per-section results via the streaming sink.
+        const wantsStream = (req.headers.accept ?? "").includes("text/event-stream");
+        if (!wantsStream) {
+          const result = await renderReport(renderRequest, renderDeps);
+          res.status(200).json(result);
+          return;
+        }
+
+        // SSE path. Own frame writer + heartbeat (report needs no replay buffer;
+        // see progressive-report-render design D1). After writeHead we own error
+        // handling — a half-open stream must NOT fall through to `next(error)`.
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        let seq = 0;
+        const frame = (event: string, data: unknown): void => {
+          if (res.writableEnded) return;
+          res.write(`id: ${(seq += 1)}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+        const heartbeat = setInterval(() => {
+          if (!res.writableEnded) res.write(":\n\n");
+        }, 15000);
+        heartbeat.unref?.();
+        try {
+          const result = await renderReport(renderRequest, {
+            ...renderDeps,
+            onMeta: (sectionIds) =>
+              frame("meta", { report_id: `rr-${templateId}`, template_id: templateId, section_ids: sectionIds }),
+            onSection: (wire, index) => frame("section", { index, section: wire }),
+          });
+          // Terminal frame carries the FULL final envelope (gate / empty / complete
+          // + resolved_variables + export_formats + preview_only) — the authoritative
+          // final state; the FE uses `section` frames for progressive paint and `done`
+          // for the source of truth (mirrors chat's terminal `envelope` frame).
+          frame("done", result);
+        } catch (err) {
+          logger.warn({ err }, "report render stream failed");
+          frame("error", { message: "render failed" });
+        } finally {
+          clearInterval(heartbeat);
+          if (!res.writableEnded) res.end();
+        }
       } catch (error) {
         next(error);
       }

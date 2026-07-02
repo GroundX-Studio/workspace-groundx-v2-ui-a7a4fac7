@@ -30,9 +30,17 @@ template_id, ordered section ids) → one `section` frame per completed section 
 existing per-section wire shape + its ordinal + `status: "ok" | "failed"`) → terminal
 `done` (resolved_variables, export_formats, preview_only) or `error`. A non-streaming
 request returns the unchanged single JSON envelope.
-The reusable pieces are the lower substrate: `TurnEventBuffer` + `streamPump.ts`
-(`pumpFramesToResponse` + heartbeat/backpressure — valuable for a multi-second stream)
-on the server, and `app/src/api/sseFrames.ts` (`readSseFrames`) on the client.
+The reusable pieces are the SSE FRAMING + heartbeat PATTERN, on the client the
+`app/src/api/sseFrames.ts` (`readSseFrames`) reader. **DECISION (2026-07-01, deviation
+from the first draft's "reuse `TurnEventBuffer`"):** the report writes its own `meta`/
+`section`/`done` frames directly to the response with a small heartbeat, and does NOT
+reuse `TurnEventBuffer`/`pumpFramesToResponse`. Why: that buffer's frame-type union is
+chat-specific (`meta|activity|token|envelope|error`) and its value is token *replay* on
+reconnect — report needs neither (its frames are `meta|section|done`, and per D5 there is
+no replay). Reusing it would force coupling the chat frame union to report semantics (or a
+generic refactor of chat's streaming path) for no gain. Report streams a handful of small
+frames, so full pump-style backpressure isn't needed; the heartbeat (kept-alive during the
+multi-second render) is.
 *Explicitly NOT reused:* the chat `TurnRunner`/`TurnRegistry` — that is chat-turn
 machinery (keyed `(sessionId, turnKey)`, idempotent reconnect-attach, `Last-Event-ID`
 from-DB resume, per-turn persistence). Report render has no `turnKey`, no per-turn

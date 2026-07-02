@@ -377,6 +377,26 @@ describe("renderReport — parallel + per-section resilience (progressive-report
     const billing = result.sections.find((s) => s.name === "billing_summary");
     expect(billing?.body).toContain("$214.07");
   });
+
+  it("streaming sink: onMeta fires once with ordered ids, onSection once per section, aggregate still returned", async () => {
+    const metaCalls: string[][] = [];
+    const sectionNames: string[] = [];
+    const deps: RenderReportDeps = {
+      ...utilityLiveDeps(),
+      onMeta: (ids) => metaCalls.push(ids),
+      onSection: (wire) => sectionNames.push(wire.name),
+    };
+    const result = await renderReport(baseRequest(), deps);
+    if ("gated" in result) throw new Error("expected a render");
+    // onMeta: exactly once, ordered template section ids.
+    expect(metaCalls).toHaveLength(1);
+    expect(metaCalls[0]).toEqual(["billing_summary", "charge_breakdown", "anomalies", "recommendation"]);
+    // onSection: once per section (completion order arbitrary → compare as a set).
+    expect(sectionNames.length).toBe(4);
+    expect(new Set(sectionNames)).toEqual(new Set(["billing_summary", "charge_breakdown", "anomalies", "recommendation"]));
+    // The aggregate is STILL returned in template order (JSON path unaffected).
+    expect(result.sections.map((s) => s.name)).toEqual(["billing_summary", "charge_breakdown", "anomalies", "recommendation"]);
+  });
 });
 
 /** Injected clients that THROW if touched — proves a branch short-circuits

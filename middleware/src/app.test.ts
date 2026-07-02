@@ -1606,6 +1606,44 @@ describe("POST /api/widgets/smart-report/reports/render (smart-report Phase 6 �
     expect(res.body.sections.map((s: { name: string }) => s.name)).toEqual(["anomalies"]);
   });
 
+  // progressive-report-render B2 — SSE progressive delivery + JSON back-compat.
+  it("streams meta → section frames → done under Accept: text/event-stream", async () => {
+    const { app } = await renderSetup();
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .set("Accept", "text/event-stream")
+      .send(renderBody())
+      .expect(200);
+    expect(res.headers["content-type"]).toContain("text/event-stream");
+    const text = res.text;
+    // meta first, with the ordered section ids.
+    const metaIdx = text.indexOf("event: meta");
+    expect(metaIdx).toBeGreaterThanOrEqual(0);
+    expect(text).toMatch(/event: meta[\s\S]*"section_ids":\["billing_summary","charge_breakdown","anomalies","recommendation"\]/);
+    // one section frame per section, all four present, before the terminal done.
+    const sectionFrames = (text.match(/event: section\n/g) ?? []).length;
+    expect(sectionFrames).toBe(4);
+    const doneIdx = text.lastIndexOf("event: done");
+    expect(doneIdx).toBeGreaterThan(metaIdx);
+    // done carries the authoritative final envelope (status + preview_only).
+    expect(text).toMatch(/event: done[\s\S]*"status":"complete"/);
+    expect(text).toMatch(/event: done[\s\S]*"preview_only":true/);
+  });
+
+  it("a request WITHOUT the SSE Accept header still returns the single JSON envelope (back-compat)", async () => {
+    const { app } = await renderSetup();
+    const agent = await ownedAgent(app);
+    const res = await agent
+      .post("/api/widgets/smart-report/reports/render")
+      .send(renderBody())
+      .expect(200);
+    expect(res.headers["content-type"]).toContain("application/json");
+    expect(res.headers["content-type"]).not.toContain("event-stream");
+    expect(res.body.status).toBe("complete");
+    expect(res.body.sections).toHaveLength(4);
+  });
+
   it("a BYO scope returns the gate envelope (#10), not a render", async () => {
     const { app } = await renderSetup();
     const agent = await ownedAgent(app);
