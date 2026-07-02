@@ -18,8 +18,6 @@
  * resolve to the SAME bindings — one source of truth.
  *
  *   - chatRouterTypes.ts — wire types, shared constants, envelope schema, error.
- *   - chatClassifier.ts  — the keyword classifier (retained as a re-export; no
- *                          longer part of routing — deleted in Stage-3 cleanup).
  *   - groundxSearch.ts   — `searchGroundX` + filter composition.
  *   - ragPipeline.ts     — grounded search → prompt → LLM (tool-loop) → citations.
  */
@@ -67,7 +65,6 @@ export type {
   RawToolCall,
 } from "./chatRouterTypes.js";
 
-export { classifyChatMode } from "./chatClassifier.js";
 export { searchGroundX, type SearchGroundXOptions } from "./groundxSearch.js";
 export { parseGroundedAnswer, buildSnippetBlock } from "./ragPipeline.js";
 

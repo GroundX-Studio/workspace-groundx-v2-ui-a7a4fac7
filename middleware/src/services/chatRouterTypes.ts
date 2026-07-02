@@ -232,16 +232,6 @@ export interface ChatRouterDeps {
    */
   skillsRetrieve?: (question: string, options?: { bypassEntryBar?: boolean }) => string | null;
   /**
-   * Turn-router seams (chat-architecture-hardening Task 4; mode routing
-   * since turn-router-extraction-appstate): the light client + model the
-   * planner runs on, and an injectable `planTurn` for deterministic tests.
-   * `routeChat` consumes the RoutePlan's `appState` for mode derivation and
-   * strips it before threading the seam plan to `GroundedAnswerDeps`.
-   */
-  lightLlmClient?: LlmClient;
-  lightLlmModelId?: string;
-  planTurn?: (question: string) => Promise<import("./turnRouter.js").RoutePlan>;
-  /**
    * Embedding-similarity verification seam (wire-embedding-verification) —
    * see `GroundedAnswerDeps.quoteEmbedder`. Threaded to the grounded call;
    * absent -> lexical-only verification (dev-degrade).

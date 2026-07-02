@@ -14,37 +14,9 @@ import {
 import { buildGroundedSystem } from "./grounded.js";
 import { buildExtractorPrompt } from "./extractor.js";
 import { buildSummaryPrompt, buildMetaSummaryPrompt } from "./summarizer.js";
-import { buildTurnRouterPrompt } from "./turnRouter.js";
 
-describe("buildTurnRouterPrompt", () => {
-  // turn-router-extraction-appstate Task 1 — extractionContext joins the
-  // strict-JSON shape with a true-when-unsure bias (fallback parity).
-  it("declares the extractionContext flag with a true-when-unsure bias", () => {
-    const { system } = buildTurnRouterPrompt("hi");
-    expect(system).toContain('"extractionContext": <bool>');
-    expect(system).toMatch(/extractionContext.*unsure/is);
-  });
-
-  // Task 2 — appState joins the shape with a FALSE-when-unsure bias
-  // (mis-routing toward rag is today's behavior; toward structured would
-  // be a regression).
-  it("declares the appState flag with a false-when-unsure bias", () => {
-    const { system } = buildTurnRouterPrompt("hi");
-    expect(system).toContain('"appState": <bool>');
-    expect(system).toMatch(/appState.*false when unsure/is);
-  });
-
-  // chat-QA 2026-07-01 (finding #2, secondary). appState is account/workspace
-  // META only — acting on a document or its data (delete/export/re-run) or
-  // asking about document CONTENT is documentSearch, not appState. This keeps
-  // the planner from over-routing phrasings like "delete this document" into
-  // the structured account path.
-  it("scopes appState to account/workspace meta, excluding document content or actions", () => {
-    const { system } = buildTurnRouterPrompt("hi");
-    expect(system).toMatch(/NOT appState/);
-    expect(system).toMatch(/delete|export|re-run/i);
-  });
-});
+// chat-unified-tool-loop — buildTurnRouterPrompt was deleted with the light-LLM
+// planner; there is no per-turn classification prompt anymore.
 
 describe("fragments", () => {
   it("VOICE_RULE bans the internal vocabulary", () => {

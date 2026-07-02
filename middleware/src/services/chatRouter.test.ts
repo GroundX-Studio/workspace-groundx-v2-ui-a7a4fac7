@@ -10,7 +10,6 @@ import { __clearWordMapCache } from "./wordMapCache.js";
 import wordMapFixture from "./wordMap.fixture.json" with { type: "json" };
 import type { WordMap } from "./citationGeometry.js";
 import {
-  classifyChatMode,
   GROUNDED_REFUSAL_PHRASE,
   MAX_SNIPPET_BLOCK_CHARS,
   parseGroundedAnswer,
@@ -39,33 +38,10 @@ const fakeLlm: LlmClient = {
   forward: vi.fn(),
 };
 
-describe("classifyChatMode", () => {
-  it("returns rag for extract / chat.sources / understand intents", () => {
-    expect(classifyChatMode(makeRequest({ intent: "extract.field-hovered" }))).toBe("rag");
-    expect(classifyChatMode(makeRequest({ intent: "chat.sources" }))).toBe("rag");
-    expect(classifyChatMode(makeRequest({ intent: "understand" }))).toBe("rag");
-  });
-
-  it("returns hybrid for smart.report and explain.sample intents", () => {
-    expect(classifyChatMode(makeRequest({ intent: "smart.report" }))).toBe("hybrid");
-    expect(classifyChatMode(makeRequest({ intent: "explain.sample" }))).toBe("hybrid");
-  });
-
-  it("returns structured for app-state pattern matches", () => {
-    expect(classifyChatMode(makeRequest({ newUserMessage: "what saved schemas do I have?" }))).toBe("structured");
-    expect(classifyChatMode(makeRequest({ newUserMessage: "how many pages remaining on my plan?" }))).toBe("structured");
-    expect(classifyChatMode(makeRequest({ newUserMessage: "Show me my API key" }))).toBe("structured");
-  });
-
-  it("returns hybrid for open-ended exploratory patterns", () => {
-    expect(classifyChatMode(makeRequest({ newUserMessage: "explain this sample please" }))).toBe("hybrid");
-    expect(classifyChatMode(makeRequest({ newUserMessage: "what can I do here?" }))).toBe("hybrid");
-  });
-
-  it("defaults to rag for everything else", () => {
-    expect(classifyChatMode(makeRequest({ newUserMessage: "what is the total amount due?" }))).toBe("rag");
-  });
-});
+// chat-unified-tool-loop — the `classifyChatMode` keyword classifier was
+// deleted (routeChat runs one loop; there is no mode to classify). The single-
+// path behavior is asserted by "collapses every turn onto the one grounded
+// tool-loop" in the routeChat block below.
 
 describe("routeChat", () => {
   function jsonOk(payload: unknown): Response {

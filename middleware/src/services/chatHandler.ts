@@ -420,10 +420,6 @@ export async function handleChatMessage(
       rbacFilter: deps.rbacFilter,
       byoPagesLimit: deps.byoPagesLimit,
       llmModelId: deps.llmModelId,
-      // Turn-router seams (Task 4): the CF-16 light client plans each turn's
-      // retrieval; absent -> deterministic fallback inside the seam.
-      lightLlmClient: deps.lightLlmClient,
-      lightLlmModelId: deps.lightLlmModelId ?? deps.compressionModelId,
       // wire-embedding-verification: the third verifyQuote gate.
       quoteEmbedder: deps.quoteEmbedder,
       embedThreshold: deps.embedThreshold,

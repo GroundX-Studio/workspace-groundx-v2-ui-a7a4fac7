@@ -33,7 +33,6 @@ import type {
   DispatchedIntent,
   ToolFailure,
 } from "./chatRouterTypes.js";
-import * as classifier from "./chatClassifier.js";
 import * as search from "./groundxSearch.js";
 import * as ragPipeline from "./ragPipeline.js";
 
@@ -62,10 +61,6 @@ describe("chatRouter.ts split — module seams", () => {
     expect(typeof types.SUGGESTED_INTENT_THRESHOLD).toBe("number");
   });
 
-  it("extracts the deterministic classifier into chatClassifier.ts", () => {
-    expect(typeof classifier.classifyChatMode).toBe("function");
-  });
-
   it("extracts searchGroundX into groundxSearch.ts", () => {
     expect(typeof search.searchGroundX).toBe("function");
   });
@@ -81,7 +76,6 @@ describe("chatRouter.ts split — public surface preserved by re-export", () => 
   // lives in. The chatRouter barrel MUST re-export the SAME binding (===),
   // not a copy.
   const reexported: Array<[string, Record<string, unknown>]> = [
-    ["classifyChatMode", classifier],
     ["searchGroundX", search],
     ["parseGroundedAnswer", ragPipeline],
     ["buildSnippetBlock", ragPipeline],

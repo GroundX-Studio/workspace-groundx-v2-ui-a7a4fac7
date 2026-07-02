@@ -153,9 +153,6 @@ export async function runRagPipeline(
       ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
       ...(deps.wordMapFetch ? { wordMapFetch: deps.wordMapFetch } : {}),
       ...(deps.skillsRetrieve ? { skillsRetrieve: deps.skillsRetrieve } : {}),
-      ...(deps.lightLlmClient ? { lightLlmClient: deps.lightLlmClient } : {}),
-      ...(deps.lightLlmModelId ? { lightLlmModelId: deps.lightLlmModelId } : {}),
-      ...(deps.planTurn ? { planTurn: deps.planTurn } : {}),
       ...(deps.quoteEmbedder ? { quoteEmbedder: deps.quoteEmbedder } : {}),
       ...(deps.embedThreshold !== undefined ? { embedThreshold: deps.embedThreshold } : {}),
       // chat-unified-tool-loop D3 — account reader deps for the account tools'

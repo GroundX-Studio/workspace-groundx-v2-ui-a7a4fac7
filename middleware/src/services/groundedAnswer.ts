@@ -52,13 +52,7 @@ import { callGroundedLlm, parseGroundedAnswer, type ServerToolLoop } from "./rag
 import { getServerTool } from "./toolCatalog.js";
 import { searchGroundX, type SearchGroundXOptions } from "./groundxSearch.js";
 import { retrieveGroundxKnowledge, type RetrieveOptions } from "./groundxSkills.js";
-import {
-  FALLBACK_TURN_PLAN,
-  RETRIEVER_DECIDES,
-  planTurn,
-  type PlanTurnFn,
-  type TurnPlan,
-} from "./turnRouter.js";
+import { FALLBACK_TURN_PLAN, RETRIEVER_DECIDES, type TurnPlan } from "./turnRouter.js";
 import {
   isExtractionCitation,
   RAG_SNIPPET_CHARS,
@@ -110,14 +104,6 @@ export interface GroundedAnswerDeps {
    * vendored pack; tests inject a fixture.
    */
   skillsRetrieve?: (question: string, options?: Pick<RetrieveOptions, "bypassEntryBar">) => string | null;
-  /**
-   * Turn-router seam (Task 4). The light client + model the planner runs on
-   * (CF-16 `LLM_LIGHT_*`); absent -> deterministic fallback plan. `planTurn`
-   * itself is injectable for deterministic tests.
-   */
-  lightLlmClient?: LlmClient;
-  lightLlmModelId?: string;
-  planTurn?: PlanTurnFn;
   /**
    * Embedding-similarity verification seam (wire-embedding-verification).
    * The third `verifyQuote` gate: best quote-vs-sentences cosine. Defaults to
@@ -844,15 +830,11 @@ export async function groundedAnswerOverScope(
   deps: GroundedAnswerDeps,
   options: GroundedAnswerOptions = {},
 ): Promise<GroundedAnswer> {
-  // Task 4 — plan the turn BEFORE retrieval. Fixed plan (hybrid/report) >
-  // injected planner (tests) > light-LLM planner (falls back
-  // deterministically when no light client is configured).
-  const plan: TurnPlan = options.turnPlan
-    ?? (deps.planTurn
-      ? await deps.planTurn(question)
-      : deps.lightLlmClient && deps.lightLlmModelId
-        ? await planTurn(question, { lightLlmClient: deps.lightLlmClient, lightLlmModelId: deps.lightLlmModelId })
-        : FALLBACK_TURN_PLAN);
+  // chat-unified-tool-loop — the turn plan is supplied by the ONLY caller
+  // (routeChat passes a fixed plan: documentSearch on, productKnowledge off,
+  // extractionContext on). The light-LLM planner was removed; when no plan is
+  // threaded (report path), the deterministic FALLBACK_TURN_PLAN applies.
+  const plan: TurnPlan = options.turnPlan ?? FALLBACK_TURN_PLAN;
 
   const searchOptions: SearchGroundXOptions = {
     ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
