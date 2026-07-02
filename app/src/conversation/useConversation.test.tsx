@@ -2,6 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { useEffect, useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ChatApiError } from "@/api/chatErrors";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { renderWithOnboardingProviders } from "@/test/renderWithOnboardingProviders";
 
@@ -557,6 +558,79 @@ describe("streaming send (chat-response-streaming P4)", () => {
     expect(screen.getByTestId("probe-turn-assistant").textContent).not.toContain("streaming draft…");
     // The hook used the streaming path, not the JSON sendChatMessage.
     expect(sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("self-heals an orphaned-anon-session 403: recovers to a fresh session id and retries the send once", async () => {
+    const envelope = {
+      userMessageId: "u1",
+      assistantMessageId: "a1",
+      compressionRan: false,
+      reply: {
+        mode: "rag",
+        answer: "Recovered answer.",
+        citations: [],
+        suggestedActions: [],
+        intents: [],
+        toolFailures: [],
+        proposedSchemaField: null,
+      },
+    };
+    const streamChatMessage = vi
+      .fn()
+      // First send → the cached chat id is orphaned relative to the current
+      // anon cookie identity → 403 not_session_owner.
+      .mockRejectedValueOnce(new ChatApiError("/api/chat/messages failed: 403", 403, { error: "not_session_owner" }))
+      // After recovery re-keys the session, the retry succeeds.
+      .mockResolvedValueOnce(envelope);
+
+    renderWithOnboardingProviders(<Probe />, {
+      api: { chat: { streamChatMessage, sendChatMessage, listChatMessages } },
+    } as RenderOptions);
+
+    await waitFor(() => expect(screen.getByTestId("probe-session-id").textContent).not.toBe("none"));
+    const originalId = screen.getByTestId("probe-session-id").textContent;
+
+    act(() => {
+      screen.getByTestId("probe-send").click();
+    });
+
+    // The recovered answer renders (NOT an error bubble), proving the retry ran.
+    await waitFor(() =>
+      expect(screen.getByTestId("probe-turn-assistant").textContent).toContain("Recovered answer."),
+    );
+    expect(screen.getByTestId("probe-turn-assistant").textContent).not.toContain("went wrong");
+    expect(screen.getByTestId("probe-turn-assistant").textContent).not.toContain("refresh");
+
+    // Sent exactly twice: the failed original + one retry.
+    expect(streamChatMessage).toHaveBeenCalledTimes(2);
+    // The active session was re-keyed to a fresh id...
+    const recoveredId = screen.getByTestId("probe-session-id").textContent;
+    expect(recoveredId).not.toBe(originalId);
+    // ...and the retry targeted that fresh id, not the orphaned one.
+    expect(streamChatMessage.mock.calls[0][0].chatSessionId).toBe(originalId);
+    expect(streamChatMessage.mock.calls[1][0].chatSessionId).toBe(recoveredId);
+    expect(streamChatMessage.mock.calls[1][0].chatSessionId).not.toBe(originalId);
+  });
+
+  it("does not retry more than once: a second orphaned 403 surfaces a refresh-to-recover message", async () => {
+    const streamChatMessage = vi
+      .fn()
+      .mockRejectedValue(new ChatApiError("/api/chat/messages failed: 403", 403, { error: "not_session_owner" }));
+
+    renderWithOnboardingProviders(<Probe />, {
+      api: { chat: { streamChatMessage, sendChatMessage, listChatMessages } },
+    } as RenderOptions);
+
+    await waitFor(() => expect(screen.getByTestId("probe-session-id").textContent).not.toBe("none"));
+    act(() => {
+      screen.getByTestId("probe-send").click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("probe-turn-assistant").textContent?.toLowerCase()).toContain("refresh"),
+    );
+    // Original + exactly one retry — no infinite recover/retry loop.
+    expect(streamChatMessage).toHaveBeenCalledTimes(2);
   });
 
   it("threads an AbortSignal and aborts the in-flight stream on unmount (no zombie stream)", async () => {

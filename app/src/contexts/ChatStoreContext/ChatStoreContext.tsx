@@ -570,6 +570,37 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     });
   }, []);
 
+  // stale-anon-session-recovery — the client's cached chat-session id is
+  // ORPHANED relative to the current anon cookie identity (the cookie that
+  // created the server row expired / rotated / was cleared, while localStorage
+  // kept the id). Re-key the session to a FRESH id so the next ensure-create is
+  // a true create owned by the CURRENT identity: the server ownership guard (an
+  // IDOR fix) is never weakened — we abandon the inaccessible row rather than
+  // trying to take it over. All local content (messages, entities, viewer step,
+  // gate, scope) is preserved so the user keeps their place; only the
+  // unreachable server-side message history is left behind (it was never
+  // retrievable under the new identity anyway). Returns the new id, or null if
+  // `orphanedId` is unknown (nothing to recover). The recover/return decision
+  // reads the synced `stateRef` — never a side-effect flag inside the updater,
+  // which fails silently under render pressure.
+  const recoverOrphanedSession = useCallback((orphanedId: string): string | null => {
+    if (!stateRef.current.sessions.has(orphanedId)) return null;
+    const newId = mintSessionId();
+    setState((prev) => {
+      const existing = prev.sessions.get(orphanedId);
+      if (!existing) return prev;
+      const sessions = new Map(prev.sessions);
+      sessions.delete(orphanedId);
+      sessions.set(newId, { ...existing, id: newId });
+      return {
+        ...prev,
+        sessions,
+        activeSessionId: prev.activeSessionId === orphanedId ? newId : prev.activeSessionId,
+      };
+    });
+    return newId;
+  }, []);
+
   // 2026-05-31-onboarding-experiences — resolve (ensure-create + activate) the
   // stable session for a `ContentScope`. Idempotent per scope: the deterministic
   // `scopeSessionKey` is stored on the session, so a second resolve for the
@@ -1910,6 +1941,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     () => ({
       newSession,
       switchTo,
+      recoverOrphanedSession,
       resolveSessionForScope,
       appendMessage,
       activateEntity,
@@ -1951,6 +1983,7 @@ export const ChatStoreProvider: FC<ChatStoreProviderProps> = ({
     [
       newSession,
       switchTo,
+      recoverOrphanedSession,
       resolveSessionForScope,
       appendMessage,
       activateEntity,

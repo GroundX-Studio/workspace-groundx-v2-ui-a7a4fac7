@@ -20,9 +20,32 @@ export type ChatErrorKind =
   | "upstream"
   | "bug"
   | "not-found"
+  | "orphaned-session"
   | "network"
   | "superseded"
   | "unknown";
+
+/**
+ * True iff `err` is the middleware's `403 { error: "not_session_owner" }` —
+ * the caller's current anon cookie identity does not own the chat-session row
+ * it just referenced. This happens when the localStorage-cached chat session
+ * id outlives the `gx_app_session` cookie identity that created it (cookie /
+ * session-row 30-day expiry, SESSION_SECRET rotation on a namespace teardown,
+ * or cookie loss while localStorage persists). The local id is ORPHANED, not
+ * the cookie — recovery is to abandon it and start a fresh session owned by
+ * the current identity. NOT a security failure to paper over: the server guard
+ * (an IDOR fix) stays exactly as-is; this predicate only lets the CLIENT
+ * self-heal its own stale cache.
+ */
+export function isOrphanedAnonSessionError(err: unknown): boolean {
+  return (
+    err instanceof ChatApiError &&
+    err.status === 403 &&
+    typeof err.detail === "object" &&
+    err.detail !== null &&
+    (err.detail as { error?: unknown }).error === "not_session_owner"
+  );
+}
 
 export interface ChatErrorMapping {
   kind: ChatErrorKind;
@@ -75,6 +98,18 @@ export function chatErrorToUserCopy(err: unknown): ChatErrorMapping {
       return {
         kind: "not-found",
         message: "This chat session is no longer on the server \u2014 please refresh to start a new one.",
+        retryable: false,
+      };
+    }
+    // 403 not_session_owner \u2014 the local chat-session id is orphaned relative to
+    // the current anon cookie identity. The send path self-heals this (recovers
+    // to a fresh session + retries once); this copy only surfaces if recovery
+    // ALSO failed, so it steers the user to a full refresh rather than the
+    // scary generic "Something went wrong" fall-through.
+    if (isOrphanedAnonSessionError(err)) {
+      return {
+        kind: "orphaned-session",
+        message: "Your session has expired \u2014 please refresh to start a new one.",
         retryable: false,
       };
     }

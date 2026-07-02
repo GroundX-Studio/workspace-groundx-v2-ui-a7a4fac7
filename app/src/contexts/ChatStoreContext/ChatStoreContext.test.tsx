@@ -93,6 +93,53 @@ describe("ChatStoreContext", () => {
     expect(result.current.state.activeSessionId).toBe(createdId);
   });
 
+  it("recoverOrphanedSession() re-keys the orphaned session to a fresh id, preserving its content", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    let orphanId = "";
+    act(() => {
+      orphanId = result.current.newSession({ isOnboardingSession: true, title: "Utility" });
+      result.current.appendMessage({ role: "user", content: "carry me over" });
+      result.current.upsertEntityAndActivate("sample", "utility", {});
+    });
+
+    let newId: string | null = null;
+    act(() => {
+      newId = result.current.recoverOrphanedSession(orphanId);
+    });
+
+    // A DIFFERENT id is minted and made active; the orphaned id is gone.
+    expect(newId).toBeTruthy();
+    expect(newId).not.toBe(orphanId);
+    expect(result.current.state.activeSessionId).toBe(newId);
+    expect(result.current.state.sessions.has(orphanId)).toBe(false);
+
+    // Content (messages, entities, title, onboarding flag) survives the re-key —
+    // the user keeps their place; only the inaccessible server row is abandoned.
+    const recovered = result.current.state.sessions.get(newId!)!;
+    expect(recovered.id).toBe(newId);
+    expect(recovered.title).toBe("Utility");
+    expect(recovered.isOnboardingSession).toBe(true);
+    expect(recovered.messages).toHaveLength(1);
+    expect(recovered.messages[0].content).toBe("carry me over");
+    expect(recovered.entities.size).toBe(1);
+  });
+
+  it("recoverOrphanedSession() returns null and no-ops for an unknown id", () => {
+    const { result } = renderHook(() => useChatStore(), { wrapper });
+    let liveId = "";
+    act(() => {
+      liveId = result.current.newSession();
+    });
+    let out: string | null = "sentinel";
+    act(() => {
+      out = result.current.recoverOrphanedSession("c-does-not-exist");
+    });
+    expect(out).toBeNull();
+    // The live session + active pointer are untouched.
+    expect(result.current.state.activeSessionId).toBe(liveId);
+    expect(result.current.state.sessions.has(liveId)).toBe(true);
+  });
+
   it("appendMessage() pushes to the active session and bumps updatedAt", async () => {
     const { result } = renderHook(() => useChatStore(), { wrapper });
     act(() => {

@@ -25,7 +25,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { chatErrorToUserCopy } from "@/api/chatErrors";
+import { chatErrorToUserCopy, isOrphanedAnonSessionError } from "@/api/chatErrors";
 import { cryptoRandom } from "@/lib/cryptoRandom";
 import type {
   ChatDispatchedIntent,
@@ -251,7 +251,7 @@ export function useConversation(
   opts?: ConversationOptions,
 ): ConversationApi {
   const api = useApi();
-  const { state: chatState, enqueueFieldProposal, appendMessage } = useChatStore();
+  const { state: chatState, enqueueFieldProposal, appendMessage, recoverOrphanedSession } = useChatStore();
   const activeChatSession = chatSessionId ? chatState.sessions.get(chatSessionId) : null;
   const chatStateRef = useRef(chatState);
   chatStateRef.current = chatState;
@@ -461,7 +461,12 @@ export function useConversation(
       inFlightAbortRef.current = abortController;
       try {
         // widget-llm-integration Phase 5 — surface the user's current
-        // ViewerStep kind so the LLM tool catalog is scoped.
+        // ViewerStep kind so the LLM tool catalog is scoped. Captured ONCE
+        // from the pre-send session so the self-heal retry (below) reuses the
+        // exact same metadata — the recovery re-keys the session preserving all
+        // content, so the snapshot's title/onboarding-flag/entity/step are
+        // still correct for the fresh id (and `chatStateRef` hasn't re-rendered
+        // yet inside this synchronous handler anyway).
         const targetChatSession = chatSessionId
           ? chatStateRef.current.sessions.get(chatSessionId)
           : null;
@@ -474,44 +479,65 @@ export function useConversation(
         // finalizes it. The fake api delegates streamChatMessage→sendChatMessage,
         // so non-streaming callers/tests are unaffected.
         setLiveTurns((cur) => [...cur, { id: assistantTurnId, role: "assistant", content: "" }]);
-        const result = await api.chat.streamChatMessage(
-          {
-            chatSessionId,
-            newUserMessage: trimmed,
-            sessionMeta: {
-              // Session title wins; the caller's `title` is only a fallback
-              // label when the session has none. This preserves the deleted
-              // onboarding fork's `activeChatSession?.title ?? "Onboarding"`
-              // precedence (and the steady fork's `"Steady chat"` label, which
-              // a title-less steady session never overrode in practice).
-              title: targetChatSession?.title ?? titleRef.current ?? "Conversation",
-              // Read from the session — NOT hardcoded. Onboarding sessions
-              // carry isOnboardingSession:true; a bare chat session false.
-              isOnboarding: targetChatSession?.scopeKey
-                ? false
-                : targetChatSession?.isOnboardingSession ?? titleRef.current === "Onboarding",
-              onboardingSessionId: chatSessionId,
-              activeEntityKey: targetChatSession?.activeEntityKey ?? null,
+        const runStream = (sid: string) =>
+          api.chat.streamChatMessage(
+            {
+              chatSessionId: sid,
+              newUserMessage: trimmed,
+              sessionMeta: {
+                // Session title wins; the caller's `title` is only a fallback
+                // label when the session has none. This preserves the deleted
+                // onboarding fork's `activeChatSession?.title ?? "Onboarding"`
+                // precedence (and the steady fork's `"Steady chat"` label, which
+                // a title-less steady session never overrode in practice).
+                title: targetChatSession?.title ?? titleRef.current ?? "Conversation",
+                // Read from the session — NOT hardcoded. Onboarding sessions
+                // carry isOnboardingSession:true; a bare chat session false.
+                isOnboarding: targetChatSession?.scopeKey
+                  ? false
+                  : targetChatSession?.isOnboardingSession ?? titleRef.current === "Onboarding",
+                onboardingSessionId: sid,
+                activeEntityKey: targetChatSession?.activeEntityKey ?? null,
+              },
+              ...(scopeHint ? { scopeHint } : {}),
+              activeStepKind,
             },
-            ...(scopeHint ? { scopeHint } : {}),
-            activeStepKind,
-          },
-          {
-            onToken: (delta) =>
-              setLiveTurns((cur) =>
-                cur.map((t) => (t.id === assistantTurnId ? { ...t, content: t.content + delta } : t)),
-              ),
-            onActivity: (activity) =>
-              setLiveTurns((cur) =>
-                cur.map((t) =>
-                  t.id === assistantTurnId
-                    ? { ...t, toolActivity: [...(t.toolActivity ?? []), activity] }
-                    : t,
+            {
+              onToken: (delta) =>
+                setLiveTurns((cur) =>
+                  cur.map((t) => (t.id === assistantTurnId ? { ...t, content: t.content + delta } : t)),
                 ),
-              ),
-          },
-          { signal: abortController.signal },
-        );
+              onActivity: (activity) =>
+                setLiveTurns((cur) =>
+                  cur.map((t) =>
+                    t.id === assistantTurnId
+                      ? { ...t, toolActivity: [...(t.toolActivity ?? []), activity] }
+                      : t,
+                  ),
+                ),
+            },
+            { signal: abortController.signal },
+          );
+        let result;
+        try {
+          result = await runStream(chatSessionId);
+        } catch (err) {
+          // stale-anon-session-recovery — the cached chat id is ORPHANED
+          // relative to the current anon cookie identity (see
+          // `isOrphanedAnonSessionError`). Self-heal ONCE: re-key to a fresh
+          // session owned by the current identity, reset the streamed draft,
+          // and retry the send. A non-cancel throw here that ISN'T recoverable
+          // (or a null recovery, or a second 403) falls through to the outer
+          // catch → the "refresh to start a new one" copy. Bounded to one
+          // retry, so a persistent 403 can't loop.
+          if (abortController.signal.aborted || !isOrphanedAnonSessionError(err)) throw err;
+          const recoveredId = recoverOrphanedSession(chatSessionId);
+          if (!recoveredId) throw err;
+          setLiveTurns((cur) =>
+            cur.map((t) => (t.id === assistantTurnId ? { ...t, content: "", toolActivity: [] } : t)),
+          );
+          result = await runStream(recoveredId);
+        }
         // Finalize: the cleaned answer + full metadata replace the streamed draft
         // (the streamed text is the RAW answer; the envelope's is fence-stripped).
         setLiveTurns((cur) =>
@@ -599,7 +625,7 @@ export function useConversation(
         setSending(false);
       }
     },
-    [api.chat, sending, chatSessionId, activeChatSession, enqueueFieldProposal, appendMessage, dispatchIntent],
+    [api.chat, sending, chatSessionId, activeChatSession, enqueueFieldProposal, appendMessage, dispatchIntent, recoverOrphanedSession],
   );
 
   return {

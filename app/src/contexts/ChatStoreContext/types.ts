@@ -630,6 +630,15 @@ export interface ChatStoreApi {
   /** Activate an existing session. No-op if id is unknown. */
   switchTo: (id: string) => void;
   /**
+   * stale-anon-session-recovery — re-key an ORPHANED chat session (its server
+   * row is owned by a defunct anon cookie identity, so every ownership-guarded
+   * route 403s) to a fresh id owned by the CURRENT identity, preserving all
+   * local content. The server ownership guard stays intact — this abandons the
+   * unreachable row, it never takes it over. Returns the new id, or null if the
+   * id is unknown (nothing to recover).
+   */
+  recoverOrphanedSession: (orphanedId: string) => string | null;
+  /**
    * 2026-05-31-onboarding-experiences — resolve the stable chat session for a
    * `ContentScope` (a Workspace / Project nav entry's scope), ensure-creating
    * it if absent, and activate it. Idempotent: re-resolving the same scope
