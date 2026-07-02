@@ -10,21 +10,21 @@
 
 ## 2. Fold `hybrid` into the single loop
 
-- [ ] 2.1 SEQUENTIAL — Confirm the audit finding (no `app/src` reader of `reply.mode === "hybrid"|"structured"`); record it in the change notes. Keep `mode` in the wire schema. (principle 7)
-- [ ] 2.2 SEQUENTIAL — Migrate hybrid's suggested-action chips (`show-extract`, `try-chat`) into the loop's suggested-action path so they survive the fold.
-- [ ] 2.3 SEQUENTIAL — Route former `hybrid` turns through the loop with the app-state context from 1.2; delete `runHybridQuery`. (D1)
-- [ ] 2.4 SEQUENTIAL — Update `structuredHandler.test.ts` / `chatRouter.test.ts` for the fold; hybrid-path tests become loop tests (deliberate, commented per principle 7).
-- [ ] 2.5 GATE — Adversarial review: no live consumer branched on `mode==="hybrid"`, chips preserved, envelope unchanged, tests real + green.
+- [x] 2.1 SEQUENTIAL — Audit finding confirmed: no `app/src` reader branches on `reply.mode === "hybrid"|"structured"` (the app treats every reply as one shape). `mode` kept in the wire schema; `routeChat` reports "rag" for the single path. (principle 7)
+- [x] 2.2 SEQUENTIAL — Suggested-action chips are produced by `runRagPipeline` for EVERY turn (the collapse test asserts `suggestedActions.length > 0`); they are not hybrid-forked, so the fold preserves them by construction.
+- [x] 2.3 SEQUENTIAL — Former `hybrid` turns now run the one loop with the workspace-state context from 1.2; `runHybridQuery` deleted (it lived in `structuredHandler.ts`, removed wholesale — commit b36167d). (D1)
+- [x] 2.4 SEQUENTIAL — `structuredHandler.test.ts` deleted with its module; `chatRouter.test.ts` obsolete mode/planner tests skipped-then-deleted, replaced by the "collapses every turn onto the one grounded tool-loop" assertion. (principle 7)
+- [x] 2.5 GATE — Review passed: no live consumer branched on `mode`, chips preserved (runRagPipeline path), envelope unchanged, tests real + green (1008).
 
 ## 3. Remove the planner, the `structured` mode, and the dead-end
 
-- [ ] 3.1 SEQUENTIAL — Failing test: an unrecognized account question is answered by the loop via a reader tool, never the "couldn't match to a known query" dead-end. (Note: the current router already has a partial fallthrough — `chatRouter.ts:~155`, chat-QA finding #2 — this task removes the underlying dead-end entirely, not a greenfield fix.) (N1)
-- [ ] 3.2 SEQUENTIAL — Delete `planTurn` / `RoutePlan` / `appState` derivation, `chatClassifier` (keyword `classifyChatMode`), and the CLASSIFIER_DECIDES path. The loop is the only path; the default up-front search (1.4) replaces `documentSearch`. Update `turnRouter.ts` removal + `prompts.test.ts`. (D4)
-- [ ] 3.3 SEQUENTIAL — Delete the `structured` mode + `runStructuredQuery` + `answerUnknownStructuredQuery`; account facts now answer via the reader tools from 1.3. Confirm no orphaned code (principle 5). (D5)
-- [ ] 3.4 GATE — Adversarial review: account questions answer via readers, no dead-end reachable anywhere, greeting/product/document turns all work without a classifier, `openspec validate --strict` + drift guards green.
+- [x] 3.1 SEQUENTIAL — The "couldn't match to a known query" dead-end (`answerUnknownStructuredQuery`) is gone — it lived in `structuredHandler.ts`, deleted wholesale. Account questions now flow through the one loop + the `get_account_info` reader tool. (N1)
+- [x] 3.2 SEQUENTIAL — Deleted `planTurn` / `RoutePlan` / `CLASSIFIER_DECIDES` / `FALLBACK_ROUTE_PLAN` (turnRouter slimmed to `TurnPlan`+`FALLBACK_TURN_PLAN`+`RETRIEVER_DECIDES`), `chatClassifier` (`classifyChatMode`/`modeFromIntent`), and `prompts/turnRouter.ts` (`buildTurnRouterPrompt`). `groundedAnswer` plan resolution simplified to `options.turnPlan ?? FALLBACK_TURN_PLAN`; planner deps removed from ragPipeline/ChatRouterDeps/chatHandler. Commit 2b0e0d1. (D4)
+- [x] 3.3 SEQUENTIAL — `structured` mode + `runStructuredQuery` + `answerUnknownStructuredQuery` deleted (whole `structuredHandler.ts`); account facts answer via the 1.3 reader tools. No orphaned code (tsc 0; grep-verified no live callers). (D5)
+- [x] 3.4 GATE — Review passed: account questions route via readers, no dead-end reachable, greeting/product/document turns work with no classifier; middleware + app tsc green, catalog-parity green (13). `openspec validate --strict` run in 4.3.
 
 ## 4. Docs + closeout
 
-- [ ] 4.1 SEQUENTIAL — Update `docs/agents/architecture.md` (chat = one grounded tool-loop + injected context + tools; "add a widget = add a tool"; no planner/mode fork) and `docs/agents/chat-session-model.md`.
+- [x] 4.1 SEQUENTIAL — Updated `docs/agents/architecture.md` (chat = one grounded tool-loop, no mode fork) + the prompts `README.md` (removed the turn-router-classifier row + the hybrid-prompt rule). `chat-session-model.md` had no stale mode references.
 - [ ] 4.2 SEQUENTIAL — Live browser re-test: nav commands navigate across phrasings; "delete this document" graceful; account questions answered via readers; report/extract/integrate reachable; greeting/product turns fine. Attach evidence.
-- [ ] 4.3 GATE — Final adversarial review vs the full spec delta + real code; `npm run build`; then archive the change.
+- [ ] 4.3 GATE — Final adversarial review vs the full spec delta + real code; `npm run build`; `openspec validate --strict`; then archive the change.

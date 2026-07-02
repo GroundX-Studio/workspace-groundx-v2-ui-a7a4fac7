@@ -15,13 +15,16 @@ when one appears outside this directory.
 | Field-extractor prompt | `extractor.ts#buildExtractorPrompt` | `fieldExtractor.ts#extractField` | `prompts.test.ts` + `fieldExtractor.test.ts` |
 | Leaf conversation summary | `summarizer.ts#buildSummaryPrompt` | `conversationCompressor.ts#summarizeChunk` | `conversationCompressor.test.ts` (via re-export) |
 | Meta summary merge | `summarizer.ts#buildMetaSummaryPrompt` | `conversationCompressor.ts#runMetaCompaction` | `conversationCompressor.test.ts` (via re-export) |
-| Turn-router classifier | `turnRouter.ts` (lands in Task 4) | `groundedAnswer.ts#planTurn` | `turnRouter.test.ts` (Task 4) |
+
+_(The turn-router classifier prompt was removed in chat-unified-tool-loop along
+with the light-LLM planner — chat now runs one grounded tool-loop with a fixed
+plan, so there is no per-turn classification prompt.)_
 
 ## Rules
 
 - Consumers import builders/fragments; they never inline prompt strings.
 - A fragment exists only when ≥2 prompts share the text (earn the axis).
-- `HYBRID_SYSTEM_PROMPT` in `structuredHandler.ts` is the one temporary
-  exception (guard-excluded): it is DELETED in Task 3, not moved.
-- The VOICE fragment is the normative ban-list; Task 3 folds in the hybrid
-  copy's extra terms (union) when that prompt dies.
+- The grounded system prompt is the single chat/report system prompt; the former
+  hybrid prompt (`HYBRID_SYSTEM_PROMPT`) and its module were deleted with the
+  three-mode router in chat-unified-tool-loop.
+- The VOICE fragment is the normative ban-list for the internal vocabulary.

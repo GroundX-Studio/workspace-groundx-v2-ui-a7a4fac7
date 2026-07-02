@@ -164,7 +164,7 @@ middleware/src/app.ts (createApp)
 ├── /api/chat-sessions/:id/entities/:key     → PUT upsert + server-side merge (RT-03)
 ├── /api/viewer-events       → POST (RT-02 — citation-clicked, journey-advanced, intent-dispatched, ...)
 ├── /api/intent              → POST (UI-10b — canvas-orchestrator dispatch trail)
-├── /api/chat/messages       → chatHandler: validate → persist user → context bundle → routeChat (mock OR live RAG/structured/hybrid) → persist assistant + citations_json
+├── /api/chat/messages       → chatHandler: validate → persist user → context bundle → routeChat (ONE grounded tool-loop — no mode fork) → persist assistant + citations_json
 ├── /api/extract-field       → focused per-field extraction for ProposeCard Accept
 ├── /api/extraction-schemas  → save schema-agent templates
 ├── /api/scenarios           → ScenarioRegistry list
