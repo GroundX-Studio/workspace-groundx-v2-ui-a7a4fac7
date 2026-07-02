@@ -26,5 +26,5 @@
 ## 4. Docs + closeout
 
 - [x] 4.1 SEQUENTIAL — Updated `docs/agents/architecture.md` (chat = one grounded tool-loop, no mode fork) + the prompts `README.md` (removed the turn-router-classifier row + the hybrid-prompt rule). `chat-session-model.md` had no stale mode references.
-- [ ] 4.2 SEQUENTIAL — Live browser re-test: nav commands navigate across phrasings; "delete this document" graceful; account questions answered via readers; report/extract/integrate reachable; greeting/product turns fine. Attach evidence.
-- [ ] 4.3 GATE — Final adversarial review vs the full spec delta + real code; `npm run build`; `openspec validate --strict`; then archive the change.
+- [x] 4.2 SEQUENTIAL — Live browser re-test on dev (a45a35e, chrome-devtools MCP, clean isolated context): "take me over to the report" (unusual phrasing) → navigated to Report + graceful "Putting the report together." reply + progressive Plan-B render; "how many pages can I still process on my plan?" → graceful honest answer, NO dead-end; "delete this document" → helpful non-destructive reply naming the exact doc + the GroundX DELETE call, no error/fake. (The initial 403 dead-end was a stale `gx_app_session` cookie in a reused browser profile — clean context works; pre-existing, not this change.)
+- [x] 4.3 GATE — Review passed: middleware 1008 green + app tsc/parity/recurrence green; `npm run build` (both) green; `openspec validate --strict` valid; docs updated. Archiving.
