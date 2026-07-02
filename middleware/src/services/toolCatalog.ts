@@ -882,6 +882,33 @@ const fetchDocumentFields: ServerTool = {
  * array as widgets are mirrored. The order here is stable (matches
  * the LLM's tool listing); duplicates fail the drift test.
  */
+/**
+ * chat-unified-tool-loop D4 — GroundX PRODUCT knowledge as a tool. Replaces the
+ * removed planner's `productKnowledge` flag: the model calls this for questions
+ * ABOUT GroundX (X-Ray, ingestion, extraction, on-prem, the company) instead of
+ * a pre-flight classifier deciding to inject the skill pack. Server-only (no app
+ * mirror); delegates to the ctx's `skillsRetrieve` (the same vendored-pack seam
+ * the report/chat paths already use), so it never closes over a live dep.
+ */
+const lookupGroundxKnowledge: ServerTool = {
+  name: "lookup_groundx_knowledge",
+  description:
+    "Look up authoritative GroundX PRODUCT knowledge — how GroundX works (X-Ray, ingestion, " +
+    "search, extraction workflows), the company, APIs, on-prem deployment, pricing posture. " +
+    "Use when the user asks about GroundX itself (not about their own documents).",
+  category: "read",
+  inputSchema: z.object({
+    query: z.string().min(3).describe("The GroundX-product question, e.g. 'what is X-Ray?'"),
+  }),
+  promptGuidance:
+    "Call for questions ABOUT GroundX the product (X-Ray, ingestion, search, extraction, " +
+    "on-prem, the company) — never for the user's document content. Answer naturally from the " +
+    "result; never mention the tool or that you looked anything up.",
+  activityLabel: "Looked up GroundX product info",
+  serverExecute: ({ query }, ctx) =>
+    ctx.skillsRetrieve(query, { bypassEntryBar: true }) ?? "No GroundX product information found for that.",
+};
+
 export const SERVER_TOOL_CATALOG: ServerTool[] = [
   openDocument,
   jumpToPage,
@@ -933,6 +960,9 @@ export const SERVER_TOOL_CATALOG: ServerTool[] = [
   // loop-tool-secondary-extraction — third server-executed read tool (named
   // document's extraction, gated to the turn's authorized docs; server-only).
   fetchDocumentFields,
+  // chat-unified-tool-loop D4 — GroundX product-knowledge tool (server-only;
+  // the planner's `productKnowledge` flag replacement).
+  lookupGroundxKnowledge,
 ];
 
 /**

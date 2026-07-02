@@ -2225,6 +2225,8 @@ describe("Phase 5 — function-calling tool round-trip", () => {
       "fetch_document_fields",
       // agentic-tool-loop — server-executed product-docs lookup is universal.
       "lookup_groundx_docs",
+      // chat-unified-tool-loop D4 — product-knowledge lookup is universal.
+      "lookup_groundx_knowledge",
       "pin_to_report",
       "propose_report_section",
       "reject_report_section",

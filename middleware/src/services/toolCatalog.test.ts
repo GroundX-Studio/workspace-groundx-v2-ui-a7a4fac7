@@ -61,6 +61,8 @@ const EXPECTED_NAMES = [
   "search_documents",
   // loop-tool-secondary-extraction — third server-executed read tool (server-only).
   "fetch_document_fields",
+  // chat-unified-tool-loop D4 — GroundX product-knowledge reader (universal, server-only).
+  "lookup_groundx_knowledge",
 ].sort();
 
 describe("server tool catalog", () => {
@@ -146,6 +148,8 @@ describe("server tool catalog", () => {
         "jump_to_page",
         // agentic-tool-loop — server-executed product-docs lookup is universal.
         "lookup_groundx_docs",
+        // chat-unified-tool-loop D4 — product-knowledge lookup is universal.
+        "lookup_groundx_knowledge",
         "open_document",
         // smart-report Phase 5 — pin + render are reachable from the doc-viewer.
         "pin_to_report",
@@ -193,6 +197,8 @@ describe("server tool catalog", () => {
       "fetch_document_fields",
       // agentic-tool-loop — server-executed product-docs lookup is universal.
       "lookup_groundx_docs",
+      // chat-unified-tool-loop D4 — product-knowledge lookup is universal.
+      "lookup_groundx_knowledge",
       "pin_to_report",
       "propose_report_section",
       "reject_report_section",
