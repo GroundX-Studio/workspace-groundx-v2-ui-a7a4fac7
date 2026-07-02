@@ -22,6 +22,6 @@
 
 ## 4. Docs + closeout
 
-- [ ] 4.1 SEQUENTIAL — Update `docs/agents/template-scope-results.md` (render is progressive, parallel, per-section resilient).
-- [ ] 4.2 SEQUENTIAL — Live browser re-test: "put together a report" fills in section-by-section; a slow/failed section shows an in-slot retry, never a whole-report error; measure wall-clock vs the old ~75s. Attach evidence.
-- [ ] 4.3 GATE — Final adversarial review vs the spec delta + real code; `npm run build`; `openspec validate --strict`; then archive.
+- [x] 4.1 SEQUENTIAL — Updated `docs/agents/template-scope-results.md` (render is progressive, bounded-parallel, per-section resilient; SSE content-negotiation; completeness gate).
+- [x] 4.2 SEQUENTIAL — Live browser re-test PASSED (dev, real GroundX): `/reports/render` returns 200 (was 504) with `content-type: text/event-stream`; the report filled in section-by-section (timeline: 3 loading slots → 1 → 2 → 3 sections over ~29s); a section that failed live ("Charges By Service") degraded IN ITS SLOT with a "↻ retry §2" affordance (shown to the anon previewer — Q1) and did NOT 504 the report; "Service Accounts" showed the no-support degrade. Screenshot + SSE frame capture attached in-session.
+- [x] 4.3 GATE — Final review PASSED: `npm run build` clean (shared+app+middleware, exit 0); `openspec validate --strict` valid; app suite 1960 + middleware 1070 green; tsc clean both packages.

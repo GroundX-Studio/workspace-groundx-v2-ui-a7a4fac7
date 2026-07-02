@@ -13,6 +13,14 @@ Extract's objects/DB/lifecycle, do not fork.
 - **Scope** — a `ContentScope`. Independent of the template (one template re-runs over many scopes).
 - **Generated answers** — Template applied over Scope via RAG (search + LLM completion), grounded +
   cited (WF-06b, shared `CiteChip`). Extract → field values. Report → rendered sections.
+  - **Report render is progressive + resilient** (progressive-report-render, 2026-07-02):
+    `renderReport` fans sections through a **bounded-concurrency pool** (cap 4), each section
+    **isolated** (retry-once then degrade in its own slot — one slow section never 504s the whole
+    report). `POST /reports/render` content-negotiates: `Accept: text/event-stream` streams
+    `meta`→`section`→`done` frames (own writer + heartbeat — NOT the chat `TurnRunner`); any other
+    request gets the unchanged JSON envelope. The surface fills **template-order slots** as sections
+    complete; a failed slot shows **↻ retry §N** (every role); Save/Export are gated on a
+    **complete** report (a "retry failed" reload recovers) — viewing is never blocked.
 
 Extract and Report SHALL share data objects, DB tables, lifecycle, and lifecycle management. A
 report-template type that re-implements the extract-schema lifecycle is a bug — unify them.
