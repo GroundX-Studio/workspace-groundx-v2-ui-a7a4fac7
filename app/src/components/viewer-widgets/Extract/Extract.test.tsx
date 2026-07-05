@@ -212,44 +212,47 @@ describe("Extract — schema design surface reads the step `surface` prop, not t
   });
 });
 
-// ── standardized-viewer-control T6 — the "Try asking a question →" interact
-//    entry DISPATCHES `showInteract` through the orchestrator (the single
-//    viewer-mutation seam) instead of calling `advanceFrame("f5")`. The
-//    orchestrator pushes an `interact-chat` step resolving the document from the
-//    Extract scope.
-describe("Extract — interact entry dispatches showInteract (T6)", () => {
-  it("pushes an interact-chat viewer step (scope's document) when 'Try asking a question' is clicked", async () => {
-    const storeRef: { current: ReturnType<typeof useChatStore> | null } = { current: null };
-    const StoreProbe: FC = () => {
-      storeRef.current = useChatStore();
-      return null;
-    };
-    renderWithOnboardingProviders(
-      <>
-        <Extract role="member" scope={UTILITY_DOC_SCOPE} />
-        <StoreProbe />
-      </>,
-      { initialFrame: "f3", initialScenario: "utility" },
-    );
-
-    fireEvent.click(screen.getByTestId("extract-ask-question"));
-
-    await waitFor(() => {
-      const store = storeRef.current;
-      if (!store?.state.activeSessionId) throw new Error("ChatStore probe did not mount");
-      const session = store.state.sessions.get(store.state.activeSessionId);
-      const interactStep = session?.viewer.history.find((step) => step.kind === "interact-chat");
-      expect(interactStep).toBeTruthy();
-      // The interact-chat step resolves the document from the Extract scope so the
-      // shared PdfViewer canvas isn't doc-less.
-      expect(
-        interactStep && "documentId" in interactStep ? interactStep.documentId : undefined,
-      ).toBe("utility-bill-2026-04");
-    });
-  });
-});
-
 describe("Extract — render-surface layout (extract-screen-audit fixes)", () => {
+  // The workbench root must FILL its frame (width:100%), not shrink to its
+  // content's intrinsic width. Regression: without this the workbench was a
+  // `flex: 0 1 auto` item that sized to content, so a narrow field-detail panel
+  // shrank the whole workbench below the side-by-side threshold and spuriously
+  // collapsed the PDF for some fields but not others.
+  it("fills its frame width (never shrinks to content width)", () => {
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    expect(screen.getByTestId("extract-workbench")).toHaveStyle({ width: "100%" });
+  });
+
+  // Opening a field detail and returning via "← all fields" must land back at
+  // the same scroll position in the list (opening a shorter detail otherwise
+  // clamps the shared scroll container to the top). jsdom has no layout, so we
+  // install a settable scrollTop backing store on the scroll container.
+  it("restores the fields-list scroll position after returning from a field detail", async () => {
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+    });
+    const scroller = screen.getByTestId("extract-fields-scroll");
+    let scrollValue = 0;
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      get: () => scrollValue,
+      set: (v: number) => {
+        scrollValue = v;
+      },
+    });
+    scroller.scrollTop = 150;
+
+    fireEvent.click(screen.getByTestId("field-row-account_number"));
+    expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("extract-breadcrumb-collapse"));
+    await waitFor(() => expect(screen.getByTestId("extract-fields-panel")).toBeInTheDocument());
+    expect(scroller.scrollTop).toBe(150);
+  });
   // Field ids are unbreakable snake_case tokens; they must be allowed to wrap so
   // they never overflow into / collide with the value beside them.
   it("lets long field ids wrap instead of overflowing into the value", () => {

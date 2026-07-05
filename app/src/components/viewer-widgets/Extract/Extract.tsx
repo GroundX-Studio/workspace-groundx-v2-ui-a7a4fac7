@@ -8,7 +8,7 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FC, type SyntheticEvent } from "react";
 
 import { citationRegions, type ContentScope, type ExtractBody, type WidgetRole } from "@groundx/shared";
 
@@ -281,10 +281,29 @@ export const Extract: FC<ExtractProps> = ({
   const orchestrator = useCanvasOrchestratorOptional();
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  // The fields list and the field-detail panel are sibling conditional
+  // renders inside the SAME scroll container (`fieldsScrollRef`). Opening a
+  // (shorter) detail clamps the container's scrollTop; without this, returning
+  // to the list via "← all fields" lands back at the top and loses the user's
+  // place in a long field list. Remember where the list was and restore it.
+  const fieldsScrollRef = useRef<HTMLDivElement | null>(null);
+  const savedFieldsScrollTop = useRef(0);
   const selectField = useCallback((fieldId: string | null) => {
+    // Entering a detail view — capture the list's current scroll offset while
+    // the list is still the mounted content (before the state flip re-renders).
+    if (fieldId !== null) {
+      savedFieldsScrollTop.current = fieldsScrollRef.current?.scrollTop ?? 0;
+    }
     setSelectedFieldId(fieldId);
     setSelectedCitation(null);
   }, []);
+  // Returning to the list — restore the remembered scroll offset after the
+  // list content re-mounts. Layout effect so it happens before paint (no jump).
+  useLayoutEffect(() => {
+    if (selectedFieldId === null && fieldsScrollRef.current) {
+      fieldsScrollRef.current.scrollTop = savedFieldsScrollTop.current;
+    }
+  }, [selectedFieldId]);
   const [renderMode, setRenderMode] = useState<"table" | "json">("table");
   const handleRenderMode = (_event: SyntheticEvent, value: "table" | "json") => {
     if (value) setRenderMode(value);
@@ -354,16 +373,6 @@ export const Extract: FC<ExtractProps> = ({
     },
     [orchestrator, scope, scenarioId],
   );
-
-  // standardized-viewer-control T6 — the "Try asking a question →" interact entry
-  // DISPATCHES `showInteract` through the orchestrator (the single
-  // viewer-mutation seam) carrying the Extract scope, so the orchestrator pushes
-  // an `interact-chat` step resolving the document from the scope. The Interact
-  // journey stage is layered by the `showInteract` handler (one canvas outcome,
-  // no experience fork). No-op in a standalone mount with no orchestrator.
-  const handleAskQuestion = useCallback(() => {
-    orchestrator?.dispatch({ kind: "showInteract", scope }, "user");
-  }, [orchestrator, scope]);
 
   // ScopedViewerWidget contract: the document set comes FROM the scope, not
   // from scenario context. The live schema/values/geometry load re-runs only
@@ -689,7 +698,16 @@ export const Extract: FC<ExtractProps> = ({
       data-testid="extract-workbench"
       data-role={role}
       aria-label="Extract workbench"
-      sx={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", backgroundColor: WARM_OFFWHITE }}
+      // width:100% + minWidth:0 — the workbench is a flex item in a row frame
+      // (`viewer-frame-body`), so without an explicit width it defaults to
+      // `flex: 0 1 auto` and shrinks to its CONTENT's intrinsic width. That made
+      // the measured content width (and therefore the side-by-side vs stacked
+      // decision) depend on WHICH field's detail was showing — a narrow field
+      // detail shrank the workbench below the 760px threshold and spuriously
+      // collapsed the PDF, while a wide one didn't. Filling the frame makes the
+      // layout decision depend only on the real available canvas width. Same
+      // fix PdfViewerWidget already carries for the same reason.
+      sx={{ display: "flex", flexDirection: "column", width: "100%", minWidth: 0, height: "100%", overflow: "hidden", backgroundColor: WARM_OFFWHITE }}
     >
       <Box
         data-testid="extract-topbar"
@@ -986,19 +1004,26 @@ export const Extract: FC<ExtractProps> = ({
 
             {useSideBySide || activePane === "fields" ? (
               <Box
+                ref={fieldsScrollRef}
+                data-testid="extract-fields-scroll"
                 sx={{
                   // Side-by-side: schema gets a slightly larger share than the
                   // document (it's denser). Stacked: it's the only pane.
                   flex: useSideBySide ? "1.2 1 0" : 1,
                   minWidth: 0,
                   minHeight: 0,
-                  display: "flex",
-                  flexDirection: "column",
+                  // This is the SOLE scroll container for both the fields list
+                  // and the field detail — a plain block (not a flex column) so
+                  // tall block children overflow it and scroll here rather than
+                  // in an inner region. Because this node PERSISTS across the
+                  // list↔detail toggle, its scroll offset is preserved/restored
+                  // (see `fieldsScrollRef` save/restore). The inner panels
+                  // intentionally do NOT set their own overflow.
                   overflow: "auto",
                 }}
               >
           {selectedField ? (
-            <Box data-testid="field-provenance-panel" sx={{ overflow: "auto", p: 1 }}>
+            <Box data-testid="field-provenance-panel" sx={{ p: 1 }}>
               <Stack
                 data-testid="extract-breadcrumb"
                 direction="row"
@@ -1148,64 +1173,10 @@ export const Extract: FC<ExtractProps> = ({
                     Not scored yet
                   </Box>
                 </Box>
-
-                <Box>
-                  <Typography sx={detailLabelSx}>NEIGHBORS</Typography>
-                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
-                    {(() => {
-                      const cat = schema.categories.find((c) => c.fields.some((f) => f.id === selectedField.id));
-                      const neighbors = (cat?.fields ?? []).filter((f) => f.id !== selectedField.id).slice(0, 3);
-                      if (neighbors.length === 0) {
-                        return (
-                          <Typography sx={{ color: MUTED_ON_LIGHT, fontSize: FONT_SIZE_CAPTION }}>
-                            No neighbors in this category.
-                          </Typography>
-                        );
-                      }
-                      return neighbors.map((n) => {
-                        const nv = valuesByFieldId.get(n.id)?.value;
-                        return (
-                          <Box
-                            key={n.id}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => selectField(n.id)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                selectField(n.id);
-                              }
-                            }}
-                            sx={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 0.5,
-                              px: 1,
-                              py: 0.375,
-                              borderRadius: BORDER_RADIUS_PILL,
-                              border: `1px solid ${BORDER}`,
-                              backgroundColor: WHITE,
-                              color: NAVY,
-                              fontFamily: "monospace",
-                              fontSize: FONT_SIZE_LABEL,
-                              cursor: "pointer",
-                              "&:hover": { borderColor: NAVY, backgroundColor: alpha(NAVY, 0.04) },
-                            }}
-                          >
-                            {n.id}
-                            <Box component="span" sx={{ color: MUTED_ON_LIGHT }}>
-                              {nv === undefined || nv === null ? "—" : String(nv).slice(0, 18)}
-                            </Box>
-                          </Box>
-                        );
-                      });
-                    })()}
-                  </Stack>
-                </Box>
               </Stack>
             </Box>
           ) : (
-            <Box data-testid="extract-fields-panel" sx={{ overflow: "auto" }}>
+            <Box data-testid="extract-fields-panel">
               <Box
                 sx={{
                   display: "flex",
@@ -1438,33 +1409,6 @@ export const Extract: FC<ExtractProps> = ({
                   </Stack>
                 </Card>
               )) : null}
-              <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                <Box
-                  role="button"
-                  tabIndex={0}
-                  data-testid="extract-ask-question"
-                  onClick={handleAskQuestion}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      handleAskQuestion();
-                    }
-                  }}
-                  sx={{
-                    display: "inline-block",
-                    px: 2,
-                    py: 1,
-                    borderRadius: BORDER_RADIUS_PILL,
-                    border: `1px solid ${NAVY}`,
-                    color: NAVY,
-                    cursor: "pointer",
-                    fontWeight: FONT_WEIGHT_LABEL,
-                    "&:hover": { backgroundColor: alpha(NAVY, 0.04) },
-                  }}
-                >
-                  Try asking a question →
-                </Box>
-              </Stack>
             </Box>
           )}
               </Box>

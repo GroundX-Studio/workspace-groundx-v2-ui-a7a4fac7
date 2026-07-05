@@ -188,8 +188,10 @@ describe("ExtractView (F3/F4)", () => {
 
   // WF-01 C9 (2026-05-28). Clicking a field card in F3 SHALL swap the
   // fields panel into a provenance panel with FIELD / SOURCE / WHY
-  // MATCHED / CONFIDENCE / NEIGHBORS sections + a breadcrumb above
-  // the panes. The "▴ collapse" control returns to the fields list.
+  // MATCHED / CONFIDENCE sections + a breadcrumb above the panes. The
+  // "▴ collapse" control returns to the fields list. (NEIGHBORS was
+  // removed 2026-07-05 — it only listed arbitrary sibling fields, which
+  // duplicated the fields list and carried no real relationship signal.)
   it("WF-01 C9: clicking a field card swaps the panel to a provenance view", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
@@ -202,7 +204,8 @@ describe("ExtractView (F3/F4)", () => {
     expect(panel.textContent ?? "").toMatch(/SOURCE/);
     expect(panel.textContent ?? "").toMatch(/WHY MATCHED/);
     expect(panel.textContent ?? "").toMatch(/CONFIDENCE/);
-    expect(panel.textContent ?? "").toMatch(/NEIGHBORS/);
+    // NEIGHBORS intentionally absent.
+    expect(panel.textContent ?? "").not.toMatch(/NEIGHBORS/);
   });
 
   it("WF-01 C9: clicking ▴ collapse returns to the fields list", async () => {
@@ -278,7 +281,6 @@ describe("ExtractView (F3/F4)", () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "solar" });
 
     expect(screen.getByText(/This sample skips extract/)).toBeInTheDocument();
-    expect(screen.queryByTestId("extract-ask-question")).not.toBeInTheDocument();
   });
 
   it("shows a loading beat (NOT the skips-extract copy) when an extract scenario's schema hasn't resolved yet", () => {
@@ -303,22 +305,10 @@ describe("ExtractView (F3/F4)", () => {
     expect(screen.queryByText(/This sample skips extract/)).not.toBeInTheDocument();
   });
 
-  it("advances from Extract to Interact", async () => {
-    const user = userEvent.setup();
-    let step: string | null = null;
-
-    renderWithOnboardingProviders(
-      <>
-        <ExtractView />
-        <StepProbe onStep={(next) => (step = next)} />
-      </>,
-      { initialFrame: "f3", initialScenario: "utility" },
-    );
-
-    await user.click(screen.getByTestId("extract-ask-question"));
-
-    await waitFor(() => expect(step).toBe("interact-chat"));
-  });
+  // Note: advancing Extract → Interact no longer happens via an in-widget
+  // "Try asking a question" button (removed 2026-07-05 as redundant). That
+  // transition is driven by the interact nav pill and the first chat send,
+  // covered in conversation/experiences/onboarding/experience.dispatchNav.test.tsx.
 
   // ── Workbench-shell topbar (spec: project_dev_contracts.md) ─────────
 
