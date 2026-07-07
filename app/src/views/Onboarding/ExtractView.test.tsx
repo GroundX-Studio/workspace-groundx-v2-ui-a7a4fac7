@@ -120,41 +120,36 @@ async function enterDesignSurface(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("ExtractView (F3/F4)", () => {
-  it("pre-selects the first field in the focus category on mount when the step carries a focusedCategoryId", async () => {
+  it("pre-selects the focused group's tab on mount when the step carries a focusedCategoryId", async () => {
     // F2 Pick-a-view pills dispatch `showExtract` with `focusedCategoryId`;
-    // the user lands already inspecting their picked slice. WF-01 C9
-    // (2026-05-28): when the step focuses a category, the first field in that
-    // category becomes the active selection AND the provenance panel surfaces;
-    // the user lands on F4-shape provenance, not the fields list.
-    // (standardized-viewer-control: the focus arrives via the step's
-    // `focusedCategoryId` prop, not the retired `?focus=` URL param.)
+    // the user lands already inspecting their picked slice. analyze-and-chat-ux
+    // §2.1: focus preselects the matching group TAB (the detail/provenance
+    // panel is retired) — landing on Meters shows its instance pills + rows.
     renderWithOnboardingProviders(<ExtractView focusedCategoryId="meters" />, {
       initialFrame: "f3",
       initialScenario: "utility",
     });
-    await waitFor(() => expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument());
-    expect(screen.getByTestId("extract-breadcrumb").textContent ?? "").toMatch(/meter_kwh/);
+    await waitFor(() =>
+      expect(screen.getByTestId("field-row-meters/0/meter_kwh")).toBeInTheDocument(),
+    );
   });
 
-  it("renders schema categories for the Utility sample", async () => {
+  it("renders schema groups as instance tabs for the Utility sample", async () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
     expect(screen.getByTestId("extract-topbar-title")).toHaveTextContent(/utility/);
-    // "Statement" + "Meters" appear in both the category-tab row and
-    // the field-card eyebrow; assert by the aria-labeled category Card.
-    expect(document.querySelector('[aria-label="Statement"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="Meters"]')).not.toBeNull();
+    expect(screen.getByTestId("instance-tab-__fields")).toHaveTextContent(/Statement/);
+    expect(screen.getByTestId("instance-tab-meters")).toHaveTextContent(/Meters/);
   });
 
-  // WF-01 C7 (2026-05-28). Category tabs let the user filter the
-  // fields panel by category; the wireframe pins them above the field
-  // cards. The unlock banner below the panes flags locked features and
-  // funnels signed-out users to F6.
-  it("WF-01 C7: F3 renders one category tab per schema category", () => {
+  // WF-01 C7 (2026-05-28, re-anchored to the recursive render §2.1). The root
+  // tab bar carries one tab per group so the user can filter the fields panel;
+  // the unlock banner below the panes flags locked features and funnels
+  // signed-out users to F6.
+  it("WF-01 C7: F3 renders one tab per schema group", () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
-    const tabs = screen.getByTestId("extract-category-tabs");
-    // Utility schema has two categories (statement + meters).
-    expect(within(tabs).getByTestId("extract-category-tab-statement")).toBeInTheDocument();
-    expect(within(tabs).getByTestId("extract-category-tab-meters")).toBeInTheDocument();
+    const tabs = screen.getAllByTestId("instance-tabs")[0];
+    expect(within(tabs).getByTestId("instance-tab-__fields")).toBeInTheDocument();
+    expect(within(tabs).getByTestId("instance-tab-meters")).toBeInTheDocument();
   });
 
   it("WF-01 C7: F3 renders a sign-in unlock banner for anonymous users", () => {
@@ -176,64 +171,37 @@ describe("ExtractView (F3/F4)", () => {
     expect(row.textContent ?? "").toMatch(/account_number/);
   });
 
-  it("WF-01 C8: F3 field row renders a citation chip", () => {
+  it("WF-01 C8: F3 field row renders its source-page chip", () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
-    // Utility schema's account_number field has one citation → cite-chip-1
-    // inside that field row. (2026-05-29: dropped the harsh coral background
-    // — field citations use the default neutral chip now.)
+    // Utility fixture's account_number citation is page 1 → a `p.1` chip on
+    // the row (analyze-and-chat-ux: the CiteChip footnote gave way to the
+    // hover-highlight interaction; the chip names the source page).
     const row = screen.getByTestId("field-row-account_number");
-    const chip = within(row).getByTestId("cite-chip-1");
-    expect(chip).toHaveAttribute("data-color", "cyan");
+    expect(within(row).getByTestId("field-source-chip")).toHaveTextContent("p.1");
   });
 
-  // WF-01 C9 (2026-05-28). Clicking a field card in F3 SHALL swap the
-  // fields panel into a provenance panel with FIELD / SOURCE / WHY
-  // MATCHED / CONFIDENCE sections + a breadcrumb above the panes. The
-  // "▴ collapse" control returns to the fields list. (NEIGHBORS was
-  // removed 2026-07-05 — it only listed arbitrary sibling fields, which
-  // duplicated the fields list and carried no real relationship signal.)
-  it("WF-01 C9: clicking a field card swaps the panel to a provenance view", async () => {
-    const user = userEvent.setup();
+  // WF-01 C9 is RETIRED (analyze-and-chat-ux §3.1): the provenance/detail card
+  // is gone. A field row carries the id + value + full description INLINE, and
+  // provenance is the hover/pin highlight on the embedded document.
+  it("field rows carry the description inline — no detail card, no breadcrumb", () => {
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
-    await user.click(screen.getByTestId("field-row-account_number"));
-    expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("extract-breadcrumb")).toBeInTheDocument();
-    // Required sections.
-    const panel = screen.getByTestId("field-provenance-panel");
-    expect(panel.textContent ?? "").toMatch(/FIELD/);
-    expect(panel.textContent ?? "").toMatch(/SOURCE/);
-    expect(panel.textContent ?? "").toMatch(/WHY MATCHED/);
-    expect(panel.textContent ?? "").toMatch(/CONFIDENCE/);
-    // NEIGHBORS intentionally absent.
-    expect(panel.textContent ?? "").not.toMatch(/NEIGHBORS/);
-  });
-
-  it("WF-01 C9: clicking ▴ collapse returns to the fields list", async () => {
-    const user = userEvent.setup();
-    renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
-    await user.click(screen.getByTestId("field-row-account_number"));
-    expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument();
-    await user.click(screen.getByTestId("extract-breadcrumb-collapse"));
+    const row = screen.getByTestId("field-row-account_number");
+    expect(row).toHaveTextContent(/account_number/);
+    expect(row).toHaveTextContent("The account number printed in the statement header.");
     expect(screen.queryByTestId("field-provenance-panel")).not.toBeInTheDocument();
-    // Back to fields panel.
-    expect(screen.getByTestId("field-row-account_number")).toBeInTheDocument();
+    expect(screen.queryByTestId("extract-breadcrumb")).not.toBeInTheDocument();
   });
 
-  // WF-01b C (2026-05-28). When a field is selected, the left-pane
-  // PdfViewerWidget receives the selected field's first-citation page
-  // as `targetPage` (and bbox as `highlightBbox` when the citation
-  // carries one). We assert via the data-attrs the widget surfaces on
-  // its root so the test doesn't depend on the xray fetch (which
-  // doesn't resolve in jsdom without an API mock).
-  it("WF-01b C: selecting a field threads the citation's page to the left-pane viewer", async () => {
+  // WF-01b C (2026-05-28, re-anchored §3.2b). PINNING a field row threads the
+  // instance's source page to the left-pane PdfViewerWidget as `targetPage`
+  // (bbox highlight when geometry carries one — the fixture is page-only, so
+  // the overlay stays off; production-realistic, bbox is sometimes missing).
+  it("WF-01b C: pinning a field threads the citation's page to the left-pane viewer", async () => {
     const user = userEvent.setup();
     renderWithOnboardingProviders(<ExtractView />, { initialFrame: "f3", initialScenario: "utility" });
     const viewer = screen.getByTestId("pdf-viewer-widget");
     expect(viewer.getAttribute("data-target-page")).toBeNull();
     await user.click(screen.getByTestId("field-row-amount_due"));
-    // The Utility fixture's `amount_due` citation has page 1 (no bbox
-    // in this fixture, so the highlight overlay stays off — that's
-    // production-realistic: bbox is sometimes missing upstream).
     expect(viewer.getAttribute("data-target-page")).toBe("1");
   });
 
@@ -268,9 +236,10 @@ describe("ExtractView (F3/F4)", () => {
 
     await user.click(screen.getByTestId("render-mode-json"));
 
+    // Tree-shaped JSON (§2.2): the schema-visible slice of the output in its
+    // own shape — field values directly, not the old flat category projection.
     const json = screen.getByTestId("extract-json");
-    expect(json).toHaveTextContent('"schemaId": "loan-schema-v1"');
-    expect(json).toHaveTextContent('"gross_monthly_income"');
+    expect(json).toHaveTextContent('"gross_monthly_income": 7708');
     expect(screen.queryByTestId("field-row-gross_monthly_income")).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("render-mode-table"));

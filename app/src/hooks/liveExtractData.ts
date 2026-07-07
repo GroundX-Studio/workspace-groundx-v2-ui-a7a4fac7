@@ -8,7 +8,7 @@
  * of falling back to `scenario.manifest.*`:
  *
  *   schema ← getDocument → filter.workflow_id → getGroundXWorkflow → workflowToSchema
- *   values ← getDocumentExtract → extractToValues
+ *   values ← getDocumentExtract → extractToInstances → first-instance samples
  *
  * The document/workflow/extract calls hit the real GroundX data path through
  * the middleware (the same calls the Extract widget makes); tests inject
@@ -18,7 +18,8 @@
  * fetch failures so the caller renders its real empty/error state — never the
  * manifest.
  */
-import { extractToValues, workflowToSchema } from "@/api/extractLiveData";
+import { extractToInstances, flattenInstanceFields } from "@/api/extractInstances";
+import { entriesToFieldValues, workflowToSchema } from "@/api/extractLiveData";
 import type { useDocumentsContext } from "@/contexts/DocumentsContext";
 import type { ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
 
@@ -54,11 +55,14 @@ export async function fetchLiveExtract(
   if (!schema) return EMPTY;
   const ex = await getDocumentExtract(documentId);
   if (!ex.response) return { schema, values: [] };
-  const valueMap = extractToValues(ex.response as Record<string, unknown>, schema);
-  const values: ExtractedFieldValue[] = Object.entries(valueMap).map(([fieldId, value]) => ({
-    fieldId,
-    value,
-    citations: [],
-  }));
+  // analyze-and-chat-ux §2.3 — first-instance samples via the output-first walk
+  // (SchemaView is the label editor; one sample value per field def is its
+  // semantic). No geometry on this standalone path → citation-less samples.
+  const { root } = extractToInstances(ex.response as Record<string, unknown>, schema);
+  const values: ExtractedFieldValue[] = entriesToFieldValues(
+    documentId,
+    flattenInstanceFields(root),
+    new Map(),
+  );
   return { schema, values };
 }

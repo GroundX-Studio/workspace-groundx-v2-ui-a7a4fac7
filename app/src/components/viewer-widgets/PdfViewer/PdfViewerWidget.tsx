@@ -48,8 +48,7 @@ import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useRef, useState, type FC } from "react";
 
-import { isResolvedDocumentId } from "@/api/documentId";
-import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
+import { useXrayQuery } from "@/hooks/queries/viewerQueries";
 
 import type { ContentScope, NormalizedBbox, WidgetRole } from "@groundx/shared";
 import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity";
@@ -71,7 +70,10 @@ import {
   PDF_THUMB_PAGE_NUMBER_FONT_SIZE,
   WHITE,
 } from "@/constants";
-import { useDocumentsContext } from "@/contexts/DocumentsContext";
+
+/** Breathing room (px) added around a highlight so its border/fill doesn't
+ * crowd or visually clip the glyphs it marks. */
+const HIGHLIGHT_PAD_PX = 4;
 
 export interface PdfViewerWidgetProps {
   /**
@@ -193,9 +195,16 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   // empty string is intentionally non-resolved (see `isResolvedDocumentId`)
   // so the fetch is gated exactly as the prior placeholder-id path was.
   const documentId = scope.type === "documents" ? scope.documentIds[0] ?? "" : "";
-  const { getDocumentXray } = useDocumentsContext();
-  const [xray, setXray] = useState<DocumentXrayResponse | null>(null);
-  const [error, setError] = useState<unknown | null>(null);
+  // adopt-tanstack-query: the X-Ray read is now a keyed `useQuery`
+  // (`useXrayQuery`), replacing the `useScopeAdapter` + `loadSeqRef` + setState
+  // fetch. It's keyed on `documentId`, so a remount over the same document reads
+  // the cache instead of re-hitting GroundX (fixes the Interact↔Extract toggle
+  // reload); TanStack drops stale results, so no manual load-sequence guard. It
+  // gates on a resolved id internally, and the X-Ray parse error is tagged
+  // non-retryable (a consistent error fails fast — the old network-only retry).
+  const { data: xrayData, error: xrayError } = useXrayQuery(documentId);
+  const xray = xrayData ?? null;
+  const error = xrayError;
   const [activePage, setActivePage] = useState<number>(targetPage ?? initialPage);
 
   // clickable-citations Phase 4 — when the caller updates `targetPage`,
@@ -210,40 +219,12 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
     }
   }, [targetPage]);
 
-  // ScopedViewerWidget contract (core-data base): reload the X-Ray on
-  // scope-IDENTITY change via `useScopeAdapter` rather than a bespoke
-  // `useEffect` keyed on a derived id. The adapter fires on mount and again
-  // only when the `scope` identity changes (`scopeKey`), not on every render.
-  // Async cancellation is handled with a monotonically-increasing sequence: a
-  // newer adapt run invalidates an in-flight fetch from an older scope.
-  const loadSeqRef = useRef(0);
-  useScopeAdapter(scope, (nextScope) => {
-    const loadSeq = ++loadSeqRef.current;
-    const nextDocId =
-      nextScope.type === "documents" ? nextScope.documentIds[0] ?? "" : "";
-    setXray(null);
-    setError(null);
-    // WF-15 — gate the fetch on a resolved GroundX documentId. The
-    // canvas mounts with a placeholder id (`scenario:utility`) before
-    // the active entity resolves the real UUID; fetching an X-Ray for
-    // it 406s and flashes "COULD NOT LOAD". Hold the neutral loading
-    // state (xray + error both null → `loading` true) until a real id
-    // arrives.
-    if (!isResolvedDocumentId(nextDocId)) return;
-    void (async () => {
-      const result = await getDocumentXray(nextDocId);
-      // A newer scope took over while we awaited — drop this stale result.
-      if (loadSeqRef.current !== loadSeq) return;
-      if (result.isSuccess && result.response) {
-        setXray(result.response);
-        // Report the resolved name up so the host nav can drop its own
-        // duplicate metadata fetch (single source = the viewer's X-Ray).
-        if (result.response.fileName) onFileNameResolvedRef.current?.(result.response.fileName);
-      } else {
-        setError(result.error ?? new Error("xray fetch failed"));
-      }
-    })();
-  });
+  // Report the resolved filename up so the host nav can drop its own duplicate
+  // metadata fetch (single source = the viewer's X-Ray). Was done inside the
+  // fetch callback; now an effect-on-data over the query result.
+  useEffect(() => {
+    if (xray?.fileName) onFileNameResolvedRef.current?.(xray.fileName);
+  }, [xray]);
 
   const pages = xray?.documentPages ?? [];
   const activeImage =
@@ -304,7 +285,9 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
   // fallback (also the jsdom path, which has no layout) before the observer fires.
   const overlayStyleFor = (bbox: NormalizedBbox): import("react").CSSProperties => {
     if (contentRect) {
-      const r = overlayPxRect(bbox, contentRect);
+      // A few px of breathing room so the highlight border/fill doesn't crowd
+      // (and visually clip) the glyphs it's marking. Clamped to the page.
+      const r = overlayPxRect(bbox, contentRect, HIGHLIGHT_PAD_PX);
       return { position: "absolute", left: r.left, top: r.top, width: r.width, height: r.height };
     }
     return {

@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { render } from "@testing-library/react";
 import { HelmetProvider } from "react-helmet-async";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { Api } from "@/api/client";
 import { ApiProvider } from "@/contexts/ApiContext";
@@ -73,11 +74,18 @@ export const renderWithOnboardingProviders = (
   const resolvedUrl =
     initialUrl ??
     (initialScenario ? `/onboarding/${registryBucketId}/${initialScenario}` : "/onboarding");
+  // adopt-tanstack-query: widgets now read via useQuery, so the harness needs a
+  // QueryClientProvider (mirrors the real AppProviders). Fresh client per render
+  // → no cache carryover between tests; retry off keeps error-path tests fast.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
   return render(
     // ApiProvider is OUTERMOST: the providers below (OnboardingSession,
     // ScenarioRegistry, Documents, Canvas) become useApi() consumers, so the
     // fake must sit above them.
     <ApiProvider value={makeFakeApi(api)}>
+    <QueryClientProvider client={queryClient}>
     <GxThemeProvider>
       <LoadingProvider>
         <MessageBarProvider>
@@ -125,6 +133,7 @@ export const renderWithOnboardingProviders = (
         </MessageBarProvider>
       </LoadingProvider>
     </GxThemeProvider>
+    </QueryClientProvider>
     </ApiProvider>,
   );
 };

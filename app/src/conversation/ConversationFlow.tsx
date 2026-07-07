@@ -94,7 +94,11 @@ export const ConversationFlow: FC<ConversationFlowProps> = ({ chatSessionId, exp
           flex: 1,
           minHeight: 0,
           overflow: "auto",
-          py: 1.5,
+          // No TOP padding: a scroll container's top padding is pinned above the
+          // content, so scrolled-up messages could never reach the top edge (the
+          // "padded cutoff"). Keep bottom breathing room only.
+          pt: 0,
+          pb: 1.5,
           pr: 1,
           display: "flex",
           flexDirection: "column",

@@ -49,14 +49,16 @@ describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () =>
     },
   );
 
-  it("renders the Utility schema categories over a documents scope (manifest fallback)", () => {
+  it("renders the Utility groups as instance tabs over a documents scope (manifest fallback)", () => {
+    // analyze-and-chat-ux §2.1 — the render is a recursive tab bar: the root
+    // scalars tab (label joined from the schema) + one tab per group.
     renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
       initialFrame: "f3",
       initialScenario: "utility",
     });
     expect(screen.getByTestId("extract-topbar-title")).toHaveTextContent(/utility/);
-    expect(document.querySelector('[aria-label="Statement"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="Meters"]')).not.toBeNull();
+    expect(screen.getByTestId("instance-tab-__fields")).toHaveTextContent(/Statement/);
+    expect(screen.getByTestId("instance-tab-meters")).toHaveTextContent(/Meters/);
   });
 
   it("gates the table→JSON render toggle on the scenario's supportsJsonRender capability flag, not the id", () => {
@@ -113,7 +115,10 @@ describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () =>
     expect(screen.getByTestId("pdf-viewer-widget")).toBeInTheDocument();
   });
 
-  it("keeps field citation clicks inside the embedded Extract PDF pane", async () => {
+  it("pinning a field row drives the EMBEDDED PDF pane to its source page — no viewer navigation (§3.2b)", async () => {
+    // Replaces the retired CiteChip-click contract: rows now pin their instance's
+    // source on click. Same guarantee — the interaction stays inside the
+    // embedded Extract pane (no `doc-viewer` step pushed to the global viewer).
     const storeRef: { current: ReturnType<typeof useChatStore> | null } = { current: null };
     const StoreProbe: FC = () => {
       storeRef.current = useChatStore();
@@ -130,13 +135,20 @@ describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () =>
       },
     );
 
-    const meterRow = screen.getByTestId("field-row-meter_kwh");
-    fireEvent.click(within(meterRow).getByTestId("cite-chip-1"));
+    // meter_kwh lives in the meters group (fixture citation: page 2)
+    fireEvent.click(screen.getByTestId("instance-tab-meters"));
+    const meterRow = screen.getByTestId("field-row-meters/0/meter_kwh");
+    fireEvent.click(meterRow);
 
     await waitFor(() => {
-      expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument();
       expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-target-page", "2");
     });
+    // Pin persists across mouse-leave (stable target for keyboard/touch)…
+    fireEvent.mouseLeave(meterRow);
+    expect(screen.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-target-page", "2");
+    // …and a second click unpins.
+    fireEvent.click(screen.getByTestId("field-row-meters/0/meter_kwh"));
+
     const store = storeRef.current;
     expect(store?.state.activeSessionId).toBeTruthy();
     if (!store?.state.activeSessionId) throw new Error("ChatStore probe did not mount");
@@ -186,6 +198,73 @@ describe("Extract — extraction-workbench ScopedViewerWidget (Phase 3a)", () =>
 //    driven by the active step's `surface` PROP, not `currentFrame === "f3a"`.
 //    This makes the design surface reachable for AUTHENTICATED users (steady),
 //    not just the onboarding f3a frame (a production bug today).
+describe("Extract — hover lights the hovered INSTANCE's own regions (§3.2)", () => {
+  // Live-shaped fakes at the SDK seam: a resolved doc id + a workflow with a
+  // meters group whose instances nest meter_charges, and geometry derived from
+  // the VALUE so each instance resolves distinct regions.
+  const LIVE_DOC_ID = "c3bfff49-0000-4000-8000-0000000000aa";
+  const LIVE_SCOPE: ContentScope = { type: "documents", documentIds: [LIVE_DOC_ID] };
+  const liveWorkflow = {
+    workflowId: "wf-live",
+    name: "Utility Live",
+    extract: {
+      statement: { fields: { bill_account_id: { prompt: { description: "acct", type: "str" } } } },
+      meters: { fields: { meter_id: { prompt: { description: "id", type: "str" } }, usage_amount: { prompt: { description: "usage", type: ["int", "float"] } } } },
+      charges: { fields: { line_amount: { prompt: { description: "amt", type: ["int", "float"] } } } },
+    },
+  };
+  const liveOutput = {
+    bill_account_id: "10295809",
+    meters: [
+      { meter_id: "M-1", usage_amount: 60960, meter_charges: [{ line_amount: 55 }] },
+      { meter_id: "M-2", usage_amount: 900, meter_charges: [{ line_amount: 99 }] },
+    ],
+  };
+  const liveApi = () => ({
+    groundxDocuments: {
+      getGroundXDocument: vi.fn(async () => ({
+        document: { documentId: LIVE_DOC_ID, filter: { workflow_id: "wf-live" } },
+      })),
+      getGroundXDocumentExtract: vi.fn(async () => liveOutput),
+    },
+    workflow: { getGroundXWorkflow: vi.fn(async () => ({ workflow: liveWorkflow })) },
+    extract: {
+      fetchFieldGeometry: vi.fn(async (_docId: string, fields: Array<{ value: unknown }>) =>
+        fields.map((q) => [
+          {
+            // page + y derived from the value → meter 1's charge (55) and meter
+            // 2's charge (99) get DISTINCT regions.
+            page: q.value === 99 ? 3 : 2,
+            bbox: { x: 0.1, y: q.value === 99 ? 0.55 : 0.2, w: 0.2, h: 0.02 },
+          },
+        ]),
+      ),
+    },
+  });
+
+  it("hovering meter 2's charge lights ITS bbox on the embedded PDF; leaving clears it", async () => {
+    renderWithOnboardingProviders(<Extract role="member" scope={LIVE_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      api: liveApi(),
+    });
+    // live tree resolved → meters tab present with 2 instances
+    await waitFor(() => expect(screen.getByTestId("instance-tab-meters")).toHaveTextContent("2"));
+    fireEvent.click(screen.getByTestId("instance-tab-meters"));
+    fireEvent.click(screen.getByTestId("instance-pill-meters/1"));
+    fireEvent.click(screen.getByTestId("instance-tab-meters/1/meter_charges"));
+
+    const chargeRow = screen.getByTestId("field-row-meters/1/meter_charges/0/line_amount");
+    fireEvent.mouseEnter(chargeRow);
+    const viewer = screen.getByTestId("pdf-viewer-widget");
+    await waitFor(() => expect(viewer).toHaveAttribute("data-target-page", "3"));
+    expect(viewer.getAttribute("data-highlight-bbox") ?? "").toContain("0.55");
+
+    fireEvent.mouseLeave(chargeRow);
+    await waitFor(() => expect(viewer).not.toHaveAttribute("data-highlight-bbox"));
+  });
+});
+
 describe("Extract — schema design surface reads the step `surface` prop, not the frame (T5/R7)", () => {
   it("renders the design surface (SchemaView + ← back) when `surface='design'` even with the frame on f3", () => {
     renderWithOnboardingProviders(
@@ -226,33 +305,11 @@ describe("Extract — render-surface layout (extract-screen-audit fixes)", () =>
     expect(screen.getByTestId("extract-workbench")).toHaveStyle({ width: "100%" });
   });
 
-  // Opening a field detail and returning via "← all fields" must land back at
-  // the same scroll position in the list (opening a shorter detail otherwise
-  // clamps the shared scroll container to the top). jsdom has no layout, so we
-  // install a settable scrollTop backing store on the scroll container.
-  it("restores the fields-list scroll position after returning from a field detail", async () => {
-    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
-      initialFrame: "f3",
-      initialScenario: "utility",
-    });
-    const scroller = screen.getByTestId("extract-fields-scroll");
-    let scrollValue = 0;
-    Object.defineProperty(scroller, "scrollTop", {
-      configurable: true,
-      get: () => scrollValue,
-      set: (v: number) => {
-        scrollValue = v;
-      },
-    });
-    scroller.scrollTop = 150;
+  // (The "restores the fields-list scroll position after returning from a field
+  // detail" contract is RETIRED — analyze-and-chat-ux §3.1 removed the field
+  // detail view entirely; the list is the only content, so there is no
+  // list↔detail toggle to restore across.)
 
-    fireEvent.click(screen.getByTestId("field-row-account_number"));
-    expect(screen.getByTestId("field-provenance-panel")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("extract-breadcrumb-collapse"));
-    await waitFor(() => expect(screen.getByTestId("extract-fields-panel")).toBeInTheDocument());
-    expect(scroller.scrollTop).toBe(150);
-  });
   // Field ids are unbreakable snake_case tokens; they must be allowed to wrap so
   // they never overflow into / collide with the value beside them.
   it("lets long field ids wrap instead of overflowing into the value", () => {
@@ -260,7 +317,7 @@ describe("Extract — render-surface layout (extract-screen-audit fixes)", () =>
       initialFrame: "f3",
       initialScenario: "utility",
     });
-    expect(screen.getByTestId("extract-field-id-account_number")).toBeInTheDocument();
+    expect(screen.getByTestId("field-row-account_number")).toHaveTextContent("account_number");
     // jsdom's CSS parser doesn't recognize the `anywhere` value, so assert the
     // rule was emitted into the emotion stylesheet rather than via getComputedStyle.
     const css = Array.from(document.querySelectorAll("style"))
@@ -281,8 +338,8 @@ describe("Extract — render-surface layout (extract-screen-audit fixes)", () =>
     const row = screen.getByTestId("field-row-account_number");
     expect(row).toHaveStyle({ display: "flex" });
     expect(row).toHaveStyle({ flexDirection: "column" });
-    // The description renders as its own full-width block...
-    expect(screen.getByTestId("extract-field-desc-account_number")).toBeInTheDocument();
+    // The description renders as its own full-width block inside the row...
+    expect(row).toHaveTextContent("The account number printed in the statement header.");
     // ...and nothing in the panel clamps/truncates text.
     const css = Array.from(document.querySelectorAll("style"))
       .map((s) => s.textContent ?? "")
@@ -290,14 +347,14 @@ describe("Extract — render-surface layout (extract-screen-audit fixes)", () =>
     expect(css).not.toContain("line-clamp");
   });
 
-  // The category tabs WRAP when narrow — they must never become a horizontal
+  // The group tabs WRAP when narrow — they must never become a horizontal
   // scrollbar (the band-aid that shipped and was rejected).
-  it("wraps the category tabs, never a horizontal scrollbar", () => {
+  it("wraps the group tabs, never a horizontal scrollbar", () => {
     renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
       initialFrame: "f3",
       initialScenario: "utility",
     });
-    const tabs = screen.getByTestId("extract-category-tabs");
+    const tabs = screen.getAllByTestId("instance-tabs")[0];
     expect(tabs).toHaveStyle({ flexWrap: "wrap" });
     expect(tabs).not.toHaveStyle({ overflowX: "auto" });
     expect(tabs).not.toHaveStyle({ overflowX: "scroll" });
@@ -360,5 +417,70 @@ describe("Extract — responsive document/schema layout (regression guards)", ()
     fireEvent.click(screen.getByTestId("extract-pane-toggle-fields"));
     await waitFor(() => expect(screen.getByTestId("extract-fields-panel")).toBeInTheDocument());
     expect(screen.queryByTestId("extract-doc-pane")).not.toBeInTheDocument();
+  });
+});
+
+describe("Extract — per-field confidence label (shown only when the value carries one)", () => {
+  // A utility scenario where ONE field's extracted value carries a confidence
+  // and another does NOT — mirrors a workflow that returns `{value, confidence}`
+  // for some fields and bare values for others.
+  const scenarioWithConfidence: ScenarioConfig = {
+    ...utilityTestScenario,
+    manifest: {
+      ...utilityTestScenario.manifest,
+      sampleExtractionValues: [
+        {
+          fieldId: "account_number",
+          value: "1023456",
+          citations: [{ documentId: "utility-bill-2026-04", page: 1 }],
+          confidence: 0.94,
+        },
+        {
+          fieldId: "amount_due",
+          value: 18742.16,
+          citations: [{ documentId: "utility-bill-2026-04", page: 1 }],
+        },
+        {
+          fieldId: "meter_kwh",
+          value: 4128,
+          citations: [{ documentId: "utility-bill-2026-04", page: 2 }],
+          confidence: 0.3, // Low
+        },
+      ],
+    },
+  };
+
+  const renderIt = () =>
+    renderWithOnboardingProviders(<Extract role="member" scope={UTILITY_DOC_SCOPE} />, {
+      initialFrame: "f3",
+      initialScenario: "utility",
+      initialScenarios: [scenarioWithConfidence],
+    });
+
+  // §3.3 — the band renders INLINE on the row (the detail card is retired).
+  it("shows a High band (0.94) inline on the row, with the exact score on hover", () => {
+    renderIt();
+    const row = screen.getByTestId("field-row-account_number");
+    const pill = within(row).getByTestId("extract-field-confidence");
+    expect(pill).toHaveTextContent("High"); // 0.94 → High
+    expect(pill).toHaveAttribute("data-band", "High");
+    expect(pill).toHaveAttribute("title", "94%"); // exact score on hover
+  });
+
+  it("shows a Low band (0.3) so a shaky value stands out", () => {
+    renderIt();
+    fireEvent.click(screen.getByTestId("instance-tab-meters"));
+    const row = screen.getByTestId("field-row-meters/0/meter_kwh");
+    const pill = within(row).getByTestId("extract-field-confidence");
+    expect(pill).toHaveTextContent("Low");
+    expect(pill).toHaveAttribute("data-band", "Low");
+    expect(pill).toHaveAttribute("title", "30%");
+  });
+
+  it("hides the confidence band entirely for a field with no confidence", () => {
+    renderIt();
+    const row = screen.getByTestId("field-row-amount_due");
+    expect(within(row).queryByTestId("extract-field-confidence")).not.toBeInTheDocument();
+    expect(screen.queryByText(/not scored yet/i)).not.toBeInTheDocument();
   });
 });

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--workspace", "app", "run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "middleware",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--workspace", "middleware", "run", "dev"],
+      "port": 3001
+    }
+  ]
+}

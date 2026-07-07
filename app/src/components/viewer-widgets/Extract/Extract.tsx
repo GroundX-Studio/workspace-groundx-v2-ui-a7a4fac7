@@ -1,5 +1,4 @@
 import Box from "@mui/material/Box";
-import Card from "@mui/material/Card";
 import IconButton from "@mui/material/IconButton";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
@@ -8,18 +7,13 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FC, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type SyntheticEvent } from "react";
 
-import { citationRegions, type ContentScope, type ExtractBody, type WidgetRole } from "@groundx/shared";
+import { type ContentScope, type ExtractBody, type WidgetRole } from "@groundx/shared";
 
-import {
-  citationsForJson,
-  extractToValues,
-  liveValuesToFieldValues,
-  workflowToSchema,
-} from "@/api/extractLiveData";
+import { instancesToJson, manifestToInstances } from "@/api/extractInstances";
+import { entriesToFieldValues } from "@/api/extractLiveData";
 import type { FieldRegion } from "@/api/fieldGeometry";
-import { isResolvedDocumentId } from "@/api/documentId";
 import { cryptoRandom } from "@/lib/cryptoRandom";
 import {
   BODY_TEXT,
@@ -47,13 +41,12 @@ import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorCont
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
-import { useDocumentsContext } from "@/contexts/DocumentsContext";
-import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
+import { useExtractWorkbench } from "@/hooks/queries/useExtractWorkbench";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { track } from "@/lib/analytics";
-import type { Citation, ExtractedFieldValue, ExtractionSchemaDef } from "@/types/scenarios";
-import { CiteChip } from "@/components/brand/CiteChip/CiteChip";
+import type { ExtractedFieldValue } from "@/types/scenarios";
+import { InstanceFields } from "./InstanceFields";
 import { SchemaView } from "./SchemaView";
 
 /**
@@ -136,28 +129,6 @@ function primaryDocumentIdFromScope(scope: ContentScope): string | null {
   return null;
 }
 
-function sameCitation(a: Citation, b: Citation): boolean {
-  const bboxA = a.bbox ?? null;
-  const bboxB = b.bbox ?? null;
-  const sameBbox =
-    bboxA === bboxB ||
-    Boolean(
-      bboxA &&
-        bboxB &&
-        bboxA.x === bboxB.x &&
-        bboxA.y === bboxB.y &&
-        bboxA.w === bboxB.w &&
-        bboxA.h === bboxB.h,
-    );
-  return (
-    a.documentId === b.documentId &&
-    a.page === b.page &&
-    (a.snippet ?? "") === (b.snippet ?? "") &&
-    (a.tier ?? "") === (b.tier ?? "") &&
-    sameBbox
-  );
-}
-
 /**
  * Merge the per-session overlay onto the manifest extraction-schema for
  * Save. Mirrors SchemaView's render-time merge so the persisted
@@ -238,16 +209,6 @@ function draftBodyToSchemaDef(
   };
 }
 
-// Shared section-label style for the field-detail (provenance) panel.
-const detailLabelSx = {
-  display: "block",
-  color: MUTED_ON_LIGHT,
-  fontWeight: FONT_WEIGHT_LABEL,
-  fontSize: FONT_SIZE_LABEL,
-  letterSpacing: 0.6,
-  textTransform: "uppercase",
-} as const;
-
 // Document / schema layout geometry (extract-screen-audit). Plain px — this is
 // responsive layout geometry, not a brand token. Below this measured canvas
 // width the PDF + schema can't both be comfortable, so the canvas switches from
@@ -279,31 +240,16 @@ export const Extract: FC<ExtractProps> = ({
   // ChatStore overlay field. Optional: a standalone widget mount (some tests)
   // has no orchestrator, where the dropdown is a no-op.
   const orchestrator = useCanvasOrchestratorOptional();
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
-  const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
-  // The fields list and the field-detail panel are sibling conditional
-  // renders inside the SAME scroll container (`fieldsScrollRef`). Opening a
-  // (shorter) detail clamps the container's scrollTop; without this, returning
-  // to the list via "← all fields" lands back at the top and loses the user's
-  // place in a long field list. Remember where the list was and restore it.
-  const fieldsScrollRef = useRef<HTMLDivElement | null>(null);
-  const savedFieldsScrollTop = useRef(0);
-  const selectField = useCallback((fieldId: string | null) => {
-    // Entering a detail view — capture the list's current scroll offset while
-    // the list is still the mounted content (before the state flip re-renders).
-    if (fieldId !== null) {
-      savedFieldsScrollTop.current = fieldsScrollRef.current?.scrollTop ?? 0;
-    }
-    setSelectedFieldId(fieldId);
-    setSelectedCitation(null);
+  // analyze-and-chat-ux §3.2/§3.2b — the field detail card is retired. Hovering
+  // or focusing a field-instance row lights that instance's source regions on
+  // the embedded PDF; a click PINS the highlight (stable target for
+  // keyboard/touch), a second click unpins. Hover wins while active.
+  const [hoverPath, setHoverPath] = useState<string | null>(null);
+  const [pinnedPath, setPinnedPath] = useState<string | null>(null);
+  const handleFieldHover = useCallback((path: string | null) => {
+    setHoverPath(path);
+    if (path) track("extract.field_hovered", { path });
   }, []);
-  // Returning to the list — restore the remembered scroll offset after the
-  // list content re-mounts. Layout effect so it happens before paint (no jump).
-  useLayoutEffect(() => {
-    if (selectedFieldId === null && fieldsScrollRef.current) {
-      fieldsScrollRef.current.scrollTop = savedFieldsScrollTop.current;
-    }
-  }, [selectedFieldId]);
   const [renderMode, setRenderMode] = useState<"table" | "json">("table");
   const handleRenderMode = (_event: SyntheticEvent, value: "table" | "json") => {
     if (value) setRenderMode(value);
@@ -341,16 +287,11 @@ export const Extract: FC<ExtractProps> = ({
   // true width before first paint (no flash); environments without ResizeObserver
   // (jsdom) stay side-by-side.
   const useSideBySide = contentWidth === 0 || contentWidth >= SIDE_BY_SIDE_MIN_PX;
-  // When stacked (single pane), surface the schema as soon as a field is
-  // selected so its provenance isn't hidden behind the document. Citation
-  // activations are the exception: those target the embedded document pane.
-  useEffect(() => {
-    if (!useSideBySide && selectedFieldId && !selectedCitation) setActivePane("fields");
-  }, [useSideBySide, selectedFieldId, selectedCitation]);
-  const handleFieldCitationActivate = useCallback(
-    (fieldId: string, citation: Citation) => {
-      setSelectedFieldId(fieldId);
-      setSelectedCitation(citation);
+  // Pin toggle (§3.2b). In the stacked single-pane layout, pinning also brings
+  // the document pane forward so the pinned highlight is actually visible.
+  const handleFieldPin = useCallback(
+    (path: string) => {
+      setPinnedPath((prev) => (prev === path ? null : path));
       if (!useSideBySide) setActivePane("document");
     },
     [useSideBySide],
@@ -375,65 +316,21 @@ export const Extract: FC<ExtractProps> = ({
   );
 
   // ScopedViewerWidget contract: the document set comes FROM the scope, not
-  // from scenario context. The live schema/values/geometry load re-runs only
-  // when the scope IDENTITY changes (via `useScopeAdapter`).
+  // from scenario context.
+  // adopt-tanstack-query: the whole live read (document → workflow → schema →
+  // values/confidences → geometry) is now ONE keyed `useQuery` in
+  // `useExtractWorkbench`, replacing the `useScopeAdapter` + `loadSeqRef` + four
+  // `setState` sinks. Keyed on the documentId, so an Interact↔Extract toggle over
+  // the same doc reads the cache instead of re-running the chain; TanStack drops
+  // stale results (no manual load-sequence guard). Placeholder ids / failures →
+  // empty, so the manifest fallback still applies.
   const liveDocId = primaryDocumentIdFromScope(scope);
-  const { getDocument, getDocumentExtract } = useDocumentsContext();
-  const [liveSchema, setLiveSchema] = useState<ExtractionSchemaDef | null>(null);
-  const [liveValues, setLiveValues] = useState<Record<string, string | number | boolean | null>>({});
-  const [liveGeometry, setLiveGeometry] = useState<Map<string, FieldRegion[]>>(new Map());
-  // Monotonic load sequence: each scope-identity change bumps it; a resumed
-  // async load from a stale scope checks the sequence before committing state,
-  // so a slow prior load can't overwrite the current scope's data
-  // (`useScopeAdapter` has no cleanup hook — the sequence is the cancellation
-  // mechanism).
-  const loadSeqRef = useRef(0);
-  useScopeAdapter(scope, (nextScope) => {
-    const loadSeq = ++loadSeqRef.current;
-    // Reset the prior scope's live data so a re-scope doesn't strand stale
-    // schema/values while the next load resolves.
-    setLiveSchema(null);
-    setLiveValues({});
-    setLiveGeometry(new Map());
-    const docId = primaryDocumentIdFromScope(nextScope);
-    // Skip placeholder ids (BYO / fixture) — the manifest fallback handles them.
-    if (!docId || !isResolvedDocumentId(docId)) return;
-    const isStale = () => loadSeqRef.current !== loadSeq;
-    void (async () => {
-      try {
-        const doc = await getDocument(docId);
-        if (isStale()) return;
-        const workflowId = (doc.response?.filter as Record<string, unknown> | undefined)?.workflow_id;
-        if (typeof workflowId !== "string") return;
-        const wf = await api.workflow.getGroundXWorkflow(workflowId);
-        const live = workflowToSchema(wf.workflow);
-        if (isStale() || !live) return;
-        setLiveSchema(live);
-        const ex = await getDocumentExtract(docId);
-        if (isStale() || !ex.response) return;
-        const values = extractToValues(ex.response as Record<string, unknown>, live);
-        setLiveValues(values);
-        const queries = live.categories.flatMap((cat) =>
-          cat.fields
-            .filter((f) => f.id in values)
-            .map((f) => ({ fieldId: f.id, value: values[f.id], label: f.name })),
-        );
-        const geos = await api.extract.fetchFieldGeometry(
-          docId,
-          queries.map(({ value, label }) => ({ value, label })),
-        );
-        if (isStale()) return;
-        const geoMap = new Map<string, FieldRegion[]>();
-        queries.forEach((q, i) => {
-          const g = geos[i];
-          if (g && g.length) geoMap.set(q.fieldId, g);
-        });
-        setLiveGeometry(geoMap);
-      } catch {
-        /* fall back to the manifest schema */
-      }
-    })();
-  });
+  const {
+    schema: liveSchema,
+    root: liveRoot,
+    entries: liveEntries,
+    geometry: liveGeometry,
+  } = useExtractWorkbench(liveDocId ?? "");
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const templateIdRef = useRef<string | null>(null);
@@ -583,32 +480,30 @@ export const Extract: FC<ExtractProps> = ({
     })();
   }, [api.template, session?.gate, schema, overlay, orchestrator, appendAgentMessage, commitDraftTemplate]);
 
-  const valuesByFieldId = useMemo(() => {
-    if (liveSchema) {
-      // WF-12 live values + WF-05 X-Ray geometry → ExtractedFieldValue map.
-      return liveValuesToFieldValues(liveDocId ?? "", liveValues, liveGeometry);
+  // analyze-and-chat-ux §2.2 — the render source is the OUTPUT-FIRST instance
+  // tree: live → the workbench's tree + per-instance-path geometry; no live doc
+  // → a degenerate single-instance tree from the manifest fixtures (no
+  // geometry — fixture citations carry no boxes). Same recursive render both
+  // ways. (The old F4 "land on the first field's provenance" effect died with
+  // the detail card; focus now preselects the matching tab in InstanceFields.)
+  const displayData = useMemo(() => {
+    if (liveSchema && liveRoot) {
+      return { root: liveRoot, geometry: liveGeometry, pages: undefined };
     }
-    const map = new Map<string, ExtractedFieldValue>();
-    for (const v of scenario?.manifest.sampleExtractionValues ?? []) {
-      map.set(v.fieldId, v);
+    const base = scenario?.manifest.extractionSchema;
+    if (base) {
+      const { root, pages } = manifestToInstances(base, scenario?.manifest.sampleExtractionValues ?? []);
+      return { root, geometry: new Map<string, FieldRegion[]>(), pages };
     }
-    return map;
-  }, [scenario, liveSchema, liveValues, liveGeometry, liveDocId]);
+    return null;
+  }, [liveSchema, liveRoot, liveGeometry, scenario]);
 
-  // standardized-viewer-control — when the user ENTERS the workbench already
-  // focused on a category (a pick-a-view pill / `showExtract` intent carrying
-  // `focusedCategoryId` from another view), land them on that category's first
-  // field provenance (the F4-shape landing) — once, when the schema first loads
-  // for that focus, until they navigate. Keyed on `schema` only (not the prop)
-  // so a LIVE re-focus of an already-shown workbench doesn't surprise-open the
-  // provenance panel; it just re-scopes the fields.
-  useEffect(() => {
-    if (!focusedCategoryIdProp || !schema || selectedFieldId !== null) return;
-    const category = schema.categories.find((c) => c.id === focusedCategoryIdProp);
-    const firstField = category?.fields[0];
-    if (firstField) selectField(firstField.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema]);
+  // SchemaView (design surface) consumes a flat per-field sample-value list —
+  // it is the LABEL editor, so first-instance samples are its semantic.
+  const schemaViewValues = useMemo<ExtractedFieldValue[]>(() => {
+    if (liveSchema) return entriesToFieldValues(liveDocId ?? "", liveEntries, liveGeometry);
+    return scenario?.manifest.sampleExtractionValues ?? [];
+  }, [liveSchema, liveEntries, liveGeometry, liveDocId, scenario]);
 
   // On F3a entry, auto-pin the scope's primary document. Idempotent. (The
   // focused category is no longer seeded here — focus lives on the viewer step
@@ -660,35 +555,24 @@ export const Extract: FC<ExtractProps> = ({
     schema.categories[0]?.id ??
     null;
 
-  const allFields = schema.categories.flatMap((c) => c.fields);
-  const selectedField = selectedFieldId ? allFields.find((f) => f.id === selectedFieldId) ?? null : null;
-  const selectedValue = selectedField ? valuesByFieldId.get(selectedField.id) : undefined;
-  const selectedCitations = selectedValue?.citations ?? [];
-  const activeCitation =
-    (selectedCitation && selectedCitations.find((c) => sameCitation(c, selectedCitation))) ??
-    selectedCitations[0] ??
-    null;
+  // Hover wins while active; otherwise the pinned path holds the highlight
+  // (§3.2/§3.2b). Regions are per instance path, so meter 2's usage lights its
+  // own box, not meter 1's. Manifest fixtures have pages but no boxes → page
+  // jump only.
+  const activeFieldPath = hoverPath ?? pinnedPath;
+  const activeRegions = activeFieldPath
+    ? displayData?.geometry.get(activeFieldPath) ?? null
+    : null;
+  const activeTargetPage =
+    activeRegions?.[0]?.page ??
+    (activeFieldPath ? displayData?.pages?.get(activeFieldPath) : undefined);
 
   const supportsJsonRender = scenario?.supportsJsonRender ?? false;
 
+  // Tree-shaped JSON: the schema-visible slice of the extraction output in its
+  // own recursive shape (§2.2 — replaces the flat category projection).
   const jsonOutput = JSON.stringify(
-    {
-      schemaId: schema.id,
-      name: schema.name,
-      categories: schema.categories.map((category) => ({
-        id: category.id,
-        type: category.type,
-        fields: category.fields.map((field) => {
-          const value = valuesByFieldId.get(field.id);
-          return {
-            id: field.id,
-            type: field.type,
-            value: value?.value ?? null,
-            citations: citationsForJson(value?.citations),
-          };
-        }),
-      })),
-    },
+    displayData ? instancesToJson(displayData.root) : {},
     null,
     2
   );
@@ -869,7 +753,7 @@ export const Extract: FC<ExtractProps> = ({
         <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
           <SchemaView
             schema={schema}
-            values={Array.from(valuesByFieldId.values())}
+            values={schemaViewValues}
             focusedCategoryId={focusedCategoryId}
           />
         </Box>
@@ -982,11 +866,16 @@ export const Extract: FC<ExtractProps> = ({
               <PdfViewerWidget
                 scope={scope}
                 role={role}
-                targetPage={activeCitation?.page ?? undefined}
-                highlightBbox={activeCitation?.bbox ?? null}
-                highlightTier={activeCitation?.tier}
-                // multi-region-citations P1.3b — light EVERY place the field value appears.
-                highlightRegions={activeCitation ? citationRegions(activeCitation) : undefined}
+                targetPage={activeTargetPage ?? undefined}
+                highlightBbox={activeRegions?.[0]?.bbox ?? null}
+                highlightTier={activeRegions ? "paraphrase" : undefined}
+                // multi-region-citations P1.3b — light EVERY place the hovered/
+                // pinned field instance's value appears (§3.2).
+                highlightRegions={
+                  activeRegions
+                    ? activeRegions.map((r) => ({ page: r.page, bbox: r.bbox, tier: "paraphrase" as const }))
+                    : undefined
+                }
               />
             ) : (
               <Stack spacing={1} sx={{ p: 2 }}>
@@ -1004,7 +893,6 @@ export const Extract: FC<ExtractProps> = ({
 
             {useSideBySide || activePane === "fields" ? (
               <Box
-                ref={fieldsScrollRef}
                 data-testid="extract-fields-scroll"
                 sx={{
                   // Side-by-side: schema gets a slightly larger share than the
@@ -1012,405 +900,62 @@ export const Extract: FC<ExtractProps> = ({
                   flex: useSideBySide ? "1.2 1 0" : 1,
                   minWidth: 0,
                   minHeight: 0,
-                  // This is the SOLE scroll container for both the fields list
-                  // and the field detail — a plain block (not a flex column) so
-                  // tall block children overflow it and scroll here rather than
-                  // in an inner region. Because this node PERSISTS across the
-                  // list↔detail toggle, its scroll offset is preserved/restored
-                  // (see `fieldsScrollRef` save/restore). The inner panels
-                  // intentionally do NOT set their own overflow.
+                  // The SOLE scroll container for the recursive fields tree — a
+                  // plain block so tall children scroll here, not in an inner
+                  // region. (The list↔detail scroll save/restore died with the
+                  // detail card, §3.1.)
                   overflow: "auto",
                 }}
               >
-          {selectedField ? (
-            <Box data-testid="field-provenance-panel" sx={{ p: 1 }}>
-              <Stack
-                data-testid="extract-breadcrumb"
-                direction="row"
-                spacing={1}
-                alignItems="center"
-                sx={{ mb: 1.5, fontSize: FONT_SIZE_LABEL, color: NAVY }}
-              >
-                <Box
-                  component="button"
-                  type="button"
-                  data-testid="extract-breadcrumb-collapse"
-                  onClick={() => selectField(null)}
-                  aria-label="Collapse to all fields"
-                  sx={{
-                    border: "none",
-                    background: "none",
-                    color: NAVY,
-                    fontFamily: "inherit",
-                    fontSize: FONT_SIZE_LABEL,
-                    fontWeight: FONT_WEIGHT_LABEL,
-                    cursor: "pointer",
-                    padding: 0,
-                    "&:hover": { textDecoration: "underline" },
-                  }}
-                >
-                  ▴ ← all fields
-                </Box>
-                <Box component="span" sx={{ color: MUTED_ON_LIGHT }}>›</Box>
-                <Box component="span" sx={{ fontFamily: "monospace" }}>
-                  {schema.categories.find((c) => c.fields.some((f) => f.id === selectedField.id))?.name ?? "—"}
-                </Box>
-                <Box component="span" sx={{ color: MUTED_ON_LIGHT }}>›</Box>
-                <Box component="span" sx={{ fontFamily: "monospace", fontWeight: FONT_WEIGHT_HEADLINE }}>
-                  {selectedField.id}
-                </Box>
-              </Stack>
-
-              <Stack spacing={2.25}>
-                <Box
-                  sx={{
-                    p: 2,
-                    borderRadius: BORDER_RADIUS_CARD,
-                    backgroundColor: alpha(NAVY, 0.04),
-                    border: `1px solid ${alpha(NAVY, 0.08)}`,
-                  }}
-                >
-                  <Typography sx={detailLabelSx}>FIELD</Typography>
-                  <Typography
-                    sx={{
-                      fontFamily: "monospace",
-                      fontSize: FONT_SIZE_LABEL,
-                      color: MUTED_ON_LIGHT,
-                      mt: 0.75,
-                    }}
-                  >
-                    {selectedField.id}
-                  </Typography>
-                  <Typography
-                    sx={{
-                      color: NAVY,
-                      fontWeight: FONT_WEIGHT_HEADLINE,
-                      fontFamily: "monospace",
-                      fontSize: "1.25rem",
-                      lineHeight: 1.3,
-                      mt: 0.25,
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {selectedValue?.value === undefined || selectedValue?.value === null
-                      ? "—"
-                      : String(selectedValue.value)}
-                  </Typography>
-                  <Typography sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, mt: 0.5 }}>
-                    {selectedField.name} · {selectedField.type}
-                  </Typography>
-                </Box>
-
-                <Box>
-                  <Typography sx={detailLabelSx}>SOURCE</Typography>
-                  <Stack spacing={0.75} sx={{ mt: 0.75 }}>
-                    {(selectedValue?.citations ?? []).map((c, idx) => (
-                      <Box key={idx}>
-                        <Box
-                          component="span"
-                          sx={{
-                            display: "inline-block",
-                            px: 1,
-                            py: 0.25,
-                            borderRadius: BORDER_RADIUS_PILL,
-                            backgroundColor: alpha(CYAN, 0.22),
-                            border: `1px solid ${alpha(CYAN, 0.5)}`,
-                            color: NAVY,
-                            fontSize: FONT_SIZE_LABEL,
-                            fontWeight: FONT_WEIGHT_LABEL,
-                          }}
-                        >
-                          page {c.page}
-                        </Box>
-                        {c.snippet ? (
-                          <Typography
-                            sx={{
-                              mt: 0.5,
-                              pl: 1.25,
-                              borderLeft: `2px solid ${alpha(CYAN, 0.5)}`,
-                              color: BODY_TEXT,
-                              fontSize: FONT_SIZE_CAPTION,
-                              fontStyle: "italic",
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            “{c.snippet.trim().slice(0, 90)}”
-                          </Typography>
-                        ) : null}
-                      </Box>
-                    ))}
-                    {(selectedValue?.citations ?? []).length === 0 ? (
-                      <Typography sx={{ color: MUTED_ON_LIGHT, fontSize: FONT_SIZE_CAPTION }}>
-                        No source citations on this field.
-                      </Typography>
-                    ) : null}
-                  </Stack>
-                </Box>
-
-                <Box>
-                  <Typography sx={detailLabelSx}>WHY MATCHED</Typography>
-                  <Typography sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, lineHeight: 1.5, mt: 0.75 }}>
-                    {selectedField.description}
-                  </Typography>
-                </Box>
-
-                <Box>
-                  <Typography sx={detailLabelSx}>CONFIDENCE</Typography>
-                  <Box
-                    component="span"
-                    sx={{
-                      display: "inline-block",
-                      mt: 0.75,
-                      px: 1,
-                      py: 0.25,
-                      borderRadius: BORDER_RADIUS_PILL,
-                      backgroundColor: alpha(NAVY, 0.06),
-                      color: MUTED_ON_LIGHT,
-                      fontSize: FONT_SIZE_LABEL,
-                      fontWeight: FONT_WEIGHT_LABEL,
-                    }}
-                  >
-                    Not scored yet
-                  </Box>
-                </Box>
-              </Stack>
+          <Box data-testid="extract-fields-panel" sx={{ p: 1 }}>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                mb: 1.5,
+                borderBottom: `1px solid ${BORDER}`,
+                pb: 0.75,
+              }}
+            >
+              <Box sx={{ flex: 1 }} />
+              <FieldsPanelMenu scenarioId={scenarioId} />
             </Box>
-          ) : (
-            <Box data-testid="extract-fields-panel">
+            {supportsJsonRender && renderMode === "json" ? (
               <Box
+                component="pre"
+                data-testid="extract-json"
                 sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 1,
-                  mb: 1.5,
-                  borderBottom: `1px solid ${BORDER}`,
-                  pb: 0.75,
+                  fontFamily: "monospace",
+                  fontSize: FONT_SIZE_LABEL,
+                  backgroundColor: WHITE,
+                  border: `1px solid ${BORDER}`,
+                  borderRadius: BORDER_RADIUS_2X,
+                  p: 2,
+                  m: 0,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  color: NAVY,
                 }}
               >
-                {!supportsJsonRender && schema.categories.length > 1 ? (
-                  <Box
-                    data-testid="extract-category-tabs"
-                    sx={{
-                      display: "flex",
-                      gap: 0.5,
-                      // Wrap to a second row when genuinely narrow (rare now that
-                      // a too-narrow canvas switches to the single-pane toggle).
-                      // Never a horizontal scrollbar — that's worse UX than a wrap.
-                      flexWrap: "wrap",
-                      rowGap: 0.5,
-                      flex: 1,
-                      minWidth: 0,
-                    }}
-                  >
-                    {schema.categories.map((category) => (
-                      <Box
-                        key={category.id}
-                        role="button"
-                        tabIndex={0}
-                        data-testid={`extract-category-tab-${category.id}`}
-                        onClick={() => {
-                          const target = document.querySelector(`[aria-label="${category.name}"]`);
-                          if (target && "scrollIntoView" in target) {
-                            (target as HTMLElement).scrollIntoView({ behavior: "smooth", block: "start" });
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            (event.target as HTMLElement).click();
-                          }
-                        }}
-                        sx={{
-                          px: 1.25,
-                          py: 0.5,
-                          borderRadius: BORDER_RADIUS_PILL,
-                          border: `1px solid ${alpha(NAVY, 0.18)}`,
-                          backgroundColor: WHITE,
-                          cursor: "pointer",
-                          color: NAVY,
-                          fontSize: FONT_SIZE_LABEL,
-                          fontWeight: FONT_WEIGHT_LABEL,
-                          whiteSpace: "nowrap",
-                          "&:hover": { backgroundColor: alpha(GREEN, 0.08) },
-                        }}
-                      >
-                        <Box component="span" sx={{ fontFamily: "monospace" }}>{category.name}</Box>
-                        <Box
-                          component="span"
-                          sx={{ color: MUTED_ON_LIGHT, ml: 0.75, fontFamily: "monospace" }}
-                        >
-                          · {category.fields.length}
-                        </Box>
-                      </Box>
-                    ))}
-                  </Box>
-                ) : (
-                  <Box sx={{ flex: 1 }} />
-                )}
-                <FieldsPanelMenu scenarioId={scenarioId} />
+                {jsonOutput}
               </Box>
-              {supportsJsonRender && renderMode === "json" ? (
-                <Box
-                  component="pre"
-                  data-testid="extract-json"
-                  sx={{
-                    fontFamily: "monospace",
-                    fontSize: FONT_SIZE_LABEL,
-                    backgroundColor: WHITE,
-                    border: `1px solid ${BORDER}`,
-                    borderRadius: BORDER_RADIUS_2X,
-                    p: 2,
-                    m: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    color: NAVY,
-                  }}
-                >
-                  {jsonOutput}
-                </Box>
-              ) : null}
-              {!supportsJsonRender || renderMode === "table" ? schema.categories.map((category) => (
-                <Card key={category.id} sx={{ mb: 2, p: 2 }} aria-label={category.name}>
-                  <Typography variant="overline" sx={{ color: NAVY, fontWeight: FONT_WEIGHT_LABEL }}>
-                    {category.name}
-                  </Typography>
-                  <Stack spacing={1} sx={{ mt: 1.5 }}>
-                    {category.fields.map((field) => {
-                      const extracted = valuesByFieldId.get(field.id);
-                      const value = extracted?.value;
-                      const citations = extracted?.citations ?? [];
-                      return (
-                        <Box
-                          key={field.id}
-                          tabIndex={0}
-                          aria-label={`Inspect field: ${field.name}`}
-                          data-testid={`field-row-${field.id}`}
-                          onMouseEnter={() => {
-                            track("extract.field_hovered", {
-                              fieldId: field.id,
-                              fieldName: field.name,
-                            });
-                          }}
-                          onClick={() => selectField(field.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              selectField(field.id);
-                            }
-                          }}
-                          sx={{
-                            // Key-value CARD: a header row (field id + its value)
-                            // stacked OVER the full-width description. The value
-                            // never shares a column with the description, so the
-                            // description always gets the full width and is never
-                            // truncated. The value wraps below the id only when the
-                            // two genuinely can't share a line.
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 0.5,
-                            p: 1.5,
-                            borderRadius: BORDER_RADIUS,
-                            cursor: "pointer",
-                            backgroundColor: selectedFieldId === field.id ? alpha(GREEN, 0.12) : "transparent",
-                            "&:hover": { backgroundColor: alpha(GREEN, 0.08) },
-                          }}
-                        >
-                          <Box
-                            sx={{
-                              display: "flex",
-                              flexWrap: "wrap",
-                              alignItems: "baseline",
-                              columnGap: 2,
-                              rowGap: 0.5,
-                            }}
-                          >
-                            <Typography
-                              variant="body2"
-                              data-testid={`extract-field-id-${field.id}`}
-                              sx={{
-                                color: NAVY,
-                                fontWeight: FONT_WEIGHT_HEADLINE,
-                                fontFamily: "monospace",
-                                // Field ids are unbreakable snake_case tokens; allow
-                                // them to wrap as a last resort rather than overflow.
-                                overflowWrap: "anywhere",
-                                minWidth: 0,
-                              }}
-                            >
-                              {field.id}
-                            </Typography>
-                            <Stack
-                              direction="row"
-                              spacing={0.75}
-                              alignItems="center"
-                              sx={{
-                                flexShrink: 0,
-                                ml: "auto",
-                                flexWrap: "wrap",
-                                justifyContent: "flex-end",
-                                rowGap: 0.5,
-                              }}
-                            >
-                              <Box
-                                sx={{
-                                  px: 1,
-                                  py: 0.5,
-                                  borderRadius: BORDER_RADIUS_SM,
-                                  backgroundColor: value === undefined || value === null ? "transparent" : alpha(NAVY, 0.05),
-                                  fontFamily: "monospace",
-                                  fontSize: FONT_SIZE_LABEL,
-                                  fontWeight: FONT_WEIGHT_HEADLINE,
-                                  color: NAVY,
-                                  textAlign: "right",
-                                  // Long values wrap inside the chip rather than
-                                  // forcing the row wider or truncating.
-                                  wordBreak: "break-word",
-                                  overflowWrap: "anywhere",
-                                }}
-                              >
-                                {value === undefined || value === null ? "—" : String(value)}
-                              </Box>
-                              {citations.length > 0 && (
-                                <Stack direction="row" spacing={0.5}>
-                                  {citations.map((c, idx) => (
-                                    <Box
-                                      key={`${field.id}-${idx}`}
-                                      component="span"
-                                      onClick={(event) => event.stopPropagation()}
-                                      onKeyDown={(event) => event.stopPropagation()}
-                                    >
-                                      <CiteChip
-                                        citation={c}
-                                        index={idx + 1}
-                                        // inline-footnote-citations — the same footnote marker
-                                        // used in chat/report, app-wide (no Extract-specific chip).
-                                        variant="footnote"
-                                        onActivate={(citation) => handleFieldCitationActivate(field.id, citation)}
-                                      />
-                                    </Box>
-                                  ))}
-                                </Stack>
-                              )}
-                            </Stack>
-                          </Box>
-                          <Typography
-                            variant="caption"
-                            data-testid={`extract-field-desc-${field.id}`}
-                            sx={{ color: MUTED_ON_LIGHT }}
-                          >
-                            <Box component="span" sx={{ color: BODY_TEXT, fontWeight: FONT_WEIGHT_LABEL }}>
-                              {field.name}
-                            </Box>{" "}
-                            — {field.description}
-                          </Typography>
-                        </Box>
-                      );
-                    })}
-                  </Stack>
-                </Card>
-              )) : null}
-            </Box>
-          )}
+            ) : displayData ? (
+              // analyze-and-chat-ux §2.2 — the recursive output-first render.
+              // Every instance renders (no [0] flatten); hovering/focusing a row
+              // lights its own source regions on the embedded PDF; clicking pins.
+              <InstanceFields
+                root={displayData.root}
+                schema={schema}
+                geometry={displayData.geometry}
+                pages={displayData.pages}
+                pinnedPath={pinnedPath}
+                onFieldHover={handleFieldHover}
+                onFieldPin={handleFieldPin}
+                focusedGroupId={focusedCategoryId}
+              />
+            ) : null}
+          </Box>
               </Box>
             ) : null}
           </Box>

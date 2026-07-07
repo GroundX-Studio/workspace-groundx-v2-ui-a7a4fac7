@@ -28,6 +28,7 @@ import { GxThemeProvider } from "@/ThemeProvider";
 import type { ApiOverrides } from "@/test/makeFakeApi";
 import { utilityTestScenario } from "@/test/scenarioFixtures";
 import { withApiProvider } from "@/test/withApiProvider";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ScenarioConfig } from "@/types/scenarios";
 
 import { WorkspacesView, ProjectsView } from "./ScopedConversationShell";
@@ -60,7 +61,9 @@ function Harness({
   // production PdfViewerWidget can mount via <ScopedCanvas> — mirrors
   // renderWithOnboardingProviders, which is how the onboarding shell test
   // exercises the same viewer mount path.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return withApiProvider(
+    <QueryClientProvider client={queryClient}>
     <GxThemeProvider>
       <LoadingProvider>
         <MessageBarProvider>
@@ -84,7 +87,8 @@ function Harness({
           </AppModeProvider>
         </MessageBarProvider>
       </LoadingProvider>
-    </GxThemeProvider>,
+    </GxThemeProvider>
+    </QueryClientProvider>,
     api,
   );
 }

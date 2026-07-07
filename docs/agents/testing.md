@@ -226,6 +226,10 @@ Gotchas (all hit during `2026-06-02-e2e-live-data-realignment`):
 - **Canvas swap on gate-open:** `onboarding-frame-f3` is the persistent canvas
   WRAPPER; the value-prop panel renders inside it, so assert the sample content
   (`extract-workbench`) hides, not the wrapper.
-- **Provenance peek** (`field-provenance-panel`) lists citations as "page N"
-  source pills, not `cite-chip-*` (the panel + field-row read one
-  `valuesByFieldId` source).
+- **Provenance is hover/pin, not a panel** (analyze-and-chat-ux §3.1 retired
+  `field-provenance-panel`): a field-instance row (`field-row-<instance-path>`,
+  e.g. `field-row-meters/0/usage_amount`) shows a `field-source-chip` ("p.N");
+  hover/focus lights that instance's regions on the embedded PDF, click PINS
+  (`data-target-page` on `pdf-viewer-widget`), second click unpins. Groups are
+  `instance-tab-*` tab bars with `instance-pill-*` per instance (recursive —
+  see `InstanceFields.test.tsx`).

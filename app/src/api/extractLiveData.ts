@@ -1,18 +1,22 @@
 /**
- * WF-12 — turn live GroundX workflow + extract responses into the shapes the
- * F3 Extract UI consumes, replacing the scenario-manifest fixtures.
+ * WF-12 — turn live GroundX workflow responses into the label dictionary the
+ * Extract UI consumes (analyze-and-chat-ux: the render is OUTPUT-FIRST — see
+ * `extractInstances.ts` for the structural walk; this module owns the schema
+ * label join + the flat first-instance sample projection for the design
+ * surface).
  *
  *   schema  ← `getGroundXWorkflow(filter.workflow_id)` → `workflowToSchema`
- *   values  ← `getGroundXDocumentExtract(documentId)`  → `extractToValues`
+ *   samples ← instance entries (§1.4) → `entriesToFieldValues`
  *
  * Workflow shape (verified live 2026-05-29, workflow 9910308e):
- *   workflow.extract.{statement|meters|charges}.fields.<id>.prompt =
+ *   workflow.extract.<group>.fields.<id>.prompt =
  *     { description, identifiers?, instructions, type, format?, default? }
- * The three group keys map 1:1 to `SchemaCategoryDef.type`.
+ * Groups are open-ended (§1.2) — every group yields a category, no allow-list.
  */
 
 import { citationRegions, type Citation, type ExtractedFieldValue } from "@groundx/shared";
 
+import type { InstanceFieldEntry } from "@/api/extractInstances";
 import type { FieldRegion } from "@/api/fieldGeometry";
 import type { ExtractionSchemaDef, SchemaCategoryDef, SchemaFieldDef } from "@/types/scenarios";
 
@@ -34,8 +38,6 @@ export interface GroundXWorkflowDefinition {
   name?: string;
   extract?: Record<string, unknown>;
 }
-
-const CATEGORY_ORDER: SchemaCategoryDef["type"][] = ["statement", "meters", "charges"];
 
 /** snake_case field id → sentence-case label ("amount_due" → "Amount due"). */
 export function humanizeFieldId(id: string): string {
@@ -87,15 +89,20 @@ export function workflowToSchema(
   const extract = (workflow.extract ?? null) as Loose | null;
   if (!extract || typeof extract !== "object") return null;
 
+  // analyze-and-chat-ux §1.2 — iterate EVERY group in the workflow's extract
+  // (not a fixed statement/meters/charges allow-list). The schema is a label
+  // dictionary joined to the output BY NAME, so an arbitrary-named group must
+  // yield its field defs too. Object key order preserves the workflow's own
+  // group order (statement → meters → charges for the demo).
   const categories: SchemaCategoryDef[] = [];
-  for (const type of CATEGORY_ORDER) {
-    const group = extract[type] as Loose | undefined;
+  for (const [groupId, groupRaw] of Object.entries(extract)) {
+    const group = groupRaw as Loose | undefined;
     if (!group || typeof group !== "object") continue;
     const fieldsObj = (group.fields ?? {}) as Loose;
     const fields: SchemaFieldDef[] = Object.entries(fieldsObj)
       .filter(([, f]) => f && typeof f === "object")
       .map(([id, f]) => fieldFromPrompt(id, ((f as Loose).prompt ?? {}) as Loose));
-    if (fields.length) categories.push({ id: type, type, name: humanizeFieldId(type), fields });
+    if (fields.length) categories.push({ id: groupId, type: groupId, name: humanizeFieldId(groupId), fields });
   }
   if (!categories.length) return null;
 
@@ -104,50 +111,15 @@ export function workflowToSchema(
   return { id: workflowId, name, categories };
 }
 
-/**
- * Map a live `getDocumentExtract` response to `{ fieldId → value }`.
- * Statement fields are top-level keys; meters/charges are arrays — for the
- * single-value UI we surface the first element's value (multi-row rendering
- * is a follow-up). Returns a plain object keyed by field id.
- */
-export function extractToValues(
-  extract: Loose | null | undefined,
-  schema: ExtractionSchemaDef | null,
-): Record<string, string | number | boolean | null> {
-  const out: Record<string, string | number | boolean | null> = {};
-  if (!extract || typeof extract !== "object" || !schema) return out;
+export type ConfidenceBucket = "Low" | "Medium" | "High";
 
-  const firstArrObj = (obj: Loose | undefined, key: string): Loose | undefined => {
-    if (!obj) return undefined;
-    const arr = obj[key];
-    return Array.isArray(arr) && arr[0] && typeof arr[0] === "object" ? (arr[0] as Loose) : undefined;
-  };
-  const meter0 = firstArrObj(extract, "meters");
-  const charge0 = firstArrObj(extract, "charges") ?? firstArrObj(meter0, "meter_charges");
-
-  const scalar = (v: unknown): string | number | boolean | null =>
-    v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean" ? (v ?? null) : null;
-
-  for (const cat of schema.categories) {
-    const source: Loose | undefined =
-      cat.type === "statement" ? extract : cat.type === "meters" ? meter0 : charge0;
-    if (!source) continue;
-    for (const field of cat.fields) {
-      if (field.id in source) out[field.id] = scalar(source[field.id]);
-    }
-  }
-  return out;
+/** Bucket a 0–1 confidence into a Low/Medium/High band for display. */
+export function confidenceBucket(confidence: number): ConfidenceBucket {
+  if (confidence >= 0.8) return "High";
+  if (confidence >= 0.5) return "Medium";
+  return "Low";
 }
 
-/**
- * Build the `fieldId → ExtractedFieldValue` map for the LIVE extract path:
- * each live value gets its X-Ray-resolved source region attached as a
- * `Citation` (the extract response carries no geometry; WF-05 resolves it
- * from the X-Ray). Lifting this out of the widget keeps the `documentId:`
- * citation literal out of the widget's `.tsx` — the widget contract bans raw
- * id PROPS, and a regex can't tell a prop annotation from an object-literal
- * key, so the construction lives in this `.ts` helper.
- */
 /**
  * Project a field's citations to the `{ documentId, page }` shape the Extract
  * workbench's JSON render mode emits. Lifted out of the widget for the same
@@ -165,17 +137,24 @@ export function citationsForJson(
   }));
 }
 
-export function liveValuesToFieldValues(
+/**
+ * Project instance-path entries (§1.4) to a flat FIRST-INSTANCE
+ * `ExtractedFieldValue[]` for the schema-design surface — the label editor
+ * shows one sample value per field def, so the first instance is its
+ * semantic. Each sample carries its instance's X-Ray regions as one
+ * multi-region `Citation` (chunk-level → `paraphrase`; legacy page/bbox alias
+ * = region[0]). Lives in this `.ts` helper (not the widget `.tsx`) because the
+ * widget contract bans raw `documentId:` literals in widget files.
+ */
+export function entriesToFieldValues(
   documentId: string,
-  liveValues: Record<string, string | number | boolean | null>,
-  liveGeometry: ReadonlyMap<string, FieldRegion[]>,
-): Map<string, ExtractedFieldValue> {
-  const map = new Map<string, ExtractedFieldValue>();
-  for (const [fieldId, value] of Object.entries(liveValues)) {
-    // multi-region-citations P1.3b — a field's value can appear in several
-    // chunks; carry EVERY region so the grid's source highlight lights all of
-    // them (chunk-level → `paraphrase`). The legacy page/bbox alias = region[0].
-    const regions = liveGeometry.get(fieldId) ?? [];
+  entries: ReadonlyArray<InstanceFieldEntry>,
+  geometry: ReadonlyMap<string, FieldRegion[]>,
+): ExtractedFieldValue[] {
+  const seen = new Map<string, ExtractedFieldValue>();
+  for (const entry of entries) {
+    if (seen.has(entry.fieldId)) continue;
+    const regions = geometry.get(entry.path) ?? [];
     const citations: Citation[] = regions.length
       ? [
           {
@@ -187,7 +166,12 @@ export function liveValuesToFieldValues(
           },
         ]
       : [];
-    map.set(fieldId, { fieldId, value, citations });
+    seen.set(entry.fieldId, {
+      fieldId: entry.fieldId,
+      value: entry.value,
+      citations,
+      ...(entry.confidence != null ? { confidence: entry.confidence } : {}),
+    });
   }
-  return map;
+  return Array.from(seen.values());
 }

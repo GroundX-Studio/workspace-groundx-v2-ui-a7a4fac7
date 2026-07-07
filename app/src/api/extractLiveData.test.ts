@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { Workflow } from "@/api/entities/sdkTypes";
 
-import { extractToValues, humanizeFieldId, mapFieldType, workflowToSchema } from "./extractLiveData";
+import {
+  confidenceBucket,
+  entriesToFieldValues,
+  humanizeFieldId,
+  mapFieldType,
+  workflowToSchema,
+} from "./extractLiveData";
 import type { GroundXWorkflowDefinition } from "./extractLiveData";
 
 /**
@@ -64,6 +70,30 @@ describe("workflowToSchema (WF-12)", () => {
     expect(schema.categories.map((c) => c.type)).toEqual(["statement", "meters", "charges"]);
   });
 
+  it("emits label defs for an ARBITRARY-named group (anti-hardcode: not just statement/meters/charges)", () => {
+    // analyze-and-chat-ux §1.2 — the schema is a label dictionary joined to the
+    // output BY NAME; group NAMES are not a fixed allow-list. A loan/solar/any
+    // workflow with a group ∉ {statement,meters,charges} must still yield its
+    // field defs so the output-first render can label those fields.
+    const arbitrary: GroundXWorkflowDefinition = {
+      workflowId: "wf-arb",
+      name: "Arbitrary",
+      extract: {
+        assets: {
+          fields: {
+            serial_number: { prompt: { description: "the asset serial", type: "str" } },
+          },
+        },
+      },
+    };
+    const schema = workflowToSchema(arbitrary)!;
+    expect(schema).not.toBeNull();
+    const assets = schema.categories.find((c) => c.id === "assets");
+    expect(assets, "arbitrary group 'assets' must survive").toBeDefined();
+    expect(assets!.fields.map((f) => f.id)).toContain("serial_number");
+    expect(assets!.name).toBe("Assets");
+  });
+
   it("maps a field's prompt → SchemaFieldDef (name, type, description, identifiers, instructions)", () => {
     const schema = workflowToSchema(workflow)!;
     const statement = schema.categories.find((c) => c.type === "statement")!;
@@ -122,30 +152,51 @@ describe("mapFieldType / humanizeFieldId", () => {
   });
 });
 
-describe("extractToValues (WF-12)", () => {
-  const schema = workflowToSchema(workflow)!;
-  const extract = {
-    balance_payable: 7613.2,
-    payment_deadline: "2025-07-30",
-    addressee: "KWIK TRIP (1147)",
-    meters: [{ usage_amount: 60960, meter_charges: [{ line_amount: 2218.75 }] }],
-  };
+// (analyze-and-chat-ux §2.3 — `extractToValues`/`extractToConfidences` are
+// REPLACED by the output-first `extractToInstances` walk; its structural,
+// dict-unwrap, and confidence coverage lives in `extractInstances.test.ts`.)
 
-  it("maps statement fields from top-level keys", () => {
-    const v = extractToValues(extract, schema);
-    expect(v.balance_payable).toBe(7613.2);
-    expect(v.payment_deadline).toBe("2025-07-30");
-    expect(v.addressee).toBe("KWIK TRIP (1147)");
+describe("confidenceBucket (0–1 → Low/Medium/High)", () => {
+  it("High at ≥ 0.8", () => {
+    expect(confidenceBucket(0.94)).toBe("High");
+    expect(confidenceBucket(0.8)).toBe("High");
+  });
+  it("Medium in [0.5, 0.8)", () => {
+    expect(confidenceBucket(0.79)).toBe("Medium");
+    expect(confidenceBucket(0.5)).toBe("Medium");
+  });
+  it("Low below 0.5 (incl. 0)", () => {
+    expect(confidenceBucket(0.49)).toBe("Low");
+    expect(confidenceBucket(0)).toBe("Low");
+  });
+});
+
+describe("entriesToFieldValues — first-instance samples for the design surface (§2.3)", () => {
+  const entries = [
+    { path: "balance_payable", fieldId: "balance_payable", value: 7613.2, confidence: 0.94 },
+    { path: "addressee", fieldId: "addressee", value: "KWIK TRIP (1147)" },
+    { path: "meters/0/usage_amount", fieldId: "usage_amount", value: 60960 },
+    { path: "meters/1/usage_amount", fieldId: "usage_amount", value: 900 },
+  ];
+
+  it("keeps the FIRST instance per fieldId and attaches confidence only when present", () => {
+    const values = entriesToFieldValues("doc-1", entries, new Map());
+    const byId = new Map(values.map((v) => [v.fieldId, v]));
+    expect(byId.get("usage_amount")!.value).toBe(60960); // first instance wins
+    expect(values.filter((v) => v.fieldId === "usage_amount")).toHaveLength(1);
+    expect(byId.get("balance_payable")!.confidence).toBe(0.94);
+    expect("confidence" in byId.get("addressee")!).toBe(false);
   });
 
-  it("maps meter fields from the first meter and charge fields from nested meter_charges", () => {
-    const v = extractToValues(extract, schema);
-    expect(v.usage_amount).toBe(60960);
-    expect(v.line_amount).toBe(2218.75);
-  });
-
-  it("returns {} on empty input", () => {
-    expect(extractToValues(null, schema)).toEqual({});
-    expect(extractToValues(extract, null)).toEqual({});
+  it("attaches the entry's OWN instance regions as one multi-region citation", () => {
+    const geometry = new Map([
+      ["meters/0/usage_amount", [{ page: 2, bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.02 } }]],
+    ]);
+    const values = entriesToFieldValues("doc-1", entries, geometry);
+    const usage = values.find((v) => v.fieldId === "usage_amount")!;
+    expect(usage.citations).toHaveLength(1);
+    expect(usage.citations[0].page).toBe(2);
+    const noGeo = values.find((v) => v.fieldId === "addressee")!;
+    expect(noGeo.citations).toEqual([]);
   });
 });

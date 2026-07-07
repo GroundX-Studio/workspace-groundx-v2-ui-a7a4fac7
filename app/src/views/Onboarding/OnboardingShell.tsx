@@ -1097,6 +1097,10 @@ export const OnboardingShell: FC = () => {
         backgroundColor: WARM_OFFWHITE,
         overflow: "auto",
         p: 2,
+        // No right padding: let the chat scroll region (and its scrollbar) reach
+        // the pane's right edge — the scrollbar hugs the edge instead of floating
+        // 16px inside it. Content keeps its breathing room via the scroller's own pr.
+        pr: 0,
         display: "flex",
         flexDirection: "column",
         gap: 2,

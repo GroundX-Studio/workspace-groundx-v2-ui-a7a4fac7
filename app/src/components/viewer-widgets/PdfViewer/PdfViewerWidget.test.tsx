@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { ContentScope, WidgetRole } from "@groundx/shared";
 
@@ -39,16 +41,24 @@ import { PdfViewerWidget } from "./PdfViewerWidget";
 /** Single-doc scope helper — the canonical ScopedViewerWidget shape for one document. */
 const docScope = (id: string): ContentScope => ({ type: "documents", documentIds: [id] });
 
-const wrapper = ({ children }: { children: React.ReactNode }) => (
-  withApiProvider(
-    <LoadingProvider>
-      <MessageBarProvider>
-        <DocumentsProvider>{children}</DocumentsProvider>
-      </MessageBarProvider>
-    </LoadingProvider>,
+const wrapper = ({ children }: { children: React.ReactNode }) => {
+  // adopt-tanstack-query: the widget now reads via useQuery, so it needs a
+  // QueryClientProvider. Fresh client per tree (retry off, no cache carryover)
+  // keeps tests isolated + fast.
+  const [qc] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }),
+  );
+  return withApiProvider(
+    <QueryClientProvider client={qc}>
+      <LoadingProvider>
+        <MessageBarProvider>
+          <DocumentsProvider>{children}</DocumentsProvider>
+        </MessageBarProvider>
+      </LoadingProvider>
+    </QueryClientProvider>,
     { groundxDocuments: { getGroundXDocumentXray: getXrayMock } },
-  )
-);
+  );
+};
 
 const fakeXray = {
   fileName: "utility-bill-april-2026.pdf",

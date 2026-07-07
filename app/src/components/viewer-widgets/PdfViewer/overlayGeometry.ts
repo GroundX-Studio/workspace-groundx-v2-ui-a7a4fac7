@@ -62,12 +62,28 @@ export interface OverlayPxRect {
 /**
  * Map a 0–1 page-relative bbox to a px rect inside the contained content rect.
  * This is what places a citation highlight exactly over the cited region.
+ *
+ * `padPx` grows the rect outward by that many px on every side (default 0) so a
+ * highlight border doesn't sit right on the glyphs — the padded rect is clamped
+ * to the contained page so it never spills outside the image.
  */
-export function overlayPxRect(bbox: NormalizedBbox, content: ContainContentRect): OverlayPxRect {
-  return {
-    left: content.offsetX + bbox.x * content.width,
-    top: content.offsetY + bbox.y * content.height,
-    width: bbox.w * content.width,
-    height: bbox.h * content.height,
-  };
+export function overlayPxRect(
+  bbox: NormalizedBbox,
+  content: ContainContentRect,
+  padPx = 0,
+): OverlayPxRect {
+  const left = content.offsetX + bbox.x * content.width;
+  const top = content.offsetY + bbox.y * content.height;
+  const width = bbox.w * content.width;
+  const height = bbox.h * content.height;
+  if (!padPx) return { left, top, width, height };
+  const minX = content.offsetX;
+  const minY = content.offsetY;
+  const maxX = content.offsetX + content.width;
+  const maxY = content.offsetY + content.height;
+  const l = Math.max(minX, left - padPx);
+  const t = Math.max(minY, top - padPx);
+  const r = Math.min(maxX, left + width + padPx);
+  const b = Math.min(maxY, top + height + padPx);
+  return { left: l, top: t, width: r - l, height: b - t };
 }

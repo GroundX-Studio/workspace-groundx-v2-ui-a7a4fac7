@@ -1437,13 +1437,15 @@ export const schemaFieldDefSchema = z.object({
 export type SchemaFieldDef = z.infer<typeof schemaFieldDefSchema>;
 
 /**
- * A scenario-fixture schema category. `type` is the utility-specific enum the
- * legacy fixtures carry (NOT the free string the shared `templateCategorySchema`
- * uses) — this is the strict demo-fixture shape both sides must agree on.
+ * A scenario-fixture schema category. `type` is a FREE STRING (analyze-and-chat-ux
+ * §1.1) — the schema is a label dictionary joined to the extraction OUTPUT by field
+ * NAME, so group names are open-ended (loan/solar/any workflow group), not a fixed
+ * `statement|charges|meters` allow-list. The demo fixtures still carry those three
+ * values; they validate as strings. This matches the sibling `templateCategorySchema.type`.
  */
 export const schemaCategoryDefSchema = z.object({
   id: z.string(),
-  type: z.enum(["statement", "charges", "meters"]),
+  type: z.string(),
   name: z.string(),
   fields: z.array(schemaFieldDefSchema),
 });

@@ -20,14 +20,21 @@ close/back chrome.
 
 ## What it does
 
-The production **extraction workbench** — the live schema/values/geometry view
-packaged as a **ScopedViewerWidget** (PdfViewer · Extract · SmartReport ·
-Integrate). It loads the document's extraction schema + values from GroundX
-(getDocument → `filter.workflow_id` → getGroundXWorkflow → `workflowToSchema`;
-getDocumentExtract → `extractToValues`; field-source geometry via
-`fetchFieldGeometry`), renders the fields panel + a `<PdfViewerWidget>` source
-peek, and hosts the F3a Design surface (`<SchemaView>`) for inline schema edits
-+ Save.
+The production **extraction workbench** — the live extraction view packaged as
+a **ScopedViewerWidget** (PdfViewer · Extract · SmartReport · Integrate). The
+render is **output-first** (analyze-and-chat-ux): `useExtractWorkbench` (one
+TanStack `useQuery`) loads getDocument → `filter.workflow_id` →
+getGroundXWorkflow → `workflowToSchema` (a flat LABEL dictionary) →
+getDocumentExtract → `extractToInstances` (STRUCTURE from the output tree —
+statement scalars at root, `meters[]` each with nested `meter_charges`,
+`account_charges`; output keys with no schema field are hidden) → per-instance
+`fetchFieldGeometry` keyed by instance path. `<InstanceFields>` renders the
+tree recursively: each object level is a tab bar (scalars tab + one tab per
+array group), array groups show instance pills (labeled by an identifying
+field, else `#n`) — EVERY instance renders, no `[0]` flatten. Hovering/focusing
+a field row lights that instance's regions on the embedded `<PdfViewerWidget>`;
+clicking PINS the highlight (second click unpins). It also hosts the Design
+surface (`<SchemaView>`) for inline schema edits + Save.
 
 This is the SAME widget the authenticated experience uses (per
 `feedback_no_onboarding_duplicates`); `views/Onboarding/ExtractView.tsx` is now
@@ -57,10 +64,13 @@ Both `role` and `scope` are REQUIRED by the widget contract. No raw
 
 `scope: ContentScope` selects the document(s) the workbench extracts over. The
 primary `documentId` is `scope.documentIds[0]` (the single-doc case the demos
-use). `useScopeAdapter` re-runs the live schema/values/geometry load whenever
-the scope IDENTITY changes, with a monotonic load token guarding against a slow
-prior load committing stale state. A `bucket`/`group` scope (or a placeholder
-id) resolves to no live document and falls back to the manifest schema.
+use). The live load is ONE TanStack `useQuery` keyed by documentId
+(`useExtractWorkbench` — adopt-tanstack-query): a scope-identity change re-keys
+the query, stale results are dropped by the cache (no manual load token), and
+an Interact↔Extract toggle over the same doc reads the cache instead of
+refetching. A `bucket`/`group` scope (or a failed load) resolves to no live
+document and falls back to the manifest schema (rendered as a degenerate
+single-instance tree through the same recursive render).
 
 ## Locked affordances
 
@@ -77,8 +87,12 @@ id) resolves to no live document and falls back to the manifest schema.
 
 - **Save** — persists the merged (manifest + overlay) template, attaches it to
   the ingest step, and appends a chat agent message.
-- **Field click** — selects a field → the source `<PdfViewerWidget>` jumps to
-  the field's first-citation page + highlights its X-Ray-resolved region.
+- **Field hover/focus** — lights the hovered INSTANCE's X-Ray regions on the
+  embedded `<PdfViewerWidget>` (per-instance geometry); leave/blur clears.
+- **Field click** — PINS the highlight (stable target for keyboard/touch); a
+  second click unpins. In the stacked single-pane layout, pinning brings the
+  document pane forward. No detail card — the row carries id · value ·
+  confidence band (when scored) · `p.N` source chip · description inline.
 - **`↻` / `✎ edit schema`** — switches Results (f3) ↔ Design (f3a) via
   `advanceFrame`; `advance-to-f5` routes to Interact.
 
@@ -112,7 +126,13 @@ app declaration is metadata only.
 `Extract.test.tsx` covers the role + scope contract:
 
 1. Mounts for BOTH roles (`anonymous`, `member`); `data-role` reflects the prop.
-2. Renders the Utility manifest schema categories over a documents scope.
+2. Renders the Utility groups as instance tabs over a documents scope.
 3. The anon unlock banner / Save padlock is present for `anonymous`, absent for
    `member`.
-4. `useScopeAdapter` re-resolves when the scope IDENTITY changes.
+4. The keyed query re-resolves when the scope IDENTITY changes.
+5. Hover lights the hovered INSTANCE's own regions (§3.2); click pins across
+   mouse-leave, second click unpins (§3.2b) — no viewer navigation.
+
+`InstanceFields.test.tsx` covers the recursive render itself (tab bar per
+level, instance pills, per-instance nested groups, empty-group state, the
+anti-hardcode arbitrary-shape walk, hover/pin callbacks, source chip).

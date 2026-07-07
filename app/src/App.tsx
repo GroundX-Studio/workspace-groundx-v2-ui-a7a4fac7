@@ -1,8 +1,11 @@
 import { HelmetProvider } from "react-helmet-async";
 import { RouterProvider } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import type { FC, ReactNode } from "react";
 
 import { realApi, type Api } from "@/api/client";
+import { queryClient } from "@/api/queryClient";
+import type { QueryClient } from "@tanstack/react-query";
 import { ApiProvider } from "@/contexts/ApiContext";
 import { AuthProvider } from "@/contexts/AuthContext/AuthProvider";
 import { LoadingProvider } from "@/contexts/LoadingContext/LoadingContext";
@@ -35,9 +38,10 @@ import { router, ROUTER_FUTURE_FLAGS } from "@/router/router";
  * the helper had `DocumentsProvider`, this didn't. Lesson burned in
  * — keep the test helper aligned with this component.
  */
-export const AppProviders: FC<{ children: ReactNode; apiClient?: Api }> = ({
+export const AppProviders: FC<{ children: ReactNode; apiClient?: Api; queryClientOverride?: QueryClient }> = ({
   children,
   apiClient = realApi,
+  queryClientOverride,
 }) => (
   <ApiProvider value={apiClient}>
     {/* ApiProvider is the OUTERMOST provider (above the consumer providers):
@@ -46,7 +50,12 @@ export const AppProviders: FC<{ children: ReactNode; apiClient?: Api }> = ({
         inside it. Production wires the real client (`realApi`); tests inject
         `makeFakeApi` through the render harnesses. */}
     <AppErrorBoundary captureException={apiClient.telemetry.captureException}>
-      <GxThemeProvider>
+      {/* QueryClientProvider (adopt-tanstack-query): the app's server-state
+          layer. Inside the error boundary (so query errors are caught) and
+          above every data consumer. Tests pass a fresh client via
+          `queryClientOverride` for isolation; production uses the singleton. */}
+      <QueryClientProvider client={queryClientOverride ?? queryClient}>
+        <GxThemeProvider>
         {/* UR-03: global MotionConfig — honors OS `prefers-reduced-motion`
           for every descendant `motion.X`. When reduced is on, the
           default transition floor is 80 ms (linear). Per-component
@@ -84,6 +93,7 @@ export const AppProviders: FC<{ children: ReactNode; apiClient?: Api }> = ({
           </AnalyticsConsentProvider>
         </MotionRoot>
       </GxThemeProvider>
+      </QueryClientProvider>
     </AppErrorBoundary>
   </ApiProvider>
 );

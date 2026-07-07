@@ -45,4 +45,25 @@ describe("overlayPxRect — the citation-misplacement regression", () => {
     expect(r.width).toBeCloseTo(151.6, 0);
     expect(r.height).toBeCloseTo(6.9, 0);
   });
+
+  it("expands the rect by padPx on every side so the highlight doesn't crowd the text", () => {
+    const content = containContentRect(838, 763, 1700, 2200)!;
+    const bbox = { x: 0.2347, y: 0.6936, w: 0.2571, h: 0.0095 };
+    const base = overlayPxRect(bbox, content);
+    const padded = overlayPxRect(bbox, content, 4);
+    expect(padded.left).toBeCloseTo(base.left - 4, 5);
+    expect(padded.top).toBeCloseTo(base.top - 4, 5);
+    expect(padded.width).toBeCloseTo(base.width + 8, 5);
+    expect(padded.height).toBeCloseTo(base.height + 8, 5);
+  });
+
+  it("clamps the padded rect to the contained page (never outside the image)", () => {
+    const content = containContentRect(600, 800, 1000, 500)!; // offsetY 250, height 300
+    // bbox flush against the page's top-left and bottom-right corners.
+    const corner = overlayPxRect({ x: 0, y: 0, w: 1, h: 1 }, content, 10);
+    expect(corner.left).toBeCloseTo(content.offsetX, 5); // not offsetX - 10
+    expect(corner.top).toBeCloseTo(content.offsetY, 5);
+    expect(corner.width).toBeCloseTo(content.width, 5);
+    expect(corner.height).toBeCloseTo(content.height, 5);
+  });
 });
