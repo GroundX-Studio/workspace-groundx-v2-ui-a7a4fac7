@@ -147,7 +147,7 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
       `ThinkingStream` for in-flight real turns; collapse to the answer + citations on the final
       `message`. (This is `chatPrimitives.tsx`, NOT `ChatColumn` — ChatColumn has no thinking
       indicator.) Test: mid-turn shows status lines in place of the dot; final render clears them.
-- [ ] 6.4 **Source 2 — OpenAI Responses API reasoning path** (TDD, IN SCOPE; order vs §6.2–6.3
+- [x] 6.4 **Source 2 — OpenAI Responses API reasoning path** (TDD, IN SCOPE; order vs §6.2–6.3
       is flexible, both ship in this change). Behind the `LlmClient` seam, add an OpenAI
       **Responses API** path (`/v1/responses`, `reasoning:{summary:"auto"}` — live-probed to work
       for gpt-5.5) that maps reasoning-summary deltas → `{kind:"reasoning"}` events; enable it for
@@ -155,7 +155,7 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
       summaries. Test: a Responses-API fake emits reasoning events. **Gate/verify carefully:**
       moving chat off `/chat/completions` risks tool-calls + citations — verify both still work on
       the Responses path before enabling.
-- [ ] 6.4b **Anthropic reasoning branch + graceful degrade** (TDD): the Anthropic branch
+- [x] 6.4b **Anthropic reasoning branch + graceful degrade** (TDD): the Anthropic branch
       (`thinking:{adaptive,summarized}` → `thinking_delta`) shares the §6.4 adapter interface; a
       non-reasoning provider/model yields zero reasoning events and the stream stays valid. Test:
       Anthropic fake emits reasoning events; a non-capable fake → zero reasoning events, stream

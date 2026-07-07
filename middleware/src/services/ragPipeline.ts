@@ -25,6 +25,13 @@ import {
 } from "./toolCatalog.js";
 import { toOpenAiTools, type OpenAiFunctionTool } from "./zodToJsonSchema.js";
 import { consumeChatCompletionStream } from "./chatCompletionStream.js";
+import {
+  buildResponsesRequestBody,
+  consumeResponsesStream,
+  parseResponsesPayload,
+  type CompletionsFunctionTool,
+  type CompletionsMessage,
+} from "./responsesApiDispatch.js";
 import { turnStreamContext, type TurnStreamSink } from "./streamSink.js";
 import { buildGroundedSystem } from "./prompts/grounded.js";
 import { buildToolNotes } from "./prompts/toolNotes.js";
@@ -666,6 +673,44 @@ export async function callGroundedLlm(
       },
       "grounded LLM dispatch",
     );
+    // analyze-and-chat-ux §6.4 — the OpenAI Responses API path (`/responses`,
+    // `reasoning:{summary:"auto"}`) maps the model's reasoning SUMMARY to
+    // `{kind:"reasoning"}` thinking events. ENV-GATED (`LLM_REASONING_API=
+    // responses`), default OFF: the shipped /chat/completions dispatch below is
+    // byte-identical until the flag is set — flip per environment only after
+    // live-verifying tool-calls + citations on this path (the flagged risk).
+    // The outcome shape is identical, so the tool loop + citation parsing are
+    // protocol-agnostic.
+    if (process.env.LLM_REASONING_API === "responses") {
+      const responsesBody = buildResponsesRequestBody({
+        modelId,
+        convo: messages as CompletionsMessage[],
+        ...(tools !== undefined && !opts?.disableTools
+          ? { tools: tools as unknown as CompletionsFunctionTool[] }
+          : {}),
+        ...(sink?.onToken ? { stream: true } : {}),
+        maxOutputTokens: GROUNDED_MAX_COMPLETION_TOKENS,
+      });
+      const response = await llmClient.forward("/responses", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(responsesBody),
+        ...(sink?.abortSignal ? { signal: sink.abortSignal } : {}),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "<unreadable>");
+        throw new Error(`grounded llm call failed: ${response.status} ${response.statusText} — ${text.slice(0, 200)}`);
+      }
+      const onReasoning = (text: string): void => sink?.onThinking?.({ kind: "reasoning", text });
+      if (sink?.onToken && (response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+        const streamed = await consumeResponsesStream(response, { onText: sink.onToken, onReasoning });
+        return { rawAnswer: streamed.rawAnswer, toolCalls: streamed.toolCalls, finishReason: streamed.finishReason };
+      }
+      return parseResponsesPayload(
+        (await response.json()) as Parameters<typeof parseResponsesPayload>[0],
+        onReasoning,
+      );
+    }
     // harden-citation-emission U2 — explicit output ceiling on EVERY round.
     // The citations fence is contractually LAST in the completion, so an
     // unbounded provider default that cuts the answer amputates exactly the
