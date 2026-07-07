@@ -96,6 +96,7 @@ const expectedExports: Record<string, { module: Record<string, unknown>; exports
       "getGroundXAccountWorkflow",
       "getGroundXWorkflow",
       "listGroundXWorkflows",
+      "redactWorkflowEngineSecrets",
       "removeGroundXAccountWorkflow",
       "removeGroundXWorkflowFromResource",
       "updateGroundXWorkflow",
