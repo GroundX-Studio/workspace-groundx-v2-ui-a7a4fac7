@@ -13,7 +13,7 @@
  * message, handled one layer up). Generation only ever appends here, so a slow/absent
  * reader never stalls it (socket backpressure lives in the pump).
  */
-export type StreamFrameType = "meta" | "activity" | "token" | "envelope" | "error";
+export type StreamFrameType = "meta" | "activity" | "thinking" | "token" | "envelope" | "error";
 
 export interface StreamFrame {
   seq: number;

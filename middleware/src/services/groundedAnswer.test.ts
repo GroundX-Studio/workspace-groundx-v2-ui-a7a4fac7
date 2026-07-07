@@ -630,3 +630,71 @@ describe("attachSourceMeta — shared fileName/sourceUrl labeling (extraction-fo
     expect(out.fileName).toBe("kept.pdf");
   });
 });
+
+// analyze-and-chat-ux §6.2 — the thinking stream's SOURCE 1: app-authored
+// status narration at the REAL pipeline phase boundaries, emitted through the
+// ambient per-turn stream sink (the same seam token/activity frames use).
+// Deterministic — no provider dependency.
+describe("groundedAnswerOverScope — thinking status events (§6.2)", () => {
+  it("emits ordered status events: search → read passages → write → verify", async () => {
+    const { turnStreamContext } = await import("./streamSink.js");
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () =>
+        jsonOk({
+          search: { results: [{ documentId: "d1", text: "the bill total is $214.07" }] },
+        }),
+      ),
+    };
+    const llmAnswer = [
+      "The total is $214.07.",
+      "",
+      "```json",
+      '{"citations":[{"documentId":"d1","page":1,"quote":"total is $214.07"}]}',
+      "```",
+    ].join("\n");
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: llmAnswer } }] })),
+    };
+    const deps: GroundedAnswerDeps = {
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+      wordMapFetch: async () => null,
+    };
+
+    const events: Array<{ kind: string; text: string }> = [];
+    await turnStreamContext.run(
+      { onThinking: (ev) => events.push(ev) },
+      () => groundedAnswerOverScope("What is the total?", scope, deps),
+    );
+
+    const statuses = events.filter((e) => e.kind === "status").map((e) => e.text);
+    // Ordered, at the real boundaries; exact copy is the implementation's, but
+    // each phase must appear once and in this order.
+    const phaseOrder = ["search", "passage", "answer", "verify"];
+    const matched = phaseOrder.map((p) => statuses.findIndex((s) => s.toLowerCase().includes(p)));
+    expect(statuses.length).toBeGreaterThanOrEqual(4);
+    expect(matched.every((i) => i >= 0), `phases in ${JSON.stringify(statuses)}`).toBe(true);
+    expect([...matched]).toEqual([...matched].sort((a, b) => a - b));
+  });
+
+  it("emits NO events when no sink is ambient (non-streaming callers byte-identical)", async () => {
+    const groundxClient: GroundXClient = {
+      forward: vi.fn(async () => jsonOk({ search: { results: [] } })),
+    };
+    const llmClient: LlmClient = {
+      forward: vi.fn(async () => jsonOk({ choices: [{ message: { content: "Hi." } }] })),
+    };
+    const deps: GroundedAnswerDeps = {
+      groundxClient,
+      groundxApiKey: "k",
+      llmClient,
+      llmModelId: "test-model",
+      wordMapFetch: async () => null,
+    };
+    // No ambient sink — must not throw, and returns the normal result.
+    const result = await groundedAnswerOverScope("hello", scope, deps);
+    expect(result.body).toBe("Hi.");
+  });
+});

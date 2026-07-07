@@ -47,7 +47,7 @@
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useEffect, useRef, useState, type FC } from "react";
-import type { WidgetRole, WidgetScope } from "@groundx/shared";
+import type { ThinkingEvent, WidgetRole, WidgetScope } from "@groundx/shared";
 
 import { BODY_TEXT, BORDER } from "@/constants";
 
@@ -99,6 +99,16 @@ export interface ThinkingStreamProps {
    * derived from role.
    */
   persistReplay?: boolean;
+  /**
+   * analyze-and-chat-ux §6.3 — the LIVE source: streamed `ThinkingEvent`s from
+   * an in-flight chat turn (status narration + provider reasoning summaries).
+   * When present, this source WINS over `notes`: every event renders
+   * immediately in arrival order (the stream's own arrival is the cadence — no
+   * timers), the replay guard is bypassed (an in-flight turn is unique), and
+   * `onDone`/`onWillPlay` never fire (the parent collapses the stream when the
+   * final answer lands). A second source axis on the same widget, not a fork.
+   */
+  events?: ThinkingEvent[];
   /** Fires once when the stream finishes (after DONE_REVEAL_DELAY_MS). */
   onDone?: () => void;
   /**
@@ -117,9 +127,55 @@ export const ThinkingStream: FC<ThinkingStreamProps> = ({
   role: _role,
   scope: _scope,
   persistReplay = false,
+  events,
   onDone,
   onWillPlay,
 }) => {
+  // §6.3 — live source: render the streamed events as-is (arrival is the
+  // cadence); skip every timer/replay/done concern of the scripted path.
+  if (events) {
+    if (events.length === 0) return null;
+    return (
+      <Stack spacing={0.75} sx={{ pl: 0.5 }} data-widget="thinking-stream">
+        {events.map((event, i) => (
+          <Typography
+            key={i}
+            data-testid={`thinking-note-${i}`}
+            variant="caption"
+            sx={{
+              fontStyle: "italic",
+              color: BODY_TEXT,
+              lineHeight: 1.4,
+              paddingLeft: 1,
+              borderLeft: `2px solid ${BORDER}`,
+            }}
+          >
+            {event.text}
+          </Typography>
+        ))}
+      </Stack>
+    );
+  }
+  return (
+    <ScriptedThinkingStream
+      notes={notes}
+      scenarioKey={scenarioKey}
+      persistReplay={persistReplay}
+      onDone={onDone}
+      onWillPlay={onWillPlay}
+    />
+  );
+};
+
+/** The original timer-driven scripted reveal (notes[]), unchanged. Split out so
+ *  the live-source early return above can't violate the rules of hooks. */
+const ScriptedThinkingStream: FC<{
+  notes: string[];
+  scenarioKey: string;
+  persistReplay: boolean;
+  onDone?: (() => void) | undefined;
+  onWillPlay?: (() => void) | undefined;
+}> = ({ notes, scenarioKey, persistReplay, onDone, onWillPlay }) => {
   const persist = persistReplay;
   const storageKey = `${STORAGE_KEY_PREFIX}${scenarioKey}`;
 

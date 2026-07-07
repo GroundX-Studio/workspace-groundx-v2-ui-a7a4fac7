@@ -26,6 +26,7 @@ import { PinToReportAction } from "@/components/chat-widgets/PinToReportAction/P
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
 import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
 import { Markdown } from "@/components/primitives/Markdown/Markdown";
 import { consumedAnchorKeys } from "@/components/primitives/Markdown/remarkClickableSpans";
 import type { LiveTurn } from "./useConversation";
@@ -289,11 +290,31 @@ export function LiveTurnList({
           })()
         ),
       )}
-      {showThinking && (
-        <BotBubble testid="chat-thinking">
-          <LoadingDots aria-label="Assistant is thinking" />
-        </BotBubble>
-      )}
+      {showThinking &&
+        (() => {
+          // analyze-and-chat-ux §6.3b — an in-flight REAL turn streams
+          // ThinkingEvents (status narration + provider reasoning summaries):
+          // reveal them live in place of the bare dots. No events (yet, or a
+          // scripted/legacy path) → the dots, unchanged. The final envelope
+          // clears `thinkingEvents`, so the answer collapses over the stream.
+          const inFlight = [...liveTurns].reverse().find((t) => t.role === "assistant");
+          const events = inFlight?.thinkingEvents ?? [];
+          return events.length > 0 ? (
+            <Box data-testid="chat-thinking" sx={{ pl: 0.25 }}>
+              <ThinkingStream
+                notes={[]}
+                scenarioKey="live-turn"
+                role={role}
+                scope={{ type: "none" }}
+                events={events}
+              />
+            </Box>
+          ) : (
+            <BotBubble testid="chat-thinking">
+              <LoadingDots aria-label="Assistant is thinking" />
+            </BotBubble>
+          );
+        })()}
     </Stack>
   );
 }

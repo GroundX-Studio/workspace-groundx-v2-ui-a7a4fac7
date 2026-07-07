@@ -300,3 +300,56 @@ describe("per-message footer (chat-message-actions-timestamps)", () => {
     expect(screen.queryByTestId("message-actions")).not.toBeInTheDocument();
   });
 });
+
+// analyze-and-chat-ux §6.3b — the in-flight thinking indicator: with streamed
+// thinkingEvents on the in-flight turn, the live ThinkingStream's status lines
+// render IN PLACE OF the bare LoadingDots; the final answer collapses them.
+describe("LiveTurnList — live thinking stream (§6.3b)", () => {
+  it("mid-turn: streamed status lines render in place of the dots", () => {
+    render(
+      <LiveTurnList
+        liveTurns={[
+          assistantTurn({
+            content: "",
+            thinkingEvents: [
+              { kind: "status", text: "Searching your documents" },
+              { kind: "status", text: "Writing a grounded answer" },
+            ],
+          }),
+        ]}
+        sending
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    const indicator = screen.getByTestId("chat-thinking");
+    expect(indicator).toHaveTextContent("Searching your documents");
+    expect(indicator).toHaveTextContent("Writing a grounded answer");
+    expect(screen.queryByLabelText("Assistant is thinking")).toBeNull(); // no bare dots
+  });
+
+  it("mid-turn with NO events yet: falls back to the dots (unchanged back-compat)", () => {
+    render(
+      <LiveTurnList
+        liveTurns={[assistantTurn({ content: "" })]}
+        sending
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("chat-thinking")).toBeInTheDocument();
+    expect(screen.getByLabelText("Assistant is thinking")).toBeInTheDocument();
+  });
+
+  it("final render (turn finalized, not sending): no thinking indicator at all", () => {
+    render(
+      <LiveTurnList
+        liveTurns={[assistantTurn({ content: "The total is $214.07." })]}
+        sending={false}
+        role="anonymous"
+        onSuggestedAction={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("chat-thinking")).toBeNull();
+  });
+});

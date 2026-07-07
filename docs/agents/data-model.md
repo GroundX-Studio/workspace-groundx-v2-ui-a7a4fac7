@@ -96,6 +96,7 @@ crosses ≥2 layers.
 |---|---|---|---|
 | `ChatSession` | composes messages/summaries/entities/viewer | `id, title, createdAt, updatedAt, messages[], summaries[]` + paired `ViewerSession` | root aggregate |
 | `ChatMessage` | — | `id, role, content, timestamp, compressedIntoSummaryId?` (+`citations?` planned) | chat thread |
+| `ThinkingEvent` (shared) / chat SSE stream | `thinkingEventSchema` — `{kind:"status"\|"reasoning", text}` | wire: one `thinking` SSE frame per event on the chat turn stream (`StreamFrameType = meta·activity·thinking·token·envelope·error`; never evicted — eviction drops only `token`) | analyze-and-chat-ux §6 — source-1 `status` narration emitted at the REAL pipeline phase boundaries via the ambient `TurnStreamSink.onThinking` (plan → search → passages → answer → verify); source-2 `reasoning` = the provider's SUMMARY only (never raw CoT). Client: `streamChatMessage.onThinking` → `LiveTurn.thinkingEvents` (in-flight only; the envelope clears it) → `LiveTurnList` renders the live-fed `ThinkingStream`. NOT persisted — display-only stream state. |
 | `ConversationSummary` | — | `id, fromMessageId, toMessageId, generation, absorbedSummaryIds[], content, model, tokensIn, tokensOut, createdAt` | compression chain |
 | `ViewerEvent` | — | `id, timestamp, entityKey, action, source, detail?` | LLM context bundling |
 | `ViewerSession` | composes `ViewerStep[]`,`ViewerOverlay[]`,`ViewerWorkspace` | `history[], currentStep{stepIndex}, overlays[], workspace` | paired 1:1 w/ `ChatSession` |

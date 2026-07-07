@@ -33,7 +33,7 @@ import type {
   ChatSuggestedAction,
   ProposedSchemaField,
 } from "@/api/chatSessions";
-import { citationRegions, isNonDocNavIntentKind, type Citation, type ToolActivity } from "@groundx/shared";
+import { citationRegions, isNonDocNavIntentKind, type Citation, type ThinkingEvent, type ToolActivity } from "@groundx/shared";
 import { useApi } from "@/contexts/ApiContext";
 import type { CanvasIntent } from "@/contexts/CanvasOrchestratorContext";
 import { useCanvasOrchestrator } from "@/contexts/CanvasOrchestratorContext";
@@ -91,6 +91,14 @@ export interface LiveTurn {
    * annotation on the assistant bubble. Absent/empty = nothing to show.
    */
   toolActivity?: ToolActivity[];
+  /**
+   * analyze-and-chat-ux §6.3b — the live thinking stream for THIS in-flight
+   * turn: `status` narration at the pipeline's real phase boundaries plus the
+   * provider's `reasoning` summary lines, appended as `thinking` SSE frames
+   * arrive. Rendered by `LiveTurnList` in place of the bare LoadingDots;
+   * CLEARED when the final envelope lands (the answer collapses over it).
+   */
+  thinkingEvents?: ThinkingEvent[];
   /**
    * report-pin-affordance — OPT-IN: `true` ONLY on genuine document-answer turns
    * (the `send()` server reply + DB-hydration of a non-error assistant turn).
@@ -525,6 +533,16 @@ export function useConversation(
                       : t,
                   ),
                 ),
+              // §6.3b — accumulate the live thinking stream on the in-flight
+              // turn; LiveTurnList reveals it in place of the bare dots.
+              onThinking: (event) =>
+                setLiveTurns((cur) =>
+                  cur.map((t) =>
+                    t.id === assistantTurnId
+                      ? { ...t, thinkingEvents: [...(t.thinkingEvents ?? []), event] }
+                      : t,
+                  ),
+                ),
             },
             { signal: abortController.signal },
           );
@@ -560,6 +578,8 @@ export function useConversation(
                   citations: result.reply.citations ?? [],
                   suggestedActions: result.reply.suggestedActions ?? [],
                   toolActivity: result.reply.toolActivity ?? [],
+                  // §6.3b — the answer collapses over the thinking stream.
+                  thinkingEvents: undefined,
                   // report-pin-affordance — opt-in: the genuine server answer is
                   // the canonical pinnable turn.
                   pinnable: true,

@@ -105,6 +105,10 @@ export class TurnRunner {
               if (safe) this.buffer.append("token", { delta: safe });
             },
             onActivity: (activity) => this.buffer.append("activity", activity),
+            // §6 — thinking-stream events (status narration + provider
+            // reasoning summaries) buffer as `thinking` frames; never evicted
+            // (eviction drops only cheap `token` prose).
+            onThinking: (event) => this.buffer.append("thinking", event),
           }
         : {}),
     };

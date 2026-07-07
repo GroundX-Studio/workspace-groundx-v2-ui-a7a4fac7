@@ -273,3 +273,60 @@ describe("ThinkingStream", () => {
     expect(screen.getByTestId("thinking-note-0")).toBeInTheDocument();
   });
 });
+
+// analyze-and-chat-ux §6.3 — the LIVE-FED source: streamed ThinkingEvents
+// (accumulate + reveal, arrival is the cadence — no timers, no replay guard).
+// A second source AXIS on the same widget, not a fork: the scripted `notes`
+// path above is untouched.
+describe("ThinkingStream — live events source (§6.3)", () => {
+  const baseProps = {
+    notes: [] as string[],
+    scenarioKey: "live-turn",
+    role: "member" as const,
+    scope: { type: "none" } as const,
+  };
+
+  it("renders streamed events immediately in arrival order, and reveals appended ones", () => {
+    const { rerender } = render(
+      <ThinkingStream
+        {...baseProps}
+        events={[
+          { kind: "status", text: "Searching your documents" },
+          { kind: "status", text: "Reading 4 matching passages" },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("thinking-note-0")).toHaveTextContent("Searching your documents");
+    expect(screen.getByTestId("thinking-note-1")).toHaveTextContent("Reading 4 matching passages");
+    rerender(
+      <ThinkingStream
+        {...baseProps}
+        events={[
+          { kind: "status", text: "Searching your documents" },
+          { kind: "status", text: "Reading 4 matching passages" },
+          { kind: "reasoning", text: "The total appears on page 1 of the bill." },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("thinking-note-2")).toHaveTextContent("The total appears on page 1");
+  });
+
+  it("live source ignores the replay guard and fires no onDone", () => {
+    const onDone = vi.fn();
+    render(
+      <ThinkingStream
+        {...baseProps}
+        persistReplay
+        onDone={onDone}
+        events={[{ kind: "status", text: "Planning this turn" }]}
+      />,
+    );
+    expect(screen.getByTestId("thinking-note-0")).toBeInTheDocument();
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("empty events → renders nothing (parent shows its fallback)", () => {
+    const { container } = render(<ThinkingStream {...baseProps} events={[]} />);
+    expect(container.querySelector('[data-widget="thinking-stream"]')).toBeNull();
+  });
+});

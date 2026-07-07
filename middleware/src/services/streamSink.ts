@@ -14,6 +14,8 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import type { ThinkingEvent } from "@groundx/shared";
+
 import type { ToolActivity } from "./chatRouterTypes.js";
 
 export interface TurnStreamSink {
@@ -21,6 +23,14 @@ export interface TurnStreamSink {
   onToken?: (delta: string) => void;
   /** Called when a server-executed tool runs → an `activity` frame. */
   onActivity?: (activity: ToolActivity) => void;
+  /**
+   * analyze-and-chat-ux §6 — called per thinking-stream event → a `thinking`
+   * frame. Source 1: app-authored `status` narration at the real pipeline
+   * phase boundaries (deterministic, §6.2). Source 2: the provider's
+   * reasoning SUMMARY as `reasoning` events when the model exposes one
+   * (§6.4). Never raw chain-of-thought.
+   */
+  onThinking?: (event: ThinkingEvent) => void;
   /**
    * Aborts the turn's upstream LLM call (supersede-cancel). The runner sets this
    * to its AbortController's signal; `callGroundedLlm` passes it to the LLM

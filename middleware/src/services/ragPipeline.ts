@@ -71,6 +71,11 @@ export async function runRagPipeline(
     throw new Error("rag mode: llmModelId is required");
   }
 
+  // §6.2 — the "plan" phase boundary: catalog/step routing + workspace-context
+  // assembly happen below, before the grounded pipeline's own phases. Ambient
+  // sink absent (non-streaming callers) → no-op.
+  turnStreamContext.getStore()?.onThinking?.({ kind: "status", text: "Planning this turn" });
+
   // Derive the ContentScope. Callers can override via `deps.contentScope`
   // once the chatHandler wires it from the entity bundle; for now we
   // fall back to the legacy single-bucket scope from env.

@@ -131,18 +131,18 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
 
 ## 6. Thinking stream (source 1 ships independently of source 2)
 
-- [ ] 6.1 Shared `ThinkingEvent` type in `@groundx/shared`
+- [x] 6.1 Shared `ThinkingEvent` type in `@groundx/shared`
       (`{kind:"status",text} | {kind:"reasoning",text}`) + its SSE wire encoding on the
       chat stream. Update `data-model.md` (chat-message/stream row).
-- [ ] 6.2 **Source 1 — app narration** (TDD): `ragPipeline`/`turnRunner` emit ordered
+- [x] 6.2 **Source 1 — app narration** (TDD): `ragPipeline`/`turnRunner` emit ordered
       `{kind:"status"}` events at the real phase boundaries (plan → GroundX search →
       snippet assembly → grounded completion → citation verify). Deterministic; no provider
       dependency. Test the emitted sequence for a scripted turn.
-- [ ] 6.3 **Add a live-fed source to `chat-widgets/ThinkingStream`** (TDD): let it consume
+- [x] 6.3 **Add a live-fed source to `chat-widgets/ThinkingStream`** (TDD): let it consume
       streamed `ThinkingEvent`s (accumulate + reveal), not just the scripted `notes[]`. Do NOT
       fork a new widget — added source axis, keep its README + `role`/`scope`. Test: live events
       reveal in order; scripted onboarding-intro path still works.
-- [ ] 6.3b **Render it in `app/src/conversation/chatPrimitives.tsx`** (TDD): replace the bare
+- [x] 6.3b **Render it in `app/src/conversation/chatPrimitives.tsx`** (TDD): replace the bare
       `showThinking` → `LoadingDots` `BotBubble` (`chat-thinking` testid) with the live-fed
       `ThinkingStream` for in-flight real turns; collapse to the answer + citations on the final
       `message`. (This is `chatPrimitives.tsx`, NOT `ChatColumn` — ChatColumn has no thinking

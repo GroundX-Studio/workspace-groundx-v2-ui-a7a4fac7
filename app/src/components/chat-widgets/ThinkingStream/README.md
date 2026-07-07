@@ -25,6 +25,17 @@ only), and a single-fire `onDone` callback.
 | `scope`         | `WidgetScope` | required           | Always `{ type: "none" }` — display widget (see § Scope).                      |
 | `persistReplay` | `boolean`     | `false`            | Persist doneness so a remount skips the reveal. Re-sourced from the old `mode`.|
 | `onDone`        | `() => void`  | optional           | Fires once when the stream finishes (after the post-stream delay).             |
+| `events`        | `ThinkingEvent[]` | optional       | §6.3 LIVE source (wins over `notes`): streamed status/reasoning lines from an in-flight chat turn. Arrival is the cadence — no timers, no replay guard, no `onDone`. |
+
+## Two sources, one widget (§6.3)
+
+- **Scripted** (`notes[]`) — the original timer-driven reveal for the
+  onboarding intro choreography. Unchanged.
+- **Live** (`events[]`) — streamed `ThinkingEvent`s (`status` narration at the
+  chat pipeline's real phase boundaries + the provider's `reasoning` SUMMARY
+  lines) rendered immediately in arrival order. The parent (`LiveTurnList`)
+  collapses the stream when the final answer envelope lands. Never raw
+  chain-of-thought.
 
 ## Behavior
 

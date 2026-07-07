@@ -54,6 +54,8 @@ import {
   type ProposalEnvelopeProvenance,
   type ProposedSchemaField,
   type SuggestedAction,
+  thinkingEventSchema,
+  type ThinkingEvent,
   type ToolFailure as SharedToolFailure,
 } from "@groundx/shared";
 
@@ -394,6 +396,8 @@ export interface StreamChatCallbacks {
   onToken?: (delta: string) => void;
   /** A server tool ran → drive the live "Checked the documents" indicator. */
   onActivity?: (activity: { name: string; label: string }) => void;
+  /** §6 — a thinking-stream line arrived (status narration / reasoning summary). */
+  onThinking?: (event: ThinkingEvent) => void;
   /** The turn's id confirmed (for reconnect) — first frame. */
   onMeta?: (meta: { turnKey: string }) => void;
 }
@@ -497,6 +501,13 @@ export async function streamChatMessage(
           case "activity":
             callbacks.onActivity?.(payload as { name: string; label: string });
             break;
+          case "thinking": {
+            // §6 — validate at the wire boundary; a malformed thinking frame is
+            // dropped (cosmetic stream), never terminal.
+            const parsed = thinkingEventSchema.safeParse(payload);
+            if (parsed.success) callbacks.onThinking?.(parsed.data);
+            break;
+          }
           case "envelope":
             seen = payload as SendChatMessageResult;
             break;

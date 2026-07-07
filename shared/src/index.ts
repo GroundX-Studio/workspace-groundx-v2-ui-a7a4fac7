@@ -874,6 +874,25 @@ export const toolActivitySchema = z.object({
 export type ToolActivity = z.infer<typeof toolActivitySchema>;
 
 /**
+ * analyze-and-chat-ux §6.1 — one line of the live thinking stream shown while
+ * a chat turn generates, streamed as `thinking` SSE frames ahead of the final
+ * message. Two sources share the shape:
+ *   - `status`   — app-authored narration at the REAL pipeline phase
+ *                  boundaries (search → read passages → write → verify).
+ *                  Deterministic; no provider dependency.
+ *   - `reasoning`— the provider's own reasoning SUMMARY (OpenAI Responses
+ *                  `reasoning.summary` / Anthropic summarized thinking) when
+ *                  the configured model exposes one. NEVER raw chain-of-thought.
+ * A non-reasoning provider simply emits zero `reasoning` events — the stream
+ * stays valid on `status` alone.
+ */
+export const thinkingEventSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("status"), text: z.string() }),
+  z.object({ kind: z.literal("reasoning"), text: z.string() }),
+]);
+export type ThinkingEvent = z.infer<typeof thinkingEventSchema>;
+
+/**
  * Dev-only diagnostic payload attached to chat replies in non-prod
  * environments. Present on `ChatReply` when `NODE_ENV !== "production"`. Lets
  * the browser DevTools console show exactly what the chat router asked

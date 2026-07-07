@@ -45,6 +45,30 @@ describe("TurnRunner", () => {
     expect(frames.at(-1)?.data).toMatchObject({ reply: { answer: "Hello world." } });
   });
 
+  it("buffers `thinking` frames from the ambient sink, in order with the other live frames (§6)", async () => {
+    const runner = new TurnRunner({
+      sessionId: "s1",
+      turnKey: "k-think",
+      streaming: true,
+      generate: async () => {
+        const sink = turnStreamContext.getStore();
+        sink?.onThinking?.({ kind: "status", text: "Searching your documents" });
+        sink?.onThinking?.({ kind: "status", text: "Writing a grounded answer" });
+        sink?.onThinking?.({ kind: "reasoning", text: "The bill total appears on page 1." });
+        sink?.onToken?.("The total is $214.07.");
+        return reply("The total is $214.07.") as never;
+      },
+    });
+
+    await runner.completion;
+    const frames = [];
+    for await (const f of runner.buffer.read(0)) frames.push(f);
+
+    expect(frames.map((f) => f.type)).toEqual(["meta", "thinking", "thinking", "thinking", "token", "envelope"]);
+    expect(frames[1].data).toEqual({ kind: "status", text: "Searching your documents" });
+    expect(frames[3].data).toEqual({ kind: "reasoning", text: "The bill total appears on page 1." });
+  });
+
   it("citation-stream-leak — redacts the trailing citations metadata block from token frames", async () => {
     const runner = new TurnRunner({
       sessionId: "s-cite",

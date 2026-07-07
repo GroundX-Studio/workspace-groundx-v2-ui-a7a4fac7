@@ -49,6 +49,7 @@ import {
 import { fetchDocumentWordMap } from "./wordMapCache.js";
 import { fetchDocumentXray } from "./xrayCache.js";
 import { callGroundedLlm, parseGroundedAnswer, type ServerToolLoop } from "./ragPipeline.js";
+import { turnStreamContext } from "./streamSink.js";
 import { getServerTool } from "./toolCatalog.js";
 import { searchGroundX, type SearchGroundXOptions } from "./groundxSearch.js";
 import { retrieveGroundxKnowledge, type RetrieveOptions } from "./groundxSkills.js";
@@ -836,6 +837,13 @@ export async function groundedAnswerOverScope(
   // threaded (report path), the deterministic FALLBACK_TURN_PLAN applies.
   const plan: TurnPlan = options.turnPlan ?? FALLBACK_TURN_PLAN;
 
+  // analyze-and-chat-ux §6.2 — source-1 thinking narration at the REAL phase
+  // boundaries, through the same ambient per-turn sink the token/activity
+  // frames use. No ambient sink (non-streaming callers, report path, existing
+  // tests) → no-op, byte-identical behavior.
+  const thinkingSink = turnStreamContext.getStore();
+  const status = (text: string): void => thinkingSink?.onThinking?.({ kind: "status", text });
+
   const searchOptions: SearchGroundXOptions = {
     ...(deps.rbacFilter ? { rbacFilter: deps.rbacFilter } : {}),
     ...(options.debug ? { debug: options.debug } : {}),
@@ -844,6 +852,7 @@ export async function groundedAnswerOverScope(
   // (the grounded LLM still answers from workspace state / conversationally).
   let snippets: GroundXSearchResult[] = [];
   if (plan.documentSearch && deps.groundxClient && deps.groundxApiKey) {
+    status("Searching your documents");
     try {
       snippets = await searchGroundX(
         question,
@@ -856,6 +865,11 @@ export async function groundedAnswerOverScope(
       if (!options.searchSoftFail) throw err;
       logger.warn({ err }, "groundedAnswerOverScope: search failed; proceeding with empty snippets (searchSoftFail)");
     }
+    status(
+      snippets.length
+        ? `Reading ${snippets.length} matching passage${snippets.length === 1 ? "" : "s"}`
+        : "No matching passages — answering from the workspace context",
+    );
   }
 
   // RAG + raw extraction (2026-06-11). Search retrieves only the TOP-K
@@ -1024,6 +1038,7 @@ export async function groundedAnswerOverScope(
         }
       : undefined;
 
+  status("Writing a grounded answer");
   const llmResponse = await callGroundedLlm(
     question,
     snippets,
@@ -1039,6 +1054,7 @@ export async function groundedAnswerOverScope(
     serverToolLoop,
   );
 
+  status("Verifying citations against the source");
   const parsed = parseGroundedAnswer(llmResponse.answer);
   const { citations, funnel } = await verifiedCitations(
     llmResponse.answer,
