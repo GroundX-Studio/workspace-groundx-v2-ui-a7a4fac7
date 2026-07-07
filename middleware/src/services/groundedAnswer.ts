@@ -852,7 +852,7 @@ export async function groundedAnswerOverScope(
   // (the grounded LLM still answers from workspace state / conversationally).
   let snippets: GroundXSearchResult[] = [];
   if (plan.documentSearch && deps.groundxClient && deps.groundxApiKey) {
-    status("Searching your documents");
+    status("Searching the documents · I'm scanning your files for relevant passages");
     try {
       snippets = await searchGroundX(
         question,
@@ -867,8 +867,8 @@ export async function groundedAnswerOverScope(
     }
     status(
       snippets.length
-        ? `Reading ${snippets.length} matching passage${snippets.length === 1 ? "" : "s"}`
-        : "No matching passages — answering from the workspace context",
+        ? `Reading the matches · I found ${snippets.length} passage${snippets.length === 1 ? "" : "s"} worth a closer look`
+        : "Coming up empty · No matching passages — I\'ll answer from the workspace context",
     );
   }
 
@@ -1038,7 +1038,7 @@ export async function groundedAnswerOverScope(
         }
       : undefined;
 
-  status("Writing a grounded answer");
+  status("Writing the answer · I'm grounding every claim in what I just read");
   const llmResponse = await callGroundedLlm(
     question,
     snippets,
@@ -1054,7 +1054,7 @@ export async function groundedAnswerOverScope(
     serverToolLoop,
   );
 
-  status("Verifying citations against the source");
+  status("Verifying citations · I'm checking each quote against the source document");
   const parsed = parseGroundedAnswer(llmResponse.answer);
   const { citations, funnel } = await verifiedCitations(
     llmResponse.answer,

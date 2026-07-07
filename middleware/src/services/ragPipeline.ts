@@ -81,7 +81,7 @@ export async function runRagPipeline(
   // §6.2 — the "plan" phase boundary: catalog/step routing + workspace-context
   // assembly happen below, before the grounded pipeline's own phases. Ambient
   // sink absent (non-streaming callers) → no-op.
-  turnStreamContext.getStore()?.onThinking?.({ kind: "status", text: "Planning this turn" });
+  turnStreamContext.getStore()?.onThinking?.({ kind: "status", text: "Planning the approach · I'm reading the question and choosing what to look up" });
 
   // Derive the ContentScope. Callers can override via `deps.contentScope`
   // once the chatHandler wires it from the entity bundle; for now we
