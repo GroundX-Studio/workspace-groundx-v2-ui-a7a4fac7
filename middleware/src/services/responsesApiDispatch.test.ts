@@ -118,7 +118,10 @@ describe("consumeResponsesStream — SSE → {rawAnswer, toolCalls, finishReason
     const onReasoning = vi.fn();
     const res = sseResponse([
       JSON.stringify({ type: "response.reasoning_summary_text.delta", delta: "Scanning the bill" }),
-      JSON.stringify({ type: "response.reasoning_summary_text.done", text: "Scanning the bill for the largest charge." }),
+      JSON.stringify({
+        type: "response.reasoning_summary_text.done",
+        text: "**Scanning the bill**\n\nLooking for the largest charge.",
+      }),
       JSON.stringify({ type: "response.output_text.delta", delta: "The largest " }),
       JSON.stringify({ type: "response.output_text.delta", delta: "charge is $2,560.32." }),
       JSON.stringify({
@@ -132,7 +135,8 @@ describe("consumeResponsesStream — SSE → {rawAnswer, toolCalls, finishReason
     expect(onText).toHaveBeenCalledTimes(2);
     // one event per COMPLETED part (deltas are not spammed as lines)
     expect(onReasoning).toHaveBeenCalledTimes(1);
-    expect(onReasoning).toHaveBeenCalledWith("Scanning the bill for the largest charge.");
+    // markdown emphasis stripped + paragraphs collapsed → a clean caption line
+    expect(onReasoning).toHaveBeenCalledWith("Scanning the bill · Looking for the largest charge.");
     expect(out.toolCalls).toEqual([{ id: "call_9", name: "show_extraction", argumentsJson: '{"scope":{}}' }]);
     expect(out.finishReason).toBe("stop");
   });

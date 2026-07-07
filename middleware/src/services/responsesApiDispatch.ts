@@ -139,6 +139,20 @@ interface ResponsesOutcome {
   finishReason: string | null;
 }
 
+/**
+ * Reasoning summaries arrive markdown-flavored (`**Header**` + paragraph
+ * breaks). The thinking stream renders plain caption lines, so strip the
+ * emphasis/heading markers and collapse the whitespace — the words are the
+ * content, the styling is the stream's.
+ */
+function cleanSummaryText(text: string): string {
+  return text
+    .replace(/\*\*/g, "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/\s*\n+\s*/g, " · ")
+    .trim();
+}
+
 function finishFromStatus(status?: string, incompleteReason?: string): string {
   if (status === "incomplete" && incompleteReason === "max_output_tokens") return "length";
   return "stop";
@@ -189,7 +203,7 @@ export async function consumeResponsesStream(
           }
           break;
         case "response.reasoning_summary_text.done":
-          if (event.text) callbacks.onReasoning?.(event.text);
+          if (event.text) callbacks.onReasoning?.(cleanSummaryText(event.text));
           break;
         case "response.output_item.done":
           if (event.item?.type === "function_call" && event.item.name) {
@@ -263,7 +277,7 @@ export function parseResponsesPayload(
       });
     } else if (item.type === "reasoning") {
       for (const part of item.summary ?? []) {
-        if (part.text) onReasoning?.(part.text);
+        if (part.text) onReasoning?.(cleanSummaryText(part.text));
       }
     }
   }
