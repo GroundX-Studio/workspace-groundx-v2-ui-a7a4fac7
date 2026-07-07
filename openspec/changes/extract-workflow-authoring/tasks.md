@@ -3,7 +3,7 @@
 TDD (failing test first), adversarial-review gate per task.
 
 ## 1. Extend the workflow type to the real shape
-- [ ] 1.1 Extend the app `Workflow` type (`app/src/api/entities/sdkTypes.ts:207`) and
+- [x] 1.1 Extend the app `Workflow` type (`app/src/api/entities/sdkTypes.ts:207`) and
       `WorkflowInput` (`app/src/api/entities/groundxWorkflowsEntity.ts:14`) with `leafFields`,
       `customSteps`, `outputRoutes` (the structures `GET`/`PUT /v1/workflow` carry). Mirror in
       `@groundx/shared` and add the reconciliation-matrix row in `docs/agents/data-model.md`.

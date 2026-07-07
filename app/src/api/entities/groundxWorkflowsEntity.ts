@@ -17,6 +17,12 @@ export interface WorkflowInput {
   sectionStrategy?: "chunks" | "page" | string;
   steps?: Metadata;
   extract?: Metadata;
+  // extract-workflow-authoring — PUT accepts the full compiler overlay
+  // (leafFields/customSteps/outputRoutes ride the round-trip opaquely;
+  // engine secrets inside `steps` are REDACTED before hold/PUT — design §2).
+  leafFields?: import("@groundx/shared").WorkflowLeafField[];
+  customSteps?: Metadata[];
+  outputRoutes?: Metadata[];
 }
 
 export interface WorkflowRelationshipInput {

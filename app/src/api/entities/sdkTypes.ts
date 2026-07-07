@@ -211,6 +211,14 @@ export interface Workflow {
   sectionStrategy?: "chunks" | "page" | string;
   steps?: Metadata;
   extract?: Metadata;
+  // extract-workflow-authoring — the compiler-output structures the v1 GET
+  // returns and PUT accepts (live-verified 2026-07-07). `leafFields` is the
+  // typed join surface (shared `workflowLeafFieldSchema`); `customSteps` /
+  // `outputRoutes` are COMPILER-owned and held opaquely for the round-trip —
+  // the app never re-derives them (design §6: that would fork the compiler).
+  leafFields?: import("@groundx/shared").WorkflowLeafField[];
+  customSteps?: Metadata[];
+  outputRoutes?: Metadata[];
 }
 
 export interface PartnerCustomer {

@@ -893,6 +893,29 @@ export const thinkingEventSchema = z.discriminatedUnion("kind", [
 export type ThinkingEvent = z.infer<typeof thinkingEventSchema>;
 
 /**
+ * extract-workflow-authoring — one record of a compiled workflow's
+ * `leafFields[]` (the compiler's field manifest; live-verified shape,
+ * 2026-07-07). The authoring round-trip and consistency check join on it.
+ * `.passthrough()` deliberately: the shape is COMPILER-owned (the synced
+ * harness `compile_workflow.py` emits it) — unknown props ride along on the
+ * GET → PUT round-trip rather than being stripped into drift.
+ */
+export const workflowLeafFieldSchema = z
+  .object({
+    finalPath: z.string(),
+    workflowGroup: z.string(),
+    workflowField: z.string(),
+    stepName: z.string().optional(),
+    level: z.string().optional(),
+    outputKey: z.string(),
+    fieldType: z.string().optional(),
+    isRepeated: z.boolean().optional(),
+    repetitionScope: z.string().optional(),
+  })
+  .passthrough();
+export type WorkflowLeafField = z.infer<typeof workflowLeafFieldSchema>;
+
+/**
  * Dev-only diagnostic payload attached to chat replies in non-prod
  * environments. Present on `ChatReply` when `NODE_ENV !== "production"`. Lets
  * the browser DevTools console show exactly what the chat router asked
