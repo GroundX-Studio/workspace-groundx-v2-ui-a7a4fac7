@@ -73,3 +73,31 @@ describe("Workflow / WorkflowInput carry the compiler structures", () => {
     expect(Array.isArray(wf.customSteps)).toBe(true);
   });
 });
+
+// Principle 0 — engine config (EXTRACT_MODEL_*) can ride inside the `steps`
+// blob a GET returns (`apiKey`/`baseURL`). It must NEVER be PUT back or held:
+// the redactor strips those keys at ANY depth before the round-trip.
+describe("redactWorkflowEngineSecrets", () => {
+  it("strips apiKey/baseURL at any depth inside steps, leaving structure intact", async () => {
+    const { redactWorkflowEngineSecrets } = await import("./groundxWorkflowsEntity");
+    const input = {
+      name: "n",
+      steps: {
+        extract: {
+          engine: { apiKey: "sk-SECRET", baseURL: "https://llm.internal", model: "gpt-5.5" },
+          nested: [{ config: { apiKey: "sk-2", keep: true } }],
+        },
+      },
+      extract: { statement: { fields: {} } },
+    };
+    const clean = redactWorkflowEngineSecrets(input) as typeof input;
+    expect(JSON.stringify(clean)).not.toContain("sk-SECRET");
+    expect(JSON.stringify(clean)).not.toContain("sk-2");
+    expect(JSON.stringify(clean)).not.toContain("llm.internal");
+    // structure + non-secret config survive
+    expect((clean.steps.extract as { engine: { model: string } }).engine.model).toBe("gpt-5.5");
+    expect((clean.steps.extract as { nested: Array<{ config: { keep: boolean } }> }).nested[0].config.keep).toBe(true);
+    // the original is not mutated
+    expect((input.steps.extract as { engine: { apiKey: string } }).engine.apiKey).toBe("sk-SECRET");
+  });
+});

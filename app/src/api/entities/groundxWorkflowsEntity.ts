@@ -50,6 +50,31 @@ export const getGroundXWorkflow = async (id: string | number, options?: RequestO
   return response.data;
 };
 
+/**
+ * extract-workflow-authoring / principle 0 — engine config (`EXTRACT_MODEL_*`)
+ * can surface an `apiKey`/`baseURL` inside the `steps` blob a workflow GET
+ * returns. Those must NEVER ride the round-trip back to a PUT (or a log):
+ * strip the keys at ANY depth, without mutating the input. The compiler reads
+ * engine config from the build service's own environment, so removal is safe.
+ */
+const ENGINE_SECRET_KEYS = new Set(["apiKey", "baseURL"]);
+
+export function redactWorkflowEngineSecrets<T>(value: T): T {
+  const scrub = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(scrub);
+    if (node !== null && typeof node === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        if (ENGINE_SECRET_KEYS.has(k)) continue;
+        out[k] = scrub(v);
+      }
+      return out;
+    }
+    return node;
+  };
+  return scrub(value) as T;
+}
+
 export const updateGroundXWorkflow = async (
   id: string | number,
   input: WorkflowInput,
@@ -57,7 +82,8 @@ export const updateGroundXWorkflow = async (
 ): Promise<WorkflowResponse> => {
   const response = await axios.put<WorkflowResponse>(
     groundxUrl(`/v1/workflow/${encodeURIComponent(String(id))}`),
-    input,
+    // principle 0 — engine secrets never ride the PUT (see redactor above).
+    redactWorkflowEngineSecrets(input),
     groundxRequestConfig(options)
   );
   return response.data;
