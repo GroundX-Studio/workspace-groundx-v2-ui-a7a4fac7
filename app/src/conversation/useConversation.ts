@@ -95,7 +95,7 @@ export interface LiveTurn {
    * analyze-and-chat-ux §6.3b — the live thinking stream for THIS in-flight
    * turn: `status` narration at the pipeline's real phase boundaries plus the
    * provider's `reasoning` summary lines, appended as `thinking` SSE frames
-   * arrive. Rendered by `LiveTurnList` in place of the bare LoadingDots;
+   * arrive. Rendered by `LiveTurnList` in place of the bare fallback mark;
    * CLEARED when the final envelope lands (the answer collapses over it).
    */
   thinkingEvents?: ThinkingEvent[];

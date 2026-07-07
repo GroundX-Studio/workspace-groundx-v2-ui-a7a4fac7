@@ -42,7 +42,7 @@ import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSessionOptional } from "@/contexts/OnboardingSessionContext";
 import { useScenarioRegistry } from "@/contexts/ScenarioRegistryContext";
 import { useExtractWorkbench } from "@/hooks/queries/useExtractWorkbench";
-import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { Loading } from "@/components/primitives/Loading/Loading";
 import { PdfViewerWidget } from "@/components/viewer-widgets/PdfViewer/PdfViewerWidget";
 import { track } from "@/lib/analytics";
 import type { ExtractedFieldValue } from "@/types/scenarios";
@@ -530,17 +530,17 @@ export const Extract: FC<ExtractProps> = ({
         </Box>
       );
     }
+    // unified-loader §1.5 — the shared boundary in place of the old dots. The
+    // frame body is a top-anchored column (§1.1), and the boundary flexes to
+    // fill it, so the mark centers in the pane instead of floating.
     return (
       <Box
         data-testid="extract-workbench"
         data-role={role}
-        sx={{ p: 4, display: "flex", alignItems: "center", gap: 1.5 }}
+        sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
       >
-        <Box data-testid="extract-loading" sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          <LoadingDots size={6} aria-label="Reading the extraction" />
-          <Typography variant="body2" sx={{ color: MUTED_ON_LIGHT }}>
-            Reading the extraction…
-          </Typography>
+        <Box data-testid="extract-loading" sx={{ flex: 1, minHeight: 0, display: "flex" }}>
+          <Loading loading size="lg" message="Reading the extraction…" />
         </Box>
       </Box>
     );

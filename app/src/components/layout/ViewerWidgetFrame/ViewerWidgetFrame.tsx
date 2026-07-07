@@ -13,7 +13,7 @@ import { Button } from "@/components/primitives/Button/Button";
 import { Heading } from "@/components/primitives/Heading/Heading";
 import { IconButton } from "@/components/primitives/IconButton/IconButton";
 import { Label } from "@/components/primitives/Label/Label";
-import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { BreathingMark } from "@/components/primitives/Loading/BreathingMark";
 import {
   BORDER,
   BORDER_RADIUS_CARD,
@@ -55,7 +55,12 @@ function modeBodySx(contentMode: ViewerWidgetFrameProps["contentMode"]) {
       } as const;
     case "embed":
     case "edge-to-edge":
+      // unified-loader §1.1 — a COLUMN, so a short child (a loading boundary)
+      // anchors to the top of the pane instead of being row-stretched to full
+      // height / floating mid-pane. Full-size widgets are unaffected: they
+      // stretch on the (now horizontal) cross axis and flex to fill.
       return {
+        flexDirection: "column",
         alignItems: "stretch",
         justifyContent: "flex-start",
         overflow: "hidden",
@@ -252,8 +257,9 @@ export const ViewerWidgetFrame: FC<ViewerWidgetFrameProps> = ({
             borderBottom: `1px solid ${BORDER}`,
             // Seamless with the white header/body — NOT the cream/green
             // treatment that read as a foreign "alert" strip. The indicator is
-            // the same coral LoadingDots as the chat "thinking" bubble, so the
-            // viewer and the conversation share one loading affordance.
+            // the shared breathing mark (unified-loader §1.8) rendered BARE —
+            // it accompanies the visible status text, so it's the mark, not
+            // the in-place-of-content boundary.
             backgroundColor: WHITE,
             color: MUTED_ON_LIGHT,
             px: { xs: 1.5, md: 2 },
@@ -262,7 +268,7 @@ export const ViewerWidgetFrame: FC<ViewerWidgetFrameProps> = ({
         >
           {loading ? (
             <Stack direction="row" spacing={1.25} alignItems="center">
-              <LoadingDots size={6} aria-label={loading.label} />
+              <BreathingMark size="sm" aria-label={loading.label} />
               <BodyText size="sm" component="span" sx={{ color: MUTED_ON_LIGHT }}>
                 {loading.label}
               </BodyText>

@@ -72,6 +72,7 @@ import {
   WHITE,
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
+import { Loading } from "@/components/primitives/Loading/Loading";
 import { useCanvasOrchestratorOptional } from "@/contexts/CanvasOrchestratorContext";
 import { useApi } from "@/contexts/ApiContext";
 import { useScopeAdapter } from "@/widgets/scopedViewerWidget";
@@ -375,14 +376,16 @@ export const SmartReportRender: FC<SmartReportRenderProps> = ({ scope, role }) =
       }}
     >
       {firstPaintState === "loading" ? (
+        // unified-loader §1.6 — the shared boundary for the first paint (the
+        // progressive per-slot skeletons take over once sections stream in).
         <Box
           data-testid="smart-report-loading"
           role="status"
           aria-live="polite"
           aria-busy="true"
-          sx={{ color: BODY_TEXT, fontSize: FONT_SIZE_CAPTION, p: 2 }}
+          sx={{ flex: 1, minHeight: 0, display: "flex" }}
         >
-          Rendering report…
+          <Loading loading size="lg" message="Rendering report…" />
         </Box>
       ) : firstPaintState === "error" ? (
         <Stack

@@ -25,7 +25,7 @@ import { MessageActions } from "@/components/conversation/MessageActions/Message
 import { PinToReportAction } from "@/components/chat-widgets/PinToReportAction/PinToReportAction";
 import { ProposeSchemaFieldCard } from "@/components/chat-widgets/ProposeSchemaFieldCard/ProposeSchemaFieldCard";
 import { SuggestedActionChips } from "@/components/chat-widgets/SuggestedActionChips/SuggestedActionChips";
-import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { BreathingMark } from "@/components/primitives/Loading/BreathingMark";
 import { ThinkingStream } from "@/components/chat-widgets/ThinkingStream/ThinkingStream";
 import { Markdown } from "@/components/primitives/Markdown/Markdown";
 import { consumedAnchorKeys } from "@/components/primitives/Markdown/remarkClickableSpans";
@@ -311,7 +311,9 @@ export function LiveTurnList({
             </Box>
           ) : (
             <BotBubble testid="chat-thinking">
-              <LoadingDots aria-label="Assistant is thinking" />
+              {/* unified-loader §1.8 — the shared mark as the pre-first-event
+                  fallback; ThinkingStream (status lines) takes over on arrival. */}
+              <BreathingMark size="sm" aria-label="Assistant is thinking" />
             </BotBubble>
           );
         })()}

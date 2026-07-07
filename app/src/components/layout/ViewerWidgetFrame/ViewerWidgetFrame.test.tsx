@@ -239,3 +239,29 @@ describe("ViewerWidgetFrame", () => {
     expect(onSecondary).toHaveBeenCalledTimes(1);
   });
 });
+
+// unified-loader §1.1 — the frame body is a COLUMN for edge-to-edge/embed
+// widgets: a short child (a loading boundary) anchors to the top of the pane
+// instead of being row-stretched to full height / floating mid-pane.
+describe("ViewerWidgetFrame — body flex direction (unified-loader §1.1)", () => {
+  it.each(["edge-to-edge", "embed"] as const)(
+    "%s body is a top-anchored column",
+    (contentMode) => {
+      render(
+        <ViewerWidgetFrame
+          widgetId="extract"
+          active
+          chromePolicy="edge-to-edge"
+          contentMode={contentMode}
+          title="Extract"
+        >
+          <div data-testid="short-child">loading…</div>
+        </ViewerWidgetFrame>,
+      );
+      const body = screen.getByTestId("viewer-frame-body");
+      expect(body).toHaveStyle({ display: "flex" });
+      expect(body).toHaveStyle({ flexDirection: "column" });
+      expect(body).toHaveStyle({ justifyContent: "flex-start" });
+    },
+  );
+});

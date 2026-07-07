@@ -35,7 +35,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { BodyText } from "@/components/primitives/BodyText/BodyText";
 import { Button } from "@/components/primitives/Button/Button";
 import { Label } from "@/components/primitives/Label/Label";
-import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { BreathingMark } from "@/components/primitives/Loading/BreathingMark";
 import { TextField } from "@/components/primitives/TextField/TextField";
 import {
   BODY_TEXT,
@@ -111,7 +111,7 @@ const TypingBubble: FC = () => (
         borderRadius: BORDER_RADIUS_2X,
       }}
     >
-      <LoadingDots size={5} aria-label="GroundX is typing" />
+      <BreathingMark size="sm" aria-label="GroundX is typing" />
     </Box>
   </motion.div>
 );

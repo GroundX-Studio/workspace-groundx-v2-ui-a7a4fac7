@@ -41,6 +41,7 @@ import {
   isCalendlyScheduledEvent,
   loadCalendlyEmbedAssets,
 } from "@/lib/calendlyEmbed";
+import { Loading } from "@/components/primitives/Loading/Loading";
 
 export type BookCallEmbedState = "initializing" | "embedding" | "ready" | "error";
 
@@ -309,6 +310,19 @@ export const BookCallView: FC<BookCallViewProps> = ({
           },
         }}
       />
+      {/* unified-loader §1.7 — the shared boundary for the BLOCKING pre-embed
+          state, overlaid on the (still-empty) embed area; Calendly's own
+          spinner is suppressed above, so this is THE loading visual. It lifts
+          the moment the embed reports ready; the frame's status band keeps
+          carrying progressive status + error. */}
+      {embedState !== "ready" && embedState !== "error" && (
+        <Box
+          data-testid="book-call-loading-overlay"
+          sx={{ position: "absolute", inset: 0, display: "flex", backgroundColor: WHITE }}
+        >
+          <Loading loading size="lg" message="Loading the booking calendar…" />
+        </Box>
+      )}
       {embedState === "error" && (
         <Box
           data-testid="book-call-calendly-error"

@@ -41,7 +41,7 @@ import {
 } from "@/constants";
 import { useChatStore } from "@/contexts/ChatStoreContext";
 import { useOnboardingSession } from "@/contexts/OnboardingSessionContext";
-import { LoadingDots } from "@/components/primitives/LoadingDots/LoadingDots";
+import { BreathingMark } from "@/components/primitives/Loading/BreathingMark";
 import { GateChatRail } from "@/components/chat-widgets/GateChatRail/GateChatRail";
 
 export interface GateChatPanelProps {
@@ -151,7 +151,7 @@ const TypingIndicator: FC<{ trigger: keyof typeof TYPING_COPY }> = ({ trigger })
     <Typography variant="caption" sx={{ color: BODY_TEXT }}>
       {TYPING_COPY[trigger]}
     </Typography>
-    <LoadingDots size={5} aria-label="GroundX is composing a response" />
+    <BreathingMark size="sm" aria-label="GroundX is composing a response" />
   </Box>
 );
 

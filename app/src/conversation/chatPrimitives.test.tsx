@@ -303,7 +303,7 @@ describe("per-message footer (chat-message-actions-timestamps)", () => {
 
 // analyze-and-chat-ux §6.3b — the in-flight thinking indicator: with streamed
 // thinkingEvents on the in-flight turn, the live ThinkingStream's status lines
-// render IN PLACE OF the bare LoadingDots; the final answer collapses them.
+// render IN PLACE OF the bare fallback mark; the final answer collapses them.
 describe("LiveTurnList — live thinking stream (§6.3b)", () => {
   it("mid-turn: streamed status lines render in place of the dots", () => {
     render(

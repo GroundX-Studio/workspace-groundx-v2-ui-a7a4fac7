@@ -52,6 +52,7 @@ import { useXrayQuery } from "@/hooks/queries/viewerQueries";
 
 import type { ContentScope, NormalizedBbox, WidgetRole } from "@groundx/shared";
 import type { DocumentXrayResponse } from "@/api/entities/groundxDocumentsEntity";
+import { Loading } from "@/components/primitives/Loading/Loading";
 import { containContentRect, overlayPxRect } from "./overlayGeometry";
 import { mergeAdjacentRegions } from "./mergeRegions";
 import { ZOOM_MIN, ZOOM_MAX, clampPan, stepZoom, zoomAtPoint, type Vec2 } from "./zoomPan";
@@ -694,21 +695,24 @@ export const PdfViewerWidget: FC<PdfViewerWidgetProps> = ({
             </Box>
           </>
         ) : (
-          // Loading state placeholder — neither error nor a real image
-          // yet. The data-loading="true" attribute on the root carries
-          // the contract for tests + screen readers; the visible cell
-          // is just a quiet block so the layout doesn't jump when the
-          // image arrives.
+          // Loading state — neither error nor a real image yet. The
+          // data-loading="true" attribute on the root carries the contract for
+          // tests + screen readers; the cell keeps the page's shape (so layout
+          // doesn't jump when the image arrives) and shows the shared breathing
+          // mark via the app-wide boundary (unified-loader §1.4; the anti-flash
+          // delay keeps fast loads clean).
           <Box
-            aria-hidden
             sx={{
               width: "min(100%, 560px)",
               aspectRatio: "8.5 / 11",
               maxHeight: "100%",
               border: `1px solid ${BORDER}`,
               backgroundColor: WHITE,
+              display: "flex",
             }}
-          />
+          >
+            <Loading loading size="lg" aria-label="Loading document" />
+          </Box>
         )}
         {/* WF-01 C5 — F2 "GroundX is reading the doc" scanner. Lives at the
             page-area level (not on the letterboxed image) so the dim overlay
