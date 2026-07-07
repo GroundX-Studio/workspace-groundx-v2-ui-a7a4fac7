@@ -179,13 +179,13 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
 
 ## 8. Verification
 
-- [ ] 8.1 `npx tsc --noEmit` + full app + middleware vitest green.
-- [ ] 8.2 `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`.
-- [ ] 8.3 Live Chrome DevTools E2E on the utility sample: ALL 8 meters render, each with its
+- [x] 8.1 `npx tsc --noEmit` + full app + middleware vitest green. (app 2035 / middleware 1030, both tsc clean — 2026-07-07)
+- [x] 8.2 `OPENSPEC_TELEMETRY=0 npx @fission-ai/openspec@1.3.1 validate --all --strict`. (23/23)
+- [x] 8.3 Live Chrome DevTools E2E on the utility sample: ALL 8 meters render, each with its
       charges nested; hovering a field lights its bbox (padded, readable), leaving clears;
       confidence bands show where present; no detail card; a chat turn shows the thinking
       stream (status lines) then collapses to the answer; scrollbar flush; header not clipped.
-- [ ] 8.4 Adversarial review gate: no hardcoded group names anywhere; every instance renders
+- [x] 8.4 Adversarial review gate: no hardcoded group names anywhere; every instance renders
       (no `[0]` flatten); hover-highlight per instance; card fully removed; confidence band
       preserved; thinking stream degrades cleanly with no reasoning provider; no raw CoT
       leaked; suite + guards green.
@@ -194,3 +194,17 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
 
 - D.1 Per-document geometry/instance cap for very large documents (log, never silently drop).
 - D.2 Instance labeling heuristics beyond "identifying field or #n".
+
+## Verification record (2026-07-07)
+
+- 8.3 live (chrome-devtools on dev-RDS stack): Meters·8 tab (was [0]-flatten), 8 pills by real
+  meter_id, meter0 Charges·6 vs meter5 Charges·5, hover → page+bbox highlight (p.3, bbox y .088),
+  leave clears, click pins across mouse-leave; thinking stream: dots → Planning → Searching →
+  Reading 8 passages → Writing → Verifying → collapsed to cited answer; chat first message reaches
+  y=0. Confidence bands: dormant in real output (no {value,confidence} dicts) — covered by tests.
+- 8.4 greps CLEAN (no group-name literals in the render path; provenance panel + selectedField
+  machinery fully gone); §6 degrade verified LIVE (gpt-5.5 'auto' emitted zero reasoning summaries
+  → stream stayed valid on status lines); no raw CoT by construction (summary-only APIs).
+- §6.4 gate: LIVE turn through POST /responses on gpt-5.5 — citation funnel emitted 3 → shipped 3,
+  fence intact, tools advertised. Default OFF (.env.example); dev soaks with the flag on.
+- OPEN: §7.1 only (doc-pane gutter does not reproduce — needs the original repro surface).
