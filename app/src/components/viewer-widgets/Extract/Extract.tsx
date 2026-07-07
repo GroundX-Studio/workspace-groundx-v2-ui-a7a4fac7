@@ -905,6 +905,14 @@ export const Extract: FC<ExtractProps> = ({
                   // region. (The list↔detail scroll save/restore died with the
                   // detail card, §3.1.)
                   overflow: "auto",
+                  // analyze-and-chat-ux §7.1 — scrollbar FLUSH to the pane edge:
+                  // bleed through the workbench body's right padding (negative
+                  // margin) and give the CONTENT its breathing room back via the
+                  // scroller's own padding-right — the same pattern as the chat
+                  // pane. The scrollbar hugs the pane instead of floating ~24px
+                  // inside it. (Chat's `scrollbarGutter: stable` is untouched.)
+                  mr: { xs: -1.5, md: -2 },
+                  pr: { xs: 1.5, md: 2 },
                 }}
               >
           <Box data-testid="extract-fields-panel" sx={{ p: 1 }}>

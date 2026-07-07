@@ -165,13 +165,15 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
 
 ## 7. CSS polishes
 
-- [ ] 7.1 Understand doc-pane scrollbar flush to the pane edge (drop the wasted right
-      gutter); do NOT regress the existing **chat** scrollbar-gutter requirement. Verify in
-      Chrome DevTools. **[2026-07-07 live measurement: does NOT reproduce on the current
-      doc-viewer step — every wrapper (viewer-frame-body → onboarding-shell-canvas-pane) is
-      flush (gap 0) and the contain-fit page renders NO scrollbar (zoom pans, overflow
-      hidden). Chat gutter (`scrollbarGutter: stable`) intact. Needs the original repro
-      surface/state before any code change — do no harm.]**
+- [x] 7.1 Doc-pane scrollbar flush to the pane edge (drop the wasted right gutter); do NOT
+      regress the existing **chat** scrollbar-gutter requirement. **RESOLVED 2026-07-07 —
+      the reproducing surface was the EXTRACT FIELDS pane, not the doc-viewer step** (the
+      doc-viewer page pans, no scrollbar): `extract-fields-scroll`'s scrollbar floated 24px
+      inside the pane (the workbench body's right padding wrapped the scroller). Fix = the
+      chat pattern: the scroller bleeds through the body padding (negative right margin) and
+      carries the content inset itself (`pr`). Chrome-DevTools measured: gap 24px → 8px (the
+      8px is the shell's uniform outer card frame — the scrollbar now hugs the card edge);
+      chat gutter (`scrollbarGutter: stable`, 9px) untouched; no console errors.
 - [x] 7.2 Chat header cutoff: pad the header text, not the scroll region, so scrolled content
       reaches y=0. Verified in Chrome DevTools 2026-07-07: chat scroller `padding-top: 0`,
       first message top-offset = 0 at scrollTop 0 (ConversationFlow py→pb + OnboardingShell
