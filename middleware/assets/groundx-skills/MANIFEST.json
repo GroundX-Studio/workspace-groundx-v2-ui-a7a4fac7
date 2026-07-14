@@ -1,7 +1,7 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "04222a6be13ba6014f2797e911053edf19bd5cde",
+  "commit": "b28b96d7bce826f3d11c3aac2a01f432ea0f4a9a",
   "fileCount": 155,
   "files": [
     "groundx-api/SKILL.md",
