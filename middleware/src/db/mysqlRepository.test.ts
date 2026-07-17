@@ -540,6 +540,38 @@ describe("MySqlAppRepository", () => {
     });
   });
 
+  it("normalizes omitted nullable chat-session entity fields to SQL NULL", async () => {
+    const repository = new MySqlAppRepository(testEnv);
+    const createdAt = new Date("2026-06-22T00:00:00.000Z");
+
+    await repository.upsertChatSessionEntity({
+      chatSessionId: "sess-partial",
+      entityKey: "e1",
+      lastStepJson: null,
+      reachedStagesJson: "[]",
+      createdAt,
+      lastVisitedAt: createdAt,
+    } as Parameters<typeof repository.upsertChatSessionEntity>[0]);
+
+    const [, params] = mysqlMock.execute.mock.calls.at(-1)!;
+    expect(params).toEqual([
+      "sess-partial",
+      "e1",
+      null,
+      "[]",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      createdAt,
+      createdAt,
+    ]);
+    expect(params).not.toContain(undefined);
+  });
+
   // shared-template-lifecycle Phase 2 — templates repo methods.
   describe("templates (Phase 2)", () => {
     it("saveTemplate upserts INTO templates with the kind + body_json params", async () => {
