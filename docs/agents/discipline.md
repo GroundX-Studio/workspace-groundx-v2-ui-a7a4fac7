@@ -49,11 +49,11 @@ state explicitly that the key must be rotated.
 - Save in real time. Don't batch a session's worth of work into
   one mega-commit. Each chunk = one passing test + one commit.
 
-## 3a. Comment hygiene
+## 3a. Committed comments
 
-Use comments for non-obvious behavior, invariants, or risk. Do not commit PR
-history, ticket rationale, implementation-plan prose, or "this test proves..."
-narration in code or tests; put that context in OpenSpec, the PR body, or docs.
+Use comments to explain non-obvious behavior, invariants, or risk. Keep PR
+history, ticket rationale, implementation-plan notes, and test-result narration
+in OpenSpec, the PR body, or durable docs instead of committed code or tests.
 
 ## 4. Pre-response consult
 
