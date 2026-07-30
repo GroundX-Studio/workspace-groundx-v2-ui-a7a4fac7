@@ -13,6 +13,7 @@ Test layers, conventions, what runs when.
 | Secret scan | plain node script | `scripts/scan-secrets.mjs` | `npm run scan:secrets` (manual, pre-push) |
 | Vite alias | plain node script | `scripts/test-vite-alias.mjs` | Every `npm test` via `test:alias` |
 | Setup-env smoke | plain node script | `scripts/test-setup-local-env.mjs` | Every `npm test` via `test:setup-env` |
+| Line-ending guard | plain node script | `scripts/check-line-endings.mjs` | Every `npm test` via `check:line-endings` |
 | E2E browser | Playwright + Chromium | `app/e2e/*.spec.ts` | `npm run test:e2e` (demand-driven, slow) |
 
 Current counts:
