@@ -1,9 +1,10 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "dd4431f403b0686947c3d2a1f836ad326482c9fe",
-  "fileCount": 156,
+  "commit": "935bb48b7483c5e9180efe6a55d7a33f793db469",
+  "fileCount": 158,
   "files": [
+    "RESPONSE_STYLE.md",
     "groundx-api/SKILL.md",
     "groundx-api/guides/00-api-surface-changelog.md",
     "groundx-api/guides/01-core-rag-workflow.md",
@@ -152,6 +153,7 @@
     "product-brand-gtm/references/brand-relationship.md",
     "product-brand-gtm/references/buyer.md",
     "product-brand-gtm/references/capabilities-and-surfaces.md",
+    "product-brand-gtm/references/customer-disclosure.md",
     "product-brand-gtm/references/differentiation.md",
     "product-brand-gtm/references/harness-pitch.md",
     "product-brand-gtm/references/narrative.md",
