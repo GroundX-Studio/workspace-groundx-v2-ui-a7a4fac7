@@ -1,8 +1,8 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "ae1cb278ed9191e40bd41cd94793f642edf70c8a",
-  "fileCount": 155,
+  "commit": "dd4431f403b0686947c3d2a1f836ad326482c9fe",
+  "fileCount": 156,
   "files": [
     "groundx-api/SKILL.md",
     "groundx-api/guides/00-api-surface-changelog.md",
@@ -147,6 +147,7 @@
     "master-brand-gtm/references/voice.md",
     "product-brand-gtm/SKILL.md",
     "product-brand-gtm/references/README.md",
+    "product-brand-gtm/references/artifact-recipes.md",
     "product-brand-gtm/references/audiences.md",
     "product-brand-gtm/references/brand-relationship.md",
     "product-brand-gtm/references/buyer.md",
