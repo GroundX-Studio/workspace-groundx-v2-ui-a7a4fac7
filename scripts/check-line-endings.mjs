@@ -10,6 +10,9 @@ const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "
 // Must match the LF text extensions declared in .gitattributes.
 const lfExtensions = new Set([".ts", ".tsx", ".jsx", ".mjs", ".json", ".css", ".html", ".md", ".yaml", ".yml"]);
 
+// Extensionless policy files that define the line-ending policy — scanned by name.
+const lfFiles = new Set([".gitattributes", ".editorconfig"]);
+
 const violations = [];
 
 function extensionOf(file) {
@@ -18,7 +21,7 @@ function extensionOf(file) {
 }
 
 function scanFile(file) {
-  if (!lfExtensions.has(extensionOf(file))) return;
+  if (!lfExtensions.has(extensionOf(file)) && !lfFiles.has(file)) return;
   const path = resolve(root, file);
   if (!existsSync(path)) return;
   const text = readFileSync(path, "utf8");
