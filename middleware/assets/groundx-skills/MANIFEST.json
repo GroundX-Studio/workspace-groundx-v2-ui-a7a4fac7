@@ -1,8 +1,8 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "935bb48b7483c5e9180efe6a55d7a33f793db469",
-  "fileCount": 158,
+  "commit": "346754f32680eca69ebd80e62b58ea4654fb87f6",
+  "fileCount": 159,
   "files": [
     "RESPONSE_STYLE.md",
     "groundx-api/SKILL.md",
@@ -79,6 +79,7 @@
     "groundx-extraction-workflows/references/README.md",
     "groundx-extraction-workflows/references/customer-onboarding.md",
     "groundx-extraction-workflows/references/deploy.md",
+    "groundx-extraction-workflows/references/local-artifact-closeout.md",
     "groundx-extraction-workflows/references/openspec-pilots.md",
     "groundx-extraction-workflows/references/prompt-improvement-loop.md",
     "groundx-extraction-workflows/references/prompt-manager.md",
