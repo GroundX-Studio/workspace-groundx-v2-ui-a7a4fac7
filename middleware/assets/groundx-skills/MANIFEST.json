@@ -1,8 +1,8 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "3350e9b182ebe259af81d855fb75cceb817ce822",
-  "fileCount": 160,
+  "commit": "a21e0706e66efa427101d3b7d440522e748c510b",
+  "fileCount": 162,
   "files": [
     "RESPONSE_STYLE.md",
     "groundx-api/SKILL.md",
@@ -93,7 +93,6 @@
     "groundx-mcp/references/04-auth.md",
     "groundx-mcp/references/05-workflows.md",
     "groundx-mcp/references/06-migration.md",
-    "groundx-mcp/references/07-issue-report-template.md",
     "groundx-mcp/references/README.md",
     "groundx-on-prem/SKILL.md",
     "groundx-on-prem/examples/README.md",
@@ -132,6 +131,9 @@
     "groundx-python/references/02-core-sdk.md",
     "groundx-python/references/03-extract.md",
     "groundx-python/references/README.md",
+    "harness-feedback/SKILL.md",
+    "harness-feedback/references/README.md",
+    "harness-feedback/references/report-template.md",
     "master-brand-gtm/SKILL.md",
     "master-brand-gtm/references/README.md",
     "master-brand-gtm/references/ai-and-humans.md",
