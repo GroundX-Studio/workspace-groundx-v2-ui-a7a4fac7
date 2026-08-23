@@ -1,8 +1,8 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "f97733448f097fdc491855b56feb2e27fc046da0",
-  "fileCount": 162,
+  "commit": "2ae15150a1391d497f5367caa6dd663d2cdc03e5",
+  "fileCount": 163,
   "files": [
     "RESPONSE_STYLE.md",
     "groundx-api/SKILL.md",
@@ -145,6 +145,7 @@
     "master-brand-gtm/references/narrative.md",
     "master-brand-gtm/references/objections.md",
     "master-brand-gtm/references/outcome-playbooks.md",
+    "master-brand-gtm/references/people.md",
     "master-brand-gtm/references/product.md",
     "master-brand-gtm/references/proof-points.md",
     "master-brand-gtm/references/verticals.md",
