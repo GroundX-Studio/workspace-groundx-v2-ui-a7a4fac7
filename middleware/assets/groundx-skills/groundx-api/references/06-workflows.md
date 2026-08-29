@@ -103,7 +103,7 @@ supply an `engine` object. The same field exists on the wire and on the
 | `apiKey` | `api_key` | Bearer token for the custom LLM endpoint. |
 | `baseURL` | `base_url` | Base URL of an OpenAI chat completion-compatible endpoint. |
 | `engineID` | `engine_id` | Model name to include in the request. |
-| `maxImages` | `max_images` | Optional positive limit for the combined image attachments in each provider request using this engine. |
+| `maxImages` | `max_images` | Optional positive limit for the combined image attachments in each provider request using this engine. Omission uses the default of 50. |
 | `service` | `service` | Identifies the kind of endpoint — see §1.3.1 below. The field name is `service` on **both** wire and SDK; earlier versions of this reference incorrectly called it `serviceType`. |
 | `reasoningEffort` | `reasoning_effort` | One of: `minimal`, `low`, `medium`, `high`. |
 
@@ -114,11 +114,16 @@ authored step engine supersedes its workflow engine default. No separate route-s
 image-count value overrides the selected engine. Page images and crop images share one
 combined request-wide count. If the count is exceeded, GroundX removes earlier images
 first and preserves all text; later crop images therefore survive in the current summary
-request layout. If the selected engine omits `maxImages`, no image-count cap applies.
+request layout. If the selected engine omits `maxImages`, GroundX uses the default of
+50. An explicit positive value takes precedence over this default.
 The independent `openai-base64` serialized request-size guard may still remove images by
 byte size. The Python `max_images` attribute requires an SDK release generated from the
 Fern contract that contains this field; use the REST `maxImages` key with older SDK
 versions.
+The 50-image default is a fallback, not a universal provider-safe limit. When a provider
+or model supports fewer than 50 images, set an explicit `maxImages` to its tested lower
+limit. For DeepInfra `google/gemma-4-31B-it`, set `maxImages` to 30. Do not apply 30 to
+another provider or model without verifying its limit.
 
 See `references/12-python-sdk-objects.md` §3 for the `WorkflowEngine` constructor
 example.
