@@ -1,8 +1,8 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "e88a450cd207144ce38324709be13578b1e89c54",
-  "fileCount": 163,
+  "commit": "b8a6e200f77428fa8ef04bd7f6c07a5d1996dd58",
+  "fileCount": 164,
   "files": [
     "RESPONSE_STYLE.md",
     "groundx-api/SKILL.md",
@@ -108,6 +108,7 @@
     "groundx-on-prem/references/dr-cross-region-runbook.md",
     "groundx-on-prem/references/engines.md",
     "groundx-on-prem/references/gpu-operator.md",
+    "groundx-on-prem/references/identity-model.md",
     "groundx-on-prem/references/image-variants.md",
     "groundx-on-prem/references/install-flow.md",
     "groundx-on-prem/references/license-and-admin.md",
