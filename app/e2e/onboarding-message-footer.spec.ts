@@ -4,16 +4,47 @@ import { expect, test } from "@playwright/test";
  * chat-message-actions-timestamps — per-message footer + SuggestedActionChips
  * behaviors that jsdom cannot measure (computed opacity for the hover-reveal /
  * touch-persistent path, and single-line ellipsis truncation which needs real
- * layout). Runs against the REAL backend like the other onboarding specs.
+ * layout). Runs against the real app like the other onboarding specs.
  *
  * Determinism: sending a message renders the USER turn OPTIMISTICALLY (no LLM
- * needed for the footer assertions). The chip test does depend on the light
- * planner surfacing the `book_call` chip for an explicit booking ask, with a
- * generous timeout.
+ * needed for the footer assertions). The chip layout test supplies the server's
+ * typed response at the HTTP boundary because live model tool selection is not
+ * a stable layout-test precondition.
  */
 
 const TIME_RE = /\d{1,2}:\d{2}\s?(AM|PM)/i;
 const userFooter = '[data-testid="message-actions"][data-role="user"]';
+
+async function stubBookCallReply(page: import("@playwright/test").Page) {
+  await page.route("**/api/chat/messages", async (route) => {
+    const result = {
+      userMessageId: "e2e-user-message",
+      assistantMessageId: "e2e-assistant-message",
+      reply: {
+        mode: "rag",
+        answer: "You can book a call with an engineer.",
+        citations: [],
+        suggestedActions: [
+          {
+            key: "tool:book_call",
+            label: "Book a call",
+            detail: { name: "book_call", arguments: {}, intent: { kind: "openBookCall" } },
+          },
+        ],
+        intents: [],
+        toolFailures: [],
+        toolActivity: [],
+        proposedSchemaField: null,
+      },
+      compressionRan: false,
+    };
+    await route.fulfill({
+      body: `id: 1\nevent: envelope\ndata: ${JSON.stringify(result)}\n\n`,
+      contentType: "text/event-stream",
+      status: 200,
+    });
+  });
+}
 
 async function sendFirstMessage(page: import("@playwright/test").Page, text: string) {
   await page.goto("/onboarding/28454/utility");
@@ -45,6 +76,7 @@ test.describe("per-message footer — hover-reveal @desktop", () => {
   test("a booking ask surfaces a single-line, in-width, left-aligned 'Book a call' chip that truncates a long label", async ({
     page,
   }) => {
+    await stubBookCallReply(page);
     await sendFirstMessage(page, "can i book a call with a human please");
     const chip = page.getByTestId("suggested-action-chip-tool:book_call");
     await expect(chip).toBeVisible({ timeout: 30_000 });

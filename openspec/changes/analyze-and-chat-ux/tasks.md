@@ -107,6 +107,8 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
       1772-line `Extract.tsx`, **not** deleting a `FieldProvenancePanel` component (there is none).
 - [x] 3.1b Retire the `field-provenance-panel` test contract in `docs/agents/testing.md` and the
       `field-provenance-panel` assertions in `Extract.test.tsx` / `ExtractView.test.tsx`.
+- [x] 3.1c Align the live Utility browser journey with the replacement contract: require a
+      `field-source-chip`, then click its row and assert the PDF viewer pins that source page.
 - [x] 3.2 Field-instance row drives the PDF highlight on **hover/focus** (TDD) — sets
       `targetPage`+`highlightBbox` per instance; leave/blur clears. Reuse the shipped padded
       overlay. Test: hovering `field-row` for meter 2's `line_amount` renders `pdf-viewer-highlight`

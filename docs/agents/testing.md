@@ -192,11 +192,13 @@ unit + contract layers carry most of the regression weight.
 
 ### E2E runs against LIVE GroundX — assert invariants, not fixtures (2026-06-02)
 
-There is no MOCK_MODE; the middleware boots in real mode and the chat is a real
-LLM. So e2e MUST assert **live-stable structural invariants** — frame testids,
-`field-row-*` / `cite-chip-*` presence, step transitions, gate lifecycle — and
-MUST NOT assert deterministic fixture strings (exact extracted values, canned
-LLM answers, fixture doc titles). It exercises the **actually-seeded** scenarios
+There is no MOCK_MODE; the middleware boots in real mode and chat uses a real
+LLM by default. Tests covering live server behavior MUST assert **live-stable
+structural invariants**: frame testids, `field-row-*` / `field-source-chip`
+presence, step transitions, and gate lifecycle. They MUST NOT assert deterministic
+fixture strings (exact extracted values, canned LLM answers, fixture doc titles).
+A layout-only test may stub one typed HTTP response when model tool selection is
+not the behavior under test. The suite exercises the **actually-seeded** scenarios
 (Utility today); an unseeded scenario (Loan/Solar) is `describe.skip`ped with a
 seeding ticket, never asserted against absent data and never faked.
 
