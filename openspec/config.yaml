@@ -68,7 +68,7 @@ context: |
   - npm run verify:preview (smoke)
   - Recurrence drift guards: app/src/test/recurrence-drift-guards.test.ts §5(a)–(e) + middleware/src/db/persistedColumnPolicy.test.ts + app/src/tools/catalog-parity.test.ts
   
-  Active OpenSpec state: 8 changes / 21 steps; locked execution order in docs/agents/cross-plan-execution-order.md; WIP cap = 3 per epic; cf19 (broken—rework), wf10, cf04 are BACKLOGGED.
+  Active OpenSpec state and locked execution order live in docs/agents/cross-plan-execution-order.md; WIP cap = 3 per epic; cf19 (broken—rework), wf10, cf04 are BACKLOGGED.
   
   Constraints:
   - No mock mode: real API clients always; fakes injected only at DI seam for tests
