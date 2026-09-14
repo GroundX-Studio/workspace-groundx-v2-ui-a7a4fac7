@@ -1,9 +1,8 @@
 name: Uninstall
 
 # Manual teardown of the Helm release for one environment. Requires the
-# operator to type "uninstall" into the confirm field. Permanent project
-# deletion also sets purge to remove the app's middleware credentials.
-# Ordinary teardown preserves credentials for republishing.
+# operator to type "uninstall" into the confirm field. Namespaces are
+# pre-created runner configuration and are never deleted by this workflow.
 #
 # For prod, also add required reviewers to the `prod` GitHub Environment
 # (Settings -> Environments -> prod -> Required reviewers) so this
@@ -24,11 +23,6 @@ on:
         description: Type the word "uninstall" exactly to confirm
         required: true
         type: string
-      purge:
-        description: Permanently remove this app's middleware credentials
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -50,7 +44,6 @@ jobs:
       EKS_CLUSTER_REGION: ${{ inputs.environment == 'prod' && (vars.EKS_CLUSTER_REGION_PROD || secrets.EKS_CLUSTER_REGION_PROD) || (vars.EKS_CLUSTER_REGION_DEV || secrets.EKS_CLUSTER_REGION_DEV) }}
       K8S_NAMESPACE_INPUT: ${{ vars.K8S_NAMESPACE || secrets.K8S_NAMESPACE || '' }}
       HELM_RELEASE_NAME_INPUT: ${{ vars.HELM_RELEASE_NAME || secrets.HELM_RELEASE_NAME || '' }}
-      MIDDLEWARE_SECRET_NAME_INPUT: ${{ vars.MIDDLEWARE_SECRET_NAME || secrets.MIDDLEWARE_SECRET_NAME || '' }}
     steps:
       - name: Confirm intent
         run: |
@@ -103,10 +96,8 @@ jobs:
           [ -z "$repo_k8s_name" ] && repo_k8s_name="groundx-web-ui"
           namespace="${K8S_NAMESPACE_INPUT:-${repo_k8s_name}-${{ inputs.environment }}}"
           release_name="$(slugify_k8s_name "${HELM_RELEASE_NAME_INPUT:-${repo_k8s_name}-${{ inputs.environment }}}")"
-          middleware_secret_name="$(slugify_k8s_name "${MIDDLEWARE_SECRET_NAME_INPUT:-${release_name}-middleware}")"
           echo "namespace=$namespace" >> "$GITHUB_OUTPUT"
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
-          echo "middleware_secret_name=$middleware_secret_name" >> "$GITHUB_OUTPUT"
           echo "Target release: $release_name (namespace: $namespace)"
 
       - name: Helm uninstall
@@ -131,25 +122,3 @@ jobs:
             exit 0
           fi
           kubectl -n "$ns" delete deployment,replicaset,pod,service,ingress,configmap,horizontalpodautoscaler,job,cronjob -l "$selector" --ignore-not-found --wait=true
-
-      - name: Purge middleware credentials
-        if: inputs.purge
-        run: |
-          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
-          ns="${{ steps.target.outputs.namespace }}"
-          rel="${{ steps.target.outputs.release_name }}"
-          secret="${{ steps.target.outputs.middleware_secret_name }}"
-          test -n "$ns" && test -n "$rel" && test -n "$secret"
-          ownership="$(kubectl -n "$ns" get secret "$secret" --ignore-not-found -o 'jsonpath={.metadata.name}{" "}{.data.GROUNDX_DEPLOY_NAMESPACE}{" "}{.data.GROUNDX_DEPLOY_RELEASE_NAME}')"
-          if [ -z "$ownership" ]; then
-            echo "Middleware Secret already absent."
-            exit 0
-          fi
-          read -r stored_name stored_namespace stored_release <<< "$ownership"
-          stored_namespace="$(printf '%s' "$stored_namespace" | base64 --decode)"
-          stored_release="$(printf '%s' "$stored_release" | base64 --decode)"
-          if [ "$stored_name" != "$secret" ] || [ "$stored_namespace" != "$ns" ] || [ "$stored_release" != "$rel" ]; then
-            echo "Middleware Secret ownership does not match this deployment; refusing deletion."
-            exit 1
-          fi
-          kubectl -n "$ns" delete secret "$secret" --ignore-not-found --wait=true
