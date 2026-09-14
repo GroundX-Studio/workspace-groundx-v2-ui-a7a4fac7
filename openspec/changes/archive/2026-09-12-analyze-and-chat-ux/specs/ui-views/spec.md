@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: F3 Extract SHALL render the live extraction output tree, labeled from the workflow schema by name
+### Requirement: F3 Extract SHALL render live workflow schema and extract values
 
 F3 MUST render the **full extracted object output-first** — its STRUCTURE walked from the live
 extraction OUTPUT tree (`getGroundXDocumentExtract(documentId)`) as-received, and its LABELS/TYPES
@@ -94,17 +94,17 @@ replace it.
 - **WHEN** the final message arrives
 - **THEN** the thinking stream is replaced by the answer and its citation chips.
 
-### Requirement: The Understand doc-pane scrollbar SHALL sit flush at the pane edge
+### Requirement: The Extract fields scrollbar SHALL sit flush at the pane edge
 
-The Understand document-pane scroll container SHALL NOT reserve an unused right-margin gutter;
-its vertical scrollbar SHALL sit flush at the pane's right edge. This is the **document pane**,
-distinct from the ChatColumn scrollbar-gutter requirement, which is unchanged.
+The Extract fields scroll container SHALL NOT reserve an unused right-margin gutter; its vertical
+scrollbar SHALL sit flush at the fields pane edge. The ChatColumn scrollbar-gutter requirement is
+unchanged.
 
-#### Scenario: No wasted gutter beside the document pane
+#### Scenario: No wasted gutter beside Extract fields
 
-- **GIVEN** the Understand view with a scrollable document
-- **WHEN** the doc pane renders
-- **THEN** the scrollbar sits at the pane's right edge with no reserved empty gutter beside it.
+- **GIVEN** F3 Extract with enough fields to scroll
+- **WHEN** the fields pane renders
+- **THEN** `extract-fields-scroll` places its scrollbar at the pane edge without an internal empty gutter.
 
 ### Requirement: The chat header SHALL NOT clip the top of scrolled content
 

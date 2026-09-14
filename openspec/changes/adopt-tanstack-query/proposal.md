@@ -67,7 +67,7 @@ introducing Redux/Zustand (client state stays in the existing contexts).
   the other two go through the FLAT `api.*` client — `api.workflow.getGroundXWorkflow` (no
   `WorkflowsProvider` is mounted in `App.tsx`) and `api.extract.fetchFieldGeometry` — so the
   migration wraps both context and flat-client reads, not "the entity contexts" alone. Rebuild
-  Extract's 4-call imperative chain as chained `enabled`-gated queries and re-home its
+  Extract's 4-call imperative chain as one keyed query around an ordered loader and re-home its
   `onFileNameResolved` side-effect. Consolidate the PARALLEL fetch chain
   (`hooks/useLiveExtract.ts` + `hooks/liveExtractData.ts` + `hooks/useLiveExtractionSchema.ts` +
   `hooks/liveExtractionSchemaData.ts`) onto the same query hooks so one fetch path serves both

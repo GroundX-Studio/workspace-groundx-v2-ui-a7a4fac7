@@ -41,25 +41,24 @@
 
 | change | one line |
 |--------|----------|
-| `adopt-tanstack-query` | server-state layer (TanStack Query v5); fixes Interact↔Extract toggle churn |
-| `analyze-and-chat-ux` | output-first Extract render + hover highlights + chat thinking stream + polishes |
-| `unified-loader` | one shared loading treatment; retire `LoadingDots`; frame flex fix |
+| `adopt-tanstack-query` | foundation + viewer cache shipped; remaining migration stays active |
+| `analyze-and-chat-ux` | ✓ complete (archived 2026-09-12) |
+| `unified-loader` | ✓ complete (pending archive) |
 | `extract-workflow-authoring` | schema editor → YAML → **real harness Python build service** → PUT |
 | `agentic-template-item-editor` | ✓ complete (pending archive) |
 
 ## Dependency graph
 
 ```
-adopt-tanstack-query P1 ──(useQuery hooks)──▶ analyze render (output-first; works on legacy)
-                        └──(isPending/isError)──▶ unified-loader
-analyze-and-chat-ux ──(settled viewer+chat structure)──▶ unified-loader
-                    └──(recursive render surface)──▶ extract-workflow-authoring editor
+shipped TanStack foundation + viewer cache ──▶ analyze render (complete)
+                                           └──▶ unified loader (complete)
+analyze-and-chat-ux (complete) ──▶ extract-workflow-authoring editor
 step 0 (demo → v1 workflow) ──(leafFields for authoring round-trip)──▶ extract-workflow-authoring
 ```
 
-The render is **output-first and works on the legacy demo**, so it is **NOT** blocked by step 0 —
-only by tanstack Phase 1. Authoring **no longer gates analyze**; it sits on top of the render and
-needs step 0 (v1 workflow) for its build/round-trip.
+The render is **output-first and works on the legacy demo**. Its required TanStack foundation and
+viewer cache have shipped. Authoring sits on top of the completed render and needs step 0 (v1
+workflow) for its build/round-trip. The rest of the TanStack migration is independent follow-up.
 
 ## Ordered steps
 
@@ -68,14 +67,14 @@ needs step 0 (v1 workflow) for its build/round-trip.
 | # | change / phase | blocked by | why here |
 |---|----------------|-----------|----------|
 | 0 ‖ | **Migrate the demo workflow → v1** (see the concrete target + procedure below) | — | v1 `leafFields` for the authoring round-trip (NOT needed by the render) |
-| 1 ‖ | `adopt-tanstack-query` **Phase 1** (provider + 5 viewer reads) | — | foundation; fixes toggle bug; gives analyze its `useQuery` reads |
-| 2 | `analyze-and-chat-ux` (output-first render, hover, thinking, polishes) | 1 | walks the output tree + labels from schema; tanstack reads; restructures viewer & chat |
-| 3 | `unified-loader` (shared mark + flex fix) | 2, 1 | swaps the mark into the settled structure; consumes `isPending` |
-| 4 | `extract-workflow-authoring` (schema editor → YAML → real harness build → PUT) | 2, 0 | authoring over the render; needs the Python build service + v1 workflow (step 0) |
-| 5 ‖ | `adopt-tanstack-query` **Phase 2** (rest of data layer) | 1 | remaining reads/mutations; may trail 2–4 |
+| 1 ‖ | `adopt-tanstack-query` foundation + viewer cache (complete) | — | shipped provider, retry policy, keys, and supported viewer queries |
+| 2 | `analyze-and-chat-ux` (complete, archived 2026-09-12) | — | output-first render, highlights, and chat work shipped |
+| 3 | `unified-loader` (complete, pending archive) | — | shared loading treatment and frame fix shipped |
+| 4 | `extract-workflow-authoring` (schema editor → YAML → real harness build → PUT) | 0 | uses the completed render; still needs the Python build service + v1 workflow |
+| 5 ‖ | `adopt-tanstack-query` remaining Phase 1 + Phase 2 | — | consolidate duplicate readers, add invalidation/reset coverage, then migrate the rest |
 
-Concurrency: **0 ‖ 1** (step 0 is a data/setup task, step 1 is app code — disjoint); the render
-(step 2) needs neither of them except tanstack P1. Everything else serial. Step 5 may overlap 2–4.
+Steps 1–3 are complete. Step 0 and the remaining TanStack work are disjoint and may proceed in
+parallel. Authoring waits only for step 0.
 
 ## Step 0 — demo workflow migration (concrete; verified live 2026-07-06)
 

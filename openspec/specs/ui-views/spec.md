@@ -330,32 +330,6 @@ pinned below the panes.
 - **THEN** the `← back`, schema name, version chip, `export ▾`, `↻ rerun`, and `💾 Save` controls all have non-overlapping bounding rectangles
 - **AND** all controls are individually focusable.
 
-### Requirement: F4 SHALL render a Field provenance panel on field-card click
-
-When a user clicks a field card in F3, the right pane SHALL swap from
-the extracted-fields list to a `FieldProvenancePanel` containing
-sections FIELD / SOURCE / WHY MATCHED / CONFIDENCE / NEIGHBORS. A
-breadcrumb row `← all fields › {category} · #{n} › {fieldKey}` SHALL
-appear above the panes with `▴ collapse` and `↗ open full doc` ghost
-controls. The selected field's source region MUST be highlighted on
-the PDF with a floating `match · {confidence}%` label.
-
-#### Scenario: Click field → provenance panel + breadcrumb
-
-- **GIVEN** the user is on F3 with the extracted-fields panel visible
-- **WHEN** they click the `account_number` field card
-- **THEN** the right pane swaps to a `FieldProvenancePanel` with the five named sections
-- **AND** a breadcrumb appears: `← all fields › statement · account_number`
-- **AND** the PDF viewer highlights the source region in green with a `match · 98%` floating label.
-
-#### Scenario: ▴ collapse returns to F3
-
-- **GIVEN** F4 is open
-- **WHEN** the user clicks `▴ collapse`
-- **THEN** the right pane reverts to the extracted-fields list
-- **AND** the breadcrumb disappears
-- **AND** the PDF region highlight clears.
-
 ### Requirement: F5 InteractView SHALL light citation regions on the PDF in chip-keyed colors
 
 The PdfViewerWidget SHALL paint one lit region per `[N]` footnote marker in the assistant
@@ -404,18 +378,25 @@ coral semantic rule wins, matching the `CiteChip` `color` prop).
 
 ### Requirement: F3 PDF viewer SHALL highlight the selected field's source region
 
-The F3 ExtractView SHALL pass the selected field's first citation as `targetPage` + `highlightBbox` to the left-pane `PdfViewerWidget`, so the source region is visually cross-linked when the user clicks (or focus-pre-selects) a field card. When no field is selected, the viewer falls back to its uncontrolled default.
+The F3 ExtractView SHALL cross-link a field-instance row to its source region on the left-pane
+`PdfViewerWidget` via `targetPage` + `highlightBbox`, driven by **hover/focus** (transient) and
+**click** (pinned), keyed **per field-instance** (a value on meter 2 charge 3 is distinct from
+meter 0 charge 0). On mouse-leave/blur the transient highlight clears; when nothing is
+hovered/pinned the viewer falls back to its uncontrolled default. The highlight overlay MUST use
+the padded overlay geometry so it does not visually clip the marked glyphs.
 
-#### Scenario: Clicking a field card highlights its source page + bbox
+#### Scenario: Hovering a field-instance highlights its source page + bbox
 
 - **GIVEN** the user is on F3 with the Utility scenario
-- **WHEN** they click `field-row-amount_due`
-- **THEN** the left-pane PdfViewerWidget renders with `targetPage` matching the field's first citation page
-- **AND** the widget renders an element with testid `pdf-viewer-highlight` overlaying the citation bbox.
+- **WHEN** they hover the row for meter 2's `line_amount`
+- **THEN** the left-pane PdfViewerWidget renders `targetPage` matching that instance's citation page
+- **AND** an element with testid `pdf-viewer-highlight` overlays that instance's bbox
+- **WHEN** they move the pointer off the row
+- **THEN** the transient highlight clears.
 
-#### Scenario: No field selected leaves the viewer at its default
+#### Scenario: No hover/pin leaves the viewer at its default
 
-- **GIVEN** the user is on F3 with no field selected
+- **GIVEN** the user is on F3 with nothing hovered or pinned
 - **WHEN** the viewer renders
 - **THEN** no `pdf-viewer-highlight` overlay is in the document.
 
@@ -461,12 +442,26 @@ as starter-chip prompts that feed the real chat.
 
 ### Requirement: F3 Extract SHALL render live workflow schema and extract values
 
-F3 SHALL render the extraction schema and field values from live GroundX, not the scenario
-manifest. The schema MUST come from `getGroundXWorkflow(filter.workflow_id)` (resolved via
-`getDocument`) and the values from `getGroundXDocumentExtract(documentId)`; `ExtractView`,
-`SchemaView` (F3a), and the `ChatColumn` schema read MUST NOT read
-`scenario.manifest.extractionSchema` or `sampleExtractionValues`. The overlay-merge and F3a save
-flow MUST operate on the live schema.
+F3 MUST render the **full extracted object output-first** — its STRUCTURE walked from the live
+extraction OUTPUT tree (`getGroundXDocumentExtract(documentId)`) as-received, and its LABELS/TYPES
+joined from the live workflow schema fields **by field name** — with **no hardcoded group names**
+and **no first-element flatten**, not from the scenario manifest. STRUCTURE MUST come from the
+output tree: top-level scalar fields (statement scalars hoisted to root), top-level array groups
+(`meters`, synthesized `account_charges`), and within a meter its nested `meter_charges` array. The
+app MUST NOT reassemble, re-nest, or group-by — the server already reshaped the output. The parse
+MUST yield **one instance per array element** (every meter; every charge nested under its meter),
+not element `[0]`. LABELS/TYPES/instructions MUST come from the workflow schema fields read by name
+(`workflowToSchema` over `workflow.extract.<group>.fields.<id>.prompt`, resolved via `getDocument`
+→ `getGroundXWorkflow(filter.workflow_id)`); a charge field under `meter_charges` OR
+`account_charges` MUST resolve to the `charges` group's field def by name. The workflow schema MUST
+NOT be restricted to a fixed `{statement, meters, charges}` allow-list. Hiding MUST be by absence of
+a matching schema field: an output key with no schema field MUST NOT render; there MUST be no
+hardcoded `__conflicts` pattern and no `leafFields` allow-list. `ExtractView` and `SchemaView`
+(F3a) MUST NOT read `scenario.manifest.extractionSchema` or `sampleExtractionValues`. A
+`{value, confidence}` field value MUST be unwrapped defensively with the confidence surfaced per
+instance when present; the real output carries none, so the confidence band is dormant. The render
+source is live data (output + workflow schema), NOT the persisted Extract Template (a different,
+flat `{categories}` shape); this requirement does NOT assume a v1 workflow.
 
 #### Scenario: F3 shows real extracted values
 
@@ -474,6 +469,27 @@ flow MUST operate on the live schema.
 - **WHEN** F3 renders
 - **THEN** the values come from `getGroundXDocumentExtract` (the real bill figures)
 - **AND** no manifest `sampleExtractionValues` are displayed.
+
+#### Scenario: All array instances render (no flatten)
+
+- **GIVEN** the Utility bill output with 8 meters, each with nested `meter_charges`, plus top-level `account_charges`
+- **WHEN** F3 renders the fields panel
+- **THEN** all 8 meters render, each with its charges nested beneath it, and `account_charges` renders as its own top-level group
+- **AND** no meter or charge beyond the first is dropped.
+
+#### Scenario: An arbitrary output shape renders (anti-hardcode)
+
+- **GIVEN** an extraction output whose top-level array group is NOT named `statement`/`meters`/`charges` and nests an array two levels deep
+- **WHEN** the parse + render walk the output and join labels from the schema by name
+- **THEN** every group, instance, and nested instance renders
+- **AND** no group is dropped for not matching a name allow-list.
+
+#### Scenario: An output key with no schema field is hidden
+
+- **GIVEN** an extraction output containing a key that has no matching workflow schema field
+- **WHEN** F3 renders
+- **THEN** that key is not displayed
+- **AND** no hardcoded `__conflicts` filter is used to hide it.
 
 ### Requirement: The document viewer SHALL NOT fetch an X-Ray for a placeholder id
 
@@ -1121,3 +1137,43 @@ is already shown.
 - **WHEN** the user clicks the "Charges" pill
 - **THEN** Extract re-focuses to Charges without a remount
 
+### Requirement: The chat SHALL render a thinking stream instead of a bare loading dot
+
+While a chat turn is in flight, the chat message list SHALL render a live **thinking stream** —
+the turn's ordered status lines (and any model-reasoning summary, when present) — in place of the
+bare "…" indicator. This indicator lives in `app/src/conversation/chatPrimitives.tsx` (the
+`showThinking` → `LoadingDots` `BotBubble`), NOT in `ChatColumn`. When the final message event
+arrives, the thinking stream SHALL collapse and the rendered answer (with citations) SHALL
+replace it.
+
+#### Scenario: In-flight turn shows status, not a bare dot
+
+- **GIVEN** the user sends a chat message
+- **WHEN** the turn is still resolving (searching, verifying citations)
+- **THEN** the chat shows the streamed status lines (e.g. "verifying citations"), not only a "…"
+- **WHEN** the final message arrives
+- **THEN** the thinking stream is replaced by the answer and its citation chips.
+
+### Requirement: The Extract fields scrollbar SHALL sit flush at the pane edge
+
+The Extract fields scroll container SHALL NOT reserve an unused right-margin gutter; its vertical
+scrollbar SHALL sit flush at the fields pane edge. The ChatColumn scrollbar-gutter requirement is
+unchanged.
+
+#### Scenario: No wasted gutter beside Extract fields
+
+- **GIVEN** F3 Extract with enough fields to scroll
+- **WHEN** the fields pane renders
+- **THEN** `extract-fields-scroll` places its scrollbar at the pane edge without an internal empty gutter.
+
+### Requirement: The chat header SHALL NOT clip the top of scrolled content
+
+The chat column header's fade/mask SHALL pad its own text rather than overlap the scroll
+region, so the message list can scroll fully to the top (y=0) without the first content being
+clipped behind the header.
+
+#### Scenario: Scrolled chat content reaches the top
+
+- **GIVEN** a chat with enough messages to scroll
+- **WHEN** the user scrolls to the top
+- **THEN** the first message is fully visible, not clipped behind the header fade.

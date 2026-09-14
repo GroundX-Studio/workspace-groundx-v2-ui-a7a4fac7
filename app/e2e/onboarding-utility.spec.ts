@@ -58,10 +58,10 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
   });
 
   // Structural, live-data-stable: the extract renders schema rows and at least
-  // one citation chip. Field IDs come from the live extract workflow schema, so
-  // we assert ≥1 `field-row-*` + ≥1 `cite-chip-*` rather than specific field
-  // names/values (those were MOCK_MODE fixtures).
-  test("F3 surfaces schema rows with citation chips", async ({ page }) => {
+  // one source-page chip. Field IDs come from the live extract workflow schema,
+  // so we assert the current row-level provenance contract rather than specific
+  // field names or values.
+  test("F3 surfaces schema rows with source-page chips", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
     // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
     // advances to Extract on completion (experience.tsx onDone →
@@ -71,8 +71,8 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
     // At least one extracted field row renders.
     await expect(page.locator('[data-testid^="field-row-"]').first()).toBeVisible({ timeout: 15_000 });
-    // At least one field carries a citation chip.
-    await expect(page.locator('[data-testid^="cite-chip-"]').first()).toBeVisible({ timeout: 15_000 });
+    // At least one field carries its source-page chip.
+    await expect(page.getByTestId("field-source-chip").first()).toBeVisible({ timeout: 15_000 });
   });
 
   // ──────────────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
   // GateChatRail. An anonymous user clicking the Extract "unlock" banner
   // (`extract-unlock-banner`) fires `openGate("save")`.
   // ──────────────────────────────────────────────────────────────────────
-  test("F4 citation peek opens when a cited field row is clicked", async ({ page }) => {
+  test("F4 clicking a sourced field pins its page in the document viewer", async ({ page }) => {
     await page.getByTestId("sample-utility").click();
     // The thinking stream (6 notes · ~1.5–2.8s each + 1.2s done-reveal) AUTO-
     // advances to Extract on completion (experience.tsx onDone →
@@ -89,22 +89,14 @@ test.describe("F1–F7 · Utility scenario · golden journey @desktop-only", () 
     // extract-workbench step rather than clicking a pill the auto-advance
     // preempts. Generous timeout covers the live stream duration.
     await expect(page.getByTestId("onboarding-step-extract-workbench")).toBeVisible({ timeout: 25_000 });
-    // Click a row that actually carries a citation, so the peek has one to show.
-    const citedRow = page
-      .locator('[data-testid^="field-row-"]', { has: page.locator('[data-testid^="cite-chip-"]') })
-      .first();
+    // Click a row that carries a source-page chip, so the viewer has a page to pin.
+    const citedRow = page.locator('[data-testid^="field-row-"]', { has: page.getByTestId("field-source-chip") }).first();
     await expect(citedRow).toBeVisible({ timeout: 15_000 });
+    const sourceText = await citedRow.getByTestId("field-source-chip").textContent();
+    const sourcePage = sourceText?.match(/p\.(\d+)/)?.[1];
+    expect(sourcePage).toBeTruthy();
     await citedRow.click();
-    // Selecting a field opens the provenance panel (the live "peek"). The panel
-    // and the field-row chip read the SAME `valuesByFieldId` source, so a row
-    // with a cite chip has a populated panel. The panel renders each citation as
-    // a "page N" source pill under a SOURCE label (NOT a `cite-chip-*` testid),
-    // and shows "No source citations" only when empty — so we assert a real
-    // citation rendered, not the empty state.
-    const panel = page.getByTestId("field-provenance-panel");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText(/page \d+/i).first()).toBeVisible();
-    await expect(panel.getByText(/No source citations/i)).toHaveCount(0);
+    await expect(page.getByTestId("pdf-viewer-widget")).toHaveAttribute("data-target-page", sourcePage!);
   });
 
   test("F5 InteractView mounts after advancing from Extract", async ({ page }) => {

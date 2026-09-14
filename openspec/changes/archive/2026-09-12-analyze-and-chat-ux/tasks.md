@@ -107,6 +107,8 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
       1772-line `Extract.tsx`, **not** deleting a `FieldProvenancePanel` component (there is none).
 - [x] 3.1b Retire the `field-provenance-panel` test contract in `docs/agents/testing.md` and the
       `field-provenance-panel` assertions in `Extract.test.tsx` / `ExtractView.test.tsx`.
+- [x] 3.1c Align the live Utility browser journey with the replacement contract: require a
+      `field-source-chip`, then click its row and assert the PDF viewer pins that source page.
 - [x] 3.2 Field-instance row drives the PDF highlight on **hover/focus** (TDD) — sets
       `targetPage`+`highlightBbox` per instance; leave/blur clears. Reuse the shipped padded
       overlay. Test: hovering `field-row` for meter 2's `line_amount` renders `pdf-viewer-highlight`
@@ -194,8 +196,10 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
 
 ## Deferred (tracked)
 
-- D.1 Per-document geometry/instance cap for very large documents (log, never silently drop).
-- D.2 Instance labeling heuristics beyond "identifying field or #n".
+- D.1 [Issue #38](https://github.com/GroundX-Studio/workspace-groundx-v2-ui-a7a4fac7/issues/38):
+  bound geometry work for reproducibly large documents without silently dropping sources.
+- D.2 [Issue #39](https://github.com/GroundX-Studio/workspace-groundx-v2-ui-a7a4fac7/issues/39):
+  improve fallback labels for repeated instances when real document shapes need it.
 
 ## Verification record (2026-07-07)
 
@@ -209,4 +213,5 @@ reasoning (OpenAI Responses API `reasoning:{summary}`) — in this change; their
   → stream stayed valid on status lines); no raw CoT by construction (summary-only APIs).
 - §6.4 gate: LIVE turn through POST /responses on gpt-5.5 — citation funnel emitted 3 → shipped 3,
   fence intact, tools advertised. Default OFF (.env.example); dev soaks with the flag on.
-- OPEN: §7.1 only (doc-pane gutter does not reproduce — needs the original repro surface).
+- §7.1 reproduced on `extract-fields-scroll` and was fixed: the measured right gap fell from
+  24px to the shell's 8px outer frame while the chat scrollbar gutter stayed unchanged.
