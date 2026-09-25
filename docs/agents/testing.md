@@ -2,6 +2,13 @@
 
 Test layers, conventions, what runs when.
 
+Before changing behavior, read the owning code, callers, consumers, shared
+helpers, and nearby tests. Reuse the existing app or middleware pattern and
+make the smallest change that protects the user-visible contract. Extend an
+existing test when it can prove the consequential behavior; add a new case or
+harness only when existing coverage cannot. Keep TDD, deploy, and round-trip
+gates. The examples below may extend existing files rather than create new ones.
+
 ## Layers
 
 | Layer | Tool | Where | When |
