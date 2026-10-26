@@ -241,6 +241,7 @@ jobs:
           context: .
           file: Dockerfile.frontend
           push: true
+          pull: true
           no-cache: true
           tags: ${{ steps.deploy-vars.outputs.frontend_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
           build-args: |
@@ -252,6 +253,7 @@ jobs:
           context: .
           file: Dockerfile.middleware
           push: true
+          pull: true
           no-cache: true
           tags: ${{ steps.deploy-vars.outputs.middleware_repo }}:${{ steps.deploy-vars.outputs.image_tag }}
 
