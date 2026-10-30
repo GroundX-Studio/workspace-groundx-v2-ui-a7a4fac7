@@ -303,6 +303,8 @@ bucket document is a rich `GroundXDocument`-shaped record (`documentId`, `bucket
 `fileName`, `fileType`, `fileSize`, `fileTokens`, `processId`, `processLevel`,
 `sourceUrl`, `xrayUrl`, `status`, `extracted`, `created`, `updated`).
 
+Note (2026-10-30): `extracted` is being retired (GX-81); `converted` replaces it.
+
 **Note — `IngestResponse` (`{ ingest }`) from `ingest_remote` / status / cancel.**
 Right after an ingest submit the `ingest` object is the LIGHT shape (`processId` +
 `status`, ref §2); after polling it is the HEAVY shape above. Both are the same

@@ -298,6 +298,6 @@ fixed.
 
 ### The legacy `extracted` field is retired; use `converted`
 
-`document_get(...)` no longer carries `extracted`. To tell whether a source file was converted
-(for example docx/pptx/xlsx), read `converted`. Neither field says whether a workflow extraction
-ran; don't infer "workflow never ran" from it.
+`extracted` is being retired (GX-81) and may still appear; do not read it. To tell whether a
+source file was converted (for example docx/pptx/hwp), read `converted`. Neither field says whether
+a workflow extraction ran; don't infer "workflow never ran" from it.
