@@ -1,10 +1,10 @@
 ## 1. Retire the field (single slice: type, fixture, doc)
 
-- [ ] 1.1 Remove `extracted?: boolean` from `IngestProcessDocument` and `extracted` from its JSDoc field list in `app/src/api/entities/sdkTypes.ts`
+- [x] 1.1 Remove `extracted?: boolean` from `IngestProcessDocument` and `extracted` from its JSDoc field list in `app/src/api/entities/sdkTypes.ts`
   check: ! grep -nw "extracted" app/src/api/entities/sdkTypes.ts
-- [ ] 1.2 Remove the `extracted: false` fixture line from `app/src/api/entities/groundxDocumentsEntity.test.ts`
+- [x] 1.2 Remove the `extracted: false` fixture line from `app/src/api/entities/groundxDocumentsEntity.test.ts`
   check: ! grep -n "extracted: false" app/src/api/entities/groundxDocumentsEntity.test.ts
-- [ ] 1.3 Rewrite the `document.extracted` section in `docs/agents/gotchas.md` so it no longer documents the retired field
+- [x] 1.3 Rewrite the `document.extracted` section in `docs/agents/gotchas.md` so it no longer documents the retired field
   check: ! grep -n "document.extracted" docs/agents/gotchas.md
 
 ## 2. Closure verification

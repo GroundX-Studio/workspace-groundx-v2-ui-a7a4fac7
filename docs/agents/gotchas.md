@@ -296,9 +296,8 @@ document endpoint — that was a contributor to the phantom-mismatch confusion.
 harness doc previously pointed agents at the wrong path; the source + generated plugin mirrors were
 fixed.
 
-### `document.extracted` is a format flag, not a workflow-run signal
+### The legacy `extracted` field is retired; use `converted`
 
-`document_get(...).extracted` indicates whether the doc was extracted from an Office archive
-(docx/pptx/xlsx), NOT whether a workflow extraction ran. A native PDF shows `extracted: false` even
-when fully processed (`status: complete`, `processLevel: full`) and a workflow extraction exists.
-Don't infer "workflow never ran" from `extracted: false`.
+`document_get(...)` no longer carries `extracted`. To tell whether a source file was converted
+(for example docx/pptx/xlsx), read `converted`. Neither field says whether a workflow extraction
+ran; don't infer "workflow never ran" from it.
