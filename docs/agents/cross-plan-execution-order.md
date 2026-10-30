@@ -84,7 +84,7 @@ parallel. Authoring waits only for step 0.
 - **Target:** bucket **28454 "Studio Onboarding Samples"**, workflow
   **`9910308e-3100-473e-9da6-3ac29f5958a6` "studio-demo"** — currently **LEGACY** (its `extract` has
   `charges`/`meters`/`statement` directly; **no** `leafFields`/`customSteps`/`outputRoutes`).
-- **Source:** `internal-arcadia-agents` `latest.yaml` (the v1 Arcadia utility workflow).
+- **Source:** `extraction-agents` `latest.yaml` (the v1 Arcadia utility workflow).
 - **Procedure (harness-sanctioned, `references/4_sdk_integration.md §4`):** `templates/deploy_workflow.py`
   compiles `latest.yaml` → validates → **updates** the existing workflow via
   `client.update_extraction_workflow(...)`, `--bucket-id 28454`, key from env. (Do NOT re-parse the
