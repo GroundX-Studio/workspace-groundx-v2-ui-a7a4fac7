@@ -117,7 +117,6 @@ describe("groundxDocumentsEntity", () => {
               sourceUrl: "https://upload.eyelevel.ai/prod/file/ssp/x.pdf",
               xrayUrl: "https://upload.eyelevel.ai/layout/processed/x/y-xray.json",
               status: "complete",
-              extracted: false,
               created: "2026-05-21T19:40:35Z",
               updated: "2026-05-21T19:42:27Z",
             },

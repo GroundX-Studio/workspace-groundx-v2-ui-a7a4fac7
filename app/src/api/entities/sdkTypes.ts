@@ -72,7 +72,7 @@ export interface GroundXCustomer {
  * `docs/agents/groundx-real-api-shapes.md`): each bucket document is a rich
  * `GroundXDocument`-shaped record. Modeled as a partial GroundXDocument plus the
  * extra ingest-status fields the status payload adds (`fileSize`, `fileTokens`,
- * `processLevel`, `xrayUrl`, `extracted`, `created`, `updated`). Loose `[key]`
+ * `processLevel`, `xrayUrl`, `created`, `updated`). Loose `[key]`
  * inherited from `GroundXDocument` keeps unknown fields readable.
  */
 export interface IngestProcessDocument extends GroundXDocument {
@@ -80,7 +80,6 @@ export interface IngestProcessDocument extends GroundXDocument {
   fileTokens?: number;
   processLevel?: "full" | "none" | string;
   xrayUrl?: string;
-  extracted?: boolean;
   created?: string;
   updated?: string;
 }
