@@ -23,7 +23,7 @@ permissions:
 jobs:
   integration:
     name: Live GroundX integration
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: dev # resolves the env-scoped GROUNDX_PARTNER_API_KEY secret
     services:
       mysql:

@@ -30,10 +30,14 @@ None. No spec under `openspec/specs/` describes the `extracted` document field, 
 
 ## Scope
 
-In scope: the stale type, fixture and gotcha doc above.
+In scope: the stale type, fixture and gotcha doc above, plus browser-runner compatibility needed to qualify the PR.
 
 Out of scope: `converted` handling or typing, cashbot-go and groundx-ai-dashboard changes, unrelated `extract*` names (`extractId`, `extractedValuesJson`, X-Ray prose), `groundx-real-api-shapes.md`, and line-ending-only changes.
 
 ## Open design questions
 
 None. No wireframe frames are affected; closure gate is the existing `npm test` (including the app unit tests for `groundxDocumentsEntity`).
+
+## CI qualification
+
+Run 41021594889, attempt 4, passed build and unit tests, then failed installing Chromium: Playwright 1.60.0 does not support `ubuntu26.04-x64`. Pin the browser-installing jobs in `ci.yml` and `integration.yml` to `ubuntu-24.04`. Keep the existing Playwright lockfile, install commands, test suites and container-build runner. Qualify through the actual Chromium install and boot smoke in CI. No deployment or credential change.

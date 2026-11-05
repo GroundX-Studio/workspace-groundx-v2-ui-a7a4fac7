@@ -12,7 +12,7 @@ permissions:
 jobs:
   scaffold:
     name: Scaffold build and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Deterministic per-PR CI: boots the stack and exercises the boot/proxy path
     # against a throwaway MySQL — NO live GroundX. The dev-smoke runs boot-only;
     # the live-GroundX integration (login + project/bucket/search + browser e2e)

@@ -13,3 +13,7 @@ Non-Goals: any `converted` typing or handling, `docs/agents/groundx-real-api-sha
 - Archive with `openspec archive --skip-specs`: no capability changes, so there is no delta to sync into `openspec/specs/`. `openspec validate --type change` reports "no deltas found" for this change by design; the `specs/` placeholder stays.
 
 No ADR: the change removes a stale declaration and carries no architectural decision.
+
+## Browser runner compatibility
+
+The lockfile selects Playwright 1.60.0. The current `ubuntu-latest` image is Ubuntu 26.04, which that browser installer rejects. Select `ubuntu-24.04` for the two jobs that install Chromium. Both keep their existing install command and tests. The container-only job retains `ubuntu-latest`. This uses the existing supported runner without a dependency upgrade or a new container. Acceptance requires the PR's browser installation and boot smoke to pass. Reverting the two runner selections restores the previous CI configuration.
