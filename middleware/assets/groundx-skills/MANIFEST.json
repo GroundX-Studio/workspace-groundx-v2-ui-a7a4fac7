@@ -1,7 +1,7 @@
 {
   "repo": "GroundX-Studio/groundx-agent-harness",
   "ref": "main",
-  "commit": "44e32142ded8b61ad9415849b9bd97472454bc84",
+  "commit": "293b7cb843cf905823a0cc5e59675bf5bc0cc215",
   "fileCount": 167,
   "files": [
     "RESPONSE_STYLE.md",
